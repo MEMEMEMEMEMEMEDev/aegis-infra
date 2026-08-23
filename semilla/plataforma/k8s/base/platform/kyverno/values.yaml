@@ -1,0 +1,38 @@
+# values kyverno 3.8.1 v2 — CA + scope horneados (A44).
+global:
+  # CA raíz de aegis (T1, PEM público). global.* => llega a los TRES
+  # controllers (admission+background+reports; per-controller dejaba
+  # reports sin CA — bug #101 v1). El placeholder AEGIS_CA_PEM (con
+  # dunders, abajo en data) lo inyecta la FASE 80 del init (el CA no
+  # existe hasta que cert-manager lo emite en fase 35) — mismo patrón
+  # que COSIGN_PUB; ambos son de clase-generado
+  # (render_platform_placeholders NO los toca). CR-2 corrida #14:
+  # este comentario NO escribe el placeholder literal — el inyector
+  # viejo tomaba el indent de la PRIMERA ocurrencia (este comentario,
+  # indent 2) y el PEM quedaba fuera del block scalar (indent 6);
+  # inject_placeholder toma el indent de la línea real y el check 48
+  # prohíbe el literal en comentarios.
+  caCertificates:
+    data: |
+      __AEGIS_CA_PEM__
+  # el mount solo NO basta: go-containerregistry no levanta el
+  # bundle — SSL_CERT_FILE lo fuerza (verificado con crane en v1):
+  extraEnvVars:
+    - name: SSL_CERT_FILE
+      value: /etc/ssl/certs/ca-certificates.crt
+
+# scope NATIVO de TODOS los webhooks => blast radius del Fail =
+# org-canary. Consistente mutating+validating (los matchConditions
+# per-policy NO — rompen verifyImages). DEUDA heredada consciente:
+# toda policy futura nace scopeada a org-canary; expandir acá.
+config:
+  webhooks:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [org-canary]
+
+admissionController: {replicas: 1}    # dev single-node; hetzner: 2-3
+backgroundController: {replicas: 1}
+reportsController: {replicas: 1}

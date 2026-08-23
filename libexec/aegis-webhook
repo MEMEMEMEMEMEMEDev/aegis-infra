@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""aegis-webhook — que un push llegue a Jenkins, en todos los repos.
+
+EL PROBLEMA QUE RESUELVE
+────────────────────────
+El init crea el webhook de GitHub para los DOS repos del bootstrap
+(`make_repo_webhook` en la fase 15, invocado con $PLATFORM_REPO y
+$APP_REPO). Todo repo que se sumó después quedó sin webhook.
+
+Medido el 2026-08-05: de los cuatro repos con job multibranch en
+Jenkins, DOS no tenían webhook —`ai-gateway` y `blog-aegis`— así que
+solo construían cuando corría el escaneo periódico. Nadie se enteraba:
+la build eventualmente pasaba, tarde y sin relación visible con el push.
+Es el mismo modo de fallo del borde (#35): no hay error, hay ausencia.
+
+LA LISTA SALE DE JENKINS, NO DE ACÁ
+───────────────────────────────────
+Los repos se derivan de los jobs declarados en el values.yaml de
+Jenkins. Esa es la definición honesta del invariante:
+
+    si Jenkins tiene un job para un repo, un push a ese repo tiene
+    que llegarle.
+
+Escribir la lista acá sería un segundo lugar donde acordarse, que es
+exactamente lo que este proyecto viene sacando de encima.
+
+EL HMAC SALE DEL CLUSTER
+────────────────────────
+Y no del archivo cifrado, a propósito: el que importa es el que Jenkins
+VALIDA, no el que git dice que debería validar. Si difirieran, leer el
+archivo daría verde mientras GitHub firma con uno y Jenkins espera otro
+— un 400 permanente en cada entrega. Leyéndolo del Secret vivo, eso no
+puede pasar.
+
+El valor no se imprime nunca, no pasa por argv y no se escribe a disco:
+va de kubectl a memoria y de ahí al cuerpo JSON que consume `gh`.
+
+    bin/aegis-webhook                # dice qué falta, no toca nada
+    bin/aegis-webhook --aplicar      # crea o re-sincroniza los webhooks
+
+Devuelve 0 si están todos, 1 si falta alguno, 2 si NO SE PUDO EVALUAR.
+Ese tercer código es deliberado: no poder mirar no es un visto bueno.
+"""
+import argparse
+import base64
+import json
+import os
+import re
+import subprocess
+import sys
+
+AQUI = os.path.dirname(os.path.abspath(__file__))
+RAIZ = os.path.dirname(AQUI)
+JENKINS_VALUES = os.path.join(RAIZ, "k8s", "base", "platform", "jenkins", "values.yaml")
+EDGE = os.path.join(RAIZ, "edge.yaml")
+
+rojo = "\033[31m"; verde = "\033[32m"; ama = "\033[33m"; gris = "\033[90m"; fin = "\033[0m"
+if not sys.stdout.isatty():
+    rojo = verde = ama = gris = fin = ""
+
+
+class Error(Exception):
+    pass
+
+
+def repos_con_job():
+    """(owner, repo) de cada job multibranch declarado en Jenkins.
+
+    Se lee con regex y no parseando el YAML porque el valor es un
+    bloque de Job DSL (Groovy) embebido como string: para el YAML es
+    texto plano. Lo que se busca son los dos campos que identifican el
+    repo, que en Job DSL son literales.
+    """
+    try:
+        texto = open(JENKINS_VALUES, encoding="utf-8").read()
+    except FileNotFoundError:
+        raise Error(f"no está {os.path.relpath(JENKINS_VALUES, RAIZ)}")
+    # Cada `github { ... }` de un branchSource trae owner y repository.
+    bloques = re.findall(
+        r"repoOwner\('([^']+)'\)\s*\n\s*repository\('([^']+)'\)", texto)
+    if not bloques:
+        raise Error("ningún job multibranch en el values.yaml de Jenkins — "
+                    "¿cambió la forma del Job DSL?")
+    # Orden estable y sin repetidos.
+    return sorted(set(bloques))
+
+
+def dominio_raiz():
+    try:
+        import yaml
+        return (yaml.safe_load(open(EDGE, encoding="utf-8")) or {})["dominio_raiz"]
+    except Exception as e:
+        raise Error(f"no pude leer dominio_raiz de edge.yaml: {e}")
+
+
+def hmac_del_cluster():
+    """El HMAC que Jenkins valida, leído del Secret vivo. Nunca se imprime."""
+    r = subprocess.run(
+        ["kubectl", "get", "secret", "github-webhook-hmac", "-n", "jenkins-system",
+         "-o", "jsonpath={.data.text}"],
+        capture_output=True, text=True)
+    if r.returncode != 0 or not r.stdout.strip():
+        raise Error("no pude leer el Secret jenkins-system/github-webhook-hmac "
+                    "(¿kubectl configurado? ¿la App jenkins-secrets sincronizó?)")
+    valor = base64.b64decode(r.stdout.strip()).decode()
+    if valor != valor.strip():
+        # El init ya cazó esto una vez: un \n final hace que GitHub firme
+        # sobre un cuerpo y Jenkins valide sobre otro, y el 400 no dice
+        # por qué. Se rechaza en vez de "arreglarlo" en silencio.
+        raise Error("el HMAC del cluster tiene espacios o \\n al borde — "
+                    "GitHub y Jenkins firmarían distinto (ver assert_no_newline)")
+    return valor
+
+
+def hooks_de(owner, repo):
+    r = subprocess.run(["gh", "api", f"repos/{owner}/{repo}/hooks"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        raise Error(f"no pude listar los hooks de {owner}/{repo}: {r.stderr.strip()}")
+    return json.loads(r.stdout)
+
+
+def asegurar(owner, repo, url, hmac, escribir):
+    """Crea o RE-SINCRONIZA el webhook. Devuelve 'ok' | 'falta' | 'creado' | 'resync'."""
+    existente = next((h for h in hooks_de(owner, repo)
+                      if (h.get("config") or {}).get("url") == url), None)
+    if not escribir:
+        return "ok" if existente else "falta"
+
+    # SIEMPRE se reescribe el secret, exista o no el hook. GitHub nunca
+    # devuelve `config.secret` de un hook existente, así que "ya existe"
+    # NO implica "está sincronizado": un hook sobreviviente puede estar
+    # firmando con un HMAC viejo mientras Jenkins valida con el nuevo, y
+    # el síntoma es un 400 permanente que no dice por qué. Misma razón y
+    # mismo remedio que `make_repo_webhook` de la fase 15.
+    cuerpo = {"active": True, "events": ["push"],
+              "config": {"url": url, "content_type": "json",
+                         "secret": hmac, "insecure_ssl": "0"}}
+    if existente:
+        ruta = f"repos/{owner}/{repo}/hooks/{existente['id']}"
+        metodo = "PATCH"
+    else:
+        cuerpo["name"] = "web"      # POST lo exige; PATCH lo rechaza
+        ruta = f"repos/{owner}/{repo}/hooks"
+        metodo = "POST"
+    # El cuerpo entra por STDIN: el HMAC no pasa por argv, donde
+    # cualquiera con /proc lo vería.
+    r = subprocess.run(["gh", "api", "-X", metodo, ruta, "--input", "-"],
+                       input=json.dumps(cuerpo), capture_output=True, text=True)
+    if r.returncode != 0:
+        raise Error(f"{metodo} del webhook de {owner}/{repo} falló: {r.stderr.strip()}")
+    return "resync" if existente else "creado"
+
+
+def main():
+    p = argparse.ArgumentParser(prog="aegis-webhook", description=__doc__.split("\n")[0])
+    p.add_argument("--aplicar", action="store_true",
+                   help="crea los que falten y re-sincroniza el HMAC de los que están")
+    a = p.parse_args()
+
+    try:
+        repos = repos_con_job()
+        url = f"https://jenkins.{dominio_raiz()}/github-webhook/"
+        hmac = hmac_del_cluster() if a.aplicar else None
+    except Error as e:
+        print(f"  {ama}!{fin} webhooks NO EVALUADOS — {e}")
+        print(f"    {gris}Esto NO es un visto bueno: es un chequeo que no corrió.{fin}")
+        return 2
+
+    faltan = 0
+    for owner, repo in repos:
+        try:
+            estado = asegurar(owner, repo, url, hmac, a.aplicar)
+        except Error as e:
+            print(f"  {ama}!{fin} {owner}/{repo}: {e}")
+            return 2
+        if estado == "falta":
+            print(f"  {rojo}✗{fin} {owner}/{repo} {gris}sin webhook — solo construye "
+                  f"cuando corre el escaneo periódico{fin}")
+            faltan += 1
+        elif estado == "creado":
+            print(f"  {verde}+{fin} {owner}/{repo} {gris}webhook creado{fin}")
+        elif estado == "resync":
+            print(f"  {gris}~{fin} {owner}/{repo} {gris}HMAC re-sincronizado{fin}")
+        else:
+            print(f"  {verde}✓{fin} {owner}/{repo}")
+
+    if faltan:
+        print(f"\n  {gris}para crearlos:  bin/aegis-webhook --aplicar{fin}")
+        return 1
+    if not a.aplicar:
+        print(f"  {verde}✓{fin} los {len(repos)} repos con job en Jenkins tienen webhook")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Error as e:
+        print(f"{rojo}✗{fin} {e}", file=sys.stderr)
+        sys.exit(2)

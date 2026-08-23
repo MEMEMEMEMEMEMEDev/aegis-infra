@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# aegis-destroy — teardown del footprint EXTERNO que el init crea y que
+# sobrevive a un snapshot revert (W-10 / R5). Hoy la única limpieza está
+# ACOPLADA al camino de creación (25-edge-tofu solo borra la "nube sucia"
+# si volvés a crear); esto la desacopla en un verbo propio y hace baratas
+# las corridas de validación.
+#
+# Qué destruye:
+#   - Cloudflare tunnel + config + CNAMEs → `tofu destroy` VÍA EL WRAPPER
+#     (A14: nunca tofu directo; el wrapper inyecta el token desde SOPS y
+#     los TF_VARs, evitando destroys fantasma de recursos count-gated).
+#   - el tfstate local (con TUNNEL_TOKEN en claro).
+#   - opcional --purge-secrets: el store .state-secrets + .init-state.
+#   - opcional --k3s: k3s-uninstall.sh (nuke del cluster local).
+#
+# El cluster k3s, si no pasás --k3s, se limpia revirtiendo el snapshot de
+# la VM (práctica del operador). Los recursos CF de OTRA VM sin tfstate
+# local los barre igual el pre-check de la fase 25 al re-crear.
+#
+# Uso:
+#   aegis-destroy.sh              # DRY-RUN: muestra el plan de destrucción
+#   aegis-destroy.sh --yes        # destruye CF + purga tfstate local
+#   aegis-destroy.sh --yes --purge-secrets --k3s   # teardown total
+set -euo pipefail
+
+# ── preámbulo canónico (V-102) ───────────────────────────────────────
+# El PRODUCTO se resuelve desde el propio archivo, siguiendo symlinks
+# (la fase 05 instala /usr/local/bin/aegis como symlink: sin readlink
+# -f, AEGIS_ROOT sería /usr/local). Si bin/aegis ya lo exportó, se
+# respeta. La INSTANCIA la decide lib/paths.sh, nunca este archivo.
+if [[ -z "${AEGIS_ROOT:-}" ]]; then
+    command -v readlink >/dev/null || { echo "aegis-destroy: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
+    AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+fi
+export AEGIS_ROOT
+# shellcheck source=../lib/paths.sh
+source "$AEGIS_ROOT/lib/paths.sh"
+TOFU="$PLATFORM_DIR/tofu/tofu-apply.sh"
+TUNNEL_ENV="$PLATFORM_DIR/tofu/envs/cloudflare-tunnel"
+STATE_SECRETS="$AEGIS_HOME/.state-secrets"
+INIT_STATE="${AEGIS_STATE_DIR:-$AEGIS_HOME/.init-state}"
+CONF="$AEGIS_HOME/aegis.conf"
+
+say()  { printf '[destroy] %s\n' "$*"; }
+die()  { printf '[destroy] FATAL: %s\n' "$*" >&2; exit 1; }
+
+YES=0; PURGE_SECRETS=0; K3S=0
+for a in "$@"; do
+  case "$a" in
+    --yes)            YES=1 ;;
+    --purge-secrets)  PURGE_SECRETS=1 ;;
+    --k3s)            K3S=1 ;;
+    *) die "flag desconocido: $a (uso: aegis-destroy.sh [--yes] [--purge-secrets] [--k3s])" ;;
+  esac
+done
+
+# la config trae CF_ACCOUNT_ID/CF_ZONE_ID/ROOT_DOMAIN que el wrapper exporta
+# como TF_VARs (config.sh los escribió acá). Sin ella no sé qué destruir.
+[[ -f "$CONF" ]] || die "no existe $CONF — sin config no hay nada que destruir (¿corriste el init?)"
+# shellcheck source=/dev/null
+source "$CONF"
+export CF_ACCOUNT_ID CF_ZONE_ID ROOT_DOMAIN
+
+say "modo: $([[ $YES -eq 1 ]] && echo 'DESTRUIR (--yes)' || echo 'DRY-RUN (pasá --yes para actuar)')"
+
+# ── 1) Cloudflare vía tofu destroy (por el wrapper) ──────────────────────
+if [[ -f "$TUNNEL_ENV/terraform.tfstate" ]]; then
+  say "cloudflare-tunnel: init del env…"
+  "$TOFU" -chdir="$TUNNEL_ENV" init -input=false >/dev/null \
+    || die "tofu init falló (¿age key / SOPS disponibles para el wrapper?)"
+  if [[ $YES -eq 1 ]]; then
+    say "cloudflare-tunnel: DESTROY…"
+    "$TOFU" -chdir="$TUNNEL_ENV" destroy -auto-approve \
+      || die "tofu destroy falló — revisá el estado de CF a mano antes de re-crear"
+    say "cloudflare-tunnel destruido (tunnel + config + CNAMEs)"
+  else
+    say "cloudflare-tunnel: plan de destrucción (DRY-RUN):"
+    "$TOFU" -chdir="$TUNNEL_ENV" plan -destroy || true
+  fi
+else
+  say "sin tfstate local en $TUNNEL_ENV — nada que destruir vía tofu"
+  say "  (restos de otra VM sin state: los barre el pre-check de la fase 25 al re-crear)"
+fi
+
+# ── 2) purga del tfstate local (solo con --yes) ──────────────────────────
+if [[ $YES -eq 1 ]]; then
+  rm -f "$TUNNEL_ENV/terraform.tfstate" "$TUNNEL_ENV/terraform.tfstate.backup"
+  say "tfstate local purgado"
+fi
+
+# ── 3) purga opcional del store de secretos + .init-state ────────────────
+if [[ $PURGE_SECRETS -eq 1 ]]; then
+  if [[ $YES -eq 1 ]]; then
+    rm -rf "$STATE_SECRETS" "$INIT_STATE"
+    say "PURGADOS el store .state-secrets y .init-state (irrecuperables sin un aegis-backup previo)"
+  else
+    say "[DRY-RUN] --purge-secrets borraría $STATE_SECRETS y $INIT_STATE (hacé un aegis-backup ANTES)"
+  fi
+fi
+
+# ── 4) teardown opcional de k3s ──────────────────────────────────────────
+if [[ $K3S -eq 1 ]]; then
+  UNINSTALL="$(command -v k3s-uninstall.sh || echo /usr/local/bin/k3s-uninstall.sh)"
+  if [[ $YES -eq 1 ]]; then
+    [[ -x "$UNINSTALL" ]] || die "--k3s pedido pero no encuentro k3s-uninstall.sh"
+    say "k3s: uninstall (nuke del cluster)…"; "$UNINSTALL"
+    say "k3s desinstalado"
+  else
+    say "[DRY-RUN] --k3s correría $UNINSTALL (borra el cluster entero)"
+  fi
+fi
+
+echo
+if [[ $YES -eq 1 ]]; then
+  say "teardown completo. Para un arranque limpio: re-correr el init (o revertir el snapshot)."
+else
+  say "DRY-RUN — no se destruyó nada. Repetí con --yes para actuar."
+fi

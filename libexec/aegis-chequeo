@@ -1,0 +1,1250 @@
+#!/usr/bin/env bash
+# aegis-chequeo — la ronda de rutina, la que se corre al volver de un
+# apagado o antes de empezar a tocar algo.
+#
+# NO ESCRIBE NADA. Todo lo que hace es leer y, en el caso del chequeo
+# de firma, pedirle al apiserver un veredicto de ADMISIÓN con
+# --dry-run=server: pasa por los webhooks pero no crea el pod.
+#
+# ── por qué existe ────────────────────────────────────────────────
+# La fase 80 del init prueba el supply-chain a fondo (negativo, scope,
+# fail-closed). Pero eso corre UNA VEZ, en el bootstrap. En el día a
+# día no había nada, y lo único a mano —`kubectl get clusterpolicy`—
+# MIENTE:
+#
+#   NAME                      BACKGROUND   ACTION
+#   require-aegis-signature   true         Audit      <- FALSO
+#
+# Esa columna lee spec.validationFailureAction, un campo DEPRECADO que
+# el webhook de Kyverno rellena solo con su default (está documentado
+# en k8s/argocd-apps/ci-supply-tenants.yaml, donde se lo ignora en el
+# diff justamente por cosmético). El Enforce real vive en la regla:
+# spec.rules[].verifyImages[].failureAction. El 2026-08-03 leí "Audit"
+# en un chequeo de rutina y por un minuto di por caída la garantía
+# central de la plataforma.
+#
+# Es la misma clase de trampa que el `sops -d ... | head -c 1` de
+# docs/protocols/ai-tenant-key.md §3: un comando que contesta algo
+# plausible y equivocado. La lección, ya escrita en f4b8132, es que el
+# check se ata al INVARIANTE y no a dónde/cómo está escrito.
+#
+# Así que acá no se lee ningún campo de la policy. Se intenta meter una
+# imagen sin firmar y se exige que REBOTE. Si algún día alguien pone la
+# policy en Audit de verdad, o borra la regla, o rompe el
+# namespaceSelector, este chequeo se pone rojo — sin importar qué diga
+# el YAML.
+set -uo pipefail
+
+# Imagen del sondeo: pública, ajena al registry interno y por lo tanto
+# jamás firmada con nuestra llave. PINNEADA a propósito (mismo criterio
+# que la fase 80): un tag móvil haría que el chequeo dependa de qué
+# subió Docker Hub anoche.
+IMG_SIN_FIRMA="busybox:1.36"
+
+# ── por qué esa imagen NO alcanza sola (#78) ───────────────────────
+# Medido el 2026-08-12: el rechazo de busybox:1.36 NO decía "sin firma".
+# Decía:
+#     Get "https://index.docker.io/v2/": tls: failed to verify
+#     certificate: x509: certificate signed by unknown authority
+#
+# O sea que Kyverno ni siquiera llegó al registro. El pod se rechaza
+# igual —falla cerrado, que está bien— pero este chequeo estaba
+# reportando VERDE por el motivo equivocado: lo que medía era «Kyverno
+# no puede hablar con Docker Hub», no «las imágenes sin firmar se
+# rechazan». Habría seguido en verde con la política de firma
+# completamente rota.
+#
+# La causa: el chart monta la CA interna ENCIMA de
+# /etc/ssl/certs/ca-certificates.crt y apunta SSL_CERT_FILE ahí, así que
+# el almacén de confianza de Kyverno es esa CA y NADA más. Es un arreglo
+# deliberado para que confíe en el registro interno, con un efecto
+# colateral que nadie vio.
+#
+# La sonda buena es una imagen ALCANZABLE y sin firmar: una del registro
+# interno, cuyo TLS Kyverno sí valida. Se DESCUBRE en vez de fijarla,
+# porque fijar un tag que hoy existe por accidente histórico es un check
+# atado a un lugar (C15) que miente apenas pase el recolector de basura.
+sonda_interna_sin_firma() {
+    local cred
+    cred=$(kubectl -n jenkins-system get secret regcred-internal \
+             -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null | base64 -d) || return 1
+    [[ -n "$cred" ]] || return 1
+    printf '%s' "$cred" | python3 -c '
+import base64, json, ssl, sys, urllib.request
+
+cfg = json.load(sys.stdin)["auths"]
+host = next(iter(cfg))
+auth = cfg[host]["auth"]
+ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+ACC = ("application/vnd.oci.image.index.v1+json,"
+       "application/vnd.oci.image.manifest.v1+json,"
+       "application/vnd.docker.distribution.manifest.v2+json")
+
+def pedir(ruta, metodo="GET"):
+    r = urllib.request.Request(f"https://{host}/v2/{ruta}", method=metodo)
+    r.add_header("Authorization", "Basic " + auth); r.add_header("Accept", ACC)
+    return urllib.request.urlopen(r, timeout=15, context=ctx)
+
+try:
+    repos = json.load(pedir("_catalog"))["repositories"]
+except Exception:
+    sys.exit(1)
+
+for repo in repos:
+    try:
+        tags = json.load(pedir(f"{repo}/tags/list")).get("tags") or []
+    except Exception:
+        continue
+    for t in [x for x in tags if not x.endswith(".sig")]:
+        try:
+            dig = pedir(f"{repo}/manifests/{t}", "HEAD").headers.get("Docker-Content-Digest")
+            if not dig:
+                continue
+            pedir(f"{repo}/manifests/{dig.replace(chr(58), chr(45))}.sig", "HEAD")
+        except urllib.error.HTTPError as e:
+            if e.code == 404:            # sin firma: es la que buscamos
+                print(f"{host}/{repo}:{t}"); sys.exit(0)
+        except Exception:
+            continue
+sys.exit(1)
+' 2>/dev/null
+}
+POLICY="require-aegis-signature"
+
+# El positivo necesita un namespace FUERA de la zona de enforce. Los de
+# recuperación (argocd, kyverno, registry-system, jenkins-system,
+# cert-manager, infra-edge) nunca llevan la etiqueta —ese es el
+# invariante que protege el bootstrap—, así que cualquiera sirve.
+# jenkins-system además no es restricted, y el sondeo corre como root.
+NS_FUERA="jenkins-system"
+
+# Los sondeos declaran recursos porque los namespaces tienen
+# ResourceQuota y la quota EXIGE limits. Sin esto el sondeo rebota por
+# quota y no por la policy — que es exactamente el error que este
+# script existe para no cometer: la primera versión daba "el
+# namespaceSelector del webhook se desbordó" cuando lo único que
+# pasaba era que faltaba limits.cpu. Con recursos declarados, lo único
+# que puede rechazarlo es el enforce de firmas.
+LIMITES='{"requests":{"cpu":"10m","memory":"32Mi"},"limits":{"cpu":"50m","memory":"64Mi"}}'
+sondeo() { # sondeo <ns> <nombre>
+    kubectl run "$2" -n "$1" --image="$IMG_SIN_FIRMA" --restart=Never \
+      --dry-run=server -o name \
+      --overrides="{\"apiVersion\":\"v1\",\"spec\":{\"containers\":[{\"name\":\"$2\",\"image\":\"$IMG_SIN_FIRMA\",\"command\":[\"true\"],\"resources\":$LIMITES}]}}" 2>&1
+}
+
+rojo=$'\033[31m'; verde=$'\033[32m'; ama=$'\033[33m'; gris=$'\033[90m'; fin=$'\033[0m'
+[[ -t 1 ]] || { rojo=""; verde=""; ama=""; gris=""; fin=""; }
+
+fallos=0; avisos=0
+ok()    { printf '  %s✓%s %s\n' "$verde" "$fin" "$*"; }
+mal()   { printf '  %s✗%s %s\n' "$rojo"  "$fin" "$*"; fallos=$((fallos + 1)); }
+aviso() { printf '  %s!%s %s\n' "$ama"   "$fin" "$*"; avisos=$((avisos + 1)); }
+nota()  { printf '    %s%s%s\n' "$gris" "$*" "$fin"; }
+titulo(){ printf '\n%s\n' "$*"; }
+
+# ── un ✓ exige haber medido algo ──────────────────────────────────
+# La regla ya estaba escrita en verify-static (check 55: «si evaluadas
+# == 0 → FAIL, el check no evaluó nada») y este archivo la violaba en
+# SEIS lugares: si kubectl falla, el 2>/dev/null se traga el error, la
+# salida queda vacía, y el vacío se lee igual que la salud. Un
+# `ok "0 certificados en True"` con el apiserver caído es exactamente
+# la Enfermedad E — el check pasa sin haber mirado a su sujeto.
+#
+# Acá el tercer desenlace de la casa se hace mecánico: cero sujetos no
+# es verde ni rojo, es NO SE PUDO EVALUAR, que cuenta como aviso y NO
+# como visto bueno.
+#
+#   ok_si_medido <n> "<mensaje si midió y está bien>" "<qué se medía>"
+ok_si_medido() {
+    if [[ "${1:-0}" -gt 0 ]]; then
+        ok "$2"
+    else
+        aviso "NO SE PUDO EVALUAR: $3 — cero sujetos (¿respondió kubectl?)"
+    fi
+}
+
+# ── una medición DEGRADADA no puede terminar en verde ──────────────
+# `nota()` es la línea de detalle de algo YA contado: cuelga de un mal o
+# de un aviso y explica por qué. Eso está bien en 15 de sus 19 usos.
+#
+# Donde no está bien es cuando la nota es lo ÚNICO que reporta que la
+# medición se debilitó. El caso vivo era la sonda de firma: si no hay
+# imagen interna sin firmar, se cae a una pública, y el comentario del
+# propio código decía «el veredicto se degrada» — en gris, sin sumar
+# nada, y dos líneas después podía salir un ✓. El veredicto final
+# («sin fallos, N avisos») nunca se enteraba.
+#
+# `degradado()` imprime igual de discreto y SÍ cuenta: la medición
+# ocurrió, pero no es la que el mensaje dice.
+degradado() { nota "$*"; avisos=$((avisos + 1)); }
+
+# ── el protocolo de los medidores, en UN solo lugar ────────────────
+# Los bloques de python grandes no devuelven un número: devuelven
+# LÍNEAS con su propio veredicto (MAL:/BIEN:/NOTA:/NO EVALUADO), que es
+# lo correcto — quien mide es quien sabe qué significa lo que midió.
+#
+# Pero el despacho estaba copiado en dos sitios y los dos tenían el
+# mismo agujero: si el medidor REVIENTA, el traceback se va a stderr,
+# la salida queda vacía, ninguna rama del case matchea y la sección
+# imprime su título y NADA MÁS. Silencio total. Ni ✓, ni ✗, ni !, y el
+# recuento final sin una sola señal de que ahí no se midió nada.
+#
+# Es la Enfermedad E en su forma más pura: no es que informe salud sin
+# medir, es que no informa. Y un renglón que falta se lee incluso mejor
+# que un verde falso, porque nadie lo cuenta.
+#
+# Acá el silencio es imposible: si el medidor no emitió ni un veredicto,
+# eso ES el hallazgo.
+#
+#   despachar <rc> "<salida>" "<qué se medía>"
+despachar() {
+    local rc="$1" salida="$2" sujeto="$3" dijo=0 linea
+    while IFS= read -r linea; do
+        case "$linea" in
+            MAL:*)          mal   "${linea#MAL: }";  dijo=1 ;;
+            BIEN:*)         ok    "${linea#BIEN: }"; dijo=1 ;;
+            NOTA:*)         nota  "${linea#NOTA: }" ;;
+            "NO EVALUADO"*) aviso "$linea";          dijo=1 ;;
+        esac
+    done <<< "$salida"
+    (( dijo )) || aviso "NO SE PUDO EVALUAR: $sujeto — el medidor terminó (rc $rc) sin emitir un solo veredicto: reventó, y el traceback se fue a stderr"
+}
+
+# ── 1. el nodo ────────────────────────────────────────────────────
+titulo "nodo"
+if ! kubectl get nodes >/dev/null 2>&1; then
+    mal "no hay contacto con el apiserver — el resto del chequeo no significa nada"
+    exit 1
+fi
+while read -r nombre estado resto; do
+    [[ -z "$nombre" ]] && continue
+    if [[ "$estado" == "Ready" ]]; then ok "$nombre Ready"
+    else mal "$nombre en estado $estado"; fi
+done < <(kubectl get nodes --no-headers 2>/dev/null)
+
+# ── 2. pods que no deberían estar así ─────────────────────────────
+# Completed es normal (Jobs que terminaron); lo demás no.
+titulo "pods"
+todos_pods=$(kubectl get pods -A --no-headers 2>/dev/null)
+n_pods=$(printf '%s' "$todos_pods" | grep -c . )
+# El mensaje prometía «ni reiniciando» y la condición NUNCA miraba
+# los reinicios: un pod en CrashLoopBackOff que justo está Running en
+# el instante del muestreo pasaba en verde.
+#
+# Pero el contador de por vida NO sirve como señal en esta casa: la
+# máquina de dev se suspende cada noche POR DISEÑO (§3.3), así que un
+# pod de 27 días acumula cientos de reinicios estando perfectamente
+# sano. Un umbral sobre el total produce 20 rojos permanentes, y un
+# rojo permanente entrena a ignorar el chequeo entero.
+# Lo que SÍ es señal es un reinicio RECIENTE: el pod se cayó mientras
+# la máquina estaba despierta.
+raros=$(printf '%s\n' "$todos_pods" \
+        | awk '$4 != "Running" && $4 != "Completed" {print "  " $1 "/" $2 " " $4}')
+#
+# Y el JSON se lee en su PROPIA llamada a kubectl, distinta de la que
+# alimenta a $n_pods. Eso importa: si ésta falla y la otra no,
+# ok_si_medido ve sujetos y da el ✓ «ninguno reiniciando» sin que nadie
+# haya mirado un solo reinicio. Un verde nacido de un error, que es
+# peor que un rojo falso porque no se investiga. Por eso el medidor
+# HABLA cuando no puede parsear, en vez de salir con bien y en silencio
+# (que era el `sys.exit(0)` de acá hasta el 2026-08-22).
+reinicios=$(kubectl get pods -A -o json 2>/dev/null | python3 -c '
+import sys, json, datetime
+LIMITE_MIN = 60
+try:
+    pods = json.load(sys.stdin)["items"]
+except Exception:
+    print("NO EVALUADO: kubectl no devolvió un JSON de pods legible — "
+          "los reinicios recientes NO se miraron")
+    sys.exit(2)
+ahora = datetime.datetime.now(datetime.timezone.utc)
+for p in pods:
+    ns = p["metadata"]["namespace"]; nom = p["metadata"]["name"]
+    for c in (p.get("status", {}).get("containerStatuses") or []):
+        fin = (c.get("lastState", {}).get("terminated") or {}).get("finishedAt")
+        if not fin:
+            continue
+        try:
+            t = datetime.datetime.fromisoformat(fin.replace("Z", "+00:00"))
+        except Exception:
+            continue
+        mins = (ahora - t).total_seconds() / 60
+        if mins <= LIMITE_MIN:
+            razon = (c.get("lastState", {}).get("terminated") or {}).get("reason", "?")
+            cn = c.get("name", "?")
+            print(f"  {ns}/{nom} ({cn}) reinició hace {mins:.0f} min — {razon}")
+' 2>/dev/null)
+if [[ "$reinicios" == "NO EVALUADO"* ]]; then
+    aviso "$reinicios"
+    [[ -n "$raros" ]] && { mal "y además hay pods en mal estado:"; printf '%s\n' "$raros"; }
+elif [[ -n "$raros" || -n "$reinicios" ]]; then
+    mal "hay pods en mal estado:"
+    [[ -n "$raros" ]] && printf '%s\n' "$raros"
+    [[ -n "$reinicios" ]] && printf '%s\n' "$reinicios"
+else
+    ok_si_medido "$n_pods" "los $n_pods pods corren, ninguno reiniciando" \
+                 "el estado de los pods"
+fi
+
+# ── 3. las apps de ArgoCD ─────────────────────────────────────────
+titulo "argocd"
+apps_todas=$(kubectl get applications -n argocd --no-headers \
+           -o custom-columns='N:.metadata.name,S:.status.sync.status,H:.status.health.status' \
+           2>/dev/null)
+n_apps=$(printf '%s' "$apps_todas" | grep -c . )
+desync=$(printf '%s\n' "$apps_todas" | grep -v 'Synced  *Healthy' | grep -v '^$')
+if [[ -z "$desync" ]]; then
+    ok_si_medido "$n_apps" "las $n_apps apps Synced + Healthy" \
+                 "el estado de las Applications de ArgoCD"
+else
+    # OutOfSync no es una caída: `root` no tiene sync automático a
+    # propósito (compuerta manual del app-of-apps), así que quedar
+    # atrás de un commit es su estado NORMAL. Por eso es aviso y no
+    # fallo — pero se muestra, porque un amarillo permanente termina
+    # tapando la deriva de verdad.
+    aviso "apps fuera de línea:"
+    printf '%s\n' "$desync" | sed 's/^/    /'
+    nota "para sincronizar: bin/aegis-sync --fuera-de-linea"
+fi
+
+# ── 3b. lo que sobra en el cluster ────────────────────────────────
+# `prune` está omitido en toda la plataforma (A19): quitar algo de git
+# NO lo quita del cluster. La decisión es correcta —un prune mal
+# disparado se lleva datos— pero deja un punto ciego. Con
+# orphanedResources.warn en los AppProjects de tenant, ArgoCD marca lo
+# que quedó vivo sin declarar, y acá se muestra.
+#
+# Se informa como AVISO y no como fallo: un huérfano no es una caída, es
+# algo que alguien tiene que mirar y decidir.
+# Y ACÁ SE DICE CUÁNTAS SE EVALUARON, que es la mitad que faltaba.
+#
+# Una app solo produce la condición Orphaned si SU AppProject tiene
+# `orphanedResources`. Las que están en un proyecto sin ese bloque no
+# dan la condición nunca — y este chequeo, que solo miraba si la
+# condición estaba, las contaba como limpias.
+#
+# Medido el 2026-08-05: de 28 Applications, 2 se evaluaban. Las otras
+# 26 —incluidas las cinco `org-*`, que son las que despliegan las
+# NetworkPolicies del incidente que motivó #31— salían en verde sin que
+# nadie las hubiera mirado. Enfermedad E dentro del chequeo escrito
+# para curar la Enfermedad E.
+#
+# El número no es decoración: es lo que distingue "no hay huérfanos" de
+# "no se buscaron huérfanos".
+lectura=$(kubectl get applications,appprojects -n argocd -o json 2>/dev/null | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+proyectos, apps = {}, []
+for it in d.get('items', []):
+    if it['kind'] == 'AppProject':
+        proyectos[it['metadata']['name']] = bool(it['spec'].get('orphanedResources'))
+    else:
+        apps.append(it)
+
+evaluadas, ciegas, hallazgos = [], [], []
+for it in apps:
+    nombre = it['metadata']['name']
+    if proyectos.get(it['spec'].get('project'), False):
+        evaluadas.append(nombre)
+    else:
+        ciegas.append('%s (%s)' % (nombre, it['spec'].get('project')))
+    for c in (it['status'].get('conditions') or []):
+        if 'Orphaned' in c.get('type', ''):
+            hallazgos.append('    %s: %s' % (nombre, (c.get('message') or '').strip()))
+
+print(len(evaluadas)); print(len(apps))
+print('\x1e'.join(sorted({c.split('(')[1].rstrip(')') for c in ciegas})))
+print('\x1e'.join(hallazgos))
+" 2>/dev/null)
+n_eval=$(sed -n 1p <<<"$lectura")
+n_todas=$(sed -n 2p <<<"$lectura")
+proy_ciegos=$(sed -n 3p <<<"$lectura" | tr '\036' ' ')
+huerfanos=$(sed -n 4p <<<"$lectura" | tr '\036' '\n')
+
+if [[ -z "$n_todas" ]]; then
+    aviso "no se pudo leer el estado de huérfanos — esto NO es un visto bueno"
+elif [[ -n "$huerfanos" ]]; then
+    aviso "recursos huérfanos (en el cluster, no en git):"
+    printf '%s\n' "$huerfanos"
+    nota "para verlos: kubectl get all -n <namespace> y comparar con el repo"
+else
+    # LOS PROYECTOS QUE NO SE CUBREN, Y POR QUÉ (#47, medido 2026-08-05).
+    #
+    # No cubrir algo puede ser un descuido o una decisión, y un chequeo
+    # que no los distingue vale lo mismo que no chequear. Estos dos
+    # están acá porque se MIDIÓ qué pasaba al cubrirlos:
+    #
+    #   aegis-platform   ~146 avisos permanentes. 81 solos de la App
+    #                    `gpu`, cuyo namespace destino es kube-system,
+    #                    así que reporta todo lo que instala k3s; el
+    #                    resto son Secrets que generan cert-manager y el
+    #                    propio ArgoCD, pods de ReplicaSet y
+    #                    ServiceAccounts por defecto. Ninguno salió de
+    #                    git ni va a salir.
+    #   aegis-bootstrap  la App root, cuyo destino es el namespace de
+    #                    ArgoCD entero.
+    #
+    # Un aviso permanente apaga la señal igual que una ausencia. Se
+    # aceptan como límite CONOCIDO y se imprimen siempre, para que el
+    # límite se lea en cada corrida en vez de vivir en un commit.
+    #
+    # Lo que NO se acepta es un proyecto ciego que nadie decidió: si
+    # aparece uno fuera de esta lista, esto avisa.
+    declarados_ciegos="aegis-bootstrap aegis-platform"
+    inesperados=""
+    for p in $proy_ciegos; do
+        case " $declarados_ciegos " in
+            *" $p "*) : ;;
+            *) inesperados="$inesperados $p" ;;
+        esac
+    done
+    if [[ -n "$inesperados" ]]; then
+        aviso "hay AppProject(s) sin orphanedResources que nadie declaró:$inesperados"
+        nota "o se les agrega, o se documentan como límite en este chequeo"
+    else
+        ok_si_medido "$n_eval" "nada huérfano en las $n_eval apps con cobertura" \
+                     "los recursos huérfanos de las apps"
+        nota "$((n_todas - n_eval)) sin cobertura A PROPÓSITO ($proy_ciegos):" \
+             "cubrirlas da ~146 avisos permanentes de recursos que nunca" \
+             "salieron de git — medido, no supuesto"
+    fi
+fi
+
+# ── 3b-bis. operaciones de sync TRABADAS ──────────────────────────
+#
+# El 2026-08-06 un Job de hook quedó en Terminating con el finalizador
+# `argocd.argoproj.io/hook-finalizer` puesto, y ArgoCD —que espera a que
+# la operación anterior termine antes de empezar otra— dejó de
+# sincronizar la app `garage`. CUATRO DÍAS. Se encontró de casualidad
+# (#62).
+#
+# Lo que hace este modo de fallo tan difícil de ver es que TODO SE VE
+# BIEN: la Application sigue diciendo Synced y Healthy, porque lo que
+# está desplegado sí coincide con lo último que se llegó a aplicar. Lo
+# que no pasa es lo nuevo. No hay un error que mirar; hay algo que dejó
+# de ocurrir.
+#
+# Se miden LAS DOS PUNTAS, porque cada una sola miente:
+#   · la operación: una fase no terminal que lleva horas abierta
+#   · el recurso: un objeto con deletionTimestamp viejo — o sea, alguien
+#     pidió borrarlo y un finalizador no suelta
+#
+# Sólo la primera se perdería un finalizador trabado que todavía no
+# bloqueó nada; sólo la segunda se perdería una operación colgada por
+# otro motivo.
+titulo "syncs trabados"
+salida_trab=$(GRACIA_MIN="${AEGIS_SYNC_GRACIA:-30}" python3 - <<'PYEOF'
+import datetime, json, os, subprocess, sys
+
+GRACIA = int(os.environ.get("GRACIA_MIN", "30"))
+AHORA = datetime.datetime.now(datetime.timezone.utc)
+TERMINALES = {"Succeeded", "Failed", "Error"}
+
+def edad_min(ts):
+    if not ts:
+        return None
+    return (AHORA - datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            ).total_seconds() / 60.0
+
+def kget(args):
+    r = subprocess.run(["kubectl", "get"] + args + ["-o", "json"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    return json.loads(r.stdout).get("items", [])
+
+apps = kget(["applications", "-n", "argocd"])
+if apps is None:
+    print("NO EVALUADO: no pude leer las Applications de ArgoCD"); sys.exit(2)
+
+problemas = []
+for a in apps:
+    op = (a.get("status", {}) or {}).get("operationState", {}) or {}
+    fase = op.get("phase")
+    if not fase or fase in TERMINALES:
+        continue
+    e = edad_min(op.get("startedAt"))
+    if e is not None and e > GRACIA:
+        problemas.append(f"la app {a['metadata']['name']} lleva {e/60:.1f} h "
+                         f"en fase {fase} — ArgoCD no va a empezar otro sync")
+
+# El recurso que traba. Un deletionTimestamp viejo es siempre un
+# finalizador que no suelta: sin finalizadores, el borrado es inmediato.
+colgados = kget(["jobs,pods", "-A"]) or []
+for r in colgados:
+    m = r["metadata"]
+    e = edad_min(m.get("deletionTimestamp"))
+    if e is None or e <= GRACIA:
+        continue
+    fin = ", ".join(m.get("finalizers", [])) or "sin finalizadores (¿kubelet trabado?)"
+    problemas.append(f"{m['namespace']}/{m['name']} lleva {e/60:.1f} h en Terminating "
+                     f"[{fin}]")
+
+for x in problemas:
+    print(f"MAL: {x}")
+if not problemas:
+    print(f"BIEN: {len(apps)} apps sin operaciones abiertas y nada en Terminating "
+          f"hace más de {GRACIA} min")
+sys.exit(1 if problemas else 0)
+PYEOF
+)
+despachar $? "$salida_trab" "las operaciones de sync trabadas"
+
+# ── 3c. la cuota de CI contra los pipelines REALES ────────────────
+# Existe porque verify-static NO PUEDE hacer este chequeo.
+#
+# Aquél verifica LA SEMILLA, y ahí los únicos pipelines que hay son la
+# plantilla y ci-images. Los que de verdad corren viven en los repos de
+# las apps, que la semilla no conoce. Así que el check 36 de allá vigila
+# el invariante contra un SUSTITUTO — y pasaba en verde mientras esta
+# instancia estaba justo en el estado que ese invariante existe para
+# impedir (#58, medido el 2026-08-07).
+#
+# El invariante es el mismo: la cuota tiene que bancar jenkins-0 más DOS
+# builds solapados, porque con multibranch y reintentos solaparse es lo
+# normal. Lo que cambia es contra qué se mide.
+#
+# LOS PIPELINES SE LEEN DE GITHUB, no de un pod. Los pods de build son
+# efímeros: Jenkins los borra al terminar, así que mirar el cluster daba
+# "no hay nada que medir" casi siempre — un chequeo que no puede correr
+# no vigila nada. Los repos salen de los jobs declarados en el
+# values.yaml de Jenkins, igual que en aegis-webhook, así que un repo
+# nuevo entra solo.
+titulo "cuota de CI"
+salida_cuota=$(AEGIS_RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" python3 - <<'PYEOF'
+import json, os, re, subprocess, sys
+
+RAIZ = os.environ["AEGIS_RAIZ"]
+VALUES = os.path.join(RAIZ, "k8s", "base", "platform", "jenkins", "values.yaml")
+
+def cpu(v):
+    v = str(v).strip()
+    return int(v[:-1]) if v.endswith("m") else int(float(v) * 1000)
+
+def mem(v):
+    v = str(v).strip()
+    for suf, mult in (("Gi", 1024), ("Mi", 1), ("Ki", 1 / 1024)):
+        if v.endswith(suf):
+            return float(v[:-2]) * mult
+    return 0.0
+
+# 1) los repos con job, del values.yaml de Jenkins
+try:
+    texto = open(VALUES, encoding="utf-8").read()
+except OSError as e:
+    print(f"NO EVALUADO: no pude leer el values.yaml de Jenkins ({e})"); sys.exit(2)
+repos = re.findall(r"repoOwner\('([^']+)'\)\s*\n\s*repository\('([^']+)'\)", texto)
+if not repos:
+    print("NO EVALUADO: ningún job multibranch en el values.yaml"); sys.exit(2)
+
+# 2) el Jenkinsfile de cada uno, desde GitHub
+def limites_del_pipeline(owner, repo):
+    r = subprocess.run(
+        ["gh", "api", f"repos/{owner}/{repo}/contents/Jenkinsfile", "--jq", ".content"],
+        capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    import base64
+    try:
+        src = base64.b64decode(r.stdout).decode("utf-8", "replace")
+    except Exception:
+        return None
+    c = m = 0.0
+    for lim in re.finditer(
+            r"limits:\s*\{\s*cpu:\s*([^,]+),\s*memory:\s*([^}\s]+)\s*\}", src):
+        c += cpu(lim.group(1)); m += mem(lim.group(2))
+    return (c, m) if c else None
+
+peor = (0.0, 0.0, None)
+sin_leer = []
+for owner, repo in repos:
+    lim = limites_del_pipeline(owner, repo)
+    if lim is None:
+        sin_leer.append(f"{owner}/{repo}")
+        continue
+    if lim[0] > peor[0]:
+        peor = (lim[0], lim[1], f"{owner}/{repo}")
+
+if peor[2] is None:
+    print("NO EVALUADO: no pude leer ningún Jenkinsfile desde GitHub")
+    print("(¿falta `gh` o su credencial?) Esto NO es un visto bueno.")
+    sys.exit(2)
+
+# 3) jenkins-0 y la cuota, del cluster
+def kget(*a):
+    r = subprocess.run(["kubectl", *a], capture_output=True, text=True)
+    return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
+
+q = kget("get", "resourcequota", "jenkins-quota", "-n", "jenkins-system", "-o", "json")
+if not q:
+    print("NO EVALUADO: no encuentro la ResourceQuota jenkins-quota"); sys.exit(2)
+hard = q["spec"]["hard"]
+
+jp = kget("get", "pod", "jenkins-0", "-n", "jenkins-system", "-o", "json")
+if not jp:
+    print("NO EVALUADO: jenkins-0 no está para medirlo"); sys.exit(2)
+jc = sum(cpu(x.get("resources", {}).get("limits", {}).get("cpu", 0))
+         for x in jp["spec"]["containers"])
+jm = sum(mem(x.get("resources", {}).get("limits", {}).get("memory", 0))
+         for x in jp["spec"]["containers"])
+
+malo = False
+for etiq, j, b, qv, u in (("cpu", jc, peor[0], cpu(hard["limits.cpu"]), "m"),
+                          ("memoria", jm, peor[1], mem(hard["limits.memory"]), "Mi")):
+    nec = j + 2 * b
+    if nec > qv:
+        print(f"la cuota de {etiq} NO banca jenkins-0 + 2 builds solapados")
+        print(f"  jenkins-0 {j:.0f}{u} + 2 x {b:.0f}{u} = {nec:.0f}{u}  >  cuota {qv:.0f}{u}")
+        print(f"  el más pesado es {peor[2]}; el segundo build queda encolado sin aviso")
+        malo = True
+
+if sin_leer:
+    print(f"ojo: no pude leer {len(sin_leer)} Jenkinsfile ({', '.join(sin_leer)})")
+    print("el peso máximo puede estar subestimado")
+
+if malo:
+    sys.exit(1)
+print(f"banca jenkins-0 + 2 builds solapados "
+      f"(el más pesado de {len(repos)} repos: {peor[2]}, {peor[0]:.0f}m/{peor[1]:.0f}Mi)")
+sys.exit(0)
+PYEOF
+)
+case $? in
+    0) ok "$salida_cuota" ;;
+    2) aviso "cuota de CI NO EVALUADA"
+       printf '%s\n' "$salida_cuota" | sed 's/^ */    /' ;;
+    *) mal "la cuota de CI no banca dos builds solapados"
+       printf '%s\n' "$salida_cuota" | sed 's/^ */    /' ;;
+esac
+
+# ── 4. LA FIRMA: el negativo ──────────────────────────────────────
+# El corazón del chequeo. Se prueba el invariante por admisión.
+titulo "cadena de suministro"
+ns_dentro=$(kubectl get ns -l aegis.dev/part-of=aegis-tenants \
+              -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+if [[ -z "$ns_dentro" ]]; then
+    mal "ningún namespace lleva aegis.dev/part-of=aegis-tenants — NADA está bajo enforce"
+else
+    # La sonda ALCANZABLE es la que mide de verdad. Si no hay ninguna
+    # sin firmar en el registro interno, se cae a la pública — pero el
+    # veredicto se degrada, porque entonces no se midió lo que dice.
+    interna=$(sonda_interna_sin_firma) || interna=""
+    if [[ -n "$interna" ]]; then
+        IMG_SIN_FIRMA="$interna"
+        nota "sonda: $interna (interna, alcanzable — el rechazo puede ser por FIRMA)"
+    else
+        # Y esto CUENTA. El comentario de arriba ya decía «el veredicto
+        # se degrada» y sin embargo era una línea gris que no sumaba
+        # nada: dos líneas después podía salir un ✓ y el recuento final
+        # decir «sin fallos», con la medición hecha contra una imagen
+        # que Kyverno ni siquiera alcanza (#78).
+        degradado "sin imagen interna sin firmar: se sondea con $IMG_SIN_FIRMA (pública) — Kyverno puede rechazarla por no llegar al registro, no por la firma"
+    fi
+
+    salida=$(sondeo "$ns_dentro" chequeo-sin-firma); rc=$?
+    if [[ $rc -eq 0 ]]; then
+        mal "una imagen SIN FIRMAR fue ADMITIDA en $ns_dentro"
+        nota "el enforce de firmas no está actuando — esto es la garantía central de la plataforma"
+    elif grep -q "$POLICY" <<<"$salida"; then
+        # #78: la policy rechazó. ¿Pero por FALTA DE FIRMA, o porque no
+        # pudo llegar al registro? Las dos cosas dan un pod rechazado y
+        # sólo una prueba el invariante.
+        if grep -qiE 'no signatures found|signature not found|no matching signatures' <<<"$salida"; then
+            ok "imagen sin firmar RECHAZADA en $ns_dentro POR FALTA DE FIRMA (citando $POLICY)"
+        elif grep -qiE 'x509|certificate signed by|tls:|no such host|connection refused|i/o timeout|dial tcp' <<<"$salida"; then
+            mal "rechazada por NO PODER LLEGAR al registro — el invariante de firma NO se midió"
+            nota "el pod se bloquea igual (falla cerrado), pero este chequeo no puede afirmar que la firma se verifique"
+            nota "$(head -c 300 <<<"$salida" | tr '\n' ' ')"
+        else
+            aviso "rechazada por $POLICY con un motivo que no reconozco — revisalo a mano"
+            nota "$(head -c 300 <<<"$salida" | tr '\n' ' ')"
+        fi
+    else
+        # Rechazado, pero no por nuestra policy. Podría ser una quota,
+        # el PSS, o un webhook caído. No alcanza como prueba: hay que
+        # mirarlo, no darlo por bueno.
+        mal "rechazada en $ns_dentro pero NO por $POLICY — el rechazo no prueba nada"
+        nota "$(head -c 400 <<<"$salida" | tr '\n' ' ')"
+    fi
+
+    # ── 5. LA FIRMA: el positivo ──────────────────────────────────
+    # Sin esto, un webhook que rechaza TODO pasaría el chequeo
+    # anterior con honores. El positivo es lo que distingue "la policy
+    # funciona" de "el cluster no admite nada".
+    if kubectl get ns "$NS_FUERA" >/dev/null 2>&1; then
+        salida_f=$(sondeo "$NS_FUERA" chequeo-fuera-scope); rc=$?
+        if [[ $rc -eq 0 ]]; then
+            ok "la misma imagen es ADMITIDA en $NS_FUERA — el blast radius está acotado"
+        elif grep -q "$POLICY" <<<"$salida_f"; then
+            mal "$NS_FUERA rechaza por $POLICY: el namespaceSelector del webhook se desbordó"
+            nota "los namespaces de recuperación NO deben estar bajo enforce (si no, un cluster roto no se puede arreglar)"
+        else
+            # Rechazado por otra cosa (quota, PSS, un LimitRange). No
+            # dice nada del scope del webhook, así que no se reporta
+            # como si lo dijera.
+            aviso "$NS_FUERA rechazó el sondeo por un motivo ajeno a la firma — el control positivo no midió"
+            nota "$(head -c 300 <<<"$salida_f" | tr '\n' ' ')"
+        fi
+    else
+        aviso "no existe $NS_FUERA — sin control positivo"
+    fi
+fi
+
+# ── 6. certificados ───────────────────────────────────────────────
+titulo "certificados"
+malos=$(kubectl get certificate -A --no-headers 2>/dev/null | awk '$3 != "True" {print "    " $1 "/" $2 " " $3}')
+total=$(kubectl get certificate -A --no-headers 2>/dev/null | wc -l)
+if [[ -z "$malos" ]]; then
+    ok_si_medido "$total" "$total certificados en True" "los Certificate del cluster"
+else mal "certificados sin emitir:"; printf '%s\n' "$malos"; fi
+
+# ── 6a-bis. de quién es el ruteo ──────────────────────────────────
+# EJERCE el invariante de #54, no lo supone.
+#
+# Un AppProject filtra por *kind* y jamás por el valor de un campo, así
+# que no hay forma de decir "IngressRoutes sí, pero solo con TU Host".
+# Mientras un inquilino pudiera crear una, podía reclamar el hostname
+# del vecino. MEDIDO el 2026-08-06: dos organizaciones reclamaron el
+# mismo host, las dos admitidas sin una queja, y traefik sirvió la del
+# segundo. El dueño legítimo no tuvo defensa ni aviso.
+#
+# El arreglo tiene DOS mitades y las dos se pueden aflojar por separado,
+# así que se miran las dos:
+#   a) ningún proyecto de inquilino puede crear IngressRoutes
+#   b) ninguna IngressRoute viva en un namespace de organización es de
+#      otro dueño que la plataforma
+#
+# (b) importa aparte de (a) porque prune está apagado (A19): una ruta
+# creada antes del control sobrevive a que el control exista.
+titulo "de quién es el ruteo"
+sin_control=""
+for p in $(kubectl get appproject -n argocd -o name 2>/dev/null | sed 's|.*/||' | grep '^aegis-tenant-'); do
+    kubectl get appproject "$p" -n argocd \
+        -o jsonpath='{.spec.namespaceResourceBlacklist[*].kind}' 2>/dev/null \
+        | grep -qw IngressRoute || sin_control="$sin_control $p"
+done
+n_proy=$(kubectl get appproject -n argocd -o name 2>/dev/null | sed 's|.*/||' | grep -c '^aegis-tenant-')
+if [[ -n "$sin_control" ]]; then
+    mal "proyecto(s) de inquilino que PUEDEN escribir su ruteo:$sin_control"
+else
+    ok_si_medido "$n_proy" \
+       "los $n_proy proyectos de inquilino tienen IngressRoute prohibido" \
+       "los AppProject de inquilino (#54)"
+fi
+
+# Dos listas y una resta, y NO un filtro de jsonpath sobre la etiqueta.
+# El filtro `labels.x != "valor"` no matchea cuando la etiqueta está
+# AUSENTE, que es justamente el caso a detectar: una ruta que nadie
+# etiquetó pasaba por buena. Escrito así el 2026-08-06 y descubierto en
+# el acto porque se probó el chequeo con una ruta ajena de verdad — la
+# misma Enfermedad E, cometida dentro del detector de Enfermedad E.
+# El selector de etiqueta lo resuelve el servidor y no tiene ese hueco.
+listar(){ kubectl get ingressroute -A "$@" --no-headers \
+    -o custom-columns=X:.metadata.namespace,Y:.metadata.name 2>/dev/null \
+    | awk '$1 ~ /^org-/ {print $1 "/" $2}' | sort; }
+ajenas=$(comm -23 <(listar) <(listar -l aegis.dev/part-of=aegis-organizaciones))
+n_rutas=$(listar | wc -l)
+if [[ -n "$ajenas" ]]; then
+    mal "IngressRoute(s) en un namespace de organización que no puso la plataforma:"
+    printf '    %s\n' $ajenas
+    nota "prune está apagado (A19): una ruta anterior al control sobrevive a que el control exista"
+else
+    ok_si_medido "$n_rutas" \
+       "las $n_rutas rutas de organización son de la plataforma" \
+       "las IngressRoute de los namespaces de organización"
+fi
+
+# ── 6b. el borde ──────────────────────────────────────────────────
+# Le pregunta a Cloudflare qué hostnames EXISTEN y los compara con los
+# que derivan de los contratos. No mira el state de tofu a propósito:
+# el state dice lo que tofu cree, y la única razón de mirar es que
+# pueden diferir (ver bin/aegis-borde).
+#
+# Distingue tres resultados, no dos: existe / falta / NO SE PUDO
+# EVALUAR. El tercero es un aviso y no un visto bueno.
+titulo "borde"
+"$(dirname "${BASH_SOURCE[0]}")/aegis-borde"
+case $? in
+    0) : ;;
+    1) fallos=$((fallos + 1)) ;;
+    *) avisos=$((avisos + 1)) ;;
+esac
+
+# ── 6c. que un push llegue a Jenkins ──────────────────────────────
+# Mismo modo de fallo que el borde, y por eso está al lado: no hay
+# error, hay AUSENCIA. Un repo sin webhook igual construye —cuando
+# corre el escaneo periódico del multibranch— así que la build
+# eventualmente pasa, tarde y sin relación visible con el push. Nadie
+# lo reporta porque nada falla.
+#
+# Medido el 2026-08-05: dos de los cuatro repos con job en Jenkins no
+# tenían webhook. El init solo lo crea para los DOS del bootstrap
+# (make_repo_webhook, fase 15); todo lo que se sumó después quedó
+# afuera (#32).
+titulo "webhooks de CI"
+"$(dirname "${BASH_SOURCE[0]}")/aegis-webhook"
+case $? in
+    0) : ;;
+    1) fallos=$((fallos + 1)) ;;
+    *) avisos=$((avisos + 1)) ;;
+esac
+
+# ── 6d. que el ÚLTIMO push haya CONSTRUIDO ────────────────────────
+#
+# El chequeo de arriba mira que el webhook EXISTA. Este mira que haya
+# servido, que no es lo mismo, y la diferencia costó tres builds el
+# 2026-08-10.
+#
+# Ese día se empujó el mismo arreglo a cuatro repos. Los cuatro llegaron
+# a GitHub. UNO construyó. Los otros tres recibieron 502 de Jenkins en
+# una ventana de 25 segundos, y GitHub NO REINTENTA una entrega fallida:
+# el push queda entregado del lado de git y sin construir del lado de
+# CI. La sección "webhooks de CI" daba verde para los cinco repos
+# mientras pasaba, y tenía razón — los webhooks estaban.
+#
+# POR QUÉ NO SE MIRA EL CÓDIGO DE LA ÚLTIMA ENTREGA, que sería lo obvio:
+# porque mide la plomería. Un push puede no construir por un webhook
+# caído, por un job deshabilitado, por el multibranch sin indexar o por
+# algo que todavía no pasó. Lo que importa es el invariante:
+#
+#     todo commit en main de un repo con job tiene una build
+#
+# Así que se compara el HEAD de main contra la revisión que Jenkins
+# realmente hizo checkout en su última build. Si difieren, hubo un push
+# que no construyó — sea cual sea la causa.
+#
+# CON MARGEN, porque una build tarda: un HEAD de hace menos de
+# AEGIS_BUILD_GRACIA minutos todavía puede estar en cola, y marcarlo
+# sería un falso positivo cada vez que alguien empuja.
+titulo "todo push construyó"
+salida_push=$(AEGIS_RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" \
+              GRACIA="${AEGIS_BUILD_GRACIA:-15}" python3 - <<'PYEOF'
+import json, os, re, subprocess, sys, datetime
+
+RAIZ = os.environ["AEGIS_RAIZ"]
+GRACIA = int(os.environ.get("GRACIA", "15"))
+VALUES = os.path.join(RAIZ, "k8s", "base", "platform", "jenkins", "values.yaml")
+
+try:
+    texto = open(VALUES, encoding="utf-8").read()
+except OSError as e:
+    print(f"NO EVALUADO: no pude leer el values.yaml de Jenkins ({e})"); sys.exit(2)
+
+# job -> (owner, repo). Del MISMO archivo que usan aegis-webhook y la
+# cuota de CI: un repo nuevo entra solo, sin tocar este script.
+jobs = re.findall(
+    r"multibranchPipelineJob\('([^']+)'\).*?repoOwner\('([^']+)'\)\s*\n\s*repository\('([^']+)'\)",
+    texto, re.S)
+if not jobs:
+    print("NO EVALUADO: ningún job multibranch en el values.yaml"); sys.exit(2)
+
+def jenkins(cmd):
+    r = subprocess.run(["kubectl", "exec", "-n", "jenkins-system", "jenkins-0",
+                        "-c", "jenkins", "--", "sh", "-lc", cmd],
+                       capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+problemas, ok = [], []
+for job, owner, repo in jobs:
+    r = subprocess.run(["gh", "api", f"repos/{owner}/{repo}/commits/main",
+                        "--jq", ".sha + \" \" + .commit.committer.date"],
+                       capture_output=True, text=True)
+    if r.returncode != 0 or not r.stdout.strip():
+        problemas.append((job, f"no pude leer el HEAD de {owner}/{repo} en GitHub"))
+        continue
+    sha, fecha = r.stdout.split()
+    edad = (datetime.datetime.now(datetime.timezone.utc)
+            - datetime.datetime.fromisoformat(fecha.replace("Z", "+00:00"))
+            ).total_seconds() / 60.0
+
+    base = f"/var/jenkins_home/jobs/{job}/branches/main/builds"
+    n = jenkins(f"ls -1 {base} 2>/dev/null | grep -E '^[0-9]+$' | sort -n | tail -1")
+    if not n:
+        problemas.append((job, "sin ninguna build en la rama main"))
+        continue
+    rev = jenkins(f"grep -am1 'Checking out Revision' {base}/{n}/log 2>/dev/null "
+                  f"| sed -E 's/.*Revision ([0-9a-f]{{40}}).*/\\1/'")
+    if not rev:
+        problemas.append((job, f"la build #{n} no dice qué revisión hizo checkout"))
+        continue
+    if rev == sha:
+        ok.append(f"{job} #{n} = {sha[:8]}")
+    elif edad < GRACIA:
+        ok.append(f"{job} {sha[:8]} de hace {edad:.0f} min — dentro de la gracia ({GRACIA})")
+    else:
+        problemas.append((job, f"HEAD {sha[:8]} de hace {edad/60:.1f} h SIN construir "
+                               f"(la última build, #{n}, tomó {rev[:8]})"))
+
+for j, m in problemas:
+    print(f"MAL: {j}: {m}")
+# El detalle por repo va como NOTA —es el respaldo de la afirmación, no
+# la afirmación— y el veredicto de la sección es UNA línea. Antes cada
+# repo salía como BIEN: y el ✓ de la sección lo ponía bash mirando el
+# rc: dos fuentes de verdad para un mismo juicio, y la de bash se
+# quedaba muda si esto reventaba.
+for x in ok:
+    print(f"NOTA: {x}")
+if not problemas:
+    print(f"BIEN: los {len(jobs)} repos con job tienen su último push en main construido")
+sys.exit(1 if problemas else 0)
+PYEOF
+)
+despachar $? "$salida_push" "que todo push en main haya construido"
+
+# ── 7. el sustrato de AI ──────────────────────────────────────────
+# No es un pass/fail: el modo `cerrado` con el engine en 0 es el estado
+# CORRECTO en reposo. Se informa para que el operador vea si algo quedó
+# encendido de ayer (que cuesta VRAM y plata, y es lo que uno quiere
+# notar al volver).
+titulo "ai"
+modo=$(kubectl get cm ai-modo -n ai-system -o jsonpath='{.data.modo}' 2>/dev/null)
+motivo=$(kubectl get cm ai-modo -n ai-system -o jsonpath='{.data.motivo}' 2>/dev/null)
+reps=$(kubectl get deploy engine-llm -n ai-system -o jsonpath='{.spec.replicas}' 2>/dev/null)
+if [[ -z "$modo" ]]; then
+    aviso "no hay ConfigMap ai-modo (¿ai-system sin desplegar?)"
+else
+    ok "modo=$modo · engine=${reps:-?} réplica(s)${motivo:+ · \"$motivo\"}"
+    [[ "$modo" == "cerrado" && "${reps:-0}" != "0" ]] \
+        && aviso "modo cerrado pero el engine NO está en 0 — el controlador no reconcilió"
+fi
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nota "VRAM: $(nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader 2>/dev/null)"
+fi
+
+# ── 8. los respaldos ──────────────────────────────────────────────
+#
+# NO mira si existe el mecanismo: mira si HAY BUNDLES y de cuándo son.
+#
+# La distinción es todo el punto. `init/aegis-backup.sh` existe desde el
+# arranque, está documentado en OPERAR.md y en AGENTS.md, y el 2026-08-09
+# se descubrió que NUNCA se había ejecutado: cero archivos .age en toda
+# la máquina. Que el script exista no distingue "hay respaldo" de "nunca
+# se hizo uno", y como el repo lo nombra, todos leíamos lo primero.
+#
+# Son DOS mitades y hacen falta las dos: `estado` trae los secretos, la
+# traza del init y el tfstate del borde; `datos` trae las bases y los
+# objetos de los inquilinos. Con una sola se levanta o una plataforma
+# vacía, o un dump que no se sabe dónde poner.
+#
+# Y desde el 2026-08-11 la pregunta cambió, porque el respaldo se separó
+# por organización. Antes era "¿hay un bundle de datos?" — UNA pregunta,
+# UNA respuesta. Ahora la pregunta honesta es "¿tiene respaldo CADA
+# organización?", y no se responde mirando si existe algún .age: una
+# organización creada ayer no tiene carpeta, el árbol sigue teniendo
+# archivos frescos de las demás, y el verde saldría igual.
+#
+# Por eso las organizaciones se ENUMERAN desde los contratos (la misma
+# fuente que usa aegis-respaldo) y se exige un bundle por cada una. Con
+# un solo proyecto, un chequeo correcto y uno mentiroso dan el mismo
+# verde; con dos, el mentiroso empieza a mentir. Se escribe bien ahora.
+titulo "respaldos"
+RESP="${AEGIS_RESPALDOS:-$HOME/aegis-respaldos}"
+UMBRAL_H=${AEGIS_RESPALDO_HORAS:-48}
+RAIZ_P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# edad_bundle <patrón-glob> -> imprime "<edad_h> <bytes> <basename>" del
+# más nuevo, o nada si no hay ninguno.
+edad_bundle() {
+    local u; u=$(ls -t $1 2>/dev/null | head -1) || true
+    [[ -n "$u" ]] || return 1
+    printf '%s %s %s\n' \
+        "$(( ( $(date +%s) - $(stat -c %Y "$u") ) / 3600 ))" \
+        "$(stat -c %s "$u")" "$(basename "$u")"
+}
+
+if [[ ! -d "$RESP" ]]; then
+    mal "no existe el directorio de respaldos ($RESP) — no hay ni un bundle"
+else
+    # (a) el disco de destino es el que se anotó. Si el segundo disco no
+    #     está montado, esta ruta es un directorio vacío del disco raíz y
+    #     los respaldos estarían cayendo en el disco que deben sobrevivir.
+    MARCA="$RESP/.aegis-destino"
+    if [[ -f "$MARCA" ]]; then
+        esperado=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("uuid",""))' "$MARCA" 2>/dev/null)
+        actual=$(findmnt -no UUID --target "$RESP" 2>/dev/null)
+        if [[ -n "$esperado" && "$esperado" != "$actual" ]]; then
+            mal "el destino de respaldos NO es el disco anotado (esperado $esperado, hay ${actual:-ninguno}) — ¿el disco no está montado? los bundles caerían en el disco raíz"
+        else
+            ok "destino en el disco anotado (fs ${actual:-?})"
+        fi
+    else
+        aviso "sin $MARCA: nadie anotó en qué disco viven los respaldos (lo escribe la primera captura)"
+    fi
+
+    # (b) el ESTADO de la plataforma: uno solo, no es de nadie en particular.
+    if lectura=$(edad_bundle "$RESP/plataforma/aegis-estado-*.age"); then
+        read -r e_h e_b e_n <<<"$lectura"
+        if (( e_h > UMBRAL_H )); then
+            aviso "plataforma/estado: ${e_h}h (umbral ${UMBRAL_H}h) — $e_n"
+        else
+            ok "plataforma/estado: ${e_h}h, ${e_b} bytes · $e_n"
+        fi
+    else
+        mal "sin bundle de ESTADO en $RESP/plataforma/ — con solo los datos se tiene un dump que no se sabe dónde poner"
+    fi
+
+    # (c) y una por organización, ENUMERADAS desde los contratos.
+    mapfile -t ORGS < <(python3 - "$RAIZ_P/orgs" <<'PYEOF'
+import os, sys, yaml
+d = sys.argv[1]
+if not os.path.isdir(d):
+    print("\x01no existe el directorio de contratos %s — no sé a quién exigirle respaldo" % d)
+    sys.exit(0)
+for f in sorted(os.listdir(d)):
+    if not f.endswith(".yaml"):
+        continue
+    try:
+        c = yaml.safe_load(open(os.path.join(d, f), encoding="utf-8")) or {}
+    except Exception as e:
+        # Un `continue` a secas acá era el peor silencio del archivo: la
+        # organización DESAPARECE de la lista, no se le exige bundle, y
+        # como además baja el número de sujetos, las que quedan siguen
+        # viéndose bien. Nadie se entera de que hay una sin respaldo.
+        print("\x01%s no parsea (%s) — si esa organización declara datos, "
+              "nadie le está exigiendo respaldo" % (f, type(e).__name__))
+        continue
+    org = c.get("organizacion") or c.get("nombre")
+    # solo las que DECLARAN datos: una organización de puro estático no
+    # tiene nada que respaldar, y exigirle un bundle sería un rojo
+    # permanente, que apaga la señal igual que una ausencia.
+    tiene = any((s or {}).get("tipo") == "postgres" for s in c.get("servicios") or []) \
+            or bool((c.get("almacenamiento") or {}).get("bucket"))
+    if org and tiene:
+        print(org)
+PYEOF
+)
+    # Las líneas con \x01 al frente son quejas del enumerador, no
+    # organizaciones. Se apartan ANTES de contar: si entraran a la
+    # lista, se le pediría un bundle a un nombre que no existe.
+    QUEJAS=(); LIMPIA=()
+    for l in "${ORGS[@]}"; do
+        if [[ "$l" == $'\x01'* ]]; then QUEJAS+=("${l#$'\x01'}"); else LIMPIA+=("$l"); fi
+    done
+    ORGS=("${LIMPIA[@]}")
+    for q in "${QUEJAS[@]}"; do
+        aviso "NO SE PUDO EVALUAR: $q"
+    done
+    if (( ${#ORGS[@]} == 0 && ${#QUEJAS[@]} == 0 )); then
+        aviso "ningún contrato declara datos: no hay respaldo de inquilino que exigir (¿es lo esperado?)"
+    fi
+    for org in "${ORGS[@]}"; do
+        if lectura=$(edad_bundle "$RESP/org-$org/aegis-datos-org-$org-*.age"); then
+            read -r o_h o_b o_n <<<"$lectura"
+            if (( o_h > UMBRAL_H )); then
+                aviso "org-$org: ${o_h}h (umbral ${UMBRAL_H}h) — $o_n"
+            else
+                ok "org-$org: ${o_h}h, ${o_b} bytes · $o_n"
+            fi
+        else
+            mal "org-$org declara datos y NO tiene ni un bundle en $RESP/org-$org/"
+        fi
+    done
+
+    # (d) y lo que sobra: una carpeta org-* sin contrato es una
+    #     organización dada de baja cuyo resguardo quedó ahí. No se
+    #     borra —A19: quitar de git no quita del disco— pero se dice.
+    for d in "$RESP"/org-*/; do
+        [[ -d "$d" ]] || continue
+        n=$(basename "$d"); n=${n#org-}
+        printf '%s\n' "${ORGS[@]}" | grep -qxF "$n" \
+            || aviso "$(basename "$d")/ tiene respaldos y ningún contrato la declara — ¿organización dada de baja?"
+    done
+
+    # Un bundle que nunca sale de esta máquina no sobrevive a perderla,
+    # que es exactamente el escenario para el que se hace.
+    [[ -z "${AEGIS_BACKUP_SINK:-}" ]] \
+        && aviso "sin AEGIS_BACKUP_SINK: los bundles viven en la MISMA máquina que se quiere sobrevivir"
+fi
+
+# ── 9. la observabilidad se vigila a sí misma ─────────────────────
+#
+# Hasta el 2026-08-22 este archivo tenía CERO menciones de vmalert,
+# vmagent, vlogs, grafana, alertmanager, ntfy o blackbox: toda la
+# validación del stack vivía en los gates de la fase 85, que corren UNA
+# VEZ, en el encendido. Se verificaba que la observabilidad se hubiera
+# montado bien; nunca que siguiera funcionando.
+#
+# Ese día el CronJob de trivy llevaba 30 h fallando, vmalert no
+# recargaba sus reglas y vmagent no podía ni reiniciarse — con todos
+# los gates de la fase 85 en verde desde hacía dos días, porque habían
+# sido ciertos en el momento en que corrieron.
+#
+# Se mide por EFECTO y desde afuera, no preguntándole a cada pod si
+# está contento: ¿hay métricas frescas?, ¿las reglas que git declara
+# están CARGADAS?, ¿los objetivos declarados se están raspando?
+titulo "observabilidad"
+
+_ip_svc() { # el ClusterIP real, o el del endpoint si el Service es headless
+    local ns=$1 sv=$2 ip
+    ip=$(kubectl get svc -n "$ns" "$sv" -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
+    [[ -n "$ip" && "$ip" != "None" ]] || \
+        ip=$(kubectl get endpoints -n "$ns" "$sv" -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null)
+    printf '%s' "$ip"
+}
+_puerto_svc() { kubectl get svc -n "$1" "$2" -o jsonpath='{.spec.ports[0].port}' 2>/dev/null; }
+
+VM_IP=$(_ip_svc observability vmsingle); VM_PT=$(_puerto_svc observability vmsingle)
+if [[ -z "$VM_IP" || -z "$VM_PT" ]]; then
+    aviso "NO SE PUDO EVALUAR: no encontré el Service vmsingle — el resto de esta sección no significa nada"
+else
+  _vm() { curl -s --max-time 10 "http://$VM_IP:$VM_PT/api/v1/query" --data-urlencode "query=$1" 2>/dev/null; }
+  _vm_num() { _vm "$1" | python3 -c 'import sys,json
+try:
+    d=json.load(sys.stdin)["data"]["result"]
+    print(int(float(d[0]["value"][1])) if d else "")
+except Exception:
+    print("")' 2>/dev/null; }
+
+  # (a) ¿la base de métricas tiene datos FRESCOS? Sin esto, todo panel
+  #     y toda alerta miran un archivo muerto y no lo dicen.
+  frescas=$(_vm_num 'count(count by (job) (up))')
+  if [[ -z "$frescas" ]]; then
+      mal "vmsingle no responde consultas — la plataforma está ciega y las alertas no pueden evaluarse"
+  else
+      ok_si_medido "$frescas" "$frescas jobs de scrape con métricas frescas" \
+                   "los objetivos que vmagent está raspando"
+      # (b) objetivos caídos AHORA. La alerta existe, pero la ronda no
+      #     puede depender de que alguien mire el teléfono.
+      caidos=$(_vm_num 'count(up == 0)')
+      [[ -n "$caidos" && "$caidos" -gt 0 ]] \
+          && mal "$caidos objetivo(s) de scrape caídos: lo que midan está mudo, no en verde"
+  fi
+
+  # (c) LAS REGLAS DE GIT ESTÁN CARGADAS. Este es el check que no
+  #     existía y habría atrapado el vicio de vmalert: una regla
+  #     commiteada y sincronizada NO EXISTE hasta que vmalert la relee.
+  #     ArgoCD dice «Synced» igual, y la alerta simplemente no está.
+  declaradas=$(kubectl get cm -n observability vmalert-reglas -o json 2>/dev/null \
+      | python3 -c 'import sys,json,re
+try:
+    d=json.load(sys.stdin)["data"]
+    print(sum(len(re.findall(r"^\s*- alert:", v, re.M)) for v in d.values()))
+except Exception:
+    print("")' 2>/dev/null)
+  VA_IP=$(_ip_svc observability vmalert); VA_PT=$(_puerto_svc observability vmalert)
+  cargadas=""
+  [[ -n "$VA_IP" && -n "$VA_PT" ]] && cargadas=$(curl -s --max-time 10 \
+      "http://$VA_IP:$VA_PT/api/v1/rules" 2>/dev/null | python3 -c 'import sys,json
+try:
+    g=json.load(sys.stdin)["data"]["groups"]
+    print(sum(len(x.get("rules",[])) for x in g))
+except Exception:
+    print("")' 2>/dev/null)
+  if [[ -z "$declaradas" || -z "$cargadas" ]]; then
+      aviso "NO SE PUDO EVALUAR: no pude contrastar las reglas de git contra las que vmalert tiene cargadas"
+  elif [[ "$declaradas" != "$cargadas" ]]; then
+      mal "git declara $declaradas alertas y vmalert tiene $cargadas cargadas"
+      nota "una regla que no está cargada NO EXISTE, y ArgoCD dice Synced igual"
+  else
+      ok_si_medido "$cargadas" "las $cargadas alertas de git están cargadas en vmalert" \
+                   "las reglas declaradas contra las cargadas"
+  fi
+
+  # (d) las sondas que aegis-org deriva de los contratos. Una
+  #     organización con dominio y sin sonda nació ciega otra vez.
+  con_dominio=$(grep -lE '^dominio:' "$RAIZ_P"/orgs/*.yaml 2>/dev/null | wc -l)
+  sondas=$(_vm_num 'count(count by (job) (probe_success{job=~"sitio-.*"}))')
+  if [[ -z "$sondas" ]]; then
+      aviso "NO SE PUDO EVALUAR: no pude contar las sondas de inquilino"
+  elif [[ "$con_dominio" -gt 0 && "$sondas" -lt "$con_dominio" ]]; then
+      mal "$con_dominio organización(es) con dominio y solo $sondas sonda(s): alguna nació sin vigilancia"
+      nota "las deriva bin/aegis-org aplicar → k8s/base/observability/vmagent/values.yaml"
+  else
+      ok_si_medido "$sondas" "las $sondas organizaciones públicas tienen sonda" \
+                   "las sondas derivadas de los contratos"
+  fi
+
+  # (e) el canal. No se prueba mandando un mensaje (eso ensucia el
+  #     tópico del operador en cada corrida): se comprueba que la
+  #     cadena esté ENTERA y que el latido siga latiendo — si el
+  #     deadman dejó de disparar, algún eslabón se cortó.
+  AM_IP=$(_ip_svc observability alertmanager); AM_PT=$(_puerto_svc observability alertmanager)
+  latido=""
+  [[ -n "$AM_IP" && -n "$AM_PT" ]] && latido=$(curl -s --max-time 10 \
+      "http://$AM_IP:$AM_PT/api/v2/alerts" 2>/dev/null | python3 -c 'import sys,json
+try:
+    print(sum(1 for a in json.load(sys.stdin) if a["labels"].get("alertname")=="DeadmanAegis"))
+except Exception:
+    print("")' 2>/dev/null)
+  if [[ -z "$latido" ]]; then
+      aviso "NO SE PUDO EVALUAR: Alertmanager no respondió — no sé si la cadena de alertas está viva"
+  elif [[ "$latido" -eq 0 ]]; then
+      mal "el latido DeadmanAegis no llegó a Alertmanager: la cadena de alertas está cortada"
+      nota "su valor es su AUSENCIA — si falta, ninguna otra alerta va a llegar tampoco"
+  else
+      ok "el latido llega a Alertmanager: la cadena vmalert→AM está viva"
+  fi
+
+  # (f) LO QUE ESTÁ CORRIENDO, ¿lo escaneó alguien? Los stages `scan` y
+  #     `sign` de la plantilla toleran que el trivy-server o la clave de
+  #     cosign no existan (fases 50-70 del arranque) y siguen en VERDE.
+  #     La tolerancia está bien; que fuera invisible con la plataforma
+  #     ya de pie, no: `scan_skipped:true` viajaba en el evento, se
+  #     guardaba un año, y nadie lo leía nunca.
+  #
+  #     Desde hoy el build pushea la medida, la alerta ImagenSinEscaneo
+  #     la lee y este bloque la cruza contra lo que hay DESPLEGADO —
+  #     que es la pregunta que ni el panel ni la alerta pueden hacer:
+  #     ellos solo ven las imágenes que alguna vez se buildearon.
+  #
+  #     Los tres desenlaces, separados:
+  #       · el último build saltó el escaneo  → fallo
+  #       · desplegada y sin ninguna medida   → NO SE PUDO EVALUAR
+  #       · medida y escaneada                → verde
+  #     Solo las del registry INTERNO: son las que produce alguno de
+  #     nuestros dos pipelines y por lo tanto las únicas de las que
+  #     tiene sentido exigir medida. Una imagen pública de un chart de
+  #     terceros no la escanea aegis y pedirle métrica sería inventar
+  #     un amarillo permanente. El host del registry se DERIVA del
+  #     Service, no se escribe acá.
+  REG_HOST=$(kubectl get svc -n registry-system registry \
+      -o jsonpath='{.metadata.name}.{.metadata.namespace}.svc' 2>/dev/null)
+  desplegadas=""
+  [[ -n "$REG_HOST" ]] && desplegadas=$(kubectl get pods -A \
+      -o jsonpath='{range .items[*]}{range .spec.containers[*]}{.image}{"\n"}{end}{end}' 2>/dev/null \
+      | grep -F "$REG_HOST" \
+      | sed -E 's|^.*/||; s|[:@].*$||' | sort -u)
+  medidas=$(_vm 'last_over_time(aegis_build_scan_skipped[30d])' \
+      | python3 -c 'import sys,json
+try:
+    for r in json.load(sys.stdin)["data"]["result"]:
+        print(r["metric"].get("image",""), int(float(r["value"][1])))
+except Exception:
+    pass' 2>/dev/null)
+  if [[ -z "$desplegadas" ]]; then
+      aviso "NO SE PUDO EVALUAR: no pude listar las imágenes desplegadas — no sé qué está corriendo sin escanear"
+  else
+      sin_escaneo=""; sin_medida=""; n_ok=0
+      while read -r img; do
+          [[ -n "$img" ]] || continue
+          linea=$(printf '%s\n' "$medidas" | awk -v i="$img" '$1==i {print $2}')
+          if [[ -z "$linea" ]]; then sin_medida="$sin_medida $img"
+          elif [[ "$linea" == "1" ]]; then sin_escaneo="$sin_escaneo $img"
+          else n_ok=$((n_ok+1)); fi
+      done <<< "$desplegadas"
+      if [[ -n "$sin_escaneo" ]]; then
+          mal "imagen(es) corriendo cuyo último build SALTÓ el escaneo:$sin_escaneo"
+          nota "rebuildear con el trivy-server vivo; nada las distingue de una escaneada"
+      fi
+      [[ -n "$sin_medida" ]] \
+          && aviso "NO SE PUDO EVALUAR: sin medida de build (¿imagen previa a la métrica, o de un pipeline que no la pushea?):$sin_medida"
+      # El ✓ solo si hay algo que celebrar. Acá NO va ok_si_medido: cada
+      # imagen desplegada cae en exactamente uno de los tres cajones
+      # (escaneada / sin escaneo / sin medida), así que con la lista no
+      # vacía siempre sale al menos un renglón — el silencio es
+      # imposible por construcción. Poner el helper igual haría que con
+      # n_ok=0 se avisara DOS VECES el mismo hecho, y un aviso repetido
+      # se lee como dos problemas.
+      [[ "$n_ok" -gt 0 ]] \
+          && ok "$n_ok imagen(es) desplegada(s) con su último build escaneado"
+  fi
+fi
+
+# ── veredicto ─────────────────────────────────────────────────────
+printf '\n'
+if [[ $fallos -gt 0 ]]; then
+    printf '%s%d fallo(s)%s, %d aviso(s)\n' "$rojo" "$fallos" "$fin" "$avisos"
+    exit 1
+fi
+printf '%ssin fallos%s, %d aviso(s)\n' "$verde" "$fin" "$avisos"
+exit 0

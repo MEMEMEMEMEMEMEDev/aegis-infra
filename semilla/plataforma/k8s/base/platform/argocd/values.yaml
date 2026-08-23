@@ -1,0 +1,71 @@
+# values argo-cd 9.5.20 v2 — usados DOS veces con contenido
+# IDÉNTICO: helm install de la fase 30 y la App self (contrato de
+# adopción, D6). Estructura ALINEADA al values del v1 VIVO
+# (verificado bit-a-bit contra el release real, rev 4) — toda
+# divergencia respecto de ese patrón fue un bug acá (el caso
+# configs.cm literal-con-punto lo cazó verify-static check 13).
+configs:
+  cm:
+    # sin esto el repo-server RECHAZA el generator exec de KSOPS y
+    # todos los syncs de *-secrets fallan (fase 35):
+    kustomize.buildOptions: --enable-alpha-plugins --enable-exec
+  params:
+    server.insecure: true      # TLS termina en el edge (A21):
+                               # CF → Traefik → pod HTTP plano.
+                               # Checks SIEMPRE con http://.
+  secret:
+    # ADR-0015: puntero $ref, JAMÁS el value en el values bag.
+    # Requiere el Secret github-webhook (App argocd-secrets) ANTES
+    # del primer sync de esta App (orden de la fase 35):
+    githubSecret: "$github-webhook:token"
+
+dex:
+  enabled: false               # sin SSO en aegis (v1 vivo igual)
+
+global:
+  additionalLabels:
+    aegis.dev/part-of: aegis-platform
+  domain: argocd.__ROOT_DOMAIN__
+
+notifications:
+  enabled: false               # sin notificaciones (v1 vivo igual)
+
+redisSecretInit:
+  enabled: false     # el Job hook pre-install correría en CADA sync
+                     # (helm.sh/hook → PreSync). Con el Job OFF el
+                     # chart NO crea argocd-redis y el container
+                     # redis lo exige (verificado contra el render
+                     # 9.5.20): lo crea la fase 30 por kubectl como
+                     # Secret de bootstrap #3, ANTES del install.
+
+repoServer:
+  # KSOPS — bloque CRÍTICO: sin él, el repo-server pierde el plugin
+  # al reiniciar y ninguna App *-secrets descifra. La age key la
+  # monta el Secret argocd-sops-age (creado por KUBECTL en fase 30 —
+  # D2: jamás por tofu, jamás en un state). Var EXPLÍCITA (A2), no
+  # confiar en defaults de XDG.
+  env:
+    - {name: SOPS_AGE_KEY_FILE, value: /.config/sops/age/keys.txt}
+    - {name: XDG_CONFIG_HOME, value: /.config}
+  initContainers:
+    - name: install-ksops
+      image: viaductoss/ksops:v4.5.1
+      # el installer OFICIAL de la imagen (deja ksops + kustomize
+      # en /custom-tools) — forma validada en el release vivo:
+      command: [/usr/local/bin/ksops, install, --with-kustomize, /custom-tools]
+      volumeMounts: [{name: custom-tools, mountPath: /custom-tools}]
+      resources:
+        requests: {cpu: 50m, memory: 64Mi}
+        limits: {cpu: 200m, memory: 128Mi}
+  volumeMounts:
+    - {name: custom-tools, mountPath: /usr/local/bin/kustomize, subPath: kustomize}
+    - {name: custom-tools, mountPath: /usr/local/bin/ksops, subPath: ksops}
+    - {name: sops-age, mountPath: /.config/sops/age/keys.txt, subPath: keys.txt}
+  volumes:
+    - {name: custom-tools, emptyDir: {}}
+    - {name: sops-age, secret: {secretName: argocd-sops-age}}
+
+server:
+  # IngressRoute de Traefik la declara argocd-secrets (mismo bundle
+  # que el resto de recursos "alrededor" de argocd).
+  replicas: 1

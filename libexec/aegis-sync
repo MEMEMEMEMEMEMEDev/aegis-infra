@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# aegis-sync — dispara un sync de ArgoCD SIN romper la app.
+#
+# ── por qué existe ────────────────────────────────────────────────
+# El comando obvio para sincronizar a mano es este, y está MAL:
+#
+#   kubectl patch application X -n argocd --type merge -p \
+#     '{"operation":{"sync":{"revision":"HEAD","syncOptions":["ServerSideApply=true"]}}}'
+#
+# Pasar `syncOptions` en la operación REEMPLAZA las de la Application en
+# vez de sumarse a ellas. Y entre las que se pierden está
+# RespectIgnoreDifferences, que es lo único que hace que un
+# `ignoreDifferences` proteja de verdad: sin esa opción el ignore solo
+# afecta al DIFF, y el apply pisa igual.
+#
+# Medido el 2026-08-03: sincronizar así la app ai-system pisó el
+# ConfigMap ai-modo y devolvió el modo a "estado inicial declarado en
+# git". La ventana de AI abierta se cerró sola y el engine se apagó en
+# medio de una prueba. El comando decía "sincronizar"; hizo eso y además
+# borró estado de operación.
+#
+# Este script no pasa syncOptions. Punto. Las de la app son las que
+# valen, que es lo que uno quiere el 100% de las veces que sincroniza a
+# mano.
+set -euo pipefail
+
+rojo=$'\033[31m'; verde=$'\033[32m'; gris=$'\033[90m'; fin=$'\033[0m'
+[[ -t 1 ]] || { rojo=""; verde=""; gris=""; fin=""; }
+
+if [[ $# -eq 0 ]]; then
+    echo "uso: aegis-sync <app> [<app> ...]" >&2
+    echo "     aegis-sync --fuera-de-linea    # todas las que no estén Synced" >&2
+    exit 2
+fi
+
+apps=("$@")
+if [[ "${1:-}" == "--fuera-de-linea" ]]; then
+    mapfile -t apps < <(kubectl get applications -n argocd --no-headers \
+        -o custom-columns='N:.metadata.name,S:.status.sync.status' \
+        | awk '$2 != "Synced" {print $1}')
+    if [[ ${#apps[@]} -eq 0 ]]; then
+        echo "${verde}todas las apps ya están Synced${fin}"
+        exit 0
+    fi
+    echo "${gris}fuera de línea: ${apps[*]}${fin}"
+fi
+
+for app in "${apps[@]}"; do
+    if ! kubectl get application "$app" -n argocd >/dev/null 2>&1; then
+        echo "  ${rojo}✗${fin} $app: no existe" >&2
+        continue
+    fi
+    # Sin syncOptions: se respetan las de la Application.
+    kubectl patch application "$app" -n argocd --type merge \
+        -p "{\"operation\":{\"initiatedBy\":{\"username\":\"aegis-sync\"},\"sync\":{\"revision\":\"HEAD\"}}}" \
+        >/dev/null
+    echo "  ${verde}→${fin} $app"
+done
+echo "${gris}disparado. El resultado tarda; mirá con: aegis-chequeo${fin}"

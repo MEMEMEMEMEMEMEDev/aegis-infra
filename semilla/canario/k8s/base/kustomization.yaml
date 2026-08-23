@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# SIN ingressroute.yaml, y no es un olvido (#54).
+#
+# La ruta del canario la pone ahora la PLATAFORMA, en
+# k8s/organizations/org-canary/ruteo.yaml. Este repo ya no puede
+# escribirla: IngressRoute está en el namespaceResourceBlacklist de
+# aegis-tenant-canary.
+#
+# El motivo: un AppProject filtra por *kind* y jamás por el valor de un
+# campo, así que no hay forma de decir "IngressRoutes sí, pero solo con
+# TU Host". Mientras un inquilino pudiera crear una, podía reclamar el
+# hostname del vecino — medido el 2026-08-06 sobre la instancia, y el
+# ladrón ganaba. La única forma de acotarlo por kind es que el kind no
+# le pertenezca a nadie de este lado.
+#
+# Al canario le toca igual que a los demás A PROPÓSITO. Es la prueba de
+# que el camino del inquilino funciona; si se lo exceptuara de los
+# controles, dejaría de probar el camino que de verdad recorren.
+resources:
+  - deployment.yaml

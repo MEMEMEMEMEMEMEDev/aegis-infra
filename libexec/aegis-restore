@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# aegis-restore — restaura los 3 estados desde un bundle de aegis-backup
+# (W-09 / R4). El inverso exacto: descifra con la age key privada (el
+# irreducible del operador) y coloca cada estado en su sitio. Es la mitad
+# que hace verdadera la premisa "la age key recupera todo".
+#
+# DESTRUCTIVO: sobreescribe estado vivo. Por defecto se NIEGA a pisar un
+# destino que ya existe (para no romper una VM a medio andar); --force lo
+# habilita explícito. Sin la age key, no hace nada: el bundle sin la key no
+# sirve, y así debe ser.
+#
+# Uso: aegis-restore.sh <bundle.age> [--force]
+set -euo pipefail
+
+# ── preámbulo canónico (V-102) ───────────────────────────────────────
+# El PRODUCTO se resuelve desde el propio archivo, siguiendo symlinks
+# (la fase 05 instala /usr/local/bin/aegis como symlink: sin readlink
+# -f, AEGIS_ROOT sería /usr/local). Si bin/aegis ya lo exportó, se
+# respeta. La INSTANCIA la decide lib/paths.sh, nunca este archivo.
+if [[ -z "${AEGIS_ROOT:-}" ]]; then
+    command -v readlink >/dev/null || { echo "aegis-restore: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
+    AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+fi
+export AEGIS_ROOT
+# shellcheck source=../lib/paths.sh
+source "$AEGIS_ROOT/lib/paths.sh"
+
+STATE_SECRETS="$AEGIS_HOME/.state-secrets"
+INIT_STATE="${AEGIS_STATE_DIR:-$AEGIS_HOME/.init-state}"
+TUNNEL_ENV="$AEGIS_HOME/platform/tofu/envs/cloudflare-tunnel"
+
+say()  { printf '[restore] %s\n' "$*"; }
+die()  { printf '[restore] FATAL: %s\n' "$*" >&2; exit 1; }
+
+BUNDLE="${1:-}"; FORCE=0
+[[ "${2:-}" == "--force" ]] && FORCE=1
+[[ -n "$BUNDLE" && -f "$BUNDLE" ]] || die "uso: aegis-restore.sh <bundle.age> [--force]"
+
+KEY="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/aegis.key}"
+[[ -f "$KEY" ]] || die "sin age key privada ($KEY) — es el irreducible; sin ella el bundle no descifra"
+
+# ── descifrar a un stage y mostrar el manifest ───────────────────────────
+umask 077
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+PAY="$TMP/payload"; mkdir -p "$PAY"
+age -d -i "$KEY" "$BUNDLE" | tar -C "$PAY" -xzf - \
+  || die "el bundle no descifra/desempaqueta con esta key — ¿key equivocada o bundle corrupto?"
+say "manifest del bundle:"
+sed 's/^/    /' "$PAY/MANIFEST.txt" 2>/dev/null || true
+
+# ── colocar cada estado, paso separado, sin pisar sin --force ────────────
+# El bundle guarda el CONTENIDO bajo <label>/ (simétrico a collect()). El
+# guard de existencia es el ARCHIVO/dir concreto que indicaría estado vivo
+# (para tfstate NO es el dir del tofu env — ese existe siempre en el seed —
+# sino el terraform.tfstate).
+place() {  # place <label> <dest-dir> <guard-path>
+  local label="$1" dest="$2" guard="$3"
+  local src="$PAY/$label"
+  if [[ ! -d "$src" ]]; then say "$label: no está en el bundle — se omite"; return 0; fi
+  if [[ -e "$guard" && $FORCE -eq 0 ]]; then
+    die "$label: $guard YA existe — abortado (usá --force para pisar; no rompo estado vivo a ciegas)"
+  fi
+  mkdir -p "$dest"
+  cp -a "$src"/. "$dest"/
+  say "$label → $dest (restaurado)"
+}
+place state-secrets "$STATE_SECRETS" "$STATE_SECRETS"
+place init-state    "$INIT_STATE"    "$INIT_STATE"
+place tfstate       "$TUNNEL_ENV"     "$TUNNEL_ENV/terraform.tfstate"
+
+say "restauración completa. Siguiente: retomar el init si corresponde (aegis-init.sh --from <fase>)."

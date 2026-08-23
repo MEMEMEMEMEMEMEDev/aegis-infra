@@ -1,0 +1,116 @@
+# blackbox-exporter v0.28.0 (crudo). B11 DE VERDAD (design.md §4.2b):
+# mide el certificado SERVIDO por el registry vía handshake TLS real
+# validado CONTRA EL CA de aegis (configmap-aegis-ca) — jamás
+# insecure_skip_verify: un probe con -k daría expiry igual pero
+# dejaría pasar un cert EQUIVOCADO en verde (el mismo -k que P2.4
+# desterró de la fase 40).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blackbox-config
+  namespace: observability
+  labels: {aegis.dev/part-of: aegis-platform}
+data:
+  config.yml: |
+    modules:
+      # registry_tls: acepta 401 como éxito — la auth del registry es
+      # posterior al handshake; el 401 ES la prueba de que TLS y auth
+      # están vivos (mismo criterio que el gate registry-tls-real):
+      registry_tls:
+        prober: http
+        timeout: 10s
+        http:
+          method: GET
+          valid_status_codes: [200, 401]
+          fail_if_not_ssl: true
+          tls_config:
+            ca_file: /etc/blackbox/ca/ca.crt
+      # http_2xx plano: el /healthz de trivy (hooks.md — el vigía del
+      # vigía por disponibilidad; la EDAD de la DB la mide el CronJob):
+      http_2xx:
+        prober: http
+        timeout: 10s
+        http:
+          method: GET
+      # sitio_publico: el camino COMPLETO de un cliente hasta un sitio
+      # de inquilino — DNS de Cloudflare, borde, túnel, traefik, los
+      # middlewares y la app. Es el único probe que mide lo que una
+      # persona experimenta; todo lo demás mide piezas.
+      #
+      # Tres decisiones, y ninguna es de estilo:
+      #
+      # ip4 OBLIGATORIO. Cloudflare publica A y AAAA; blackbox prefiere
+      # IPv6 por default y este cluster no tiene salida IPv6, así que la
+      # sonda fallaba en 1 ms con probe_success=0 — indistinguible de
+      # «el sitio está caído». Medido el 2026-08-22 antes de shippear
+      # esto: una sonda que siempre falla es tan inútil como una que
+      # siempre pasa, y más ruidosa.
+      #
+      # no_follow_redirects + valid_status_codes [200]: si alguna vez
+      # un sitio de inquilino queda detrás de Cloudflare Access por
+      # error, el 302 al login NO puede contar como éxito. Es la misma
+      # regla que el check 90 del init: no medir el borde creyendo
+      # medir la app.
+      #
+      # Sin tls_config: acá el emisor es Cloudflare, no el CA interno.
+      sitio_publico:
+        prober: http
+        timeout: 10s
+        http:
+          method: GET
+          preferred_ip_protocol: ip4
+          ip_protocol_fallback: false
+          valid_status_codes: [200]
+          no_follow_redirects: true
+          fail_if_not_ssl: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blackbox
+  namespace: observability
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  selector: {app.kubernetes.io/name: blackbox}
+  ports: [{name: http, port: 9115, targetPort: 9115}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blackbox
+  namespace: observability
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: blackbox}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: blackbox}
+    spec:
+      containers:
+        - name: blackbox-exporter
+          # verificado 2026-08-19 contra github.com/prometheus/
+          # blackbox_exporter releases (v0.28.0, 2025-12-06) y el tag
+          # en quay.io/prometheus/blackbox-exporter:
+          image: quay.io/prometheus/blackbox-exporter:v0.28.0
+          args: ["--config.file=/etc/blackbox_exporter/config.yml"]
+          ports: [{name: http, containerPort: 9115}]
+          volumeMounts:
+            - {name: config, mountPath: /etc/blackbox_exporter, readOnly: true}
+            - {name: aegis-ca, mountPath: /etc/blackbox/ca, readOnly: true}
+          readinessProbe:
+            httpGet: {path: /-/healthy, port: 9115}
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet: {path: /-/healthy, port: 9115}
+            initialDelaySeconds: 15
+          resources:            # fase-85 §10
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+      volumes:
+        - name: config
+          configMap: {name: blackbox-config}
+        - name: aegis-ca
+          configMap: {name: aegis-ca}

@@ -1,0 +1,101 @@
+# NetworkPolicies del tenant org-canary — W-07 / R1 / P-D ("el
+# aislamiento del tenant era conceptual, no técnico"). k3s enforcea
+# networking.k8s.io/v1 con su controller embebido (kube-router) — NO
+# requiere Cilium (el comentario "cuando llegue Cilium" del kustomization
+# quedó obsoleto; verificado en 04-netpol-diseno.md §5). Rollout: el
+# tenant es el paso 1 (menor riesgo, máximo valor). Los namespaces de
+# plataforma van en una iteración siguiente (kyverno/cert-manager al
+# final: cortar mal su ingress = cluster sin admisión).
+#
+# RIESGO C7 (solo la corrida lo confirma): si el controller de k3s NO
+# exceptúa el tráfico del nodo, la default-deny de ingress podría cortar
+# la probe del kubelet (readiness a :8080/healthz) y dejar el canary
+# NotReady. El diseño, que MIDIÓ el tráfico, asume que el host queda
+# exceptuado; si la corrida muestra NotReady, agregar una regla de
+# ingress para el CIDR del nodo.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: org-canary
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# solo el edge (traefik en infra-edge) entra, y solo al puerto de la app.
+# podSelector {}: cualquier pod del tenant (robusto al canary efímero):
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-edge-ingress
+  namespace: org-canary
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: infra-edge}
+      ports:
+        - {protocol: TCP, port: 8080}
+---
+# Tráfico DENTRO del propio namespace. Sin esto el tenant solo servía
+# apps de un único pod: un front no podía hablarle a su backend, ni un
+# backend a su redis o a su base — la default-deny corta también el
+# tráfico pod↔pod del mismo namespace, cosa que sorprende a todo el
+# mundo la primera vez (se piensa la default-deny como frontera del
+# namespace, y es frontera de CADA POD).
+#
+# `podSelector: {}` dentro de `from`/`to` significa "cualquier pod de
+# ESTE namespace" — NO de todos. El aislamiento entre tenants queda
+# intacto: org-canary sigue sin poder hablarle a ningún otro
+# namespace, y nadie de afuera entra salvo el edge.
+#
+# ALCANCE ELEGIDO A PROPÓSITO: el namespace es la frontera de confianza,
+# así que acá adentro se permite todo. La alternativa —una política por
+# app, con selectores de labels— es más estricta pero exige una regla
+# nueva por cada par de componentes que se hablan, y equivocarse ahí
+# rompe en runtime de formas difíciles de diagnosticar. Cuando dos apps
+# INDEPENDIENTES convivan en el mismo namespace y se quiera que no se
+# vean entre sí, el refinamiento correcto es ese; mientras tanto, apps
+# de distinto dueño van en organizaciones distintas, que es la frontera
+# que la plataforma sí enforcea.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-namespace
+  namespace: org-canary
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+---
+# solo DNS sale (el error #1 de netpol es olvidar el :53 y romper toda
+# la resolución). Una SPA estática no necesita más egress.
+#
+# NO hay egress a internet, y es deliberado: la app que necesite llamar
+# a una API externa lo pide con una regla propia y explícita. Así el
+# default sigue siendo cerrado y cada salida a la red queda escrita en
+# algún lado. (Los pull de imágenes NO pasan por acá: los hace el
+# kubelet, que no está sujeto a NetworkPolicy.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: org-canary
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}

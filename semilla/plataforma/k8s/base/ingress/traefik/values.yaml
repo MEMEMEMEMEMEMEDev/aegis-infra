@@ -1,0 +1,20 @@
+# values traefik 40.3.0 v2. A31 horneada: trustedIPs del pod CIDR
+# /16 (cloudflared manda X-Forwarded-*; sin esto, backends que
+# auto-detectan esquema —Jenkins— sirven mixed-content). JAMÁS
+# insecure:true.
+service:
+  # chart 40.x: el type va en service.spec.* — con service.type el
+  # chart lo IGNORA en silencio y renderiza su default LoadBalancer
+  # → EXTERNAL-IP <pending> eterno con servicelb deshabilitado
+  # (corrida #5; verificado contra helm template del chart real):
+  spec:
+    type: ClusterIP      # el tráfico ENTRA por cloudflared, no LB
+ports:
+  web:
+    forwardedHeaders:
+      trustedIPs: ["10.42.0.0/16"]   # /16: cubre multi-nodo hetzner
+deployment:
+  replicas: 1
+resources:
+  requests: {cpu: 100m, memory: 128Mi}
+  limits: {cpu: 500m, memory: 256Mi}

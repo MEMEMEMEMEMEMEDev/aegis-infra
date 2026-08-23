@@ -1,0 +1,124 @@
+# registry v2 (multi-doc) — TLS desde el día uno (desvío pedido por
+# la fuente: 2026-07-04:7). Baches horneados: args EXPLÍCITO (sin
+# args el binario ignora el ConfigMap y arranca SIN AUTH silencioso
+# — A23), probes tcpSocket (401 rompe httpGet — A23), ClusterIP FIJA
+# pareada con el SAN del cert (A24/A30).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: registry-config
+  namespace: registry-system
+  labels: {aegis.dev/part-of: aegis-platform}
+data:
+  config.yml: |
+    version: 0.1
+    storage:
+      filesystem: {rootdirectory: /var/lib/registry}
+      delete: {enabled: true}
+    http:
+      addr: :5000
+      tls:
+        certificate: /certs/tls.crt
+        key: /certs/tls.key
+      # métricas de distribution (hooks.md / fase-85 §7): listener de
+      # debug SEPARADO del público — :5001 solo se expone a ClusterIP
+      # (vmagent, job `registry`), jamás por el edge. HTTP plano a
+      # propósito: el cert del registry no lista :5001 y el scrape es
+      # in-cluster. En instancia viva lo agrega la fase 85 (guard
+      # estructural + restart del pod: el ConfigMap solo no reinicia):
+      debug:
+        addr: :5001
+        prometheus: {enabled: true}
+    auth:
+      htpasswd:
+        realm: aegis-registry
+        path: /auth/htpasswd
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry
+  namespace: registry-system
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  clusterIP: __REGISTRY_CLUSTER_IP__   # FIJA: SAN del cert + mirror host
+  selector: {app.kubernetes.io/name: registry}
+  # dos puertos ⇒ K8s exige nombrarlos AMBOS (el presupuesto de §7
+  # decía "1 línea"; el name del 5000 es costo de validación, no scope):
+  ports:
+    - {name: registry, port: 5000, targetPort: 5000}
+    - {name: metrics, port: 5001, targetPort: 5001}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: registry-tls
+  namespace: registry-system
+spec:
+  secretName: registry-tls
+  duration: 2160h        # 90d; renovación auto a 60d. DEUDA operativa
+  renewBefore: 720h      # heredada: el pod NO reinicia solo — restart
+                         # manual ~60d o Reloader con 3+ pods (B11).
+  issuerRef: {name: aegis-internal-ca, kind: ClusterIssuer}
+  dnsNames:
+    - registry.registry-system.svc.cluster.local
+    - registry.registry-system.svc
+    - registry.registry-system
+  ipAddresses: [__REGISTRY_CLUSTER_IP__]   # el kubelet valida la IP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry
+  namespace: registry-system
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}    # PVC RWO
+  selector:
+    matchLabels: {app.kubernetes.io/name: registry}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: registry}
+      # A22: NO tocar labels/annotations de acá cosméticamente —
+      # rota el pod (template hash) con selfHeal activo.
+    spec:
+      containers:
+        - name: registry
+          image: registry:3.1.1
+          # A23: SIN args el binario usa config default (SIN auth):
+          args: ["serve", "/etc/distribution/config.yml"]
+          ports: [{containerPort: 5000}]
+          volumeMounts:
+            - {name: config, mountPath: /etc/distribution}
+            - {name: data, mountPath: /var/lib/registry}
+            - {name: tls, mountPath: /certs, readOnly: true}
+            - {name: auth, mountPath: /auth, readOnly: true}
+          readinessProbe:
+            tcpSocket: {port: 5000}    # A23: httpGet da 401
+            initialDelaySeconds: 5
+          livenessProbe:
+            tcpSocket: {port: 5000}
+            initialDelaySeconds: 15
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+      volumes:
+        - name: config
+          configMap: {name: registry-config}
+        - name: data
+          persistentVolumeClaim: {claimName: registry-data}
+        - name: tls
+          secret: {secretName: registry-tls}
+        - name: auth
+          secret: {secretName: registry-htpasswd}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registry-data
+  namespace: registry-system
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 10Gi}}

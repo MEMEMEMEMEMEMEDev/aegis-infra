@@ -1,0 +1,59 @@
+# NetworkPolicy de jenkins-system — W-07 iter2 (aislamiento de plataforma).
+# Entregado por la App 'jenkins-secrets' (path k8s/base/platform/jenkins-
+# secrets, dest jenkins-system) — el mismo directory-app que ya trae el
+# namespace/RQ/cert/IngressRoute. netpol.yaml separado (patrón del tenant).
+#
+# ITER2 = INGRESS-ONLY (ver trivy-system/netpol.yaml para el porqué de no
+# tocar egress: los builds necesitan salir a npm/docker.io/gcr.io/github y
+# flannel no hace FQDN — eso es Cilium/Hetzner, ADR-0014). Dejar el egress
+# abierto es LO SEGURO: no rompe ni `npm ci`, ni el pull de bases de kaniko,
+# ni el push al registry, ni el DNS.
+#
+# Valor real acá: NADIE fuera del edge y del propio namespace puede alcanzar
+# a Jenkins. En iter1 el tenant ya no llegaba (por su egress default-deny);
+# esto lo cierra desde el lado de Jenkins y también frente a CUALQUIER otro
+# namespace. Riesgo si la allowlist quedara mal: UI/webhook/agentes cortados
+# — RECUPERABLE (delete netpol). Por eso jenkins-system va en iter2.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: jenkins-system
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# Clientes legítimos (matriz §1):
+#  - infra-edge (traefik): la UI de Jenkins Y el webhook de GitHub, que
+#    entra por el túnel → cloudflared → traefik → jenkins :8080. Puerto
+#    verificado en la IngressRoute (services: jenkins:8080).
+#  - el propio namespace: los pods agente (JNLP :50000) hablan con el
+#    controller y viceversa; intra-ns sin restricción de puerto (el
+#    controller↔agente usa varios). podSelector {} = mismo namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-edge-and-agents
+  namespace: jenkins-system
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: infra-edge}
+      ports:
+        - {protocol: TCP, port: 8080}
+    - from:
+        - podSelector: {}          # intra-namespace: controller ↔ agentes JNLP
+    # observabilidad (fase-85 §7): vmagent scrapea /prometheus del
+    # controller en :8080 (plugin `prometheus`). Sin esta entry, up==0
+    # con todo «sano» — un agujero de scrape indistinguible de un
+    # incidente. En instancia viva la agrega la fase 85 (guard
+    # estructural, jamás grep de mención):
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: observability}
+      ports:
+        - {protocol: TCP, port: 8080}

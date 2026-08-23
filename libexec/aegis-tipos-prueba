@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""Prueba de aceptación #2 — que `tipo` signifique algo.
+
+Hasta el 2026-08-04 el campo `tipo` de un servicio se validaba contra
+una lista y después no lo consumía nadie: se podía declarar un `worker`
+público en el puerto 443, o un front estático con `usa: [ai]` —es decir,
+con una credencial que termina publicada en el navegador— y el generador
+decía que sí.
+
+Un tipo que no restringe nada no es un tipo, es una etiqueta.
+
+Esta prueba recorre cada regla con su CONTRAEJEMPLO y exige que el
+generador la rechace. Es lo contrario de la prueba #1: aquella comprueba
+que lo bueno se reproduce, esta que lo malo no pasa. Sin la segunda,
+podría relajar cualquier validación sin que nada avisara.
+
+    bin/aegis-tipos-prueba
+"""
+import importlib.machinery
+import importlib.util
+import os
+import sys
+
+import yaml
+
+AQUI = os.path.dirname(os.path.abspath(__file__))
+RAIZ = os.path.dirname(AQUI)
+
+spec = importlib.util.spec_from_loader(
+    "aegis_org", importlib.machinery.SourceFileLoader("aegis_org", os.path.join(AQUI, "aegis-org")))
+gen = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gen)
+
+rojo = "\033[31m"; verde = "\033[32m"; gris = "\033[90m"; fin = "\033[0m"
+if not sys.stdout.isatty():
+    rojo = verde = gris = fin = ""
+
+BASE = """\
+version: 1
+organizacion: prueba
+dominio: prueba.__ROOT_DOMAIN__
+cuota: pequena
+repo: git@github.com:ejemplo/repo.git
+ai:
+  plan: basico
+  tareas:
+    - {nombre: chat.x, capacidad: chat.rapido, prompt: g.txt}
+servicios:
+"""
+
+# (qué se prueba, servicios, fragmento que el error DEBE nombrar)
+#
+# El tercer campo importa: un rechazo por el motivo equivocado pasaría
+# igual de verde, y sería el mismo error que ya se cometió cuatro veces
+# esta semana — un guard que aprueba o rechaza por otra cosa.
+MALOS = [
+    ("estatico con usa: la credencial terminaría en el navegador",
+     "  - {nombre: f, tipo: estatico, publico: /, usa: [ai]}", "estatico y declara usa"),
+    ("estatico con puerto propio",
+     "  - {nombre: f, tipo: estatico, publico: /, puerto: 3000}", "declara puerto"),
+    ("estatico que nadie puede visitar",
+     "  - {nombre: f, tipo: estatico}", "no declara `publico`"),
+    ("http sin puerto: el tráfico no llegaría y en silencio",
+     "  - {nombre: a, tipo: http, publico: /api}", "no declara `puerto`"),
+    ("worker con puerto: un worker no escucha",
+     "  - {nombre: w, tipo: worker, puerto: 9000}", "worker y declara `puerto`"),
+    ("worker publicado",
+     "  - {nombre: w, tipo: worker, publico: /w}", "worker y declara `publico`"),
+    ("postgres con repo: la base la provee la plataforma",
+     "  - {nombre: d, tipo: postgres, repo: 'git@github.com:x/y.git'}", "postgres y declara `repo`"),
+    ("postgres publicado a internet",
+     "  - {nombre: d, tipo: postgres, publico: /db}", "postgres y declara `publico`"),
+    ("postgres consumiendo servicios",
+     "  - {nombre: d, tipo: postgres, usa: [ai]}", "postgres y declara usa"),
+    ("usa:[postgres] sin ninguna base declarada",
+     "  - {nombre: a, tipo: http, puerto: 8080, usa: [postgres]}", "no declaró ningún servicio de tipo postgres"),
+    ("tipo inventado",
+     "  - {nombre: x, tipo: lambda, publico: /}", "desconocido"),
+]
+
+# El contrato que SÍ tiene que pasar. Sin este caso, una validación que
+# rechace todo saldría verde en los once de arriba.
+BUENO = """\
+  - {nombre: front, tipo: estatico, publico: /}
+  - {nombre: api,   tipo: http, puerto: 8080, publico: /api, usa: [ai, postgres]}
+  - {nombre: cron,  tipo: worker, usa: [postgres]}
+  - {nombre: db,    tipo: postgres}
+"""
+
+
+# ── contratos ENTEROS ─────────────────────────────────────────────
+#
+# Estos no se pueden probar con BASE, porque lo que se prueba es
+# justamente la AUSENCIA de `repo` o de `dominio`. Van completos.
+#
+# Las dos reglas dicen lo mismo desde dos lados: un contrato declara lo
+# que sus servicios necesitan, ni más ni menos. Pedir `repo` a una
+# organización de pura infraestructura la obligaba a inventar uno
+# vacío; pedir `dominio` a algo que no publica nada la obligaba a
+# inventar un CNAME que después nadie sabe por qué está.
+CONTRATOS_MALOS = [
+    ("un http sin repo en ningún lado: nadie construye esa imagen", """\
+version: 1
+organizacion: prueba
+cuota: pequena
+servicios:
+  - {nombre: api, tipo: http, puerto: 8080}
+""", "se CONSTRUYEN: api (http)"),
+
+    ("algo público sin dominio: arranca y no recibe tráfico nunca", """\
+version: 1
+organizacion: prueba
+cuota: pequena
+repo: git@github.com:ejemplo/repo.git
+servicios:
+  - {nombre: front, tipo: estatico, publico: /}
+""", "hace falta 'dominio'"),
+
+    ("dominio sin nada público: un CNAME a un sitio que no existe", """\
+version: 1
+organizacion: prueba
+dominio: prueba.__ROOT_DOMAIN__
+cuota: pequena
+servicios:
+  - {nombre: db, tipo: postgres}
+""", "ningún servicio es"),
+]
+
+# Y el que TIENE que pasar: pura infraestructura. Sin repo porque no se
+# construye nada, y sin dominio porque no publica nada. Es el orden
+# natural de armar una organización —primero la base y el bucket,
+# después la app— y estaba prohibido.
+CONTRATO_INFRA = """\
+version: 1
+organizacion: prueba
+cuota: pequena
+almacenamiento:
+  bucket: true
+servicios:
+  - {nombre: datos, tipo: postgres}
+"""
+
+
+def valida(servicios):
+    """Devuelve None si valida, o el texto del error."""
+    return valida_contrato(BASE + servicios)
+
+
+def valida_contrato(texto):
+    planes = yaml.safe_load(open(os.path.join(RAIZ, "planes.yaml"), encoding="utf-8"))
+    try:
+        gen.validar(yaml.safe_load(texto), planes)
+        return None
+    except gen.Invalido as e:
+        return str(e)
+
+
+def main():
+    print(f"\n{'=' * 66}\nPRUEBA DE ACEPTACIÓN #2 — el `tipo` restringe\n{'=' * 66}")
+    fallos = 0
+
+    for que, servicios, esperado in MALOS:
+        err = valida(servicios)
+        if err is None:
+            print(f"  {rojo}✗{fin} {que}\n      {rojo}ACEPTADO — la regla no existe o no se aplica{fin}")
+            fallos += 1
+        elif esperado not in err:
+            print(f"  {rojo}✗{fin} {que}\n      {rojo}rechazado por OTRA razón{fin}: {err.splitlines()[0]}")
+            fallos += 1
+        else:
+            print(f"  {verde}✓{fin} {que}")
+
+    print(f"\n  {gris}y el contrato completo con los cuatro tipos:{fin}")
+    err = valida(BUENO)
+    if err is not None:
+        print(f"  {rojo}✗{fin} un contrato válido fue rechazado:\n      {err.splitlines()[0]}")
+        fallos += 1
+    else:
+        print(f"  {verde}✓{fin} estatico + http + worker + postgres valida")
+
+    print(f"\n  {gris}y el contrato declara lo que sus servicios necesitan:{fin}")
+    for que, texto, esperado in CONTRATOS_MALOS:
+        err = valida_contrato(texto)
+        if err is None:
+            print(f"  {rojo}✗{fin} {que}\n      {rojo}ACEPTADO — la regla no existe o no se aplica{fin}")
+            fallos += 1
+        elif esperado not in err:
+            print(f"  {rojo}✗{fin} {que}\n      {rojo}rechazado por OTRA razón{fin}: {err.splitlines()[0]}")
+            fallos += 1
+        else:
+            print(f"  {verde}✓{fin} {que}")
+
+    err = valida_contrato(CONTRATO_INFRA)
+    if err is not None:
+        print(f"  {rojo}✗{fin} pura infraestructura (postgres + bucket, sin repo ni dominio)"
+              f"\n      {rojo}rechazado{fin}: {err.splitlines()[0]}")
+        fallos += 1
+    else:
+        print(f"  {verde}✓{fin} pura infraestructura valida: sin repo y sin dominio")
+
+    print()
+    if fallos:
+        print(f"{rojo}{fallos} regla(s) sin efecto.{fin}\n")
+        return 1
+    print(f"{verde}Las {len(MALOS) + len(CONTRATOS_MALOS)} reglas rechazan, "
+          f"y los dos contratos válidos pasan.{fin}\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

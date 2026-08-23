@@ -1,0 +1,152 @@
+# Apps del plano base v2 (multi-doc por área). Convenciones comunes:
+# ServerSideApply=true; selfHeal=true SALVO argocd-self (ADR-0012);
+# prune OMITIDO (A19); labels aegis.dev/* (A18). El repoURL usa
+# placeholders __GH_OWNER__/__PLATFORM_REPO__ que la fase 10 del
+# init reemplaza junto con el .sops.yaml (TODO E10: unificar el
+# templating de placeholders en un solo paso del init).
+---
+# argocd-secrets ANTES que argocd (ADR-0015): KSOPS + generator con
+# LISTA EXPLÍCITA (A7) — files: ops-stack-repo, github-webhook,
+# hello-aegis-repo (SOLO LECTURA desde #59), ca-trust cert.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-secrets
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    targetRevision: main
+    path: k8s/base/platform/argocd-secrets
+  destination: {server: https://kubernetes.default.svc, namespace: argocd}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true]
+---
+# argocd self: SIN automated NI finalizer (ADR-0012). Multi-source
+# $values; ignoreDifferences de las keys runtime.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  sources:
+    - repoURL: https://argoproj.github.io/argo-helm
+      chart: argo-cd
+      targetRevision: 9.5.20
+      helm:
+        releaseName: argocd          # contrato de adopción (fase 30)
+        valueFiles: [$values/k8s/base/platform/argocd/values.yaml]
+    - repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+      targetRevision: main
+      ref: values
+  destination: {server: https://kubernetes.default.svc, namespace: argocd}
+  syncPolicy:
+    syncOptions: [ServerSideApply=true]
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: argocd-secret
+      jsonPointers: [/data]          # server.secretkey etc. runtime
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  sources:
+    - repoURL: quay.io/jetstack/charts
+      chart: cert-manager
+      targetRevision: v1.20.2
+      helm:
+        releaseName: cert-manager
+        valueFiles: [$values/k8s/base/ingress/cert-manager/values.yaml]
+    - repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+      targetRevision: main
+      ref: values
+  destination: {server: https://kubernetes.default.svc, namespace: cert-manager}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aegis-ca-issuer
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    targetRevision: main
+    path: k8s/base/platform/aegis-ca-issuer
+  destination: {server: https://kubernetes.default.svc, namespace: cert-manager}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager-issuers
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    targetRevision: main
+    path: k8s/base/ingress/cert-manager-issuers
+  destination: {server: https://kubernetes.default.svc, namespace: cert-manager}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: traefik
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  sources:
+    - repoURL: https://traefik.github.io/charts
+      chart: traefik
+      targetRevision: 40.3.0
+      helm:
+        releaseName: traefik
+        valueFiles: [$values/k8s/base/ingress/traefik/values.yaml]
+    - repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+      targetRevision: main
+      ref: values
+  destination: {server: https://kubernetes.default.svc, namespace: infra-edge}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloudflare-tunnel
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    targetRevision: main
+    path: k8s/base/ingress/cloudflare-tunnel
+  destination: {server: https://kubernetes.default.svc, namespace: infra-edge}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true]

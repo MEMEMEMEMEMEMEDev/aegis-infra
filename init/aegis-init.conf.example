@@ -1,0 +1,24 @@
+# aegis-init.conf.example — SOLO REFERENCIA para automatización.
+# EL CAMINO NORMAL NO ES ESTE ARCHIVO: el init corre un wizard
+# guiado (pregunta campo por campo, con defaults y validación) y
+# escribe aegis-init.conf solo. Usá este example únicamente para
+# pre-armar una re-corrida no interactiva.
+# Regenerar interactivo: ./aegis-init.sh --configure
+#
+# Todo T1: dominios, nombres, IDs públicos. CERO secretos.
+GH_OWNER="mi-org"
+# AISLAMIENTO: repos de trabajo DESECHABLES del v2 — el init los
+# CREA y les escribe (commits, tags, settings, webhooks). JAMÁS
+# apuntar a los repos reales del v1 (ops-stack / hello-aegis):
+PLATFORM_REPO="ops-stack-v2"
+APP_REPO="hello-aegis-v2"
+ROOT_DOMAIN="example.com"                # zona activa en Cloudflare
+ACME_EMAIL="operador@example.com"        # registro Let's Encrypt
+KUBE_CONTEXT_EXPECTED="default"          # k3s default context
+REGISTRY_CLUSTER_IP="10.43.179.123"      # en 10.43.0.0/16; pareada
+                                         # con SAN del cert
+AEGIS_WORKSPACE="$HOME/aegis"
+# IDs Cloudflare (públicos, 32 hex): dash.cloudflare.com → tu zona
+# → Overview → columna derecha, sección "API":
+CF_ACCOUNT_ID=""
+CF_ZONE_ID=""

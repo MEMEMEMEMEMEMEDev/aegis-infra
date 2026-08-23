@@ -1,0 +1,12 @@
+# Canary v2 — builder pinneado a LÍNEA soportada (A42: el pin del
+# toolchain envejece; el scan de Trivy lo vigila y bloquea).
+FROM docker.io/library/golang:1.26-alpine AS build
+WORKDIR /src
+COPY go.mod main.go ./
+RUN CGO_ENABLED=0 go build -o /hello-aegis .
+
+FROM docker.io/library/alpine:3.21
+COPY --from=build /hello-aegis /usr/local/bin/hello-aegis
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/hello-aegis"]

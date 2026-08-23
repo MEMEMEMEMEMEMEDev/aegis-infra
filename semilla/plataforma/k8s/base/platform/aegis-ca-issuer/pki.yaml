@@ -1,0 +1,57 @@
+# PKI interno v2 (multi-doc): SelfSigned bootstrap → CA raíz ECDSA
+# 10 años → ClusterIssuer CA. Para SANs internos que Let's Encrypt
+# no puede emitir (.svc, ClusterIP) — A24.
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: aegis-selfsigned-bootstrap
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: aegis-internal-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: aegis-internal-ca
+  subject:
+    organizations: [aegis]
+    organizationalUnits: [platform]
+  secretName: aegis-internal-ca
+  duration: 87600h          # 10 años (rotación decadal)
+  privateKey: {algorithm: ECDSA, size: 256}
+  issuerRef: {name: aegis-selfsigned-bootstrap, kind: ClusterIssuer}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: aegis-internal-ca
+spec:
+  ca: {secretName: aegis-internal-ca}
+---
+# Hallazgo A v1.1 (dependencia de webhook INVERTIDA): este
+# Certificate vivía en argocd-secrets — la App que la fase 35
+# sincroniza PRIMERA, ANTES de cert-manager. En cluster frío el
+# apply moría determinista con "failed calling webhook
+# webhook.cert-manager.io: no endpoints available"; parecía
+# intermitente solo porque el auto-sync de la root App a veces
+# levantaba cert-manager antes. Su lugar conceptual es ACÁ: junto al
+# ClusterIssuer aegis-internal-ca que referencia — que TAMBIÉN nacía
+# después que él (doble inversión). La App aegis-ca-issuer se
+# sincroniza tras cert-manager, con el webhook ya sirviendo.
+# El namespace es argocd A PROPÓSITO: el Secret resultante lo monta
+# el repo-server de ArgoCD para validar el TLS del registry. (Hasta
+# #59 también lo usaba el argocd-image-updater, ya retirado.)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: aegis-ca-trust
+  namespace: argocd
+spec:
+  secretName: aegis-ca-trust
+  commonName: aegis-ca-trust
+  duration: 8760h
+  issuerRef: {name: aegis-internal-ca, kind: ClusterIssuer}

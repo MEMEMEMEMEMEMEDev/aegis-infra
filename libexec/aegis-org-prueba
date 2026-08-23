@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Prueba de aceptación #1 del protocolo de organizaciones.
+
+Compara los OBJETOS de Kubernetes que produce el generador contra los
+que hay escritos a mano en el repo, para una organización que ya está
+desplegada.
+
+Compara objetos y no bytes a propósito: reproducir comentarios escritos
+a mano no tiene valor ni es posible. Lo que importa es que salgan los
+mismos objetos con los mismos campos. Si no salen, el modelo del
+protocolo no describe la realidad — y eso hay que saberlo ANTES de
+generar organizaciones nuevas con él.
+
+    bin/aegis-org-prueba orgs/portafolio.yaml
+"""
+import importlib.machinery
+import importlib.util
+import os
+import sys
+
+import yaml
+
+AQUI = os.path.dirname(os.path.abspath(__file__))
+RAIZ = os.path.dirname(AQUI)
+
+spec = importlib.util.spec_from_loader(
+    "aegis_org", importlib.machinery.SourceFileLoader("aegis_org", os.path.join(AQUI, "aegis-org")))
+gen = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gen)
+
+rojo = "\033[31m"; verde = "\033[32m"; ama = "\033[33m"; gris = "\033[90m"; fin = "\033[0m"
+
+
+def objetos(texto):
+    """(kind, name) -> objeto, ignorando los documentos vacíos."""
+    out = {}
+    for d in yaml.safe_load_all(texto):
+        if not d:
+            continue
+        out[(d["kind"], d["metadata"]["name"])] = d
+    return out
+
+
+def diferencias(a, b, ruta=""):
+    """Diferencias campo a campo. Devuelve lista de textos."""
+    ds = []
+    if type(a) is not type(b):
+        return [f"{ruta}: tipo {type(a).__name__} vs {type(b).__name__}"]
+    if isinstance(a, dict):
+        for k in sorted(set(a) | set(b)):
+            if k not in b:
+                ds.append(f"{ruta}/{k}: SOLO a mano = {a[k]!r}")
+            elif k not in a:
+                ds.append(f"{ruta}/{k}: SOLO generado = {b[k]!r}")
+            else:
+                ds += diferencias(a[k], b[k], f"{ruta}/{k}")
+    elif isinstance(a, list):
+        if len(a) != len(b):
+            ds.append(f"{ruta}: {len(a)} elementos a mano vs {len(b)} generados")
+        else:
+            for i, (x, y) in enumerate(zip(a, b)):
+                ds += diferencias(x, y, f"{ruta}[{i}]")
+    elif a != b:
+        ds.append(f"{ruta}: a mano={a!r}  generado={b!r}")
+    return ds
+
+
+def main(ruta_contrato):
+    crudo = open(ruta_contrato, encoding="utf-8").read()
+    planes = yaml.safe_load(open(os.path.join(RAIZ, "planes.yaml"), encoding="utf-8"))
+    c = gen.validar(yaml.safe_load(crudo), planes)
+    org = c["organizacion"]
+    dir_org = os.path.join(RAIZ, "k8s", "organizations", f"org-{org}")
+
+    salida, _ = gen.renderizar(c, planes, crudo)
+
+    # A mano: todo lo que kustomize incorporaría como recursos.
+    a_mano = {}
+    for f in ("bundle.yaml", "netpol.yaml", "apps.yaml"):
+        p = os.path.join(dir_org, f)
+        if os.path.exists(p):
+            a_mano.update(objetos(open(p, encoding="utf-8").read()))
+
+    generado = {}
+    for f in ("bundle.yaml", "netpol.yaml", "apps.yaml"):
+        if f in salida:
+            generado.update(objetos(salida[f]))
+
+    print(f"\n{'='*66}\nPRUEBA DE ACEPTACIÓN #1 — org-{org}\n{'='*66}")
+    print(f"a mano:   {len(a_mano)} objetos")
+    print(f"generado: {len(generado)} objetos\n")
+
+    fallos = 0
+    for clave in sorted(set(a_mano) | set(generado)):
+        kind, nombre = clave
+        etiqueta = f"{kind}/{nombre}"
+        if clave not in generado:
+            print(f"  {rojo}✗{fin} {etiqueta}  {rojo}el generador NO lo produce{fin}")
+            fallos += 1
+            continue
+        if clave not in a_mano:
+            print(f"  {ama}+{fin} {etiqueta}  {gris}solo generado (no existía a mano){fin}")
+            continue
+        ds = diferencias(a_mano[clave], generado[clave])
+        if not ds:
+            print(f"  {verde}✓{fin} {etiqueta}")
+        else:
+            print(f"  {ama}~{fin} {etiqueta}  {gris}{len(ds)} diferencia(s){fin}")
+            for d in ds[:8]:
+                print(f"        {gris}{d}{fin}")
+            fallos += 1
+
+    print()
+    if fallos:
+        print(f"{ama}{fallos} objeto(s) con diferencias.{fin}")
+        print(f"{gris}Cada diferencia es una decisión: o el generador está mal, o el\n"
+              f"objeto a mano tiene una particularidad que hay que llevar al\n"
+              f"contrato, o es una inconsistencia real que conviene corregir.{fin}\n")
+        return 1
+    print(f"{verde}El generador reproduce org-{org} objeto por objeto.{fin}\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1]))

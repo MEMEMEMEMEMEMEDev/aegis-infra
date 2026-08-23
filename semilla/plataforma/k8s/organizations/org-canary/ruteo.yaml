@@ -1,0 +1,42 @@
+---
+# El ruteo del canario — LA ÚNICA IngressRoute escrita a mano, y por un
+# motivo que no es pereza.
+#
+# Desde #54 el ruteo de una organización lo deriva `aegis org` de su
+# contrato, y el kind IngressRoute está prohibido en el AppProject de
+# cada inquilino: un AppProject filtra por *kind* y jamás por el valor
+# de un campo, así que mientras un inquilino pudiera crear una, podía
+# reclamar el Host del vecino. Medido el 2026-08-06 sobre esta misma
+# instancia: dos organizaciones reclamaron el mismo hostname, las dos
+# admitidas sin una queja, y traefik terminó sirviendo la del segundo.
+#
+# El canario NO TIENE CONTRATO, y eso es deliberado: existe para probar
+# que el camino del inquilino funciona, así que no puede depender de
+# ese camino. Sin contrato no hay nada de donde derivar, y por eso su
+# ruta se escribe acá, del lado de la plataforma — que es lo que
+# importa. Lo que cierra el agujero no es que la ruta esté GENERADA:
+# es que no la escriba el repo de la app.
+#
+# Tampoco sigue la convención `<org>-<servicio>:8080` que la plataforma
+# impone a las organizaciones con contrato. El canario expone
+# `hello-aegis:80` desde antes de que la convención existiera, y
+# alinearlo obligaría a tocar el repo que sirve de referencia para
+# comprobar que el camino del inquilino sigue andando. Se deja como
+# está y se dice acá, que es mejor que un renombre silencioso.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  # `canary-ruteo` y no `hello-aegis`: durante la transición convive
+  # con la ruta que todavía crea el repo del canario, y dos objetos
+  # con el mismo nombre serían dos Applications disputándose el
+  # mismo recurso. Cuando la vieja se borre, ésta queda sola.
+  name: canary-ruteo
+  namespace: org-canary
+  labels: {aegis.dev/part-of: aegis-organizaciones}
+spec:
+  entryPoints: [web]
+  routes:
+    - kind: Rule
+      match: Host(`aegis.__ROOT_DOMAIN__`)
+      services:
+        - {name: hello-aegis, port: 80}

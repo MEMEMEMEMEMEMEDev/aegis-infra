@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-aegis
+  labels: {app: hello-aegis}
+spec:
+  replicas: 1
+  # P2.12 reporte in-VM #14: con 1 réplica el rolling default
+  # (maxUnavailable 25% → 1) deja ~30s de Bad Gateway en cada update.
+  # Surge primero, matar después = cero ventana; el pod extra
+  # transitorio entra sobrado en la RQ de org-canary:
+  strategy:
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app: hello-aegis}
+  template:
+    metadata:
+      labels: {app: hello-aegis}
+    spec:
+      # Patrón A: el pull secret lo aporta el SA default del ns
+      # (org-canary) — la app NO declara la credencial.
+      # PSS: org-canary es enforce=restricted (corrida #12, 2do
+      # obstáculo de la 70) — el workload DECLARA el perfil completo
+      # (no hay policy mutate que lo inyecte; explícito > mágico).
+      # La imagen ya corre USER 65532 (Containerfile) → runAsNonRoot
+      # valida sin runAsUser duplicado acá:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: app
+          # el TAG lo gobierna el overlay (kustomize images) y lo
+          # actualiza el Image Updater vía write-back:
+          image: registry.registry-system.svc.cluster.local:5000/hello-aegis:seed
+          ports: [{containerPort: 8080}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080}
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-aegis
+spec:
+  selector: {app: hello-aegis}
+  ports: [{port: 80, targetPort: 8080}]

@@ -1,0 +1,15 @@
+# values victoria-logs-single 0.13.9 — instancia de LOGS DE PODS.
+# Retención CORTA por perfil (7d dev / 30d hetzner): acota el daño de
+# un secreto filtrado a un log (design.md §3.1). La retención en
+# VictoriaLogs OSS es GLOBAL por instancia — por eso los eventos
+# supply-chain viven en OTRA instancia (vlogs-eventos, 1y) y no acá
+# (design.md §4.1: la separación métricas≠eventos≠logs hecha física).
+server:
+  fullnameOverride: vlogs       # Service = `vlogs` :9428
+  retentionPeriod: __OBS_RETENCION_LOGS__
+  persistentVolume:
+    enabled: true
+    size: 5Gi
+  resources:                    # fase-85 §10
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}

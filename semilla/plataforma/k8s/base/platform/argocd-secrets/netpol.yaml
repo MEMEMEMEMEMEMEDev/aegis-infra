@@ -1,0 +1,58 @@
+# NetworkPolicy de argocd — W-07 iter2 (aislamiento de plataforma).
+# Entregado por la App 'argocd-secrets' (path k8s/base/platform/argocd-
+# secrets, dest argocd) — directory-app que ya sincroniza a ese namespace.
+# netpol.yaml separado (patrón del tenant).
+#
+# ITER2 = INGRESS-ONLY. El egress de argocd (repo-server → GitHub, app-
+# controller → API server, repo-server → GitHub)
+# NO se toca: cortarlo mal rompería el GitOps y flannel no distingue esos
+# FQDN. Egress a Cilium/Hetzner (ADR-0014). Dejarlo abierto no rompe nada.
+#
+# Riesgo si la allowlist quedara mal: la UI de ArgoCD o algún flujo interno
+# cortado — RECUPERABLE (delete netpol; ArgoCD sigue reconciliando por el
+# app-controller, que usa EGRESS al API server, no ingress). Por eso argocd
+# va en iter2. El API server NO ingresa a argocd (argocd no tiene webhook de
+# admisión — a diferencia de kyverno/cert-manager, que van en iter3).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: argocd
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# Clientes legítimos (matriz §1):
+#  - infra-edge (traefik): la UI/API de argocd-server y, si está, el
+#    receptor de webhook. Sin restricción de puerto a propósito: argocd-
+#    server escucha insecure/HTTP plano (server.insecure=true) y el puerto
+#    efectivo varía (80/8080); acotar el puerto mal cortaría la UI. El
+#    valor —que solo el edge entre— se mantiene igual.
+#  - el propio namespace: argocd-server ↔ repo-server (:8081) ↔ redis
+#    (:6379) ↔ app-controller ↔ applicationset, todo
+#    intra-ns. podSelector {} = mismo namespace, sin restricción de puerto.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-edge-and-intra
+  namespace: argocd
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: infra-edge}
+        - podSelector: {}          # intra-namespace: componentes de argocd
+    # observabilidad (fase-85 §7): vmagent scrapea los /metrics nativos
+    # de argocd (controller :8082, server :8083, repo-server :8084 —
+    # los puertos del job `argocd` en vmagent/values.yaml). En instancia
+    # viva la agrega la fase 85 (guard estructural):
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: observability}
+      ports:
+        - {protocol: TCP, port: 8082}
+        - {protocol: TCP, port: 8083}
+        - {protocol: TCP, port: 8084}

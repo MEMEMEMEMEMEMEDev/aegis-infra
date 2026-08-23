@@ -1,0 +1,807 @@
+#!/usr/bin/env python3
+"""aegis-app — el alta de una organización: `nueva` escribe archivos, `aplicar` toca GitHub.
+
+EL PROBLEMA QUE RESUELVE
+────────────────────────
+Dar de alta una organización dejaba tres pasos que ninguna herramienta
+cerraba, y los tres son contra GitHub: crear el repo de la app,
+registrar la deploy key, y poner el webhook — los pasos 4, 6 y 8 del
+camino manual (caminos/design.md §3). aegis-org genera los archivos y
+aegis-secreto la credencial; de ahí en adelante el operador quedaba
+solo con `gh` y una lista mental. El paso que aegis-secreto imprime
+como «FALTA UN PASO, y es a mano» —registrar la mitad pública en
+GitHub— era irreducible solo mientras nadie lo mecanizara: GitHub no
+acepta que la clave se registre sola, pero sí acepta `gh repo
+deploy-key add`. `aplicar` es ese paso, reducido.
+
+Y del otro lado de la misma alta: escribir el contrato, el esqueleto
+del repo y correr las derivaciones era una receta de cuatro comandos
+que había que saberse. `nueva` es esa receta, en orden y de una vez —
+el camino de plantilla de caminos/design.md §1, sin encerrar a nadie:
+lo que genera es EXACTAMENTE lo que el artesano escribe a mano, y al
+segundo siguiente el usuario ES un artesano (la plantilla se evapora,
+§0.3).
+
+LA FRONTERA (la regla de la casa, grabada acá como en aegis-org)
+────────────────────────────────────────────────────────────────
+Los dos subcomandos viven a un lado y al otro de la MISMA línea, y esa
+línea es todo el diseño (caminos/design.md §0.2 y §3):
+
+  `nueva`   ESCRIBE ARCHIVOS Y JAMÁS TOCA EL MUNDO. Contrato, staging,
+            derivaciones, secretos cifrados: todo es git diff, todo es
+            revisable, nada salió de esta máquina. No usa `gh`, no usa
+            la red. Generar es inocuo.
+  `aplicar` HABLA CON EL MUNDO (GitHub) Y JAMÁS ESCRIBE EN LOS REPOS —
+            ni en platform/ ni en el repo de la app CON HISTORIA.
+
+Es el espejo del «NO HABLA CON EL CLUSTER» de aegis-org, partido en
+dos: entre generar y ejecutar hay una PAUSA con un humano adentro (el
+plan/apply de tofu, aplicado al onboarding). La única siembra que
+`aplicar` hace en un repo ajeno es empujar el esqueleto a un repo
+VACÍO (0 commits en la rama default): plantar donde no hay nada.
+Un repo con historia jamás se pisa — no hay `--force` en este archivo
+y no debe haberlo nunca. (El init sí fuerza en la fase 12, y puede:
+sus repos están marcados desechables POR CONSTRUCCIÓN. Los de una
+organización no lo están, y esa diferencia es toda la regla.)
+
+QUIÉN GENERA Y QUIÉN EJECUTA
+────────────────────────────
+aegis-org DERIVA (manifiestos, jobs, Jenkinsfiles al staging
+.aegis-app/) y aegis-secreto CREA la credencial cifrada; este comando
+EJECUTA esa derivación contra GitHub. La lista de repos sale de
+`repos_de()` del generador — la MISMA que decide las Applications, el
+sourceRepos del AppProject y las credenciales. Cuarta consumidora de
+la misma fuente, y por lo mismo de siempre: dos listas calculadas
+aparte es cómo se desincronizan. Los webhooks no se listan acá: su
+fuente honesta es el values de Jenkins, y ese invariante ya tiene
+dueño (bin/aegis-webhook) — se delega, no se duplica.
+
+TRES DESENLACES POR PASO (doctrina de la casa)
+──────────────────────────────────────────────
+hecho / ya estaba / NO SE PUDO EVALUAR. El tercero es un AVISO y jamás
+un visto bueno: no poder mirar no es lo mismo que estar bien (el rc 2
+de aegis-borde y aegis-webhook, por la misma enfermedad E). Re-correr
+con todo hecho termina en puro «ya estaba» — converger, no ejecutar
+(caminos/design.md §0.4). Vale para los dos subcomandos: `nueva`
+re-corrida con todo hecho también termina en puro «ya estaba».
+
+    bin/aegis-app nueva tienda --plantilla base   # contrato + esqueleto + derivar
+    bin/aegis-app nueva tienda                    # artesano: el contrato ya está,
+                                                  # solo re-deriva (re-entrada)
+    bin/aegis-app aplicar orgs/ejemplo.yaml       # converge contra GitHub
+    bin/aegis-app aplicar ejemplo --check         # dice qué haría, sin tocar
+
+Devuelve 0 si todo estaba o quedó hecho, 1 si falta algo por hacer
+(--check), 2 si algo NO SE PUDO EVALUAR o abortó.
+
+Queda humano a propósito (caminos/design.md §3): el commit+push de
+platform/ —acto de gobierno— y el `tofu apply` del borde (#46). Este
+comando los dice al final, no los hace.
+"""
+import argparse
+import base64
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+try:
+    import yaml
+except ImportError:
+    sys.exit("falta pyyaml (python3-yaml)")
+
+AQUI = os.path.dirname(os.path.abspath(__file__))
+RAIZ = os.path.dirname(AQUI)
+DIR_ORGS = os.path.join(RAIZ, "orgs")
+DIR_STAGING = os.path.join(RAIZ, ".aegis-app")
+WEBHOOK = os.path.join(AQUI, "aegis-webhook")
+
+# Los repos que ESTE comando crea llevan un topic propio, no el
+# `aegis-v2-disposable` del init: ese marcador significa «el init puede
+# pisarme con --force», y un repo de organización es exactamente lo
+# contrario de eso. El topic dice quién lo creó, nada más.
+TOPIC = "aegis-app"
+TITULO_KEY = "aegis-argocd-ro"   # el mismo que aegis-secreto manda a poner a mano
+
+REPO_URL = re.compile(
+    r"^(?:git@github\.com:|https://github\.com/)([^/]+)/(.+?)(?:\.git)?/?$")
+
+rojo = "\033[31m"; verde = "\033[32m"; ama = "\033[33m"; gris = "\033[90m"; fin = "\033[0m"
+if not sys.stdout.isatty():
+    rojo = verde = ama = gris = fin = ""
+
+
+class Error(Exception):
+    pass
+
+
+def _generador():
+    """bin/aegis-org como módulo — la lista de repos sale de AHÍ.
+
+    Mismo mecanismo que usa aegis-secreto: reimplementar `repos_de` acá
+    sería la cuarta copia de la misma regla, y la forma de fallar sería
+    fea — el repo se crea con un nombre, la Application lee otro, y el
+    error habla de permisos y no de que dos listas divergieron.
+    """
+    import importlib.machinery
+    import importlib.util
+    if getattr(_generador, "_cache", None) is None:
+        p = os.path.join(AQUI, "aegis-org")
+        spec = importlib.util.spec_from_loader(
+            "aegis_org", importlib.machinery.SourceFileLoader("aegis_org", p))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        _generador._cache = m
+    return _generador._cache
+
+
+def _contrato(arg):
+    """Resuelve `orgs/x.yaml` o `x` al contrato VALIDADO.
+
+    Se valida con el validador del generador y no con un safe_load a
+    secas: un contrato inválido no debe llegar a tocar GitHub, y el
+    validador ya sabe decir por qué con el dedo en la línea.
+    """
+    ruta = arg if os.path.exists(arg) else os.path.join(DIR_ORGS, f"{arg}.yaml")
+    if not os.path.exists(ruta):
+        raise Error(f"no existe {arg} (ni como archivo ni como orgs/{arg}.yaml)")
+    gen = _generador()
+    planes = yaml.safe_load(open(gen.PLANES, encoding="utf-8"))
+    try:
+        c = gen.validar(yaml.safe_load(open(ruta, encoding="utf-8")), planes)
+    except gen.Invalido as e:
+        raise Error(f"{ruta}: {e}")
+    return ruta, c
+
+
+def _owner_repo(url):
+    m = REPO_URL.match(url or "")
+    if not m:
+        raise Error(f"no entiendo la URL {url!r} (espero git@github.com:owner/repo.git)")
+    return m.group(1), m.group(2)
+
+
+def _gh(*args, entrada=None):
+    return subprocess.run(["gh", *args], input=entrada, capture_output=True, text=True)
+
+
+def _repo_existe(owner, repo):
+    """True/False, o Error si no se pudo MIRAR — que no es lo mismo que no estar."""
+    r = _gh("api", f"repos/{owner}/{repo}", "--jq", ".id")
+    if r.returncode == 0:
+        return True
+    if "HTTP 404" in r.stderr:
+        return False
+    raise Error(f"no pude mirar {owner}/{repo}: {r.stderr.strip()}")
+
+
+def _tiene_historia(owner, repo):
+    """¿Hay al menos un commit en la rama default?
+
+    Se le pregunta a la API y no a un clone: GitHub responde 409 «Git
+    Repository is empty» para un repo sin commits, que es exactamente
+    la distinción que la guarda del esqueleto necesita.
+    """
+    r = _gh("api", f"repos/{owner}/{repo}/commits?per_page=1", "--jq", "length")
+    if r.returncode == 0:
+        return True
+    if "HTTP 409" in r.stderr or "is empty" in r.stderr:
+        return False
+    raise Error(f"no pude mirar la historia de {owner}/{repo}: {r.stderr.strip()}")
+
+
+def _crear_repo(owner, repo, org):
+    """`gh repo create` con la convención del init (fase 12): privado + topic."""
+    r = _gh("repo", "create", f"{owner}/{repo}", "--private",
+            "--description", f"aegis — organización {org}")
+    if r.returncode != 0:
+        raise Error(f"gh repo create {owner}/{repo} falló: {r.stderr.strip()}")
+    r = _gh("api", "-X", "PUT", f"repos/{owner}/{repo}/topics", "-f", f"names[]={TOPIC}")
+    if r.returncode != 0:
+        raise Error(f"no pude marcar {owner}/{repo} con el topic {TOPIC}: {r.stderr.strip()}")
+
+
+# ── el esqueleto ──────────────────────────────────────────────────────
+
+def _staging_de(c, url):
+    """El staging que corresponde a este repo, o (None, por qué no).
+
+    Para un repo declarado EN UN SERVICIO la respuesta es directa:
+    `.aegis-app/<org>/<svc>/`. Para el repo DE LA ORGANIZACIÓN solo hay
+    respuesta si exactamente UN servicio construible lo usa: con dos o
+    más, el layout del monorepo (¿qué va en la raíz? ¿qué Jenkinsfile,
+    si el multibranch lee uno solo?) no es derivable — es la herencia
+    anotada en RUTA.md: el modelo v1 es repo-por-servicio, y blog y
+    portafolio viven con un Jenkinsfile adaptado a mano. Inventar un
+    layout acá sería decidir por el artesano.
+    """
+    org = c["organizacion"]
+    gen = _generador()
+    for s in c.get("servicios") or []:
+        if s.get("repo") == url:
+            return os.path.join(DIR_STAGING, org, s["nombre"]), None
+    candidatos = [s["nombre"] for s in c.get("servicios") or []
+                  if s.get("tipo") in gen.TIPOS_CON_IMAGEN and not s.get("repo")]
+    if len(candidatos) == 1:
+        return os.path.join(DIR_STAGING, org, candidatos[0]), None
+    if not candidatos:
+        return None, "ningún servicio construible usa este repo"
+    return None, (f"lo comparten {len(candidatos)} servicios "
+                  f"({', '.join(candidatos)}) y el layout del monorepo no es "
+                  f"derivable — sembralo a mano (v1 es repo-por-servicio)")
+
+
+def _sembrar(owner, repo, staging):
+    """Empuja el staging a un repo VACÍO. Push normal, JAMÁS --force.
+
+    Si entre el chequeo de vacío y este push apareció historia, el push
+    FALLA con non-fast-forward — y fallar es el comportamiento correcto:
+    la guarda es «no pisar», no «ganar la carrera».
+
+    El push va por https con el credential helper de gh (la fase 12 del
+    init lo deja configurado con `gh auth setup-git`); las deploy keys
+    SSH son de los consumidores in-cluster, no de esta máquina.
+    """
+    d = tempfile.mkdtemp(prefix="aegis-app.")
+
+    def git(*args):
+        r = subprocess.run(["git", "-C", d, *args], capture_output=True, text=True)
+        if r.returncode != 0:
+            raise Error(f"git {args[0]} falló: {r.stderr.strip() or r.stdout.strip()}\n"
+                        f"  (si es por identidad: git config --global user.name/user.email\n"
+                        f"   — la fase 12 del init lo deja hecho)")
+        return r
+
+    try:
+        shutil.copytree(staging, d, dirs_exist_ok=True)
+        git("init", "-b", "main")
+        git("add", "-A")
+        git("commit", "-m", f"feat: esqueleto inicial (sembrado por aegis-app aplicar)",
+            "--no-verify")
+        git("remote", "add", "origin", f"https://github.com/{owner}/{repo}.git")
+        git("push", "-u", "origin", "main")   # sin --force: ver arriba
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+# ── la deploy key ─────────────────────────────────────────────────────
+
+def _publica_de(nombre):
+    """La mitad pública de la deploy key de la organización.
+
+    La pública no está persistida en ningún lado, y es a propósito:
+    aegis-secreto la imprime UNA vez al crear el par y guarda solo la
+    privada, cifrada. Así que acá se DERIVA — y se deriva del Secret
+    VIVO en argocd, no del archivo cifrado, por la misma doctrina que
+    el HMAC de aegis-webhook: la clave que importa es la que ArgoCD
+    PRESENTA, no la que git dice que debería presentar. De paso, leer
+    el cluster no necesita la age key; descifrar con sops sí.
+
+    El material privado pasa por acá y por eso la receta es la MISMA
+    que _deploy_key de aegis-secreto: tmpfs (/dev/shm), directorio 700,
+    archivo 600, shred antes de borrar. `ssh-keygen -y` no sabe leer de
+    stdin —necesita un -f— y esa es la única razón de que toque disco.
+    La privada NO se imprime, no pasa por argv, no sale de tmpfs.
+    """
+    r = subprocess.run(
+        ["kubectl", "get", "secret", f"{nombre}-repo", "-n", "argocd",
+         "-o", "jsonpath={.data.sshPrivateKey}"],
+        capture_output=True, text=True)
+    if r.returncode != 0 or not r.stdout.strip():
+        raise Error(f"no pude leer el Secret argocd/{nombre}-repo "
+                    f"(¿kubectl configurado? ¿corrió bin/aegis-secreto --todos y "
+                    f"sincronizó argocd-secrets?)")
+    privada = base64.b64decode(r.stdout.strip()).decode()
+
+    if not os.path.isdir("/dev/shm"):
+        raise Error("no hay /dev/shm: el material transitorio solo va a tmpfs")
+    d = tempfile.mkdtemp(prefix="aegis-app.", dir="/dev/shm")
+    os.chmod(d, 0o700)
+    priv = os.path.join(d, "k")
+    try:
+        with open(os.open(priv, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w",
+                  encoding="utf-8") as f:
+            f.write(privada if privada.endswith("\n") else privada + "\n")
+        r = subprocess.run(["ssh-keygen", "-y", "-f", priv],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            raise Error(f"ssh-keygen -y no pudo derivar la pública: {r.stderr.strip()}")
+        # tipo + blob, sin comentario: es la forma en que GitHub la devuelve.
+        return " ".join(r.stdout.split()[:2])
+    finally:
+        subprocess.run(["shred", "-u", priv], capture_output=True)
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def _keys_de(owner, repo):
+    r = _gh("api", f"repos/{owner}/{repo}/keys")
+    if r.returncode != 0:
+        raise Error(f"no pude listar las deploy keys de {owner}/{repo}: {r.stderr.strip()}")
+    return json.loads(r.stdout)
+
+
+def _registrar_key(owner, repo, publica):
+    """`gh repo deploy-key add`, en su forma API. read_only EXPLÍCITO.
+
+    Es el default de GitHub, pero acá va declarado igual: una deploy
+    key con escritura en el repo de una app deja que quien tenga el
+    cluster escriba en el repo, que es la dirección equivocada — la
+    misma advertencia que aegis-secreto imprime en rojo. El cuerpo
+    entra por stdin por hábito de la casa, aunque la pública sea
+    pública.
+    """
+    cuerpo = {"title": TITULO_KEY, "key": publica, "read_only": True}
+    r = _gh("api", "-X", "POST", f"repos/{owner}/{repo}/keys", "--input", "-",
+            entrada=json.dumps(cuerpo))
+    if r.returncode != 0:
+        raise Error(f"no pude registrar la deploy key en {owner}/{repo}: {r.stderr.strip()}")
+
+
+# ── nueva: el camino de plantilla (solo archivos) ─────────────────────
+
+def _dir_plantillas():
+    """Dónde viven las plantillas: `semilla/plantillas/` del PRODUCTO.
+
+    La resolución asume el layout de bin/aegis-semilla: platform/ (la
+    instancia, RAIZ de este script) vive ANIDADO en la raíz del repo
+    producto (aegis-v2), con semilla/ al lado. O sea:
+
+        <producto>/            ← os.path.dirname(RAIZ)
+        ├── semilla/plantillas/   las plantillas (el catálogo de §4)
+        └── platform/             esta instancia (RAIZ)
+
+    En una instancia SIN el repo producto alrededor —un clone suelto de
+    ops-stack— ese directorio no existe, y la respuesta honesta es un
+    error que nombra lo que falta y el camino que queda (el artesano no
+    necesita plantillas), no un traceback de os.listdir. El retorno de
+    las plantillas a la instancia empaquetada es de A7 (RUTA.md), no de
+    este comando.
+    """
+    d = os.path.join(os.path.dirname(RAIZ), "semilla", "plantillas")
+    if not os.path.isdir(d):
+        raise Error(
+            f"no encuentro las plantillas: no existe {d}\n"
+            f"  Las plantillas viven en el repo PRODUCTO (aegis-v2), con esta\n"
+            f"  instancia anidada adentro. Este clone parece estar suelto, sin el\n"
+            f"  producto alrededor. Salidas: correr desde un checkout del producto,\n"
+            f"  o el camino artesano — escribí orgs/<org>.yaml a mano y corré\n"
+            f"  `bin/aegis-app nueva <org>` SIN --plantilla, que solo deriva.")
+    return d
+
+
+def _plantilla(nombre):
+    """El directorio de UNA plantilla, o el catálogo real en el error."""
+    d = os.path.join(_dir_plantillas(), nombre)
+    if not os.path.isdir(d):
+        hay = sorted(x for x in os.listdir(_dir_plantillas())
+                     if os.path.isdir(os.path.join(_dir_plantillas(), x)))
+        raise Error(f"la plantilla {nombre!r} no existe. "
+                    f"Hay: {', '.join(hay) or '(ninguna)'}")
+    return d
+
+
+PLACEHOLDER = re.compile(r"__[A-Z]+__")
+
+
+def _valores_de(org):
+    """Los placeholders de la plantilla, TODOS derivables del nombre.
+
+    El usuario da UNA palabra (la organización) y el resto sale de la
+    instancia misma — segunda fuente de verdad, cero:
+
+      __ORG__      la palabra
+      __DOMINIO__  <org>.<dominio_raiz de edge.yaml> — la misma raíz de
+                   la que aegis-org deriva el CNAME del borde
+      __REPO__     git@github.com:<owner>/<org>-app.git — el owner sale
+                   de REPO_OPS del generador (el repo de ESTA instancia:
+                   las apps de la casa viven en la misma cuenta)
+    """
+    gen = _generador()
+    owner, _ = _owner_repo(gen.REPO_OPS)
+    edge = yaml.safe_load(open(gen.EDGE, encoding="utf-8")) or {}
+    raiz = edge.get("dominio_raiz")
+    if not raiz:
+        raise Error(f"{os.path.relpath(gen.EDGE, RAIZ)} no declara dominio_raiz — "
+                    f"sin él no puedo derivar el `dominio:` del contrato")
+    return {"__ORG__": org, "__DOMINIO__": f"{org}.{raiz}",
+            "__REPO__": f"git@github.com:{owner}/{org}-app.git"}
+
+
+def _render_tpl(texto, valores, donde):
+    for k, v in valores.items():
+        texto = texto.replace(k, v)
+    if (suelto := PLACEHOLDER.search(texto)) is not None:
+        # Una plantilla que pide algo que este comando no sabe derivar
+        # tiene que frenar acá, no entregar un contrato con __X__ adentro
+        # que el validador rechaza con un mensaje sobre otra cosa.
+        raise Error(f"{donde}: placeholder {suelto.group(0)} sin valor — "
+                    f"este comando deriva {', '.join(sorted(valores))} y nada más")
+    return texto
+
+
+def _instanciar_contrato(org, dir_plantilla, valores, tot):
+    """Paso 2 de `nueva`: el contrato, desde la plantilla, VALIDADO antes
+    de tocar disco. Un contrato que el generador rechazaría no se
+    escribe: la plantilla está rota y el error es de la plantilla."""
+    destino = os.path.join(DIR_ORGS, f"{org}.yaml")
+    tpl = os.path.join(dir_plantilla, "contrato.yaml.tpl")
+    if not os.path.exists(tpl):
+        raise Error(f"la plantilla no tiene contrato.yaml.tpl ({tpl})")
+    texto = _render_tpl(open(tpl, encoding="utf-8").read(), valores,
+                        os.path.relpath(tpl, RAIZ))
+    gen = _generador()
+    planes = yaml.safe_load(open(gen.PLANES, encoding="utf-8"))
+    try:
+        gen.validar(yaml.safe_load(texto), planes)
+    except gen.Invalido as e:
+        raise Error(f"el contrato instanciado no valida — la plantilla está rota:\n  {e}")
+    os.makedirs(DIR_ORGS, exist_ok=True)
+    open(destino, "w", encoding="utf-8").write(texto)
+    marca(tot, "hecho", "contrato", os.path.relpath(destino, RAIZ))
+    return destino
+
+
+def _instanciar_esqueletos(org, dir_plantilla, valores, tot):
+    """Paso 3 de `nueva`: los esqueletos, al staging `.aegis-app/<org>/<svc>/`.
+
+    Convive con el Jenkinsfile que aegis-org deja en el MISMO directorio
+    (caminos §2b): esta función jamás escribe un archivo llamado
+    Jenkinsfile — ese lo instancia la derivación, desde el template
+    canónico, en el paso siguiente.
+
+    Convergencia archivo por archivo: falta → se escribe; idéntico →
+    «ya estaba»; DISTINTO → se deja como está y se avisa. El staging es
+    la semilla de UN push inicial, pero si alguien lo retocó antes de
+    aplicar, pisárselo sería decidir por él.
+    """
+    base = os.path.join(dir_plantilla, "repos")
+    if not os.path.isdir(base) or not os.listdir(base):
+        raise Error(f"la plantilla no tiene esqueletos en {base}")
+    for svc in sorted(os.listdir(base)):
+        origen = os.path.join(base, svc)
+        if not os.path.isdir(origen):
+            continue
+        destino = os.path.join(DIR_STAGING, org, svc)
+        nuevos = iguales = distintos = 0
+        for d, _, archivos in os.walk(origen):
+            for a in sorted(archivos):
+                if a == "Jenkinsfile":   # de aegis-org, jamás de acá
+                    continue
+                rel = os.path.relpath(os.path.join(d, a), origen)
+                texto = _render_tpl(
+                    open(os.path.join(d, a), encoding="utf-8").read(),
+                    valores, os.path.join(os.path.relpath(origen, RAIZ), rel))
+                camino = os.path.join(destino, rel)
+                try:
+                    viejo = open(camino, encoding="utf-8").read()
+                except FileNotFoundError:
+                    viejo = None
+                if viejo == texto:
+                    iguales += 1
+                elif viejo is not None:
+                    distintos += 1
+                else:
+                    os.makedirs(os.path.dirname(camino), exist_ok=True)
+                    open(camino, "w", encoding="utf-8").write(texto)
+                    nuevos += 1
+        rel_dest = os.path.relpath(destino, RAIZ)
+        if distintos:
+            marca(tot, "aviso", f"esqueleto {svc}",
+                  f"{distintos} archivo(s) de {rel_dest} difieren de la plantilla "
+                  f"y NO se pisan (revisalos vos)")
+        elif nuevos:
+            marca(tot, "hecho", f"esqueleto {svc}",
+                  f"{nuevos} archivo(s) en {rel_dest}"
+                  + (f" ({iguales} ya estaban)" if iguales else ""))
+        else:
+            marca(tot, "ya", f"esqueleto {svc}", rel_dest)
+
+
+def _derivar(ruta, tot):
+    """Pasos 4 y 5 de `nueva`: aegis-org aplicar + aegis-secreto --todos.
+
+    Subprocesos con el MISMO python y la salida SIN capturar: los dos
+    reportan su propia convergencia línea a línea y ese reporte es para
+    el humano, no para parsearlo acá. Solo el rc vuelve, y un rc != 0
+    corta: derivar a medias y seguir sería imprimir un «siguiente paso»
+    sobre un estado que no existe.
+    """
+    for paso, cmd in (
+            ("derivaciones", [sys.executable, os.path.join(AQUI, "aegis-org"),
+                              "aplicar", ruta]),
+            ("secretos", [sys.executable, os.path.join(AQUI, "aegis-secreto"),
+                          "--todos", ruta])):
+        print(f"\n{gris}── {paso}: {' '.join(os.path.relpath(x, RAIZ) if os.path.isabs(x) else x for x in cmd[1:])} ──{fin}")
+        sys.stdout.flush()
+        rc = subprocess.run(cmd).returncode
+        if rc != 0:
+            raise Error(f"{paso} terminaron con rc {rc} — resolvé eso y re-corré "
+                        f"`bin/aegis-app nueva ...`, que converge")
+        marca(tot, "hecho", paso, "detalle arriba")
+
+
+def nueva(org, plantilla, tot):
+    gen = _generador()
+    if not gen.NOMBRE_VALIDO.match(org):
+        # El MISMO patrón que valida el contrato — no una copia local.
+        raise Error(f"{org!r} no es un nombre de organización válido "
+                    f"({gen.NOMBRE_VALIDO.pattern}); el namespace va a ser org-{org} "
+                    f"y el contrato lo rechazaría igual, mejor acá y ahora")
+    contrato = os.path.join(DIR_ORGS, f"{org}.yaml")
+    print(f"\n{org}  {gris}(nueva — solo archivos: nada de esto toca el mundo){fin}")
+
+    if plantilla:
+        # ── paso 1: un contrato vivo NO SE PISA ───────────────────
+        if os.path.exists(contrato):
+            raise Error(
+                f"orgs/{org}.yaml YA EXISTE y un contrato vivo no se pisa: se\n"
+                f"  edita a mano (es la única verdad, caminos §0.1). Si lo que\n"
+                f"  querés es re-derivar lo que falte, corré esto mismo SIN\n"
+                f"  --plantilla: `bin/aegis-app nueva {org}`")
+        d = _plantilla(plantilla)
+        valores = _valores_de(org)
+        # ── pasos 2 y 3: contrato + esqueletos ────────────────────
+        _instanciar_contrato(org, d, valores, tot)
+        _instanciar_esqueletos(org, d, valores, tot)
+    else:
+        # Modo artesano / re-entrada: el contrato es de otro, acá solo
+        # se corre la maquinaria que deriva de él.
+        if not os.path.exists(contrato):
+            raise Error(
+                f"no existe orgs/{org}.yaml. Sin --plantilla este comando no\n"
+                f"  inventa contratos: escribilo a mano (camino artesano — mirá\n"
+                f"  orgs/ejemplo.yaml) o pedile uno a una plantilla:\n"
+                f"  `bin/aegis-app nueva {org} --plantilla base`")
+        marca(tot, "ya", "contrato", f"orgs/{org}.yaml es tuyo — no se toca")
+
+    # ── pasos 4 y 5: derivar y cifrar ─────────────────────────────
+    _derivar(contrato, tot)
+
+    # ── paso 6: el resumen y la pausa ─────────────────────────────
+    staging = os.path.join(DIR_STAGING, org)
+    print(f"\n{verde}listo{fin} — quedó escrito, nada tocó el mundo:")
+    print(f"  {gris}contrato:{fin}   orgs/{org}.yaml")
+    if os.path.isdir(staging):
+        n = sum(len(fs) for _, _, fs in os.walk(staging))
+        print(f"  {gris}staging:{fin}    {os.path.relpath(staging, RAIZ)}/ "
+              f"({n} archivo(s), gitignorado — su destino es OTRO repo)")
+    print(f"  {gris}derivado:{fin}   k8s/organizations/org-{org}/ + jobs, borde, "
+          f"proyectos, credenciales (arriba)")
+    print(f"\nsiguientes pasos, EN ORDEN (la pausa del medio es el diseño):")
+    print(f"  1. revisá el diff: git status && git diff")
+    print(f"  2. bin/aegis-app aplicar {org} --check   {gris}(y sin --check cuando te guste){fin}")
+    print(f"  3. commit+push de platform/  {gris}(acto de gobierno — humano a propósito){fin}")
+    print(f"  4. tofu apply del borde (#46)  {gris}(tofu/envs/cloudflare-tunnel){fin}")
+    return 0
+
+
+# ── el recorrido ──────────────────────────────────────────────────────
+
+def marca(tot, estado, paso, detalle=""):
+    tot[estado] += 1
+    simbolo, color = {"ya": ("=", gris), "hecho": ("+", verde),
+                      "haria": ("~", ama), "aviso": ("!", ama)}[estado]
+    texto = {"ya": "ya estaba", "hecho": "hecho", "haria": "haría",
+             "aviso": "NO SE PUDO EVALUAR"}[estado]
+    sufijo = f" — {detalle}" if detalle else ""
+    print(f"  {color}{simbolo}{fin} {paso}: {texto}{gris}{sufijo}{fin}")
+
+
+def aplicar_repo(c, url, nombre, escribir, tot):
+    org = c["organizacion"]
+    print(f"\n{url}  {gris}(Application: {nombre}){fin}")
+    try:
+        owner, repo = _owner_repo(url)
+    except Error as e:
+        # Sin owner/repo no se puede evaluar NINGÚN paso de este repo.
+        marca(tot, "aviso", "repo GitHub", str(e))
+        return
+
+    # ── paso 1: el repo ───────────────────────────────────────────
+    try:
+        existe = _repo_existe(owner, repo)
+    except Error as e:
+        marca(tot, "aviso", "repo GitHub", str(e))
+        # Los pasos siguientes dependen de poder mirar el repo: mejor
+        # tres avisos honestos que dos silencios.
+        marca(tot, "aviso", "esqueleto", "no pude mirar el repo")
+        marca(tot, "aviso", "deploy key", "no pude mirar el repo")
+        return
+    if existe:
+        marca(tot, "ya", "repo GitHub")
+    elif not escribir:
+        marca(tot, "haria", "repo GitHub", f"gh repo create privado + topic {TOPIC}")
+    else:
+        try:
+            _crear_repo(owner, repo, org)
+            marca(tot, "hecho", "repo GitHub", f"creado privado, topic {TOPIC}")
+            existe = True
+        except Error as e:
+            marca(tot, "aviso", "repo GitHub", str(e))
+            marca(tot, "aviso", "esqueleto", "el repo no llegó a existir")
+            marca(tot, "aviso", "deploy key", "el repo no llegó a existir")
+            return
+
+    # ── paso 2: el esqueleto (SOLO sobre un repo vacío) ───────────
+    try:
+        # Un repo recién creado está vacío por construcción; recién
+        # entonces vale preguntar por la historia del que ya estaba.
+        vacio = True if not existe else not _tiene_historia(owner, repo)
+    except Error as e:
+        marca(tot, "aviso", "esqueleto", str(e))
+        vacio = None
+    if vacio is False:
+        marca(tot, "ya", "esqueleto", "el repo tiene historia — jamás se pisa")
+    elif vacio:
+        staging, motivo = _staging_de(c, url)
+        if staging is None:
+            marca(tot, "aviso", "esqueleto", f"repo vacío y sin esqueleto: {motivo}")
+        elif not os.path.isdir(staging) or not os.listdir(staging):
+            marca(tot, "aviso", "esqueleto",
+                  f"repo vacío y no hay staging en "
+                  f"{os.path.relpath(staging, RAIZ)} — lo genera bin/aegis-org aplicar")
+        elif not escribir:
+            n = sum(len(fs) for _, _, fs in os.walk(staging))
+            marca(tot, "haria", "esqueleto",
+                  f"push de {os.path.relpath(staging, RAIZ)} ({n} archivo(s))")
+        else:
+            try:
+                _sembrar(owner, repo, staging)
+                marca(tot, "hecho", "esqueleto",
+                      f"sembrado desde {os.path.relpath(staging, RAIZ)}")
+            except Error as e:
+                marca(tot, "aviso", "esqueleto", str(e))
+
+    # ── paso 3: la deploy key ─────────────────────────────────────
+    try:
+        publica = _publica_de(nombre)
+        registradas = _keys_de(owner, repo) if existe else []
+    except Error as e:
+        marca(tot, "aviso", "deploy key", str(e))
+        return
+    mia = next((k for k in registradas
+                if " ".join((k.get("key") or "").split()[:2]) == publica), None)
+    if mia and not mia.get("read_only", False):
+        # Existe pero CON escritura: convergió en presencia y violó la
+        # doctrina. No se «arregla» solo —borrar y recrear una key es
+        # un acto que corta el sync de ArgoCD un instante y merece un
+        # humano— pero tampoco se bendice.
+        marca(tot, "aviso", "deploy key",
+              f"registrada CON escritura ({mia.get('title')!r}) — debería ser "
+              f"solo lectura: revisala a mano en GitHub")
+    elif mia:
+        marca(tot, "ya", "deploy key", f"{mia.get('title')!r}, solo lectura")
+    elif not existe:
+        marca(tot, "haria", "deploy key", f"registrar {TITULO_KEY} (solo lectura)")
+    elif not escribir:
+        marca(tot, "haria", "deploy key", f"registrar {TITULO_KEY} (solo lectura)")
+    else:
+        try:
+            _registrar_key(owner, repo, publica)
+            marca(tot, "hecho", "deploy key", f"{TITULO_KEY}, solo lectura")
+        except Error as e:
+            marca(tot, "aviso", "deploy key", str(e))
+
+
+def aplicar_webhooks(escribir, tot):
+    """Delegado ENTERO en bin/aegis-webhook, que es el dueño del invariante.
+
+    Su lista sale del values de Jenkins (todos los repos con job, no
+    solo los de estos contratos) y eso es correcto: el invariante es
+    «si Jenkins tiene un job, el push le llega», y se converge completo
+    o no se converge. Con --aplicar además RE-SINCRONIZA el HMAC de los
+    hooks existentes — GitHub no deja leer el secret de un hook, así
+    que «existe» no prueba «sincronizado»; el PATCH idempotente es su
+    manera de no adivinar.
+    """
+    print(f"\nwebhooks  {gris}(delegado en bin/aegis-webhook — todos los repos con job){fin}")
+    # flush ANTES de ceder el stdout: con la salida entubada python
+    # bufferea y lo delegado aparecería arriba de su propio título.
+    sys.stdout.flush()
+    r = subprocess.run([WEBHOOK] + (["--aplicar"] if escribir else []),
+                       capture_output=True, text=True)
+    sys.stdout.write(r.stdout)
+    sys.stderr.write(r.stderr)
+    if r.returncode == 0:
+        # El rc no distingue «creó» de «solo re-sincronizó», y para la
+        # convergencia importa: un resync es mantenimiento del PATCH
+        # idempotente, no un cambio de estado. Se lee del reporte del
+        # delegado — sus estados son estables («webhook creado»).
+        creo = escribir and "webhook creado" in r.stdout
+        marca(tot, "hecho" if creo else "ya", "webhooks", "ver detalle arriba")
+    elif r.returncode == 1:
+        marca(tot, "haria", "webhooks", "bin/aegis-webhook --aplicar")
+    else:
+        marca(tot, "aviso", "webhooks", "aegis-webhook no pudo evaluar (rc 2)")
+
+
+def main():
+    p = argparse.ArgumentParser(prog="aegis-app", description=__doc__.split("\n")[0])
+    sub = p.add_subparsers(dest="cmd", required=True)
+    # Subcomandos y no flags: `nueva` (caminos §3, solo archivos) vive
+    # al lado de `aplicar` (solo mundo), y la frontera de la casa es
+    # precisamente esa línea — el orden del help la cuenta.
+    s = sub.add_parser("nueva",
+                       help="escribe TODO el alta en archivos: contrato desde "
+                            "plantilla, esqueleto, derivaciones, secretos. "
+                            "Jamás toca el mundo")
+    s.add_argument("organizacion", metavar="ORG",
+                   help="el nombre de la organización nueva")
+    s.add_argument("--plantilla", metavar="P",
+                   help="instancia contrato y esqueletos desde "
+                        "semilla/plantillas/<P>/. Sin esto, modo artesano: el "
+                        "contrato ya es tuyo y solo se re-deriva")
+    s = sub.add_parser("aplicar",
+                       help="ejecuta los pasos de GitHub de cada contrato: "
+                            "repo, esqueleto, deploy key, webhook")
+    s.add_argument("contratos", nargs="+", metavar="CONTRATO",
+                   help="orgs/<n>.yaml o el nombre de la organización")
+    s.add_argument("--check", action="store_true",
+                   help="muestra qué haría, sin tocar nada (cultura run_cmd del init)")
+    a = p.parse_args()
+
+    if a.cmd == "nueva":
+        # Sin chequeo de gh A PROPÓSITO: este lado de la frontera no
+        # habla con nadie, y exigir sesión para escribir archivos sería
+        # mentir sobre lo que hace.
+        tot = {"ya": 0, "hecho": 0, "haria": 0, "aviso": 0}
+        rc = nueva(a.organizacion, a.plantilla, tot)
+        if tot["aviso"]:
+            print(f"\n  {ama}hay archivos que difieren y no se pisaron{fin} "
+                  f"{gris}— revisalos antes de aplicar{fin}")
+            return 2
+        return rc
+
+    escribir = not a.check
+
+    # Sin gh no se evalúa nada, y decirlo temprano es más honesto que
+    # tres avisos idénticos por repo.
+    r = _gh("auth", "status")
+    if r.returncode != 0:
+        print(f"  {ama}!{fin} NO EVALUADO — gh sin sesión: {r.stderr.strip().splitlines()[-1]}")
+        print(f"    {gris}Esto NO es un visto bueno: es un chequeo que no corrió.{fin}")
+        return 2
+
+    tot = {"ya": 0, "hecho": 0, "haria": 0, "aviso": 0}
+    for arg in a.contratos:
+        try:
+            ruta, c = _contrato(arg)
+        except Error as e:
+            print(f"{rojo}✗{fin} {e}", file=sys.stderr)
+            return 2
+        repos = _generador().repos_de(c)
+        print(f"\n{c['organizacion']}  {gris}({os.path.relpath(ruta, RAIZ)}){fin}")
+        if not repos:
+            print(f"  {gris}={fin} sin repos declarados — nada que hacer en GitHub "
+                  f"{gris}(organización de pura infraestructura){fin}")
+            continue
+        for url, nombre in sorted(repos.items()):
+            aplicar_repo(c, url, nombre, escribir, tot)
+
+    aplicar_webhooks(escribir, tot)
+
+    print(f"\nresumen: {tot['ya']} ya estaba · {tot['hecho']} hecho · "
+          f"{tot['haria']} por hacer · {tot['aviso']} aviso(s)")
+    if tot["aviso"]:
+        print(f"  {ama}hay pasos SIN EVALUAR{fin} {gris}— un aviso no es un visto bueno: "
+              f"resolvé la causa y re-corré{fin}")
+        return 2
+    if tot["haria"]:
+        print(f"  {gris}para hacerlos: bin/aegis-app aplicar {' '.join(a.contratos)}{fin}")
+        return 1
+    if escribir and tot["hecho"]:
+        # Lo que queda es humano A PROPÓSITO (caminos/design.md §3):
+        print(f"  {gris}queda humano: commit+push de platform/ si aegis-org/aegis-secreto\n"
+              f"  dejaron diff (acto de gobierno), y `tofu apply` del borde (#46).{fin}")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Error as e:
+        print(f"{rojo}✗{fin} {e}", file=sys.stderr)
+        sys.exit(2)

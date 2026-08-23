@@ -1,0 +1,8 @@
+# values cert-manager v1.20.2 v2.
+crds: {enabled: true}
+# A20: el chart trae hooks (startupapicheck) que ArgoCD aplicaría
+# como recursos PERMANENTES — deshabilitado:
+startupapicheck: {enabled: false}
+resources:
+  requests: {cpu: 50m, memory: 96Mi}
+  limits: {cpu: 250m, memory: 256Mi}

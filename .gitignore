@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+
+# La INSTANCIA no vive dentro del PRODUCTO (02 §1). Pero la forma v2
+# —correr con AEGIS_HOME == AEGIS_ROOT— sigue siendo legítima, y en esa
+# forma la instancia aparece acá adentro. Que no se versione nunca:
+/platform/
+/.init-state/
+/.state-secrets/
+/.age-public
+/aegis.conf
+
+# Bundles de aegis state backup / data backup: van age-cifrados, pero
+# adentro viaja el tfstate del borde con el token del túnel EN CLARO.
+# El resguardo va FUERA del árbol (misma regla que v2).
+*.age

@@ -1,0 +1,73 @@
+# ntfy-alertmanager 1.0.0 — el puente (crudo). Existe porque vmalert
+# habla el protocolo de Alertmanager y ntfy habla HTTP plano: sin él,
+# el webhook llegaría a ntfy como JSON crudo ilegible (design.md
+# §4.1). Eslabón extra aceptado CON los ojos abiertos: el deadman
+# vigila la cadena completa de punta a punta.
+#
+# SIN ConfigMap a propósito (fase-85 §1 no le lista uno): su config
+# scfg lleva la credencial con la que publica en ntfy, así que el
+# archivo ENTERO vive en el Secret ntfy-puente-token (KSOPS, lo cifra
+# la fase 85). Contenido esperado del key `config` — documentado acá
+# porque es el contrato entre este Deployment y la fase:
+#
+#   http-address :8080
+#   alert-mode single
+#   ntfy {
+#       server http://ntfy.observability.svc
+#       topic aegis-alertas
+#       user puente
+#       password <ntfy_puente_token del store>
+#   }
+#   cache {
+#       type memory
+#   }
+#
+# (formato verificado 2026-08-19 contra config.scfg del tag v1.0.0
+# en git.xenrox.net/~xenrox/ntfy-alertmanager)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ntfy-puente
+  namespace: observability
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  selector: {app.kubernetes.io/name: ntfy-puente}
+  ports: [{name: http, port: 8080, targetPort: 8080}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntfy-puente
+  namespace: observability
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: ntfy-puente}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: ntfy-puente}
+    spec:
+      containers:
+        - name: ntfy-alertmanager
+          # verificado 2026-08-19 contra hub.docker.com/r/xenrox/
+          # ntfy-alertmanager (tag 1.0.0, 2026-03-31; el README del
+          # proyecto en git.xenrox.net apunta a ese repo de imagen):
+          image: docker.io/xenrox/ntfy-alertmanager:1.0.0
+          args: ["--config", "/etc/ntfy-alertmanager/config"]
+          ports: [{name: http, containerPort: 8080}]
+          volumeMounts:
+            - {name: config, mountPath: /etc/ntfy-alertmanager, readOnly: true}
+          readinessProbe:
+            tcpSocket: {port: 8080}
+            initialDelaySeconds: 5
+          livenessProbe:
+            tcpSocket: {port: 8080}
+            initialDelaySeconds: 15
+          resources:            # fase-85 §10
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+      volumes:
+        - name: config
+          secret: {secretName: ntfy-puente-token}

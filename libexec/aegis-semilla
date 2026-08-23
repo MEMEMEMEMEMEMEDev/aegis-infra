@@ -1,0 +1,503 @@
+#!/usr/bin/env python3
+"""aegis-semilla — comparar y traer cambios de la INSTANCIA a la SEMILLA.
+
+Esta herramienta es para quien MANTIENE el producto, no para quien opera
+una instancia. Vive en la raíz del repo aegis-v2 y trabaja sobre dos
+árboles que están uno al lado del otro:
+
+    semilla/plataforma/   el ARTEFACTO   (lo que se entrega, con placeholders)
+    platform/             la INSTANCIA   (lo que corre, con los valores puestos)
+
+POR QUÉ EXISTE
+==============
+
+Hasta el 2026-08-05 los dos eran la misma carpeta. Separarlos (commit
+0b40587) sacó el riesgo de pisar la instancia corriendo, pero dejó la
+deuda: la semilla se quedó en el 2026-07-28 y devolver una mejora exige
+DES-RENDERIZAR los placeholders. Mientras eso se haga a ojo, se vuelve a
+desincronizar solo. `semilla/PENDIENTE.md` §3.4 pide exactamente esto.
+
+El problema no es copiar archivos, es que copiar SIN des-renderizar
+hornea una instancia adentro del producto:
+
+    SEMILLA:   repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    INSTANCIA: repoURL: git@github.com:ejemplo-org/ops-stack-v2.git
+
+y el fallo no aparece acá: aparece en el arranque siguiente, en otra
+máquina, con un repo que no existe. `traer` hace ese reemplazo inverso
+como PARTE de la copia, no como un paso que hay que acordarse de hacer.
+
+LO QUE NO HACE
+==============
+
+No decide qué migrar. `diff` dice qué difiere; el criterio de si algo
+pertenece al producto o a esta instancia es de quien lee. Lo único que
+la herramienta impone es que nada quede EXCLUIDO en silencio: cada
+exclusión se declara con su motivo, se imprime, y una regla que no
+matchea nada es un ERROR (una regla podada por el paso del tiempo deja
+de proteger y nadie se entera — la misma enfermedad que este proyecto
+viene cazando: una señal que no distingue "pasó" de "no se evaluó").
+
+USO
+===
+
+    bin/aegis-semilla diff                  qué difiere, agrupado
+    bin/aegis-semilla diff <ruta>           el diff textual de un archivo
+    bin/aegis-semilla traer <ruta>...       copia del vivo a la semilla,
+                                            des-renderizando en el camino
+    bin/aegis-semilla excluidos             la política, con motivos
+
+Las <ruta> son relativas a la raíz de cada árbol (`bin/aegis-org`, no
+`platform/bin/aegis-org`).
+"""
+
+from __future__ import annotations
+
+import difflib
+import fnmatch
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+RAIZ = Path(__file__).resolve().parent.parent
+SEMILLA = RAIZ / "semilla" / "plataforma"
+VIVO = RAIZ / "platform"
+CONF = RAIZ / "init" / "aegis-init.conf"
+
+ROJO, VERDE, AMARILLO, AZUL, GRIS, FIN = (
+    "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0;90m", "\033[0m"
+)
+if not sys.stdout.isatty():
+    ROJO = VERDE = AMARILLO = AZUL = GRIS = FIN = ""
+
+
+def morir(msg: str) -> None:
+    print(f"{ROJO}error:{FIN} {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+# ── la política de exclusión ────────────────────────────────────────
+#
+# Cada entrada: (patrón glob sobre la ruta relativa, motivo).
+#
+# El motivo NO es decorativo: es lo que permite revisar la política sin
+# releer el código, y lo que hace evidente cuándo una exclusión dejó de
+# ser cierta. `excluidos` las imprime todas.
+#
+# Regla dura: un patrón que no matchea NINGÚN archivo del árbol vivo es
+# un error, no un no-op. Si no, la política envejece y sigue diciendo
+# que todo está cubierto.
+EXCLUSIONES = [
+    ("*.enc.yaml",
+     "secreto de ESTA instancia. Los crea el init y los commitea después; "
+     "en la semilla no existe ninguno y está bien (verify-static check 18 "
+     "no exige que estén versionados, justamente por esto)."),
+    (".sops.yaml",
+     "lo RENDERIZA la fase 10 desde .sops.yaml.tpl, que sí está en la "
+     "semilla. Traerlo hornearía la pública age de esta instancia."),
+    ("k8s/base/platform/cosign/cosign.pub",
+     "la produce la fase 80 al generar el par de firma. Es material "
+     "generado, no artefacto."),
+    ("tofu/envs/*/terraform.tfstate.enc.json",
+     "el state del borde de ESTA instancia: adentro viaja el token del "
+     "túnel. Nunca al producto."),
+    ("tofu/envs/*/.terraform.lock.hcl",
+     "lo crea `tofu init` en la corrida y lo commitea la propia fase 25 "
+     "(patrón «lo crea el init y lo commitea después», misma familia que "
+     "*.enc.yaml y cosign.pub). Traerlo pinnearía los providers de ESTA "
+     "instancia en el producto."),
+    ("orgs/*.yaml",
+     "los contratos de ESTA instancia (blog, portafolio, ejemplo). La "
+     "semilla lleva a lo sumo un contrato de ejemplo, y lo lleva escrito "
+     "a propósito, no arrastrado (PENDIENTE.md §3.3)."),
+    # Las organizaciones de ESTA instancia NO se listan acá: se derivan
+    # de los contratos, más abajo. Ver `_organizaciones_de_la_instancia`.
+    ("k8s/organizations/org-ecommerce/*",
+     "organización de ESTA instancia, derivada de un contrato que hoy no "
+     "existe en orgs/ (creada a mano antes del generador). Va a mano porque "
+     "es la única sin contrato del que derivarla."),
+    ("k8s/argocd-apps/tenants-heredados.yaml",
+     "las organizaciones ANTERIORES al generador, a mano y a propósito. Es "
+     "deuda de esta instancia (org-ecommerce sin contrato): una instancia "
+     "nueva no hereda nada."),
+    ("bin/aegis-org-prueba",
+     "compara la salida del generador contra los manifiestos escritos A MANO "
+     "de org-portafolio, que son de ESTA instancia. En la semilla no tiene "
+     "sujeto: se ejecutaría sobre nada y pasaría por vacío. La prueba que sí "
+     "viaja es bin/aegis-tipos-prueba, que es autocontenida."),
+]
+
+
+def _organizaciones_de_la_instancia() -> list[tuple[str, str]]:
+    """Una regla de exclusión por CONTRATO, derivada y no escrita.
+
+    Los manifiestos de `k8s/organizations/org-<X>/` los produce
+    `aegis-org` a partir de `orgs/<X>.yaml`: son de ESTA instancia y no
+    pertenecen al producto. La semilla lleva solo org-canary, que no
+    tiene contrato porque es parte del sustrato.
+
+    Estaban listadas A MANO —blog, portafolio, ejemplo— y eso ya falló:
+    org-shop nació el 2026-08-21, nadie agregó su regla, y desde
+    entonces `diff` venía ofreciendo copiar la ferretería de esta
+    instancia adentro del producto. Es exactamente el mismo defecto que
+    el bloque de sondas de vmagent del 2026-08-22, y la misma lección
+    que este repo lleva escrita en varios checks: una lista a mano
+    protege hasta que alguien agrega algo y se olvida, y no avisa
+    cuando deja de proteger.
+
+    Se deriva del directorio de contratos, que es la fuente de verdad de
+    quién existe. Una organización nueva queda cubierta el día que nace.
+    """
+    dir_orgs = VIVO / "orgs"
+    if not dir_orgs.is_dir():
+        return []
+    reglas = []
+    for c in sorted(dir_orgs.glob("*.yaml")):
+        org = c.stem
+        # solo si sus manifiestos EXISTEN: una regla que no matcha nada
+        # aborta la herramienta (y con razón), y un contrato recién
+        # escrito todavía no derivó nada.
+        if (VIVO / "k8s" / "organizations" / f"org-{org}").is_dir():
+            reglas.append((f"k8s/organizations/org-{org}/*",
+                           f"organización de ESTA instancia, derivada de orgs/{org}.yaml "
+                           f"(regla DERIVADA del contrato, no escrita a mano)."))
+    return reglas
+
+
+# ── diferencias DELIBERADAS ─────────────────────────────────────────
+#
+# Archivos que existen en los dos árboles y difieren A PROPÓSITO. Sin
+# esta tabla, cada corrida de `diff` los vuelve a reportar y tarde o
+# temprano alguien "arregla" la diferencia — que es exactamente el
+# accidente que esta herramienta tiene que evitar.
+#
+# Misma regla que EXCLUSIONES: una entrada que ya no difiere es un
+# ERROR. O la diferencia se perdió (y hay que enterarse) o la nota
+# quedó vieja.
+DELIBERADAS = [
+    ("k8s/base/kyverno-policies/kustomization.yaml",
+     "en la semilla va `resources: []`. La fase 80 agrega la entry en el "
+     "MISMO commit que inyecta la pública de cosign (patrón runtime-entry, "
+     "checks 18/18b/39): listarla acá haría que kustomize pidiera un archivo "
+     "sin clave durante todo el arranque."),
+    ("k8s/bootstrap/appprojects-tenants.yaml",
+     "DERIVADO de orgs/*.yaml. En la semilla va sin documentos porque no hay "
+     "contratos; en la instancia trae sus organizaciones."),
+    ("k8s/argocd-apps/tenants.yaml",
+     "DERIVADO de orgs/*.yaml, mismo caso que appprojects-tenants.yaml."),
+    ("k8s/bootstrap/appprojects.yaml",
+     "la instancia puede tener acá organizaciones ANTERIORES al generador "
+     "(sin contrato del que derivarlas). Eso es deuda de esa instancia: la "
+     "semilla lleva solo el sustrato y el canary."),
+    ("ai/tareas.yaml",
+     "las CLASES viajan, las TAREAS no: una tarea existe porque alguna "
+     "organización la declaró en su contrato, y la semilla no tiene "
+     "contratos."),
+    ("orgs/README.md",
+     "solo en la semilla, y es el punto: en la instancia ese directorio "
+     "tiene contratos reales y el README no aporta nada."),
+    ("tofu/envs/cloudflare-tunnel/main.tf",
+     "difiere en UNA línea: public_hostnames la DERIVA `aegis-org borde` "
+     "de los contratos de la instancia (acá: blog, ejemplo, portafolio); "
+     "la semilla lleva solo la base que la fase 25 aplica (aegis, argocd, "
+     "jenkins); grafana y ntfy están en edge.yaml de fábrica pero los suma "
+     "`borde` recién en la fase 85, que es cuando existe qué servir "
+     "(fase-85 §6 paso 6). Misma familia que "
+     "tenants.yaml. Sin este des-derivado, la fase 25 de una instancia "
+     "nueva crearía CNAMEs de apps ajenas de la nada (visto 2026-08-19, "
+     "retorno de Access a la semilla)."),
+]
+
+# ── bloques DERIVADOS de los contratos ──────────────────────────────
+#
+# Hay una tercera forma de hornear una instancia adentro del producto, y
+# no la cubre ni des-renderizar ni excluir: un archivo que es MITAD
+# artefacto y mitad derivado. `aegis-org` escribe las sondas de cada
+# organización DENTRO de vmagent/values.yaml, entre dos marcas. El resto
+# del archivo es producto y tiene que viajar.
+#
+# Sin esta tabla, `traer` copiaba el archivo entero: el des-renderizado
+# convertía blog.example.com en blog.__ROOT_DOMAIN__ y el guard pasaba
+# feliz, porque el valor de ESTA instancia ya no estaba. Pero los
+# NOMBRES sí: la semilla quedó con sondas a blog, ejemplo, portafolio y
+# shop —cuatro organizaciones que solo existen acá— y una instancia
+# nueva nacía sondeando cuatro sitios inexistentes en su propio dominio.
+# Cuatro probes en rojo permanente y cuatro SitioDeInquilinoCaido el día
+# uno: el falso rojo crónico, de fábrica. Encontrado el 2026-08-22, un
+# día después de agregar la derivación.
+#
+# Es la misma familia que appprojects-tenants.yaml y tenants.yaml (los
+# derivados que en la semilla van SIN documentos), solo que acá el
+# derivado no es el archivo entero sino una región de él.
+DES_DERIVADOS = {
+    "k8s/base/observability/vmagent/values.yaml": (
+        "    # --- DERIVADO por aegis-org (sondas de tenant): no editar a mano ---",
+        "    # --- FIN DERIVADO ---",
+        "las sondas por organización las escribe `aegis-org aplicar` desde los "
+        "contratos; la semilla no tiene contratos, así que el bloque va vacío."),
+}
+
+
+def desderivar(ruta: str, texto: str) -> str:
+    """Vacía los bloques que un generador rellena desde los contratos.
+
+    Las marcas se dejan: son el ancla donde el generador escribe, y sin
+    ellas la primera corrida de `aegis-org` en la instancia nueva no
+    tendría dónde poner nada.
+    """
+    if ruta not in DES_DERIVADOS:
+        return texto
+    ini, fin, _ = DES_DERIVADOS[ruta]
+    i, f = texto.find(ini), texto.find(fin)
+    if i < 0 or f < 0:
+        morir(f"{ruta}: no se encontraron las marcas del bloque derivado.\n"
+              "  O el generador cambió las marcas y esta tabla quedó vieja, o el\n"
+              "  archivo perdió el ancla. En los dos casos copiar sin mirar mete\n"
+              "  las organizaciones de esta instancia dentro del producto.")
+    return texto[:i + len(ini)] + "\n" + texto[f:]
+
+
+# Placeholders de clase-GENERADO: no salen de aegis-init.conf, los
+# produce el init (fases 10 y 80). Se des-renderizan por FORMA, porque
+# el valor cambia en cada instancia y no hay de dónde leerlo.
+GENERADOS = [
+    (re.compile(r"-----BEGIN PUBLIC KEY-----.*?-----END PUBLIC KEY-----",
+                re.DOTALL), "__COSIGN_PUB__"),
+    (re.compile(r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----",
+                re.DOTALL), "__AEGIS_CA_PEM__"),
+    (re.compile(r"age1[0-9a-z]{20,}"), "__AGE_PUBLIC__"),
+]
+
+# Los de clase-config, en el orden en que los declara
+# lib/common.sh:235 (_CONFIG_PLACEHOLDERS).
+CLAVES_CONFIG = ["GH_OWNER", "PLATFORM_REPO", "APP_REPO",
+                 "ROOT_DOMAIN", "REGISTRY_CLUSTER_IP", "ACME_EMAIL"]
+
+
+def leer_config() -> dict[str, str]:
+    """Los valores con los que la fase 10 renderizó ESTA instancia.
+
+    Sin ellos no se puede des-renderizar, y des-renderizar a medias es
+    peor que no hacerlo: deja el artefacto con una instancia adentro y
+    con aspecto de estar bien. Por eso falta de config es fatal.
+    """
+    if not CONF.exists():
+        morir(f"no existe {CONF.relative_to(RAIZ)}: sin los valores de esta "
+              "instancia no hay des-renderizado posible")
+    vals: dict[str, str] = {}
+    for linea in CONF.read_text().splitlines():
+        m = re.match(r'\s*([A-Z_]+)\s*=\s*"?([^"#]*?)"?\s*(?:#.*)?$', linea)
+        if m and m.group(1) in CLAVES_CONFIG:
+            vals[m.group(1)] = m.group(2)
+    faltan = [k for k in CLAVES_CONFIG if not vals.get(k)]
+    if faltan:
+        morir(f"aegis-init.conf no define: {', '.join(faltan)}")
+    return vals
+
+
+def desrenderizar(texto: str, vals: dict[str, str]) -> str:
+    """El inverso de render_platform_placeholders (lib/common.sh).
+
+    De más largo a más corto: si un valor es substring de otro, el corto
+    primero dejaría al largo partido por la mitad.
+    """
+    for regex, ph in GENERADOS:
+        texto = regex.sub(ph, texto)
+    for clave in sorted(CLAVES_CONFIG, key=lambda k: -len(vals[k])):
+        texto = texto.replace(vals[clave], f"__{clave}__")
+    return texto
+
+
+def trackeados(arbol: Path) -> list[str]:
+    r = subprocess.run(["git", "-C", str(arbol), "ls-files"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        morir(f"{arbol} no es un repo git ({r.stderr.strip()})")
+    return sorted(x for x in r.stdout.splitlines() if x)
+
+
+def clasificar(vivos: list[str]) -> tuple[list[str], dict[str, str]]:
+    """Parte la lista del vivo en (comparables, {excluido: motivo}).
+
+    Y verifica que toda regla de la política siga mordiendo algo.
+    """
+    excluidos: dict[str, str] = {}
+    huerfanas = []
+    for patron, motivo in EXCLUSIONES + _organizaciones_de_la_instancia():
+        pegados = [f for f in vivos if fnmatch.fnmatch(f, patron)]
+        if not pegados:
+            huerfanas.append(patron)
+        for f in pegados:
+            excluidos.setdefault(f, motivo)
+    if huerfanas:
+        morir("reglas de exclusión que ya no matchean nada: "
+              + ", ".join(huerfanas)
+              + "\n  una regla podada por el tiempo deja de proteger sin avisar."
+                "\n  Borrala de EXCLUSIONES o arreglá el patrón.")
+    return [f for f in vivos if f not in excluidos], excluidos
+
+
+def comparar(vals: dict[str, str]):
+    semilla = [f[len("semilla/plataforma/"):]
+               for f in trackeados(RAIZ) if f.startswith("semilla/plataforma/")]
+    vivos_todos = trackeados(VIVO)
+    vivos, excluidos = clasificar(vivos_todos)
+
+    set_s, set_v = set(semilla), set(vivos)
+    falta = sorted(set_v - set_s)
+    sobra = sorted(set_s - set_v)
+    difiere = []
+    for f in sorted(set_s & set_v):
+        try:
+            a = (SEMILLA / f).read_text()
+            b = desderivar(f, desrenderizar((VIVO / f).read_text(), vals))
+        except UnicodeDecodeError:
+            a = (SEMILLA / f).read_bytes().decode("utf-8", "replace")
+            b = (VIVO / f).read_bytes().decode("utf-8", "replace")
+        if a != b:
+            difiere.append(f)
+    return falta, sobra, difiere, excluidos
+
+
+def cmd_diff(argv: list[str]) -> int:
+    vals = leer_config()
+    if argv:
+        ruta = argv[0]
+        a_p, b_p = SEMILLA / ruta, VIVO / ruta
+        if not b_p.exists():
+            morir(f"{ruta} no existe en el árbol vivo")
+        a = a_p.read_text().splitlines(keepends=True) if a_p.exists() else []
+        b = desderivar(ruta, desrenderizar(b_p.read_text(), vals)).splitlines(keepends=True)
+        salida = list(difflib.unified_diff(
+            a, b, fromfile=f"semilla/{ruta}", tofile=f"vivo(des-renderizado)/{ruta}"))
+        if not salida:
+            print(f"{VERDE}idénticos{FIN} (tras des-renderizar): {ruta}")
+            return 0
+        sys.stdout.writelines(salida)
+        return 1
+
+    falta, sobra, difiere, excluidos = comparar(vals)
+
+    # Las deliberadas se apartan de los tres montones, y una que dejó de
+    # diferir es un error: o se perdió la diferencia o la nota envejeció.
+    declaradas = {r: m for r, m in DELIBERADAS}
+    sin_efecto = [r for r in declaradas
+                  if r not in difiere and r not in sobra and r not in falta]
+    if sin_efecto:
+        morir("diferencias declaradas DELIBERADAS que ya no difieren: "
+              + ", ".join(sin_efecto)
+              + "\n  o la diferencia se perdió (y hay que enterarse), o la nota"
+                "\n  quedó vieja. Revisala en bin/aegis-semilla.")
+    a_proposito = [r for r in declaradas if r in difiere or r in sobra or r in falta]
+    falta = [f for f in falta if f not in declaradas]
+    difiere = [f for f in difiere if f not in declaradas]
+    sobra = [f for f in sobra if f not in declaradas]
+
+    print(f"{AZUL}══ FALTA en la semilla ({len(falta)}) ══{FIN}")
+    for f in falta:
+        print(f"  + {f}")
+    print(f"\n{AZUL}══ DIFIERE, tras des-renderizar ({len(difiere)}) ══{FIN}")
+    for f in difiere:
+        print(f"  ~ {f}")
+    print(f"\n{AZUL}══ SOBRA en la semilla ({len(sobra)}) ══{FIN}")
+    for f in sobra:
+        print(f"  - {f}")
+    print(f"\n{GRIS}══ difieren A PROPÓSITO ({len(a_proposito)}) ══{FIN}")
+    for f in sorted(a_proposito):
+        print(f"  {GRIS}= {f}{FIN}")
+        print(f"    {GRIS}{declaradas[f]}{FIN}")
+    print(f"\n{GRIS}══ excluidos por política: {len(excluidos)} archivos "
+          f"({len(EXCLUSIONES) + len(_organizaciones_de_la_instancia())} reglas, "
+          f"{len(_organizaciones_de_la_instancia())} derivadas de los contratos). "
+          f"`aegis-semilla excluidos` los detalla ══{FIN}")
+
+    total = len(falta) + len(difiere) + len(sobra)
+    if total == 0:
+        print(f"\n{VERDE}la semilla está al día con la instancia{FIN}")
+        return 0
+    print(f"\n{AMARILLO}{total} diferencias{FIN}")
+    return 1
+
+
+def cmd_traer(argv: list[str]) -> int:
+    if not argv:
+        morir("traer necesita al menos una ruta (relativa a la raíz del árbol)")
+    vals = leer_config()
+    _, excluidos = clasificar(trackeados(VIVO))
+    for ruta in argv:
+        origen, destino = VIVO / ruta, SEMILLA / ruta
+        if not origen.exists():
+            morir(f"{ruta} no existe en el árbol vivo")
+        if origen.is_dir():
+            morir(f"{ruta} es un directorio: pasá los archivos uno por uno "
+                  "(A7 — listas explícitas, nunca globs)")
+        if ruta in excluidos:
+            morir(f"{ruta} está excluido por política:\n  {excluidos[ruta]}")
+
+        try:
+            texto = desderivar(ruta, desrenderizar(origen.read_text(), vals))
+        except UnicodeDecodeError:
+            morir(f"{ruta} no es texto: no se puede des-renderizar, copialo "
+                  "a mano y explicá por qué en el commit")
+
+        # El guard que hace que esto sirva de algo: si sobrevive un valor
+        # de ESTA instancia, la copia se aborta. Sin este chequeo la
+        # herramienta sería un `cp` con pasos extra.
+        for clave in CLAVES_CONFIG:
+            if vals[clave] in texto:
+                morir(f"{ruta}: sobrevivió el valor de {clave} "
+                      f"({vals[clave]}) al des-renderizar — no se copia nada")
+
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        nuevo = not destino.exists()
+        destino.write_text(texto)
+        shutil.copymode(origen, destino)
+        print(f"  {VERDE}{'nuevo' if nuevo else 'actualizado'}{FIN}  {ruta}")
+    print(f"\n{AMARILLO}acordate:{FIN} verify-static verifica LA SEMILLA. "
+          "Corrélo antes de commitear.")
+    return 0
+
+
+def cmd_excluidos(_argv: list[str]) -> int:
+    vivos = trackeados(VIVO)
+    _, excluidos = clasificar(vivos)
+    for patron, motivo in EXCLUSIONES + _organizaciones_de_la_instancia():
+        pegados = [f for f in vivos if fnmatch.fnmatch(f, patron)]
+        print(f"{AZUL}{patron}{FIN}  ({len(pegados)} archivos)")
+        for linea in motivo.split(". "):
+            if linea.strip():
+                print(f"    {GRIS}{linea.strip().rstrip('.')}.{FIN}")
+        print()
+    return 0
+
+
+def main() -> int:
+    if not SEMILLA.is_dir():
+        morir(f"no existe {SEMILLA}")
+    if not VIVO.is_dir():
+        morir(f"no existe {VIVO}: esta herramienta compara contra la "
+              "instancia viva, y en esta máquina no hay ninguna")
+    # Misma regla que EXCLUSIONES: una entrada que ya no muerde deja de
+    # proteger sin avisar. Acá se comprueba de entrada, no cuando toque
+    # ese archivo, porque `diff` sin argumentos no lo tocaría nunca.
+    for ruta, (ini, fin, _) in DES_DERIVADOS.items():
+        f = VIVO / ruta
+        if not f.is_file():
+            morir(f"DES_DERIVADOS nombra {ruta} y no existe en la instancia")
+        t = f.read_text()
+        if ini not in t or fin not in t:
+            morir(f"DES_DERIVADOS: {ruta} ya no tiene las marcas del bloque "
+                  "derivado. Sin ellas, traer ese archivo hornearía las "
+                  "organizaciones de esta instancia dentro del producto.")
+    cmds = {"diff": cmd_diff, "traer": cmd_traer, "excluidos": cmd_excluidos}
+    if len(sys.argv) < 2 or sys.argv[1] not in cmds:
+        print(__doc__)
+        return 2
+    return cmds[sys.argv[1]](sys.argv[2:])
+
+
+if __name__ == "__main__":
+    sys.exit(main())

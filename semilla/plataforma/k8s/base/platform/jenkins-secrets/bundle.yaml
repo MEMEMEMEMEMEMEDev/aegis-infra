@@ -1,0 +1,66 @@
+# jenkins-system: ns + RQ + cert CA-trust + IngressRoute (v2).
+# PSS BASELINE (W-05): el build ya NO necesita privileged — kaniko
+# construye sin /dev/fuse ni privilegios (extrae capas al FS directo).
+# baseline (no restricted) porque kaniko corre como root en el container
+# (root != privileged: NO escapa al nodo); restricted prohíbe root. Es
+# un salto enorme desde privileged — el escape al nodo desde el build
+# (donde entra código no confiable via npm ci) queda cerrado. La corrida
+# valida que kaniko corre bajo baseline. Ir a restricted = deuda futura
+# (rootless real de kaniko / buildkit).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jenkins-system
+  labels:
+    aegis.dev/part-of: aegis-platform
+    pod-security.kubernetes.io/enforce: baseline
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: jenkins-quota
+  namespace: jenkins-system
+spec:
+  hard:
+    # Dimensionado con aritmética, no a ojo (corrida #11: con "8" un
+    # solapamiento normal — ci-images residual 2500m + build de app
+    # 4000m + jenkins-0 2200m = 8700m — agotó la quota, el plugin no
+    # pudo crear el pod y el build quedó encolado para siempre).
+    # Invariante (check 36 de verify-static lo vigila):
+    #   quota >= jenkins-0 + 2 × pod-de-build-más-pesado
+    # porque reintentos/solapamientos del multibranch SON el caso
+    # normal, no la excepción. Hoy: limits jenkins-0 = 2200m/2.25Gi;
+    # build app = 5000m/4.25Gi (W-05: +container crane p/ el push del
+    # tar escaneado) → mínimo 12200m/10.75Gi. limits son techo, no
+    # reserva — el overcommit es barato:
+    requests.cpu: "6"
+    requests.memory: 8Gi
+    limits.cpu: "13"
+    limits.memory: 12Gi
+  # A29: RQ estricta => TODO container (init/sidecar/jnlp/buildah)
+  # necesita limits; el chart values los declara todos.
+---
+# vehículo del ca.crt para buildah (cainjector no propaga — A26):
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: aegis-ca-trust
+  namespace: jenkins-system
+spec:
+  secretName: aegis-ca-trust
+  commonName: aegis-ca-trust
+  duration: 8760h
+  issuerRef: {name: aegis-internal-ca, kind: ClusterIssuer}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: jenkins
+  namespace: jenkins-system
+spec:
+  entryPoints: [web]
+  routes:
+    - match: Host(`jenkins.__ROOT_DOMAIN__`)
+      kind: Rule
+      services: [{name: jenkins, port: 8080}]

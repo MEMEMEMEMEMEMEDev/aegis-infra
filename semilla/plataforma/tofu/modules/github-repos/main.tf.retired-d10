@@ -1,0 +1,75 @@
+# módulo github-repos v2 — settings del repo + webhook ArgoCD.
+# Default delete_branch_on_merge=FALSE (B4: en v1 el default true
+# del módulo era una mina — cualquier consumidor nuevo la pisaba).
+
+terraform {
+  required_providers {
+    github = { source = "integrations/github", version = "~> 6.0" }
+  }
+}
+
+variable "repo_name" { type = string }
+variable "description" {
+  type    = string
+  default = ""
+}
+variable "visibility" {
+  type    = string
+  default = "private"
+}
+variable "delete_branch_on_merge" {
+  description = "REGLA OPERATIVA: false. El setting borra branches al mergear incluso sin --delete-branch (bache B4, 2026-06-17)."
+  type        = bool
+  default     = false
+}
+variable "allow_squash_merge" {
+  type    = bool
+  default = true
+}
+variable "default_branch" {
+  type    = string
+  default = "main"
+}
+variable "argocd_webhook_url" { type = string }
+variable "argocd_webhook_secret" {
+  type      = string
+  sensitive = true
+}
+
+resource "github_repository" "this" {
+  name                   = var.repo_name
+  description            = var.description
+  visibility             = var.visibility
+  delete_branch_on_merge = var.delete_branch_on_merge
+  allow_squash_merge     = var.allow_squash_merge
+  allow_merge_commit     = true
+  allow_rebase_merge     = true
+  has_issues             = true
+
+  squash_merge_commit_title   = "COMMIT_OR_PR_TITLE"
+  squash_merge_commit_message = "COMMIT_MESSAGES"
+
+  lifecycle {
+    # greenfield lo crea; si el repo ya existe (re-bootstrap), se
+    # importa a mano ANTES del apply — el init v1 no importa (H5).
+    prevent_destroy = true
+  }
+}
+
+resource "github_branch_default" "main" {
+  repository = github_repository.this.name
+  branch     = var.default_branch
+}
+
+resource "github_repository_webhook" "argocd" {
+  repository = github_repository.this.name
+  active     = true
+  events     = ["push"]
+
+  configuration {
+    url          = var.argocd_webhook_url
+    content_type = "json"
+    secret       = var.argocd_webhook_secret
+    insecure_ssl = false
+  }
+}

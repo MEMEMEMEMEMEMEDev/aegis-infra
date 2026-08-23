@@ -1,0 +1,315 @@
+#!/usr/bin/env bash
+# ai — el control del operador sobre el sustrato de AI.
+#
+# UNA SOLA FUENTE DE VERDAD: este script escribe el ConfigMap ai-modo y
+# nada más. No escala nada, no toca pods, no habla con el gateway. Quien
+# escala es ai-modo-controller, que observa ese ConfigMap. Si mañana el
+# modo se cambia desde otro lado (un panel, un webhook), el efecto es el
+# mismo porque el efecto lo produce el controlador, no quien escribe.
+#
+# LA AUTOMATIZACIÓN SOLO APAGA. Este script es lo ÚNICO que enciende, y
+# es un acto humano deliberado. No hay auto-abrir, no hay
+# scale-from-zero por request: si alguien entra al portafolio a las 4 AM
+# ve el mundo dormido, y eso es correcto.
+#
+# El chequeo de VRAM vive ACÁ y no en el cluster porque acá es donde
+# nvidia-smi existe de verdad. Arrancar el engine con el escritorio
+# ocupando VRAM recorta el KV cache de forma PERMANENTE hasta el
+# siguiente reinicio (35.616 -> 27.840 tokens medidos, -22%) y con eso
+# baja a la mitad la concurrencia real. Cero complejidad adentro del
+# cluster para un problema que vive afuera.
+set -euo pipefail
+
+NS=ai-system
+CM=ai-modo
+# La flota (#97): todos suben y bajan con el modo, vía el controlador.
+ENGINES="engine-llm engine-charla"
+# CUÁNTA VRAM AJENA SE TOLERA ANTES DE ARRANCAR EL ENGINE.
+#
+# El número NO es de gusto: sale de GPU_MEM_UTIL del perfil
+# (k8s/base/ai-system/engine-llm.yaml). Miden las dos mitades de la
+# misma torta.
+#
+# HISTORIA, porque cada movimiento costó algo:
+#
+#   900   heredado del preflight de ai-server en metal. Quedó
+#         INCONSISTENTE el 2026-08-07 cuando GPU_MEM_UTIL bajó de 0.90 a
+#         0.87 (el OOM de arranque): al reservar menos, el escritorio
+#         podía usar más, pero el umbral se quedó en el número viejo y
+#         siguió bloqueando arranques que ya entraban. Se vio con 916
+#         MiB en uso — cortaba por DIECISÉIS megas mientras sobraban
+#         ~430.
+#   1100  con GPU_MEM_UTIL 0.87.
+#   1700  con 0.82 (2026-08-15): el escritorio del operador rozaba el
+#         techo en reposo y encender pedía cerrar ventanas.
+#   4390  con 0.60 (2026-08-15), al pasar de qwen3-4b a Hy-MT2-1.8B.
+#
+# El comentario del perfil ya decía "si un día se mueve el umbral del
+# preflight, este número se mueve con él". Vale en los dos sentidos, y
+# la primera vez que hizo falta fue al revés.
+#
+# Los dos números son UNA sola decisión repartida en dos archivos, y
+# moverlos por separado es exactamente el OOM del 2026-08-07 o un
+# preflight que miente.
+#
+# La cuenta del número de hoy (#97, dos engines conviviendo):
+#
+#   total 12227 MiB - (0.38 + 0.38) * 12227 = 2934 libres
+#   menos ~400 que los DOS vLLM se exceden de su presupuesto (~200 c/u)
+#   menos ~300 de margen
+#   = 2200 MiB de escritorio tolerados
+#
+#   (historia: 4390 con un solo engine a 0.60, 2026-08-15→08-17)
+#
+# El escritorio cede colchón a cambio del segundo modelo: Chrome con
+# vídeo entra justo, y si un día aprieta, la salida es la 4090 — no
+# volver a un solo carril.
+VRAM_LIMITE_MIB=2200
+
+rojo()  { printf '\033[31m%s\033[0m\n' "$*"; }
+verde() { printf '\033[32m%s\033[0m\n' "$*"; }
+gris()  { printf '\033[90m%s\033[0m\n' "$*"; }
+
+uso() {
+  cat <<'EOF'
+ai — control del sustrato de AI de aegis
+
+  ai status                  qué está pasando ahora
+  ai init [horas]            abre la jornada: enciende la GPU por N horas
+                             (default 8; se cierra sola — o antes con ai stop)
+  ai stop                    apaga la GPU (alias de cerrar)
+  ai abrir [--hasta HH:MM]   enciende la GPU (chequea la VRAM antes)
+  ai demo [minutos]          enciende con presupuestos amplios y TTL
+                             (default 60 min; se cierra solo)
+  ai max [--hasta HH:MM]     presupuestos amplios sin TTL
+  ai cerrar [motivo]         apaga la GPU
+  ai log [-f]                logs del gateway
+  ai engine-log [-f]         logs del engine
+
+Opciones:
+  --force    saltea el chequeo de VRAM (sabé lo que hacés: arrancar
+             con VRAM sucia recorta el KV cache de forma permanente)
+
+El modo vive en el ConfigMap ai-modo de ai-system. Este script es lo
+único que lo escribe a mano; el controlador lo aplica.
+EOF
+}
+
+vram_usada_mib() {
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo -1; return
+  fi
+  nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' '
+}
+
+quien_usa_la_gpu() {
+  nvidia-smi --query-compute-apps=pid,process_name,used_memory \
+    --format=csv,noheader 2>/dev/null || true
+}
+
+preflight_vram() {
+  # SI EL ENGINE YA ESTÁ ARRIBA, ESTE CHEQUEO NO APLICA.
+  #
+  # Existe para proteger UN momento: el arranque de vLLM, que reserva su
+  # KV cache de una sola vez y para siempre. Si arranca con la GPU sucia,
+  # se queda con menos cache hasta que alguien lo reinicie. Nada de eso
+  # está por pasar si el engine ya está corriendo: `ai abrir` sobre un
+  # engine encendido sólo mueve el modo y su vencimiento.
+  #
+  # Y sin esta salida el chequeo se muerde la cola, porque `nvidia-smi`
+  # informa la VRAM TOTAL en uso y el propio engine son ~10.4 GB de esos.
+  # Pasó dos veces el 2026-08-08: `ai demo` se negó a extender una ventana
+  # ya abierta contándole al engine su propia memoria como ajena, y
+  # mandando a "cerrá eso y reintentá" — donde "eso" era justamente lo que
+  # se quería mantener vivo. La única salida era --force, que saltea el
+  # chequeo entero (#38).
+  local e reps
+  for e in $ENGINES; do
+    reps=$(kubectl get deploy "$e" -n "$NS" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)
+    if [ "${reps:-0}" -gt 0 ] 2>/dev/null; then
+      verde "  la flota ya está arriba ($e con réplicas): no hay arranque que proteger"
+      gris  "  (este preflight cuida la reserva del KV cache, que se hace UNA vez al arrancar)"
+      return 0
+    fi
+  done
+
+  local usada; usada=$(vram_usada_mib)
+  if [ "$usada" = "-1" ]; then
+    gris "  (sin nvidia-smi: no se pudo chequear la VRAM)"
+    return 0
+  fi
+  if [ "$usada" -le "$VRAM_LIMITE_MIB" ]; then
+    verde "  VRAM libre: ${usada} MiB en uso (límite ${VRAM_LIMITE_MIB})"
+    return 0
+  fi
+  rojo "  VRAM SUCIA: ${usada} MiB en uso, por encima de ${VRAM_LIMITE_MIB}."
+  echo
+  echo "  Arrancar así recorta el KV cache del engine de forma permanente"
+  echo "  (hasta el próximo reinicio) y baja a la mitad la concurrencia real."
+  echo
+  echo "  Lo que está usando la GPU ahora:"
+  quien_usa_la_gpu | sed 's/^/    /'
+  echo
+  echo "  Cerrá eso y reintentá, o forzá con:  ai abrir --force"
+  return 1
+}
+
+# vence_desde_hhmm HH:MM -> RFC3339 en UTC. Si la hora ya pasó hoy, se
+# entiende que es mañana.
+vence_desde_hhmm() {
+  local hhmm="$1" ts ahora
+  ts=$(date -d "today $hhmm" +%s 2>/dev/null) || {
+    rojo "hora inválida: $hhmm (se espera HH:MM)"; exit 1; }
+  ahora=$(date +%s)
+  [ "$ts" -le "$ahora" ] && ts=$(date -d "tomorrow $hhmm" +%s)
+  date -u -d "@$ts" +%Y-%m-%dT%H:%M:%SZ
+}
+
+escribir_modo() {
+  local modo="$1" vence="$2" motivo="$3"
+  kubectl patch configmap "$CM" -n "$NS" --type merge -p "$(cat <<EOF
+{"data":{"modo":"$modo","vence":"$vence","motivo":"$motivo","actualizado":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}}
+EOF
+)" >/dev/null
+}
+
+cmd_status() {
+  local modo vence motivo actualizado usada
+  modo=$(kubectl get cm "$CM" -n "$NS" -o jsonpath='{.data.modo}' 2>/dev/null || echo "?")
+  vence=$(kubectl get cm "$CM" -n "$NS" -o jsonpath='{.data.vence}' 2>/dev/null || true)
+  motivo=$(kubectl get cm "$CM" -n "$NS" -o jsonpath='{.data.motivo}' 2>/dev/null || true)
+  actualizado=$(kubectl get cm "$CM" -n "$NS" -o jsonpath='{.data.actualizado}' 2>/dev/null || true)
+  usada=$(vram_usada_mib)
+
+  # Un modo desconocido NO se pinta de verde. El caso que importa es
+  # "el ConfigMap no existe": con un verde optimista, el operador
+  # creería que está cerrado cuando en realidad no sabe nada.
+  case "$modo" in
+    cerrado)          rojo  "modo: cerrado" ;;
+    abierto|demo|max) verde "modo: $modo" ;;
+    ""|"?")           rojo  "modo: DESCONOCIDO — no se pudo leer el ConfigMap $CM en $NS" ;;
+    *)                rojo  "modo: $modo (INVÁLIDO — el controlador lo tratará como cerrado)" ;;
+  esac
+  [ -n "$motivo" ] && gris "  motivo: $motivo"
+  [ -n "$vence" ] && gris "  vence: $vence (UTC)  ->  $(date -d "$vence" '+%H:%M' 2>/dev/null || echo '?') local"
+  [ -n "$actualizado" ] && gris "  actualizado: $actualizado"
+
+  echo
+  local e replicas listos
+  for e in $ENGINES; do
+    replicas=$(kubectl get deploy "$e" -n "$NS" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "?")
+    listos=$(kubectl get deploy "$e" -n "$NS" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)
+    if [ "${listos:-0}" = "1" ]; then
+      verde "$e: listo"
+    elif [ "$replicas" = "1" ]; then
+      echo "$e: calentando... (arranque medido: ~62 s)"
+    else
+      gris "$e: apagado"
+    fi
+  done
+  [ "$usada" != "-1" ] && gris "  VRAM: ${usada} MiB en uso"
+
+  echo
+  local gw
+  gw=$(kubectl get deploy ai-gateway -n "$NS" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)
+  if [ "${gw:-0}" = "1" ]; then
+    verde "gateway: arriba"
+  else
+    rojo "gateway: NO disponible"
+  fi
+  local ctl
+  ctl=$(kubectl get deploy ai-modo-controller -n "$NS" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)
+  if [ "${ctl:-0}" = "1" ]; then
+    verde "controlador: arriba"
+  else
+    rojo "controlador: NO disponible  (el modo no se va a aplicar)"
+  fi
+}
+
+main() {
+  local cmd="${1:-status}"; shift || true
+  local force=0 hasta="" args=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --force) force=1 ;;
+      --hasta) hasta="${2:-}"; shift ;;
+      *) args+=("$1") ;;
+    esac
+    shift
+  done
+
+  case "$cmd" in
+    status|estado) cmd_status ;;
+
+    # init/stop — los dos gestos del día a día, para teclearse sin mirar
+    # el help: `ai init` abre la jornada y `ai stop` la termina. Son
+    # azúcar sobre abrir/cerrar: mismo modo, mismo ConfigMap, mismo
+    # controlador. La diferencia con `abrir` es que el vencimiento se da
+    # en HORAS DESDE AHORA (no en hora de reloj) y que SIEMPRE hay uno:
+    # una jornada que se abre sin fin programado depende de que el
+    # operador se acuerde de cerrarla, y la GPU encendida de madrugada
+    # ya no es un acto humano deliberado — es un olvido.
+    init)
+      local horas="${args[0]:-8}"
+      case "$horas" in
+        ''|*[!0-9]*) rojo "horas inválidas: $horas (se espera un entero)"; exit 1 ;;
+      esac
+      echo "Iniciando la jornada (${horas} h)..."
+      if [ "$force" -eq 0 ]; then preflight_vram || exit 1
+      else gris "  (--force: chequeo de VRAM salteado)"; fi
+      local vence; vence=$(date -u -d "+${horas} hours" +%Y-%m-%dT%H:%M:%SZ)
+      escribir_modo "abierto" "$vence" "jornada de ${horas} h (ai init)"
+      verde "modo abierto hasta $vence UTC ($(date -d "$vence" '+%H:%M' 2>/dev/null || echo '?') local) — se cierra solo"
+      gris "  el engine tarda ~62 s en estar listo; mirá con: ai status"
+      gris "  para cortar antes: ai stop"
+      ;;
+
+    abrir)
+      echo "Abriendo..."
+      if [ "$force" -eq 0 ]; then preflight_vram || exit 1
+      else gris "  (--force: chequeo de VRAM salteado)"; fi
+      local vence=""
+      [ -n "$hasta" ] && vence=$(vence_desde_hhmm "$hasta")
+      escribir_modo "abierto" "$vence" "${args[0]:-abierto por el operador}"
+      verde "modo abierto${vence:+ hasta $vence UTC}"
+      gris "  el engine tarda ~62 s en estar listo; mirá con: ai status"
+      ;;
+
+    demo)
+      local minutos="${args[0]:-60}"
+      echo "Demo por ${minutos} min..."
+      if [ "$force" -eq 0 ]; then preflight_vram || exit 1
+      else gris "  (--force: chequeo de VRAM salteado)"; fi
+      local vence; vence=$(date -u -d "+${minutos} minutes" +%Y-%m-%dT%H:%M:%SZ)
+      escribir_modo "demo" "$vence" "demo de ${minutos} min"
+      verde "modo demo hasta $vence UTC — se cierra solo"
+      ;;
+
+    max)
+      echo "Modo max..."
+      if [ "$force" -eq 0 ]; then preflight_vram || exit 1
+      else gris "  (--force: chequeo de VRAM salteado)"; fi
+      local vence=""
+      [ -n "$hasta" ] && vence=$(vence_desde_hhmm "$hasta")
+      escribir_modo "max" "$vence" "${args[0]:-max por el operador}"
+      verde "modo max${vence:+ hasta $vence UTC}"
+      [ -z "$vence" ] && gris "  sin vencimiento: acordate de cerrarlo (o usá --hasta)"
+      ;;
+
+    cerrar|stop)
+      escribir_modo "cerrado" "" "${args[0]:-cerrado por el operador}"
+      verde "modo cerrado — el controlador baja el engine en segundos"
+      ;;
+
+    # ${args[@]+...} y no ${args[@]}: con `set -u` una expansión de
+    # array vacío es un error en bash, y `ai log` sin argumentos es el
+    # caso normal.
+    log)        kubectl logs -n "$NS" deploy/ai-gateway ${args[@]+"${args[@]}"} ;;
+    engine-log) kubectl logs -n "$NS" deploy/"$ENGINE" ${args[@]+"${args[@]}"} ;;
+
+    -h|--help|help) uso ;;
+    *) rojo "comando desconocido: $cmd"; echo; uso; exit 1 ;;
+  esac
+}
+
+main "$@"

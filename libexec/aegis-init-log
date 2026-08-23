@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# aegis-init-log.sh — la etapa C mínima: NINGUNA corrida del init sin
+# expediente. Hoy el stderr del init se pierde con la terminal; un
+# fallo a las 3 horas no deja nada que leer. Este wrapper envuelve a
+# aegis-init.sh con script(1): conserva el TTY (el wizard sigue
+# preguntando) y captura stdout+stderr — el rc real del init pasa
+# (-e), no el de script.
+#
+# En v3 esto vive DENTRO del orquestador (plan/04 §5: run-id,
+# meta.json, runs pack). Este archivo es el puente hasta entonces:
+#   ./init/aegis-init-log.sh --profile greenfield [--only NN | --from NN]
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mkdir -p "$HERE/.init-logs"
+
+# el perfil solo para nombrar el archivo; si no viene, se nota.
+PROFILE="sin-perfil"
+prev=""
+for a in "$@"; do
+    [[ "$prev" == "--profile" ]] && PROFILE="$a"
+    prev="$a"
+done
+
+LOG="$HERE/.init-logs/$(date -u +%Y%m%dT%H%M%SZ)-$PROFILE.log"
+printf 'expediente: %s\n' "$LOG"
+
+# script -qefc: -q sin banners, -e devuelve el rc del comando, -f
+# flush por línea (un kill -9 no se lleva el buffer), -c el comando.
+# printf %q arma el comando a prueba de espacios en los args.
+CMD="$(printf '%q ' "$HERE/aegis-init.sh" "$@")"
+if script -qefc "$CMD" "$LOG"; then
+    printf 'expediente: %s (rc 0)\n' "$LOG"
+else
+    rc=$?
+    printf 'FALLÓ (rc %s) — el expediente completo, stderr incluido: %s\n' "$rc" "$LOG" >&2
+    exit "$rc"
+fi

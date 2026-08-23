@@ -1,0 +1,15 @@
+# Este directorio DEBE existir tras un `git clone` limpio.
+#
+# La fase 80 copia acá la clave pública de cosign:
+#   cp "$SECRETS_TMP/cosign.pub" \
+#      "$PLATFORM_DIR/k8s/base/platform/cosign/cosign.pub"
+# y más abajo `cosign verify --key` la lee desde esta misma ruta.
+# Git no versiona directorios vacíos: sin este marcador el `cp` falla
+# en un clone virgen y la fase 80 muere justo después de generar el
+# keypair, antes de firmar la primera imagen.
+#
+# Segunda instancia de la misma clase que platform/tofu/secrets/
+# (ver el .gitkeep de allá). Dos apariciones = se ataca la CLASE:
+# el check 84 de verify-static.sh resuelve TODAS las variables de
+# ruta del init ($PLATFORM_DIR, $B, $TOKENS_DIR, $IU_DIR) y exige
+# que cada directorio destino tenga al menos un archivo versionado.

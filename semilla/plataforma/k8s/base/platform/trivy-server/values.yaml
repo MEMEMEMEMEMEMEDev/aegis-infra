@@ -1,0 +1,19 @@
+# values trivy 0.24.0 — SERVER MODE (A41): la DB (~99MiB) se baja
+# UNA vez al PVC y se auto-actualiza; el pipeline es cliente thin
+# (--server + --input docker-archive; oci-archive NO sirve).
+trivy:
+  mode: server
+service:
+  port: 4954
+persistence:
+  enabled: true
+  size: 5Gi
+# extraEnvVars del chart es MAP, no lista (verificado v1):
+extraEnvVars:
+  TRIVY_TIMEOUT: "30m"
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {cpu: "1", memory: 1Gi}
+securityContext:
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false

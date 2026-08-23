@@ -1,0 +1,19 @@
+# CA raíz de aegis en PEM, para que blackbox valide la cadena REAL
+# del registry (fase-85 §2: un probe con insecure_skip_verify daría
+# expiry igual, pero dejaría pasar un cert EQUIVOCADO en verde — el
+# mismo -k que P2.4 desterró de la fase 40).
+#
+# El PEM es de clase-generado y lo inyecta la FASE 85 del init con
+# inject_placeholder (el CA no existe hasta que cert-manager lo emite
+# en fase 35) — mismo patrón que el CA de kyverno/values.yaml. Este
+# comentario NO escribe el placeholder literal (CR-1/CR-2, check 48).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aegis-ca
+  namespace: observability
+  labels: {aegis.dev/part-of: aegis-platform}
+data:
+  ca.crt: |
+    __OBS_CA_PEM__

@@ -1,0 +1,9 @@
+# aegis-ci-cosign v2 — el cosign oficial es DISTROLESS (sin shell):
+# Jenkins container(){ sh } no puede usarlo => extraer el binario
+# oficial pinneado sobre alpine (patrón v1, A43/A49). Build: job
+# 'ci-images' de Jenkins (jobs-as-code), NO manual (salda 26 §16.9).
+# Pin = deuda vigilada por el scan (A42).
+FROM ghcr.io/sigstore/cosign/cosign:v2.6.3 AS cosign
+FROM alpine:3.22
+COPY --from=cosign /ko-app/cosign /usr/local/bin/cosign
+RUN cosign version

@@ -1,0 +1,38 @@
+# env github-repos v2 — settings del repo de plataforma + webhook
+# GitHub→ArgoCD. B4 CORREGIDO DE RAÍZ: delete_branch_on_merge=false
+# explícito Y el default del módulo también es false (en v1 el fix
+# vivió solo en gh api y el .tf lo contradecía — 2026-06-17:210-218).
+
+terraform {
+  required_providers {
+    github = {
+      source  = "integrations/github"
+      version = "~> 6.0"
+    }
+  }
+}
+
+provider "github" {
+  token = var.github_pat
+  owner = var.github_owner
+}
+
+module "platform_repo" {
+  source = "../../modules/github-repos"
+
+  repo_name   = var.platform_repo_name
+  description = "aegis platform (v2) — IaC + GitOps + CI/CD"
+  visibility  = "private"
+
+  # regla operativa B4: los branches NO se borran al mergear.
+  delete_branch_on_merge = false
+
+  # flujo vigente: feature -> PR a main -> squash
+  allow_squash_merge = true
+  default_branch     = "main"
+
+  # webhook GitHub -> ArgoCD (HMAC de tokens.enc.yaml; el lado
+  # receptor es el Secret KSOPS github-webhook — ADR-0015, D8):
+  argocd_webhook_url    = "https://argocd.${var.root_domain}/api/webhook"
+  argocd_webhook_secret = var.github_argocd_webhook_secret
+}

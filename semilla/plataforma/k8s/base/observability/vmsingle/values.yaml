@@ -1,0 +1,20 @@
+# values victoria-metrics-single 0.45.0 — el store+query de métricas
+# (design.md §4.1: un binario por rol, sin operator ni CRDs). Sin
+# réplica, PVC 5Gi (fase-85 §2: la retención de dev en un nodo solo
+# cabe de sobra; escalar a cluster es problema del perfil hetzner
+# FUTURO).
+server:
+  fullnameOverride: vmsingle    # Service = `vmsingle` :8428 (nombre
+                                # estable: lo consumen vmagent,
+                                # vmalert, grafana y el CronJob
+                                # trivy-db-age)
+  # clase-config, por perfil (fase-85 §4): 30d dev / 90d hetzner.
+  # external_labels no existen en vmsingle (no scrapea — el dato ya
+  # llega etiquetado por vmagent, que es donde vive __AEGIS_PROFILE__):
+  retentionPeriod: __OBS_RETENCION_METRICAS__
+  persistentVolume:
+    enabled: true
+    size: 5Gi
+  resources:                    # fase-85 §10
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}

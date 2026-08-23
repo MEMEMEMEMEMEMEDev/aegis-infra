@@ -1,0 +1,106 @@
+# bootstrap-host v2 — kernel + paquetes para K3s. Hereda los
+# patrones endurecidos de Hito 2 (A13): validations con
+# `when: not ansible_check_mode`, paths absolutos, sin callback yaml.
+---
+- name: Preparar host para K3s
+  hosts: k3s_nodes
+  become: true
+
+  tasks:
+    - name: Assert distro soportada
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] is version('24.04', '>=')
+
+    - name: Assert systemd es PID 1
+      ansible.builtin.assert:
+        that: ansible_facts['service_mgr'] == 'systemd'
+
+    - name: Paquetes base
+      ansible.builtin.apt:
+        name: [curl, ca-certificates, iptables, jq, conntrack]
+        state: present
+        update_cache: true
+
+    - name: Módulos kernel (runtime + persistidos)
+      community.general.modprobe:
+        name: "{{ item }}"
+        state: present
+      loop: [br_netfilter, overlay]
+
+    - name: Persistir módulos
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/aegis-k3s.conf
+        content: |
+          br_netfilter
+          overlay
+        mode: "0644"
+
+    - name: Sysctl para K3s (persistido)
+      ansible.posix.sysctl:
+        name: "{{ item }}"
+        value: "1"
+        sysctl_file: /etc/sysctl.d/99-aegis-k3s.conf
+        reload: true
+      loop:
+        - net.bridge.bridge-nf-call-iptables
+        - net.bridge.bridge-nf-call-ip6tables
+        - net.ipv4.ip_forward
+
+    # ── user namespaces sin privilegios (corrida #8, bug D) ─────────
+    # Ubuntu >= 23.10 trae kernel.apparmor_restrict_unprivileged_userns=1
+    # por DEFAULT: bloquea el user namespace rootless que buildah usa
+    # para overlay(fuse) → "overlay: failed to make mount private:
+    # permission denied" en el primer build (fase 50). El MISMO pod
+    # corre VERDE en WSL2 (apparmor deshabilitado, la key ni existe) —
+    # el manifest de buildah es config PROBADA (v1 vivo); el bug es
+    # del entorno Ubuntu, y pegará IGUAL en Hetzner (Ubuntu 24.04).
+    # Se restaura el comportamiento estándar pre-23.10 (userns
+    # unprivileged permitido — el default del resto de las distros).
+    # CONDICIONAL: la key solo existe en kernels con ese hardening
+    # (en WSL2 no existe y no hay nada que relajar):
+    - name: ¿el kernel restringe unprivileged userns (Ubuntu >= 23.10)?
+      ansible.builtin.stat:
+        path: /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+      register: userns_restrict
+
+    - name: Permitir user namespaces sin privilegios (buildah rootless)
+      ansible.posix.sysctl:
+        name: kernel.apparmor_restrict_unprivileged_userns
+        value: "0"
+        sysctl_file: /etc/sysctl.d/99-aegis-k3s.conf
+        reload: true
+      when: userns_restrict.stat.exists
+
+    - name: Directorio de config de k3s
+      ansible.builtin.file:
+        path: /etc/rancher/k3s
+        state: directory
+        mode: "0755"
+
+    # ── DNS del cluster con systemd-resolved (corrida #7, bug B) ─────
+    # Ubuntu usa systemd-resolved: /etc/resolv.conf es el STUB
+    # (nameserver 127.0.0.53). k3s pasa ese stub a CoreDNS → dentro
+    # del pod 127.0.0.53 es el loopback vacío → CoreDNS no resuelve
+    # nada externo (i/o timeout) y el nodo entero se queda sin DNS
+    # tras cada restart de k3s (el de la fase 40 rompía el pipeline).
+    # Fix canónico de k3s: --resolv-conf apuntando al resolv.conf REAL
+    # de systemd-resolved. Vía config.yaml (NO INSTALL_K3S_EXEC): k3s
+    # lo re-lee en CADA arranque → sobrevive el restart de la fase 40.
+    # CONDICIONAL: solo si el path existe (portable — en un host sin
+    # systemd-resolved el default de k3s ya funciona; CLAUDE.md: el
+    # stack corre igual en el Ryzen que en un VPS).
+    - name: ¿systemd-resolved provee el resolv.conf real?
+      ansible.builtin.stat:
+        path: /run/systemd/resolve/resolv.conf
+      register: resolved_real
+
+    - name: k3s config.yaml — resolv-conf al upstream real (idempotente)
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml
+        mode: "0644"
+        content: |
+          # gestionado por aegis-init (bootstrap-host) — bug B corrida #7
+          resolv-conf: /run/systemd/resolve/resolv.conf
+      when: resolved_real.stat.exists

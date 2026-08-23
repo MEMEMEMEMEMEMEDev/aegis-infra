@@ -1,0 +1,84 @@
+// ci-images — buildea y pushea las imágenes de tooling CI al registry
+// interno. Job en JCasC job-dsl (D9).
+//
+// W-05: build SIN privilegios. kaniko (upstream, unprivileged) reemplaza
+// a buildah privileged+vfs+/dev/fuse. kaniko extrae capas al FS directo
+// (NO hace los mounts que mataron a buildah rootless en Ubuntu 24.04);
+// corre root en el container pero NO privileged => no escapa al nodo.
+// Los tools oficiales (cosign, crane) son distroless (sin shell) => se
+// extraen sobre alpine (patrón aegis-ci-*). Acá NO hay scan, así que
+// kaniko buildea Y pushea directo. El pod declara EXPLÍCITO lo que el
+// push necesita (regcred + CA). RQ estricta: todo container con limits.
+pipeline {
+  agent {
+    kubernetes {
+      yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: jnlp
+    image: jenkins/inbound-agent:3355.v388858a_47b_33-23
+    resources:
+      requests: { cpu: 500m, memory: 512Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+  # kaniko SIN privilegios (W-05). Auth: regcred en la config docker de
+  # kaniko; CA propio del registry por --registry-certificate. -debug
+  # trae shell (container(){ sh }). Sin /dev/fuse, sin vfs, sin privileged.
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:v1.23.2-debug
+    command: ['sleep', 'infinity']
+    volumeMounts:
+    - name: regcred
+      mountPath: /kaniko/.docker/config.json
+      subPath: .dockerconfigjson
+      readOnly: true
+    - name: ca-trust
+      mountPath: /kaniko/ca.crt
+      subPath: ca.crt
+      readOnly: true
+    resources:
+      requests: { cpu: 500m, memory: 512Mi }
+      limits:   { cpu: 1500m, memory: 2Gi }
+  volumes:
+  - name: regcred
+    secret:
+      secretName: regcred-internal
+      items: [{ key: .dockerconfigjson, path: .dockerconfigjson }]
+  - name: ca-trust
+    secret:
+      secretName: aegis-ca-trust
+      items: [{ key: ca.crt, path: ca.crt }]
+'''
+      defaultContainer 'kaniko'
+    }
+  }
+  environment {
+    REGISTRY = 'registry.registry-system.svc.cluster.local:5000'
+  }
+  stages {
+    stage('build+push tooling images') {
+      steps {
+        sh '''
+          # FUENTE ÚNICA del pin: el FROM de cada Containerfile → el tag
+          # de la imagen resultante se DERIVA de ahí (sin segundo lugar
+          # que editar — la lección del pin duplicado).
+          build_push() {   # <subdir> <nombre> <patron-FROM>
+            local dir="ci-images/$1" name="$2" pat="$3" tag
+            tag="$(sed -n "s/^FROM .*${pat}:\\(v[0-9][0-9.]*\\).*/\\1/p" \
+                   "$dir/Containerfile" | head -1)"
+            test -n "$tag"
+            echo "== ${name}:${tag} (kaniko, sin privilegios) =="
+            /kaniko/executor \
+              --context="dir://${WORKSPACE}/${dir}" \
+              --dockerfile=Containerfile \
+              --destination="${REGISTRY}/${name}:${tag}" \
+              --registry-certificate "${REGISTRY}=/kaniko/ca.crt"
+          }
+          build_push cosign aegis-ci-cosign cosign
+          build_push crane  aegis-ci-crane  crane
+        '''
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+# cloudflared v2 — el token viene del Secret KSOPS que la fase 25
+# cifró desde `tofu output` (nunca pantalla). restartCount alto con
+# red intermitente = reconexión correcta, no bug (memoria v1).
+#
+# --metrics 0.0.0.0:2000 + containerPort (hooks.md / fase-85 §7, el
+# enchufe de 2 líneas): vmagent scrapea reconexiones y conexiones
+# activas del túnel (job `cloudflared`). En la semilla va de fábrica;
+# en instancia viva lo agrega la fase 85 con guard estructural.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: infra-edge
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: cloudflared}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: cloudflared}
+    spec:
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:2025.6.1
+          args: ["tunnel", "--no-autoupdate", "--metrics", "0.0.0.0:2000", "run"]
+          ports:
+            - {name: metrics, containerPort: 2000}
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cloudflared-tunnel-token
+                  key: TUNNEL_TOKEN
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 250m, memory: 128Mi}

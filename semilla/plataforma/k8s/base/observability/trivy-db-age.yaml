@@ -1,0 +1,88 @@
+# trivy-db-age — el vigía del vigía (design.md §4.2d): si la DB de
+# Trivy no se actualiza, cada scan «verde» miente en silencio y el
+# pin A42 pasa a ser fe. No hay métrica nativa; se DERIVA: este
+# CronJob lee el metadata de la DB en el PVC del trivy-server y
+# pushea `aegis_trivy_db_updated_timestamp_seconds` a vmsingle
+# (/api/v1/import/prometheus). La regla trivy-db.yaml de vmalert
+# alerta a las 48h.
+#
+# namespace trivy-system EXPLÍCITO (fase-85 §1): el PVC de la DB es
+# RWO y vive ahí — el CronJob tiene que montar `data-trivy-0` (el
+# volumeClaimTemplate `data` del StatefulSet `trivy`, chart 0.24.0,
+# montado en /home/scanner/.cache ⇒ la DB queda en
+# <pvc>/trivy/db/metadata.json).
+#
+# CASO BORDE RWO (fase-85 §2): en nodo único el segundo mount RWO
+# co-localiza solo; en hetzner multi-nodo este CronJob necesita
+# afinidad al nodo del trivy-server — resolver al activar el perfil
+# hetzner (anotado acá a propósito; hoy no hay multi-nodo que medir).
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: trivy-db-age
+  namespace: trivy-system
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  schedule: "17 * * * *"        # cada hora; el umbral es 48h — sobra
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels: {app.kubernetes.io/name: trivy-db-age}
+        spec:
+          restartPolicy: OnFailure
+          # El PVC de la DB es del trivy-server: `trivy/` es modo 2770 con
+          # dueño y grupo 65534 — ni siquiera se puede ATRAVESAR desde otro
+          # usuario. La imagen de curl corre como uid 100 por defecto, así que
+          # este CronJob falló 30 h seguidas con «Permission denied» sin que
+          # nada lo dijera (encontrado el 2026-08-22). Se corre con la misma
+          # identidad que el trivy-server, que es la única que abre ese
+          # directorio.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile: {type: RuntimeDefault}
+          containers:
+            - name: medir-y-pushear
+              # verificado 2026-08-19 contra github.com/curl/
+              # curl-container releases (8.21.0, 2026-06-24) y el tag
+              # en Docker Hub curlimages/curl:
+              image: curlimages/curl:8.21.0
+              command: ["/bin/sh", "-ec"]
+              args:
+                # UpdatedAt del metadata (lo que la DB DICE de sí
+                # misma); si el parse falla, mtime del archivo (lo
+                # que el filesystem VIO) — degradación anotada, no
+                # silencio:
+                - |
+                  META=/trivy-cache/trivy/db/metadata.json
+                  ISO="$(sed -n 's/.*"UpdatedAt":"\([0-9T:.-]*\)Z\{0,1\}".*/\1/p' "$META" | head -1)"
+                  TS="$(date -u -D '%Y-%m-%dT%H:%M:%S' -d "${ISO%%.*}" +%s 2>/dev/null || stat -c %Y "$META")"
+                  printf 'aegis_trivy_db_updated_timestamp_seconds %s\n' "$TS" \
+                    | curl -sS --fail-with-body --retry 3 --retry-connrefused --max-time 30 \
+                        --data-binary @- \
+                        http://vmsingle.observability.svc:8428/api/v1/import/prometheus
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+                readOnlyRootFilesystem: true
+              volumeMounts:
+                - {name: trivy-cache, mountPath: /trivy-cache, readOnly: true}
+                - {name: tmp, mountPath: /tmp}
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {cpu: 100m, memory: 64Mi}
+          volumes:
+            - name: trivy-cache
+              persistentVolumeClaim:
+                claimName: data-trivy-0
+                readOnly: true
+            - name: tmp
+              emptyDir: {sizeLimit: 8Mi}

@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  # Este newTag es SOLO el tag INICIAL y NO se asume su número (H1
+  # corrida #13: el build #1 del multibranch es el cosmético ABORTED
+  # sin push — el primer tag real fue main-000002): la fase 70 lo
+  # ALINEA con el mayor tag main-* que EXISTE en el registry antes
+  # del primer deploy. Después, el Image Updater gobierna la imagen
+  # vía su write-back (target default .argocd-source-hello-aegis.yaml
+  # — verificado #13; este newTag no se reescribe). El commit de
+  # alineación toca SOLO k8s/** → el anti-loop del Jenkinsfile lo
+  # salta.
+  - name: registry.registry-system.svc.cluster.local:5000/hello-aegis
+    newTag: main-000001

@@ -1,0 +1,23 @@
+# root App-of-Apps v2. SYNC MANUAL SIEMPRE (ADR-0012): el init y el
+# operador controlan el CUÁNDO de cada App — ese control ES el
+# mecanismo de orden del bootstrap (ADR-0015 y D5).
+# A19: sin defaults del schema declarados; prune se OMITE.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  labels:
+    aegis.dev/part-of: aegis-platform   # A18: JAMÁS app.kubernetes.io/part-of
+spec:
+  project: aegis-bootstrap
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    targetRevision: main
+    path: k8s/argocd-apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    syncOptions:
+      - ServerSideApply=true

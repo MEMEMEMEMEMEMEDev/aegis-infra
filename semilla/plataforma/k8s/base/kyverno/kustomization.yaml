@@ -1,0 +1,9 @@
+# kyverno-base v2: ns + regcred (pull de firmas). El CA de Kyverno
+# va por values (global.caCertificates), NO por Certificate acá —
+# el .volume+secret crashea los controllers (A44).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+generators:
+  - secret-generator.yaml

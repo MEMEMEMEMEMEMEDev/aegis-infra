@@ -1,0 +1,30 @@
+# ClusterIssuers Let's Encrypt v2 — DNS-01 (no hay puerto 80
+# expuesto). Patrón: staging PRIMERO, flip a prod tras validar la
+# pipeline ACME (rate limit). El token vive SOLO en el Secret KSOPS
+# (D7: su único consumidor es este ns).
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata: {name: letsencrypt-staging}
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: __ACME_EMAIL__
+    privateKeySecretRef: {name: le-staging-account}
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef: {name: cloudflare-dns-token, key: api-token}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata: {name: letsencrypt-prod}
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: __ACME_EMAIL__
+    privateKeySecretRef: {name: le-prod-account}
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef: {name: cloudflare-dns-token, key: api-token}

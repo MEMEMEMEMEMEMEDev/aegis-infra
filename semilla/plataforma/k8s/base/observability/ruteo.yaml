@@ -1,0 +1,91 @@
+# Exposición de grafana y ntfy — en observability-base (patrón
+# argocd: la exposición vive junto al expuesto; fase-85 §5). Los
+# hostnames los declara edge.yaml (`plataforma:`) y de ahí DERIVA
+# tofu los CNAMEs y el ingress del túnel — nadie edita main.tf a
+# mano (la lección de ai.__ROOT_DOMAIN__).
+#
+# - grafana: SIN middlewares de tenant — va TRAS Access (como
+#   argocd/jenkins hoy), y conserva su login propio: Access es la
+#   puerta, no la única cerradura (fase-85 §3).
+# - ntfy: SIN Access (la app del teléfono no puede presentar service
+#   token ni pasar el login de Access; su cerradura es el deny-all
+#   propio — ntfy.yaml). Por ser la primera ruta pública de
+#   plataforma sin Access delante, lleva los TRES middlewares del
+#   borde (#81/#90), copiados BYTE A BYTE de los que emite
+#   `aegis-org` (render_ruteo) — como hace el canario. El check 91
+#   hoy solo barre platform/k8s/organizations/; extenderlo a
+#   observability es parte de B4 (fase-85 §5) para que esta copia
+#   sin comparador no se desincronice.
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: ntfy-cabeceras
+  namespace: observability
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  headers:
+    forceSTSHeader: true
+    stsSeconds: 15552000
+    stsIncludeSubdomains: false
+    contentTypeNosniff: true
+    browserXssFilter: false
+    referrerPolicy: strict-origin-when-cross-origin
+    contentSecurityPolicy: "frame-ancestors 'none'"
+    customResponseHeaders:
+      X-Frame-Options: "DENY"
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: ntfy-ritmo
+  namespace: observability
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  rateLimit:
+    average: 50
+    burst: 100
+    period: 1s
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: ntfy-cuerpo
+  namespace: observability
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  buffering:
+    maxRequestBodyBytes: 10485760
+    memRequestBodyBytes: 1048576
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: ntfy-ruteo
+  namespace: observability
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  entryPoints: [web]
+  routes:
+    - kind: Rule
+      match: Host(`ntfy.__ROOT_DOMAIN__`)
+      middlewares:
+        - {name: ntfy-cabeceras}
+        - {name: ntfy-ritmo}
+        - {name: ntfy-cuerpo}
+      services:
+        - {name: ntfy, port: 80}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: grafana-ruteo
+  namespace: observability
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  entryPoints: [web]
+  routes:
+    - kind: Rule
+      match: Host(`grafana.__ROOT_DOMAIN__`)
+      services:
+        - {name: grafana, port: 80}

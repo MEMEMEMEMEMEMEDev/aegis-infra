@@ -1,0 +1,82 @@
+# tenant org-canary v2 — patrón A completo: la plataforma provee
+# el CÓMO pullear (SA default + regcred); las apps no declaran creds.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: org-canary
+  labels:
+    aegis.dev/part-of: aegis-tenants
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: org-canary-quota
+  namespace: org-canary
+spec:
+  hard:
+    # Dimensionado para varias apps reales con sus dependencias (front +
+    # backend + cache + base), no para el canary de un pod. El nodo
+    # tiene 32 cores y 30 GiB; con estos topes el tenant no puede
+    # asfixiar al plano de control ni a un segundo tenant.
+    requests.cpu: "8"
+    requests.memory: 8Gi
+    limits.cpu: "16"
+    limits.memory: 16Gi
+    # Techo de objetos: un bug de reconciliación que cree pods o PVCs en
+    # bucle se frena acá y no se lleva puesto el nodo.
+    pods: "50"
+    persistentvolumeclaims: "10"
+    # OJO — esto limita el tamaño DECLARADO de los PVCs, no el usado:
+    # local-path hace bind de un directorio del host y no impone cuota
+    # de disco. Un pod puede escribir más que su PVC hasta llenar /.
+    # El límite real del disco sigue siendo el disco.
+    requests.storage: 50Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: org-canary
+# W-07 iter2 (RBAC del tenant): el tenant NO usa la API de K8s (la app
+# corre, no la administra) → no montar su token en los pods. Un pod
+# comprometido no puede hablarle al apiserver con el SA. La app estática
+# no lo nota; una app que SÍ necesite la API lo pide a nivel de pod.
+automountServiceAccountToken: false
+imagePullSecrets:
+  - name: regcred-internal     # A40: patrón A de pull
+---
+# App anidada del canary (repo de la app, overlay dev — ADR-0004/7):
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hello-aegis
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-tenants}
+spec:
+  project: aegis-tenant-canary
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__APP_REPO__.git
+    targetRevision: main
+    path: k8s/overlays/dev
+  destination: {server: https://kubernetes.default.svc, namespace: org-canary}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true]
+  # Mismo motivo que en org-portafolio: la política de firma tiene
+  # mutateDigest y le agrega el digest verificado a la imagen en
+  # admisión, así que el objeto vivo nunca va a ser igual al de git.
+  # Sin esto la app queda OutOfSync para siempre y el semáforo deja de
+  # avisar. Ver el comentario largo en org-portafolio/bundle.yaml.
+  #
+  # Acá todavía NO se ve el efecto, y por un motivo que vale registrar:
+  # el pod de hello-aegis que corre hoy fue admitido SIN pasar por la
+  # política (no tiene la anotación kyverno.io/verify-images), asi que su
+  # Deployment no trae digest. Lo va a traer en cuanto se recree. Se deja
+  # puesto ahora para que el arreglo llegue antes que el problema.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jqPathExpressions:
+        - .spec.template.spec.containers[].image

@@ -1,0 +1,258 @@
+# Dashboard «plataforma» — design.md §4.4: ArgoCD sync/drift,
+# certs (servido vs declarado — B11), cloudflared, Kyverno.
+# Provisionado DESDE GIT via sidecar (label grafana_dashboard —
+# design.md §4.1: ninguno nace a click; editable:false en el JSON).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-plataforma
+  namespace: observability
+  labels:
+    aegis.dev/part-of: aegis-platform
+    grafana_dashboard: "1"
+data:
+  plataforma.json: |
+    {
+      "uid": "aegis-plataforma",
+      "title": "Aegis · plataforma",
+      "description": "Capa 2 de design.md §1: la salud de plataforma que antes se chequeaba a mano.",
+      "schemaVersion": 39,
+      "editable": false,
+      "timezone": "browser",
+      "time": {
+        "from": "now-24h",
+        "to": "now"
+      },
+      "refresh": "1m",
+      "tags": [
+        "aegis"
+      ],
+      "panels": [
+        {
+          "id": 1,
+          "title": "Apps de ArgoCD fuera de Synced",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 6,
+            "h": 6
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(argocd_app_info{sync_status!=\"Synced\"}) or vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "description": "¿git y cluster divergen?"
+        },
+        {
+          "id": 2,
+          "title": "Días al vencimiento del cert SERVIDO (blackbox, B11)",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 0,
+            "w": 6,
+            "h": 6
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "min(probe_ssl_earliest_cert_expiry{job=\"blackbox-registry\"} - time()) / 86400",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "d"
+            },
+            "overrides": []
+          },
+          "description": "Handshake TLS real contra el CA — lo servido, no la declaración. La métrica de cert-manager (panel de al lado) es solo contexto."
+        },
+        {
+          "id": 3,
+          "title": "Días al vencimiento según cert-manager (contexto)",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 0,
+            "w": 6,
+            "h": 6
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "min(certmanager_certificate_expiration_timestamp_seconds - time()) / 86400",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "d"
+            },
+            "overrides": []
+          },
+          "description": "Mide el Secret (la declaración). Si este dice 90d y el de blackbox dice 30d, el pod del registry sirve el cert viejo: ESA es la deuda B11."
+        },
+        {
+          "id": 4,
+          "title": "Conexiones activas del túnel",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 18,
+            "y": 0,
+            "w": 6,
+            "h": 6
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(cloudflared_tunnel_ha_connections)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              },
+              "legendFormat": "conexiones"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "description": "Cero SOSTENIDO = túnel caído. Huecos de scrape en dev NO son incidentes (§3.3): distinguir «sin dato» de «cero»."
+        },
+        {
+          "id": 5,
+          "title": "Admisiones RECHAZADAS en tenants (org-*)",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 6,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(increase(kyverno_admission_requests_total{request_allowed=\"false\",resource_namespace=~\"org-.*\"}[1h])) or vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              },
+              "legendFormat": "rechazos/h"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "description": "En operación sana este número ES cero. Cada rechazo es un ataque o un pipeline roto — ambas urgentes."
+        },
+        {
+          "id": 6,
+          "title": "Latencia del webhook de Kyverno (p95)",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 6,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "histogram_quantile(0.95, sum(rate(kyverno_admission_review_duration_seconds_bucket[24h])) by (le))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              },
+              "legendFormat": "p95"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "description": "Está en el camino crítico de TODO pod de tenant. Ventana de 24 h y no de 5 min A PROPÓSITO: acá las admisiones ocurren en los despliegues, unas pocas por día. Con [5m] el panel estaba en blanco el 99% del tiempo y un panel siempre vacío deja de leerse (auditoría del 2026-08-21)."
+        },
+        {
+          "id": 7,
+          "title": "Targets de scrape caídos (up == 0)",
+          "type": "table",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 14,
+            "w": 24,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "up == 0",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "description": "El target caído por netpol se ve ACÁ y no 3 días después (gate obs-metricas-fluyen)."
+        }
+      ],
+      "templating": {
+        "list": []
+      },
+      "annotations": {
+        "list": []
+      }
+    }

@@ -1,0 +1,11 @@
+# Deps del venv de ansible (lo crea la fase 20 del init; regenerable).
+# Pin literal (A12), verificado contra PyPI + ansible-build-data
+# 2026-07-09 (bug 4 validación #3: este archivo estaba REFERENCIADO
+# por la fase 20 y no existía → venv sin ansible → k3s nunca corrió).
+#
+# El paquete "ansible" (community) y no "ansible-core": los playbooks
+# usan community.general.modprobe y ansible.posix.sysctl, que core NO
+# trae. Verificado en ansible-build-data/14/ansible-14.0.0.deps:
+#   ansible-core 2.21.0 + community.general 13.0.1 + ansible.posix 2.2.0
+# Requiere python >= 3.12 (Ubuntu 24.04 trae 3.12; 26.04 más nuevo).
+ansible==14.0.0

@@ -1,0 +1,353 @@
+# Dashboard «consumo» — la pregunta que los otros tres no contestan.
+#
+# design.md §1 armó dos capas: el DETECTOR DE HUMO (¿algo está mal?) y la
+# CAJA NEGRA (¿qué pasó?). Las dos miran salud. Ninguna contesta la tercera
+# pregunta de quien opera una máquina propia: ¿CUÁNTO ESTOY USANDO Y CUÁNTO
+# ME QUEDA? Eso es capacidad, y hasta hoy no tenía panel.
+#
+# Nada de esto exigió instrumentar nada: cAdvisor viene en el kubelet y
+# vmagent ya lo raspaba desde la fase 85. Las métricas estaban; faltaba
+# mirarlas.
+#
+# CADA CONSULTA SE PROBÓ CONTRA vmsingle ANTES DE ESCRIBIRSE. Un panel que
+# dice «No data» es la Enfermedad E en versión visual: ocupa lugar, parece
+# vigilancia y no mide nada.
+#
+# Provisionado DESDE GIT via sidecar (label grafana_dashboard —
+# design.md §4.1: ninguno nace a click; editable:false en el JSON).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-consumo
+  namespace: observability
+  labels:
+    aegis.dev/part-of: aegis-platform
+    grafana_dashboard: "1"
+data:
+  consumo.json: |
+    {
+      "uid": "aegis-consumo",
+      "title": "Aegis · consumo",
+      "description": "Capacidad: cuánto usa cada organización y cuánto queda en la máquina. La pregunta que el detector de humo y la caja negra no contestan.",
+      "schemaVersion": 39,
+      "editable": false,
+      "timezone": "browser",
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "refresh": "1m",
+      "tags": [
+        "aegis",
+        "capacidad"
+      ],
+      "panels": [
+        {
+          "id": 1,
+          "title": "Memoria de la máquina",
+          "description": "Cuánto de la RAM física está comprometida. Es el número que decide si la semilla entra en un equipo más chico.",
+          "type": "gauge",
+          "datasource": { "type": "prometheus", "uid": "vmsingle" },
+          "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "100 * sum(container_memory_working_set_bytes{id=\"/\"}) / sum(machine_memory_bytes)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 70 },
+                  { "color": "red", "value": 85 }
+                ]
+              }
+            }
+          },
+          "options": { "showThresholdMarkers": true, "showThresholdLabels": false }
+        },
+        {
+          "id": 2,
+          "title": "Memoria libre",
+          "description": "Lo que queda para levantar algo nuevo sin desalojar a nadie.",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "vmsingle" },
+          "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(machine_memory_bytes) - sum(container_memory_working_set_bytes{id=\"/\"})"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "yellow", "value": 2147483648 },
+                  { "color": "green", "value": 5368709120 }
+                ]
+              }
+            }
+          },
+          "options": { "graphMode": "area", "colorMode": "value", "textMode": "value" }
+        },
+        {
+          "id": 3,
+          "title": "CPU de la máquina",
+          "description": "Promedio de los últimos 5 minutos sobre el total de núcleos.",
+          "type": "gauge",
+          "datasource": { "type": "prometheus", "uid": "vmsingle" },
+          "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "100 * sum(rate(container_cpu_usage_seconds_total{id=\"/\"}[5m])) / sum(machine_cpu_cores)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 70 },
+                  { "color": "red", "value": 90 }
+                ]
+              }
+            }
+          },
+          "options": { "showThresholdMarkers": true }
+        },
+        {
+          "id": 4,
+          "title": "Disco",
+          "description": "OJO: local-path NO impone cuota de disco. El tamaño declarado de un PVC no impide que un pod escriba hasta llenar la raíz — ver planes.yaml. Este es el único freno real, y es visual.",
+          "type": "gauge",
+          "datasource": { "type": "prometheus", "uid": "vmsingle" },
+          "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "100 * sum(container_fs_usage_bytes{id=\"/\"}) / sum(container_fs_limit_bytes{id=\"/\"})"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 75 },
+                  { "color": "red", "value": 88 }
+                ]
+              }
+            }
+          },
+          "options": { "showThresholdMarkers": true }
+        },
+        {
+          "id": 5,
+          "title": "Memoria por organización",
+          "description": "Lo que consume cada inquilino. Apilado: el total es lo que las organizaciones le sacan a la máquina.",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "vmsingle" },
+          "gridPos": { "h": 9, "w": 12, "x": 0, "y": 6 },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (namespace) (container_memory_working_set_bytes{namespace=~\"org-.*\",container!=\"\"})",
+              "legendFormat": "{{namespace}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "fillOpacity": 35,
+                "stacking": { "mode": "normal", "group": "A" },
+                "lineWidth": 1,
+                "showPoints": "never"
+              }
+            }
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          }
+        },
+        {
+          "id": 6,
+          "title": "CPU por organización",
+          "description": "En núcleos. Una demo en reposo debería vivir cerca de cero: si no lo hace, algo está girando en vacío.",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "vmsingle" },
+          "gridPos": { "h": 9, "w": 12, "x": 12, "y": 6 },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (namespace) (rate(container_cpu_usage_seconds_total{namespace=~\"org-.*\",container!=\"\"}[5m]))",
+              "legendFormat": "{{namespace}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 3,
+              "custom": { "fillOpacity": 20, "lineWidth": 1, "showPoints": "never" }
+            }
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          }
+        },
+        {
+          "id": 7,
+          "title": "Cuánto usa cada organización de lo que declaró",
+          "description": "Uso real sobre el techo declarado en los manifiestos. Muy por debajo = la cuota está sobredimensionada y esa RAM no se le puede prestar a nadie. Cerca de 100 = candidato a que lo maten por memoria.",
+          "type": "bargauge",
+          "datasource": { "type": "prometheus", "uid": "vmsingle" },
+          "gridPos": { "h": 9, "w": 12, "x": 0, "y": 15 },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "100 * sum by (namespace) (container_memory_working_set_bytes{namespace=~\"org-.*\",container!=\"\"}) / sum by (namespace) (container_spec_memory_limit_bytes{namespace=~\"org-.*\",container!=\"\"})",
+              "legendFormat": "{{namespace}}",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "blue", "value": null },
+                  { "color": "green", "value": 40 },
+                  { "color": "yellow", "value": 80 },
+                  { "color": "red", "value": 92 }
+                ]
+              }
+            }
+          },
+          "options": {
+            "displayMode": "gradient",
+            "orientation": "horizontal",
+            "showUnfilled": true,
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+          }
+        },
+        {
+          "id": 8,
+          "title": "Memoria por subsistema",
+          "description": "Toda la máquina, no solo los inquilinos. Acá se ve cuánto cuesta la propia plataforma: observabilidad, CI, GitOps, el motor de AI.",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "vmsingle" },
+          "gridPos": { "h": 9, "w": 12, "x": 12, "y": 15 },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (namespace) (container_memory_working_set_bytes{container!=\"\",namespace!=\"\"})",
+              "legendFormat": "{{namespace}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "fillOpacity": 30,
+                "stacking": { "mode": "normal", "group": "A" },
+                "lineWidth": 1,
+                "showPoints": "never"
+              }
+            }
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          }
+        },
+        {
+          "id": 9,
+          "title": "Los diez que más memoria comen",
+          "description": "Ordenado. Cuando la máquina se aprieta, la respuesta empieza acá.",
+          "type": "table",
+          "datasource": { "type": "prometheus", "uid": "vmsingle" },
+          "gridPos": { "h": 10, "w": 12, "x": 0, "y": 24 },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "topk(10, sum by (namespace, pod) (container_memory_working_set_bytes{container!=\"\"}))",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "bytes" },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "Value" },
+                "properties": [
+                  { "id": "displayName", "value": "memoria" },
+                  { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } }
+                ]
+              }
+            ]
+          },
+          "transformations": [
+            { "id": "organize", "options": { "excludeByName": { "Time": true } } },
+            { "id": "sortBy", "options": { "fields": {}, "sort": [{ "field": "Value", "desc": true }] } }
+          ],
+          "options": { "showHeader": true }
+        },
+        {
+          "id": 10,
+          "title": "Estrangulamiento de CPU",
+          "description": "Segundos por segundo que el kernel frenó a un contenedor por tocar su límite. Distinto de «usa mucha CPU»: acá el pod QUIERE trabajar y no lo dejan. Si esto sube, el límite quedó chico — no la máquina.",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "vmsingle" },
+          "gridPos": { "h": 10, "w": 12, "x": 12, "y": 24 },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "topk(10, sum by (namespace, pod) (rate(container_cpu_cfs_throttled_seconds_total{container!=\"\"}[5m])))",
+              "legendFormat": "{{namespace}}/{{pod}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 3,
+              "custom": { "fillOpacity": 15, "lineWidth": 1, "showPoints": "never" }
+            }
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          }
+        }
+      ]
+    }

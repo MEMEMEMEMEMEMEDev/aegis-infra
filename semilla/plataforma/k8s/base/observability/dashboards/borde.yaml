@@ -1,0 +1,134 @@
+# Dashboard «borde» — design.md §4.4: Traefik RPS/códigos/latencia.
+# Provisionado DESDE GIT via sidecar (label grafana_dashboard —
+# design.md §4.1: ninguno nace a click; editable:false en el JSON).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-borde
+  namespace: observability
+  labels:
+    aegis.dev/part-of: aegis-platform
+    grafana_dashboard: "1"
+data:
+  borde.json: |
+    {
+      "uid": "aegis-borde",
+      "title": "Aegis · borde",
+      "description": "El borde visto desde adentro: RPS, códigos y latencia por entrypoint de Traefik.",
+      "schemaVersion": 39,
+      "editable": false,
+      "timezone": "browser",
+      "time": {
+        "from": "now-24h",
+        "to": "now"
+      },
+      "refresh": "1m",
+      "tags": [
+        "aegis"
+      ],
+      "panels": [
+        {
+          "id": 1,
+          "title": "RPS por código (entrypoint web)",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 9
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(traefik_entrypoint_requests_total{entrypoint=\"web\"}[5m])) by (code)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              },
+              "legendFormat": "{{code}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 2,
+          "title": "Latencia p95 (entrypoint web)",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 0,
+            "w": 12,
+            "h": 9
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "histogram_quantile(0.95, sum(rate(traefik_entrypoint_request_duration_seconds_bucket{entrypoint=\"web\"}[5m])) by (le))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              },
+              "legendFormat": "p95"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 3,
+          "title": "4xx/5xx por servicio",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 9,
+            "w": 24,
+            "h": 9
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(traefik_service_requests_total{code=~\"4..|5..\"}[5m])) by (service, code)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              },
+              "legendFormat": "{{service}} {{code}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps"
+            },
+            "overrides": []
+          }
+        }
+      ],
+      "templating": {
+        "list": []
+      },
+      "annotations": {
+        "list": []
+      }
+    }

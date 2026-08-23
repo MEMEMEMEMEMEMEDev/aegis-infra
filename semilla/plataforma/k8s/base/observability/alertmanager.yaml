@@ -1,0 +1,90 @@
+# Alertmanager v0.34.0 (crudo — precedente registry.yaml). Agrupa,
+# enruta y silencia lo que vmalert evalúa; el webhook sale al puente
+# ntfy-alertmanager (ntfy habla HTTP plano, no el protocolo de
+# Alertmanager — design.md §4.1).
+#
+# emptyDir para silences A PROPÓSITO (fase-85 §2): un silence es
+# estado operativo efímero; perderlo en un restart re-alerta, que es
+# el fallo SEGURO. Un PVC para silences sería estado-a-click con
+# disfraz.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: observability
+  labels: {aegis.dev/part-of: aegis-platform}
+data:
+  alertmanager.yml: |
+    route:
+      receiver: ntfy
+      group_by: [alertname]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      routes:
+        # el deadman (design.md §4.2a): SIEMPRE firing; su valor es
+        # su AUSENCIA en el teléfono. La cadencia es por perfil
+        # (fase-85 §4: dev 24h — el notebook duerme por diseño y la
+        # ausencia nocturna no es señal; hetzner 6h):
+        - matchers: ['alertname="DeadmanAegis"']
+          receiver: ntfy
+          group_wait: 0s
+          repeat_interval: __OBS_DEADMAN_REPEAT__
+    receivers:
+      - name: ntfy
+        webhook_configs:
+          - url: http://ntfy-puente.observability.svc:8080
+            send_resolved: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: observability
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  selector: {app.kubernetes.io/name: alertmanager}
+  ports: [{name: http, port: 9093, targetPort: 9093}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: observability
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: alertmanager}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: alertmanager}
+    spec:
+      containers:
+        - name: alertmanager
+          # verificado 2026-08-19 contra github.com/prometheus/
+          # alertmanager releases (v0.34.0, 2026-08-16) y el tag en
+          # quay.io/prometheus/alertmanager:
+          image: quay.io/prometheus/alertmanager:v0.34.0
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+          ports: [{name: http, containerPort: 9093}]
+          volumeMounts:
+            - {name: config, mountPath: /etc/alertmanager, readOnly: true}
+            - {name: storage, mountPath: /alertmanager}
+          readinessProbe:
+            httpGet: {path: /-/ready, port: 9093}
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet: {path: /-/healthy, port: 9093}
+            initialDelaySeconds: 15
+          resources:            # fase-85 §10
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+      volumes:
+        - name: config
+          configMap: {name: alertmanager-config}
+        - name: storage
+          emptyDir: {}

@@ -1,0 +1,18 @@
+# values victoria-logs-single 0.13.9 — instancia de EVENTOS
+# supply-chain + historia del init (gates.jsonl). Release APARTE de
+# vlogs porque la retención OSS es global por instancia (design.md
+# §4.1): una sola instancia a 1 año violaría la retención corta de
+# logs y su porqué (§3.1).
+#
+# 1y FIJO en ambos perfiles, NO placeholder (fase-85 §4): no varía
+# por perfil — un valor constante disfrazado de variable es una
+# mentira de flexibilidad. Es la retención de auditoría de §2.
+server:
+  fullnameOverride: vlogs-eventos    # Service = `vlogs-eventos` :9428
+  retentionPeriod: 1y
+  persistentVolume:
+    enabled: true
+    size: 1Gi
+  resources:                    # fase-85 §10
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {cpu: 250m, memory: 128Mi}

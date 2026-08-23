@@ -1,0 +1,246 @@
+# Apps de CI, supply-chain y tenants (v2). Mismo contrato que
+# core.yaml. El ORDEN de habilitación lo da el init (fases 40-80);
+# kyverno-policies es LA ÚLTIMA (D5 — H-7 codificado).
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: registry
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    targetRevision: main
+    path: k8s/base/registry-system
+  destination: {server: https://kubernetes.default.svc, namespace: registry-system}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jenkins-secrets
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    targetRevision: main
+    path: k8s/base/platform/jenkins-secrets
+  destination: {server: https://kubernetes.default.svc, namespace: jenkins-system}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jenkins
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  sources:
+    - repoURL: https://charts.jenkins.io
+      chart: jenkins
+      targetRevision: 5.9.29
+      helm:
+        releaseName: jenkins
+        valueFiles: [$values/k8s/base/platform/jenkins/values.yaml]
+    - repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+      targetRevision: main
+      ref: values
+  destination: {server: https://kubernetes.default.svc, namespace: jenkins-system}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trivy-system
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    targetRevision: main
+    path: k8s/base/trivy-system
+  destination: {server: https://kubernetes.default.svc, namespace: trivy-system}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: trivy-server
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  sources:
+    - repoURL: https://aquasecurity.github.io/helm-charts
+      chart: trivy
+      targetRevision: 0.24.0
+      helm:
+        releaseName: trivy
+        valueFiles: [$values/k8s/base/platform/trivy-server/values.yaml]
+    - repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+      targetRevision: main
+      ref: values
+  destination: {server: https://kubernetes.default.svc, namespace: trivy-system}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true]
+---
+# ACÁ VIVÍA la Application del argocd-image-updater, retirada en #59.
+#
+# Su último consumidor era el canario, y salió en #57. Las
+# organizaciones generadas nacen con despliegue por DIGEST escrito por
+# su propio pipeline, así que el componente se quedó sin nadie a quien
+# servir. No se deja "por las dudas": un componente que corre y no sirve
+# a nadie es superficie de ataque y ruido (I4).
+#
+# Lo que lo reemplazó es mejor y no sólo distinto: el pipeline que
+# CONSTRUYÓ la imagen ya sabe su digest y lo escribe en git. El updater
+# tenía que redescubrirlo sondeando el registry, con un poller que se
+# cuelga y un write-back que puede no aterrizar.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno-base
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    targetRevision: main
+    path: k8s/base/kyverno
+  destination: {server: https://kubernetes.default.svc, namespace: kyverno}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  sources:
+    - repoURL: https://kyverno.github.io/kyverno
+      chart: kyverno
+      targetRevision: 3.8.1
+      helm:
+        releaseName: kyverno
+        valueFiles: [$values/k8s/base/platform/kyverno/values.yaml]
+    - repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+      targetRevision: main
+      ref: values
+  destination: {server: https://kubernetes.default.svc, namespace: kyverno}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true]
+---
+# LA ÚLTIMA en habilitarse (D5): Enforce solo con firma existente.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno-policies
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    targetRevision: main
+    path: k8s/base/kyverno-policies
+  destination: {server: https://kubernetes.default.svc, namespace: kyverno}
+  # H7 corrida #15 (BLOQUEANTE determinista): el webhook de Kyverno
+  # inyecta ~9 campos DEFAULT al admitir el ClusterPolicy (admission,
+  # emitWarning, validationFailureAction:Audit —cosmético: el Enforce
+  # real es failureAction de la regla—, skipBackgroundRequests,
+  # required/useCache/verifyDigest, signatureAlgorithm en entry y
+  # keys) → diff desired-vs-live que NUNCA cierra → OutOfSync eterno
+  # → el gate anclado a Synced moría a los 300s con op=Succeeded.
+  # Solución CANÓNICA upstream (fricción Kyverno↔ArgoCD documentada):
+  # ignorar los paths de defaulting + RespectIgnoreDifferences=true
+  # (sin la syncOption, el ignore solo afecta el DIFF, no el apply).
+  # NO se hornean los defaults en el seed (workaround d8e2940 del
+  # operador): cada versión de Kyverno puede AGREGAR defaults y el
+  # seed quedaría casado con la versión exacta — esto cubre la
+  # familia. Los campos que git SÍ declara (background, failureAction,
+  # imageReferences, publicKeys, failurePolicy) NO están en la lista:
+  # su drift se sigue detectando.
+  ignoreDifferences:
+    - group: kyverno.io
+      kind: ClusterPolicy
+      jqPathExpressions:
+        - .spec.admission
+        - .spec.emitWarning
+        - .spec.validationFailureAction
+        - .spec.rules[].skipBackgroundRequests
+        - .spec.rules[].validationFailureAction?
+        - .spec.rules[].verifyImages[]?.validationFailureAction
+        - .spec.rules[].verifyImages[]?.required
+        - .spec.rules[].verifyImages[]?.useCache
+        - .spec.rules[].verifyImages[]?.verifyDigest
+        - .spec.rules[].verifyImages[]?.signatureAlgorithm
+        - .spec.rules[].verifyImages[]?.attestors[]?.entries[]?.signatureAlgorithm
+        - .spec.rules[].verifyImages[]?.attestors[]?.entries[]?.keys.signatureAlgorithm
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions:
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: org-canary
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    targetRevision: main
+    path: k8s/organizations/org-canary
+  destination: {server: https://kubernetes.default.svc, namespace: org-canary}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+---
+# El canary: la ÚNICA App que lee del repo de la APP (no de
+# plataforma). El overlay dev trae el tag que el CI produce y el
+# Image Updater actualiza (write-back). La credencial es el Secret
+# repository hello-aegis-repo (fase 15). El sync lo dispara la fase
+# 70, DESPUÉS del primer build (el tag del overlay debe existir en
+# el registry). Hueco cazado en sesión 4: la fase 70 sincronizaba
+# una App que no estaba declarada en ningún lado.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hello-aegis
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-tenant-canary
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__APP_REPO__.git
+    targetRevision: main
+    path: k8s/overlays/dev
+  destination: {server: https://kubernetes.default.svc, namespace: org-canary}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true]
