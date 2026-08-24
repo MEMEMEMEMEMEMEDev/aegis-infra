@@ -19,8 +19,14 @@ check() {
 # RAIZ desde __file__ hasta que exista lib/aegis/rutas.py.
 # VERIFICAR (2026-08-23, T-02): extender esta regla a los de python.
 D102=""
-for f in "$LIBEXEC"/aegis-*; do
-    b="$(basename "$f")"
+# También los SUBCOMANDOS (libexec/state/*, libexec/dev/*): son
+# comandos completos, se pueden invocar solos, y tienen exactamente el
+# mismo problema con el symlink de la fase 05. El glob `aegis-*` los
+# dejaba afuera — lo descubrió el diente, que le sacó el readlink a
+# state/backup y el check ni se inmutó.
+for f in "$LIBEXEC"/aegis-* "$LIBEXEC"/state/* "$LIBEXEC"/dev/*; do
+    [[ -f "$f" ]] || continue
+    b="${f#"$LIBEXEC/"}"
     head -1 "$f" | grep -q 'bash' || continue     # los de python, en T-02
     if grep -q 'AEGIS_ROOT' "$f"; then
         grep -q 'readlink -f' "$f" \

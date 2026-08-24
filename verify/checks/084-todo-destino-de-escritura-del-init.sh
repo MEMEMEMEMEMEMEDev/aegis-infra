@@ -106,6 +106,17 @@ for p in sorted(targets):
         print("DIR", p)
 PY84
 )"
+# El instrumento de este check es git: pregunta qué archivos están
+# VERSIONADOS. Sin repositorio no hay nada que preguntar, y responder
+# «ninguno» sería confundir «no pude medir» con «está mal» — el error
+# que toda la doctrina de la casa existe para no cometer. Pasó de
+# verdad el 2026-08-23: el producto se copió a la máquina de
+# desarrollo con rsync sin .git y este check reportó 26 directorios
+# rotos que estaban perfectos.
+if ! git -C "$AEGIS_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    skip "no hay repositorio git en $AEGIS_ROOT: sin él no se puede saber qué archivos sobreviven a un clone (esto NO es un visto bueno)"
+    return
+fi
 _n84=0
 while read -r _k84 _p84; do
     case "$_k84" in
