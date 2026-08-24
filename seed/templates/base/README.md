@@ -1,6 +1,6 @@
 # Plantilla `base` — un servicio HTTP pelado
 
-La mínima que compila y despliega (caminos/design.md §4). Existe para
+La mínima que compila y despliega (journeys/design.md §4). Existe para
 que `aegis-app nueva <org> --plantilla base` te deje, en una corrida y
 sin tocar el mundo, todo lo que el camino artesano escribe a mano.
 

@@ -12,7 +12,7 @@
 #   propio — ntfy.yaml). Por ser la primera ruta pública de
 #   plataforma sin Access delante, lleva los TRES middlewares del
 #   borde (#81/#90), copiados BYTE A BYTE de los que emite
-#   `aegis-org` (render_ruteo) — como hace el canario. El check 91
+#   `aegis-org` (render_routes) — como hace el canario. El check 91
 #   hoy solo barre platform/k8s/organizations/; extenderlo a
 #   observability es parte de B4 (fase-85 §5) para que esta copia
 #   sin comparador no se desincronice.

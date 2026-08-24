@@ -1,48 +1,57 @@
-# orgs/ — los contratos de las organizaciones
+# orgs/ — the organizations' contracts
 
-Vacío al arrancar, y así tiene que estar: una instancia recién nacida no
-tiene ninguna organización. Cada archivo `.yaml` de este directorio es
-**un contrato**, y de él sale todo lo demás.
+Empty at the start, and that is how it has to be: a newborn instance has
+no organizations. Every `.yaml` file in this directory is **one
+contract**, and everything else is derived from it.
 
-Dar de alta una organización son tres comandos:
+Onboarding an organization is a handful of commands:
 
 ```bash
-$EDITOR orgs/mi-org.yaml            # el contrato
-bin/aegis-org plan orgs/mi-org.yaml # qué cambiaría, sin escribir nada
-bin/aegis-org aplicar orgs/mi-org.yaml
-aegis secret create orgs/mi-org.yaml   # los que falten (nunca rota los que ya están)
-bin/aegis-sync root                 # root NO tiene automated (ADR-0012)
+$EDITOR orgs/my-org.yaml              # the contract
+aegis org plan  orgs/my-org.yaml      # what would change, writing nothing
+aegis org apply orgs/my-org.yaml
+aegis secret create orgs/my-org.yaml  # the ones that are missing (never rotates the ones already there)
+aegis sync root                       # root has no automated syncPolicy (ADR-0012)
 ```
 
-El contrato más chico que hace algo:
+The smallest contract that does anything:
 
 ```yaml
 version: 1
-organizacion: mi-org
-dominio: mi-org.example.com
+organizacion: my-org
+dominio: my-org.example.com
 cuota: pequena
-repo: git@github.com:mi-org/mi-app.git
+repo: git@github.com:my-org/my-app.git
 servicios:
   - nombre: web
     tipo: estatico
     publico: /
 ```
 
-De ahí el generador deriva el namespace, la cuota, las NetworkPolicies,
-el AppProject, la Application, el ruteo y qué secretos hacen falta. Lo
-que **no** sale del contrato son los números: los topes de cuota viven en
-`plans.yaml`, los de AI en `plans.yaml` + `ai/tasks.yaml`, y la imagen
-de cada tipo de servicio en `services.yaml`. Están afuera a propósito —
-así se reajustan para todas las organizaciones a la vez sin editar
-treinta contratos.
+From that, the generator derives the namespace, the quota, the
+NetworkPolicies, the AppProject, the Application, the routing and which
+secrets are needed. What does **not** come out of the contract are the
+numbers: the quota ceilings live in `plans.yaml`, the AI ones in
+`plans.yaml` + `ai/tasks.yaml`, and the image for each service type in
+`services.yaml`. They are outside on purpose — that way they can be
+readjusted for every organization at once without editing thirty
+contracts.
 
-El contrato completo, campo por campo, con lo que cada tipo de servicio
-puede y no puede declarar: **`docs/protocols/organization.md`**.
+The full contract, field by field, with what each service type may and
+may not declare: **`docs/protocols/organization.md`**.
 
-Dos cosas que conviene saber antes de la primera vez:
+> The contract's field names are still in Spanish (`organizacion`,
+> `cuota`, `servicios`, `nombre`, `tipo`, `publico`). They are the last
+> piece of the move to English, and they move as one coordinated change
+> together with the generator, this document and the example contracts —
+> because a contract whose keys half-changed is a contract that silently
+> stops being read.
 
-- **`publico` es una RUTA, no un booleano** (`/`, `/api`), porque lo que
-  se publica es un prefijo del dominio de la organización.
-- **El ruteo no se escribe**: lo deriva la plataforma del contrato. Una
-  organización no puede crear sus propias `IngressRoute` — si pudiera,
-  podría reclamar el hostname de otra, y eso se midió pasando (#54).
+Two things worth knowing before the first time:
+
+- **`publico` is a PATH, not a boolean** (`/`, `/api`), because what is
+  published is a prefix of the organization's domain.
+- **The routing is not written by hand**: the platform derives it from
+  the contract. An organization cannot create its own `IngressRoute` —
+  if it could, it could claim another organization's hostname, and that
+  was measured happening (#54).

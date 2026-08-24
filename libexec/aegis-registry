@@ -1,42 +1,44 @@
 #!/usr/bin/env python3
-# aegis-summary: Rota la credencial del registry interno, entera
+# aegis-summary: Rotates the internal registry credential, all of it
 # aegis-group:   infra
 # aegis-subcommands: check rotate
-"""aegis-registry — rota la credencial del registry interno, ENTERA.
+"""aegis-registry — rotates the internal registry credential, ALL OF IT.
 
-La contraseña del registry no vive en un lugar: vive en DIEZ. Un
-htpasswd (lo que el registry valida) y nueve dockerconfigjson (lo que
-el kubelet presenta para pullear), uno por namespace, porque un Secret
-no cruza namespaces. Si esos diez se separan, el cluster deja de poder
-tirar imágenes.
+The registry's password does not live in one place: it lives in TEN. One
+htpasswd (what the registry validates) and nine dockerconfigjson (what
+the kubelet presents in order to pull), one per namespace, because a
+Secret does not cross namespaces. If those ten drift apart, the cluster
+stops being able to pull images.
 
-    aegis registry --revisar     # sin tocar nada: ¿están los diez alineados?
-    aegis registry --rotar       # genera material nuevo y reescribe los diez
+    aegis registry check      # without touching anything: are the ten aligned?
+    aegis registry rotate     # generates new material and rewrites the ten
 
-── por qué existe este comando y no alcanza con el init ────────────
+── why this command exists and the init is not enough ──────────────
 
-El camino documentado para rotar `registry_pass` es invalidarlo del
-store y re-correr la fase 40. MEDIDO el 2026-08-08 sobre la instancia
-viva: esa fase escribe el htpasswd y TRES regcred (jenkins-system,
-kyverno, org-canary). La instancia tiene NUEVE. Correrlo habría dejado
-seis namespaces —ai-system, garage-system y cuatro organizaciones— con
-la credencial vieja contra un htpasswd nuevo, y el síntoma habría sido
-ImagePullBackOff apareciendo de a poco, a medida que cada pod tocara
-reiniciar. Horas después, y sin relación aparente con la rotación.
+The documented path for rotating `registry_pass` is to invalidate it in
+the store and re-run phase 40. MEASURED on 2026-08-08 against the live
+instance: that phase writes the htpasswd and THREE regcred
+(jenkins-system, kyverno, org-canary). The instance has NINE. Running it
+would have left six namespaces —ai-system, garage-system and four
+organizations— with the old credential against a new htpasswd, and the
+symptom would have been ImagePullBackOff appearing bit by bit, as each
+pod happened to restart. Hours later, and with no apparent relation to
+the rotation.
 
-La causa de fondo es que la fase tiene la lista escrita a mano y las
-organizaciones nacieron después. Por eso acá la lista NO se escribe:
-se descubre del repo y se CONTRASTA contra el cluster. Si los dos
-conjuntos no coinciden exactamente, el comando se planta. Un destino
-que existe en el cluster y no en git, o al revés, es precisamente la
-condición que hace peligrosa la rotación — así que es un error, no una
-advertencia.
+The underlying cause is that the phase has the list written by hand and
+the organizations were born afterwards. That is why here the list is NOT
+written: it is discovered from the repo and CONTRASTED against the
+cluster. If the two sets do not match exactly, the command stops dead. A
+target that exists in the cluster and not in git, or the other way
+round, is precisely the condition that makes rotation dangerous — so it
+is an error, not a warning.
 
-── lo que este comando NO hace ─────────────────────────────────────
+── what this command does NOT do ───────────────────────────────────
 
-No commitea, no sincroniza y no reinicia el registry. Deja los diez
-archivos escritos y coherentes entre sí, e imprime los pasos que
-siguen. Rotar es deliberado; que el commit lo dé una persona también.
+It does not commit, it does not sync and it does not restart the
+registry. It leaves the ten files written and coherent with each other,
+and prints the steps that follow. Rotating is deliberate; that the
+commit be given by a person, too.
 """
 import argparse
 import base64
@@ -51,238 +53,244 @@ import tempfile
 try:
     import yaml
 except ImportError:
-    sys.exit("falta pyyaml (python3-yaml)")
+    sys.exit("pyyaml is missing (python3-yaml)")
 
-# ── preámbulo canónico de python (V-102) ─────────────────────────────
-# El producto sale de la variable (bin/aegis la exporta) o de este
-# archivo; la INSTANCIA la decide lib/aegis/paths.py y nadie más.
+# ── canonical python preamble (V-102) ────────────────────────────────
+# The product comes from the variable (bin/aegis exports it) or from
+# this file; the INSTANCE is decided by lib/aegis/paths.py and nobody
+# else.
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
 from aegis import cli, paths             # noqa: E402
 
-# RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
-# En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
-# el comando vivía DENTRO de la instancia. Al mudar el código al
-# producto la misma línea siguió compilando y pasó a apuntar al lugar
-# equivocado — la «dependencia invisible a un grep» de C1/C2.
-RAIZ = str(paths.platform_dir())
-USUARIO = "aegis-dev"
+# PLATFORM is the INSTANCE (the live checkout of the platform), not the
+# product. In v2 this line was `dirname(dirname(__file__))` and it
+# worked because the command lived INSIDE the instance. When the code
+# moved to the product the same line kept compiling and started
+# pointing at the wrong place — C1/C2's «dependency invisible to a
+# grep».
+PLATFORM = str(paths.platform_dir())
+USERNAME = "aegis-dev"
 HOST = "registry.registry-system.svc.cluster.local:5000"
 HTPASSWD = "k8s/base/registry-system/registry-htpasswd.enc.yaml"
 
-rojo = "\033[31m"; verde = "\033[32m"; ama = "\033[33m"; gris = "\033[90m"; fin = "\033[0m"
+red = "\033[31m"; green = "\033[32m"; yellow = "\033[33m"; gray = "\033[90m"; reset = "\033[0m"
 if not sys.stdout.isatty():
-    rojo = verde = ama = gris = fin = ""
+    red = green = yellow = gray = reset = ""
 
 
 def sh(cmd, **kw):
-    return subprocess.run(cmd, capture_output=True, text=True, cwd=RAIZ, **kw)
+    return subprocess.run(cmd, capture_output=True, text=True, cwd=PLATFORM, **kw)
 
 
-def morir(msg):
-    print(f"{rojo}✗{fin} {msg}", file=sys.stderr)
+def die(msg):
+    print(f"{red}✗{reset} {msg}", file=sys.stderr)
     sys.exit(1)
 
 
-def destinos():
-    """Los regcred del repo, contrastados contra los del cluster.
+def targets():
+    """The repo's regcred, contrasted against the cluster's.
 
-    Ninguna de las dos fuentes manda sola. El repo dice lo que se va a
-    reescribir; el cluster dice lo que se va a romper si algo queda sin
-    reescribir. Sólo sirven si dicen lo mismo.
+    Neither of the two sources rules on its own. The repo says what is
+    going to be rewritten; the cluster says what is going to break if
+    something is left unwritten. They are only useful if they say the
+    same thing.
     """
     r = sh(["git", "ls-files"])
     if r.returncode != 0:
-        morir("no pude listar el repo (¿estás dentro del repo de plataforma?)")
-    en_git = {}
-    for linea in r.stdout.splitlines():
-        base = os.path.basename(linea)
+        die("could not list the repo (are you inside the platform repo?)")
+    in_git = {}
+    for line in r.stdout.splitlines():
+        base = os.path.basename(line)
         if not base.startswith("secret-regcred") or not base.endswith(".enc.yaml"):
             continue
-        d = yaml.safe_load(open(os.path.join(RAIZ, linea), encoding="utf-8"))
-        en_git[(d["metadata"]["namespace"], d["metadata"]["name"])] = linea
+        d = yaml.safe_load(open(os.path.join(PLATFORM, line), encoding="utf-8"))
+        in_git[(d["metadata"]["namespace"], d["metadata"]["name"])] = line
 
     r = sh(["kubectl", "get", "secret", "-A",
             "--field-selector", "type=kubernetes.io/dockerconfigjson",
             "--no-headers", "-o",
             "custom-columns=NS:.metadata.namespace,N:.metadata.name"])
     if r.returncode != 0:
-        morir("no pude leer los secretos del cluster (¿kubeconfig?)")
-    en_cluster = {tuple(l.split()) for l in r.stdout.splitlines() if l.strip()}
+        die("could not read the cluster's secrets (kubeconfig?)")
+    in_cluster = {tuple(l.split()) for l in r.stdout.splitlines() if l.strip()}
 
-    faltan_en_git = en_cluster - set(en_git)
-    sobran_en_git = set(en_git) - en_cluster
-    if faltan_en_git or sobran_en_git:
-        for ns, n in sorted(faltan_en_git):
-            print(f"  {rojo}!{fin} {ns}/{n} vive en el CLUSTER y no está en git — "
-                  f"rotar lo dejaría con la credencial vieja")
-        for ns, n in sorted(sobran_en_git):
-            print(f"  {rojo}!{fin} {ns}/{n} está en GIT y no en el cluster — "
-                  f"o sobra el archivo, o la app no sincronizó")
-        morir("el repo y el cluster no coinciden: no se rota a ciegas")
-    return dict(sorted(en_git.items()))
+    missing_in_git = in_cluster - set(in_git)
+    extra_in_git = set(in_git) - in_cluster
+    if missing_in_git or extra_in_git:
+        for ns, n in sorted(missing_in_git):
+            print(f"  {red}!{reset} {ns}/{n} lives in the CLUSTER and is not in git — "
+                  f"rotating would leave it with the old credential")
+        for ns, n in sorted(extra_in_git):
+            print(f"  {red}!{reset} {ns}/{n} is in GIT and not in the cluster — "
+                  f"either the file is surplus, or the app did not sync")
+        die("the repo and the cluster do not match: nothing is rotated blind")
+    return dict(sorted(in_git.items()))
 
 
-def pass_de(ruta):
-    """La contraseña que hay DENTRO de un dockerconfigjson cifrado."""
+def pass_of(path):
+    """The password INSIDE an encrypted dockerconfigjson."""
     r = sh(["sops", "-d", "--extract", '["data"][".dockerconfigjson"]',
-            os.path.join(RAIZ, ruta)])
+            os.path.join(PLATFORM, path)])
     if r.returncode != 0:
-        morir(f"no pude descifrar {ruta}: {r.stderr.strip()[:160]}")
+        die(f"could not decrypt {path}: {r.stderr.strip()[:160]}")
     cfg = json.loads(base64.b64decode(r.stdout.strip()))
     auth = next(iter(cfg["auths"].values()))
     return auth["password"], auth["username"]
 
 
-def revisar(dests):
-    """¿Los diez hablan de la misma credencial?"""
-    huellas = {}
-    for (ns, name), ruta in dests.items():
-        p, u = pass_de(ruta)
-        huellas.setdefault((u, p), []).append(f"{ns}/{name}")
-    ok = len(huellas) == 1
-    for (u, _), quienes in huellas.items():
-        marca = f"{verde}={fin}" if ok else f"{rojo}!{fin}"
-        print(f"  {marca} usuario {u}: {len(quienes)} destinos "
-              f"{gris}({', '.join(quienes)}){fin}")
+def check(dests):
+    """Are the ten talking about the same credential?"""
+    fingerprints = {}
+    for (ns, name), path in dests.items():
+        p, u = pass_of(path)
+        fingerprints.setdefault((u, p), []).append(f"{ns}/{name}")
+    ok = len(fingerprints) == 1
+    for (u, _), who in fingerprints.items():
+        mark = f"{green}={reset}" if ok else f"{red}!{reset}"
+        print(f"  {mark} user {u}: {len(who)} targets "
+              f"{gray}({', '.join(who)}){reset}")
     if not ok:
-        morir("los regcred NO comparten la misma credencial — arreglar eso "
-              "ANTES de rotar (rotar encima esconde la divergencia)")
+        die("the regcred do NOT share the same credential — fix that "
+            "BEFORE rotating (rotating on top hides the divergence)")
 
-    # y el htpasswd tiene que validar esa misma contraseña
-    _, clave = next(iter(huellas))
+    # and the htpasswd has to validate that very password
+    _, password = next(iter(fingerprints))
     with tempfile.TemporaryDirectory() as tmp:
         hp = os.path.join(tmp, "htpasswd")
         r = sh(["sops", "-d", "--extract", '["data"]["htpasswd"]',
-                os.path.join(RAIZ, HTPASSWD)])
+                os.path.join(PLATFORM, HTPASSWD)])
         if r.returncode != 0:
-            morir(f"no pude descifrar {HTPASSWD}")
+            die(f"could not decrypt {HTPASSWD}")
         open(hp, "wb").write(base64.b64decode(r.stdout.strip()))
-        v = subprocess.run(["htpasswd", "-vi", hp, USUARIO],
-                           input=clave, capture_output=True, text=True)
+        v = subprocess.run(["htpasswd", "-vi", hp, USERNAME],
+                           input=password, capture_output=True, text=True)
         if v.returncode != 0:
-            morir("el htpasswd del registry NO valida la contraseña de los "
-                  "regcred: el cluster ya está roto o a punto de estarlo")
-    print(f"  {verde}={fin} el htpasswd valida esa misma contraseña")
+            die("the registry's htpasswd does NOT validate the password of the "
+                "regcred: the cluster is already broken or about to be")
+    print(f"  {green}={reset} the htpasswd validates that very password")
     return True
 
 
-def cifrar_en_sitio(doc, destino):
-    """Escribe el Secret en claro y lo cifra IN-PLACE en su ruta final.
+def encrypt_in_place(doc, target):
+    """Writes the Secret in the clear and encrypts it IN-PLACE at its final path.
 
-    En su ruta final y no en un temporal: las reglas de .sops.yaml son
-    por path_regex, así que cifrar en /tmp elegiría otra regla (o
-    ninguna) y el archivo quedaría con la forma equivocada.
+    At its final path and not in a temporary one: the rules of
+    .sops.yaml are by path_regex, so encrypting in /tmp would pick
+    another rule (or none) and the file would end up with the wrong
+    shape.
     """
-    ruta = os.path.join(RAIZ, destino)
-    respaldo = ruta + ".rotando"
-    if os.path.exists(ruta):
-        shutil.copy2(ruta, respaldo)
+    path = os.path.join(PLATFORM, target)
+    backup = path + ".rotating"
+    if os.path.exists(path):
+        shutil.copy2(path, backup)
     try:
-        with open(ruta, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8") as f:
             yaml.safe_dump(doc, f, sort_keys=False)
-        r = sh(["sops", "-e", "--in-place", ruta])
+        r = sh(["sops", "-e", "--in-place", path])
         if r.returncode != 0:
-            raise RuntimeError(f"sops -e falló sobre {destino}: {r.stderr.strip()[:160]}")
+            raise RuntimeError(f"sops -e failed on {target}: {r.stderr.strip()[:160]}")
     except Exception:
-        if os.path.exists(respaldo):
-            shutil.move(respaldo, ruta)
+        if os.path.exists(backup):
+            shutil.move(backup, path)
         raise
-    if os.path.exists(respaldo):
-        os.remove(respaldo)
+    if os.path.exists(backup):
+        os.remove(backup)
 
 
-def rotar(dests):
-    clave = base64.b64encode(secrets.token_bytes(32)).decode()
+def rotate(dests):
+    password = base64.b64encode(secrets.token_bytes(32)).decode()
 
-    # htpasswd bcrypt y dockerconfig SALEN DEL MISMO material, en el
-    # mismo proceso. La contraseña no pasa por argv en ningún momento.
-    r = subprocess.run(["htpasswd", "-nBi", USUARIO], input=clave,
+    # htpasswd bcrypt and dockerconfig COME OUT OF THE SAME material, in
+    # the same process. The password never travels through argv at any
+    # point.
+    r = subprocess.run(["htpasswd", "-nBi", USERNAME], input=password,
                        capture_output=True, text=True)
     if r.returncode != 0:
-        morir(f"htpasswd falló: {r.stderr.strip()[:160]}")
+        die(f"htpasswd failed: {r.stderr.strip()[:160]}")
     htpasswd_txt = r.stdout if r.stdout.endswith("\n") else r.stdout + "\n"
 
     cfg = json.dumps({"auths": {HOST: {
-        "username": USUARIO, "password": clave,
-        "auth": base64.b64encode(f"{USUARIO}:{clave}".encode()).decode()}}},
+        "username": USERNAME, "password": password,
+        "auth": base64.b64encode(f"{USERNAME}:{password}".encode()).decode()}}},
         indent=2) + "\n"
 
-    escritos = []
-    cifrar_en_sitio({
+    written = []
+    encrypt_in_place({
         "apiVersion": "v1", "kind": "Secret",
         "metadata": {"name": "registry-htpasswd", "namespace": "registry-system"},
         "data": {"htpasswd": base64.b64encode(htpasswd_txt.encode()).decode()},
     }, HTPASSWD)
-    escritos.append(HTPASSWD)
-    print(f"  {verde}↻{fin} {HTPASSWD}")
+    written.append(HTPASSWD)
+    print(f"  {green}↻{reset} {HTPASSWD}")
 
-    for (ns, name), ruta in dests.items():
-        cifrar_en_sitio({
+    for (ns, name), path in dests.items():
+        encrypt_in_place({
             "apiVersion": "v1", "kind": "Secret",
             "type": "kubernetes.io/dockerconfigjson",
             "metadata": {"name": name, "namespace": ns},
             "data": {".dockerconfigjson": base64.b64encode(cfg.encode()).decode()},
-        }, ruta)
-        escritos.append(ruta)
-        print(f"  {verde}↻{fin} {ruta}")
+        }, path)
+        written.append(path)
+        print(f"  {green}↻{reset} {path}")
 
-    # ROUNDTRIP: no se confía en que sops escribió lo que se le dio.
-    for (ns, name), ruta in dests.items():
-        p, u = pass_de(ruta)
-        if (u, p) != (USUARIO, clave):
-            morir(f"{ruta} no contiene la credencial nueva tras cifrar — ABORTADO")
+    # ROUNDTRIP: sops is not trusted to have written what it was given.
+    for (ns, name), path in dests.items():
+        p, u = pass_of(path)
+        if (u, p) != (USERNAME, password):
+            die(f"{path} does not contain the new credential after encrypting — ABORTED")
     with tempfile.TemporaryDirectory() as tmp:
         hp = os.path.join(tmp, "htpasswd")
         r = sh(["sops", "-d", "--extract", '["data"]["htpasswd"]',
-                os.path.join(RAIZ, HTPASSWD)])
+                os.path.join(PLATFORM, HTPASSWD)])
         open(hp, "wb").write(base64.b64decode(r.stdout.strip()))
-        v = subprocess.run(["htpasswd", "-vi", hp, USUARIO], input=clave,
+        v = subprocess.run(["htpasswd", "-vi", hp, USERNAME], input=password,
                            capture_output=True, text=True)
         if v.returncode != 0:
-            morir("el htpasswd nuevo NO valida la contraseña nueva — ABORTADO")
-    print(f"  {verde}✓{fin} roundtrip: los {len(escritos)} archivos hablan de "
-          f"la MISMA credencial nueva")
-    del clave
-    return escritos
+            die("the new htpasswd does NOT validate the new password — ABORTED")
+    print(f"  {green}✓{reset} roundtrip: the {len(written)} files talk about "
+          f"the SAME new credential")
+    del password
+    return written
 
 
 def main():
-    # Regla 1 del diseño: VERBOS, no flags. `--revisar/--rotar` eran
-    # dos modos excluyentes disfrazados de opciones; son dos cosas que
-    # el comando hace, y una de ellas destruye material.
+    # Rule 1 of the design: VERBS, not flags. `--revisar/--rotar` were
+    # two mutually exclusive modes dressed up as options; they are two
+    # things the command does, and one of them destroys material.
     p = argparse.ArgumentParser(prog=cli.cmd("registry"))
-    sub = p.add_subparsers(dest="verbo", required=True)
-    sub.add_parser("check", help="no toca nada: verifica que los diez estén alineados")
-    sub.add_parser("rotate", help="genera credencial nueva y reescribe los diez")
+    sub = p.add_subparsers(dest="verb", required=True)
+    sub.add_parser("check", help="touches nothing: verifies that the ten are aligned")
+    sub.add_parser("rotate", help="generates a new credential and rewrites the ten")
     a = p.parse_args()
 
-    print(f"{gris}destinos (repo ∩ cluster):{fin}")
-    dests = destinos()
-    for (ns, name), ruta in dests.items():
-        print(f"  {gris}·{fin} {ns}/{name}  {gris}{ruta}{fin}")
+    print(f"{gray}targets (repo ∩ cluster):{reset}")
+    dests = targets()
+    for (ns, name), path in dests.items():
+        print(f"  {gray}·{reset} {ns}/{name}  {gray}{path}{reset}")
     print()
 
-    if a.verbo == "check":
-        revisar(dests)
-        print(f"\n{verde}✓{fin} la credencial del registry es UNA sola en "
-              f"{len(dests) + 1} lugares")
+    if a.verb == "check":
+        check(dests)
+        print(f"\n{green}✓{reset} the registry credential is ONE single one in "
+              f"{len(dests) + 1} places")
         return 0
 
-    print(f"{gris}estado previo:{fin}")
-    revisar(dests)
-    print(f"\n{gris}rotando:{fin}")
-    escritos = rotar(dests)
+    print(f"{gray}state beforehand:{reset}")
+    check(dests)
+    print(f"\n{gray}rotating:{reset}")
+    written = rotate(dests)
     print(f"""
-{ama}FALTA LO QUE ESTE COMANDO NO HACE:{fin}
-  1. git add {len(escritos)} archivos + commit + push
-  2. esperar el sync de las apps (registry, ai-system, garage, kyverno,
-     jenkins-secrets y las organizaciones)
+{yellow}WHAT THIS COMMAND DOES NOT DO IS STILL MISSING:{reset}
+  1. git add {len(written)} files + commit + push
+  2. wait for the apps to sync (registry, ai-system, garage, kyverno,
+     jenkins-secrets and the organizations)
   3. kubectl rollout restart -n registry-system deploy/registry
-     {gris}(el registry lee el htpasswd al arrancar){fin}
-  4. VERIFICAR con un pull real, no con un `get secret`: borrar un pod
-     que tire imagen del registry interno y ver que vuelve Running.
+     {gray}(the registry reads the htpasswd at startup){reset}
+  4. VERIFY with a real pull, not with a `get secret`: delete a pod that
+     pulls an image from the internal registry and watch it come back
+     Running.
 """)
     return 0
 

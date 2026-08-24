@@ -26,7 +26,7 @@ source, seed = sys.argv[1], sys.argv[2]
 tree = ast.parse(open(source, encoding="utf-8").read())
 
 # The destinations the generator knows about, taken from its constants:
-# os.path.join(RAIZ, "k8s", "base", "ai-system", "x.yaml") -> k8s/base/ai-system
+# os.path.join(PLATFORM_ROOT, "k8s", "base", "ai-system", "x.yaml") -> k8s/base/ai-system
 destinations = set()
 for n in tree.body:
     if not (isinstance(n, ast.Assign) and len(n.targets) == 1

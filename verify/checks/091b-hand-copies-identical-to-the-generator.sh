@@ -17,7 +17,7 @@ check() {
 # The correct reference is not another copy: it is THE GENERATOR.
 #
 # TO VERIFY (2026-08-23, T-02): wire it up with `from aegis import
-# derivar` and compare against the real render_ruteo(). Until the
+# derivar` and compare against the real render_routes(). Until the
 # package exists, this is NOT EVALUABLE — and it says so, which is
 # different from passing green without having measured anything.
 if python3 -c 'import sys; sys.path.insert(0, "'"$AEGIS_ROOT"'/lib"); import aegis.derivar' 2>/dev/null; then

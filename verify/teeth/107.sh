@@ -9,8 +9,8 @@ red_1() {
     python3 - "$AEGIS_ROOT/libexec/dev/seed" <<'PY'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
-p.write_text(s.replace('morir(f"no existe {CONF}: sin los valores de esta "',
-                       'morir(f"no existe {CONF.relative_to(RAIZ)}: sin los valores de esta "'), encoding="utf-8")
+p.write_text(s.replace('die(f"{CONF} does not exist: without the values of this "',
+                       'die(f"{CONF.relative_to(ROOT)} does not exist: without the values of this "'), encoding="utf-8")
 PY
 }
 

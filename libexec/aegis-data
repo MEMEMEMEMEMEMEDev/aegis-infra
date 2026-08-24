@@ -1,109 +1,112 @@
 #!/usr/bin/env python3
-# aegis-summary: Captura y restaura los DATOS de los inquilinos
+# aegis-summary: Captures and restores the tenants' DATA
 # aegis-group:   backup
 # aegis-subcommands: backup list restore
-"""aegis-data — captura y restaura los DATOS de los inquilinos.
+"""aegis-data — captures and restores the tenants' DATA.
 
-Es la otra mitad de `aegis state backup`. Aquél respalda el ESTADO de
-la plataforma —los secretos del store, la traza del init, el tfstate del
-borde—; éste respalda lo que los inquilinos GENERARON: sus bases y sus
-objetos. Ninguna de las dos mitades sirve sola: con el estado se levanta
-una plataforma vacía, con los datos se tiene un dump que no se sabe
-dónde poner.
+It is the other half of `aegis state backup`. That one backs up the
+platform's STATE —the store's secrets, the init's trail, the edge's
+tfstate—; this one backs up what the tenants GENERATED: their databases
+and their objects. Neither half is any good alone: with the state you
+raise an empty platform, with the data you have a dump nobody knows where
+to put.
 
-    aegis data --capturar              # un bundle POR ORGANIZACIÓN
-    aegis data --listar <bundle.age>   # qué hay adentro, sin restaurar
-    aegis data --restaurar <bundle.age> --org ejemplo [--force]
+    aegis data backup                    # one bundle PER ORGANIZATION
+    aegis data list <bundle.age>         # what is inside, without restoring
+    aegis data restore <bundle.age> --org ejemplo [--force]
 
-── UN BUNDLE POR ORGANIZACIÓN, EN SU PROPIA CARPETA ────────────────
+── ONE BUNDLE PER ORGANIZATION, IN ITS OWN FOLDER ──────────────────
 
     $AEGIS_BACKUPS/
-      .aegis-destino                       <- la marca del disco (ver abajo)
-      plataforma/
-        aegis-state-<ts>.age              <- lo escribe aegis state backup
+      .aegis-destino                       <- the disk's mark (see below)
+      platform/
+        aegis-state-<ts>.age              <- written by aegis state backup
       org-ejemplo/
         aegis-datos-org-ejemplo-<ts>.age
       org-portafolio/
         aegis-datos-org-portafolio-<ts>.age
 
-Hasta el 2026-08-11 era UN bundle con todo adentro. Separarlo por
-organización cambia tres cosas que importan:
+Until 2026-08-11 it was ONE bundle with everything inside. Separating it
+per organization changes three things that matter:
 
-  · restaurar una no obliga a abrir el resguardo de las demás — y ese
-    resguardo lleva datos de terceros;
-  · dar de baja una organización es borrar su carpeta, no editar un
-    archivo compartido;
-  · y la que de verdad pesa: la pregunta honesta deja de ser "¿hay
-    respaldo?" y pasa a ser "¿tiene respaldo CADA organización?".
+  · restoring one does not force you to open everybody else's
+    safekeeping — and that safekeeping carries third parties' data;
+  · decommissioning an organization is deleting its folder, not editing a
+    shared file;
+  · and the one that really weighs: the honest question stops being "is
+    there a backup?" and becomes "does EVERY organization have a backup?".
 
-Esa última es la razón de fondo. Con un bundle único, una organización
-nueva que nunca se respaldó era INVISIBLE: el archivo existía, tenía
-fecha reciente, y adentro no estaba. Ahora la ausencia tiene forma de
-carpeta que falta, y `aegis check` la enumera contra los
-contratos.
+That last one is the underlying reason. With a single bundle, a new
+organization that was never backed up was INVISIBLE: the file existed, it
+had a recent date, and it was not inside. Now the absence has the shape
+of a missing folder, and `aegis check` enumerates it against the
+contracts.
 
-── LA MARCA DEL DISCO (.aegis-destino) ─────────────────────────────
+── THE DISK'S MARK (.aegis-destino) ────────────────────────────────
 
-El destino típico es un segundo disco, y en un escritorio ese disco
-suele montarlo el entorno gráfico al iniciar sesión — no está en fstab
-y NO está montado durante el arranque. Si el respaldo corre en ese
-hueco, la ruta existe igual (es un directorio vacío en el disco raíz) y
-el bundle se escribe ahí: éxito reportado, cero protección, y la copia
-que tenía que sobrevivir al disco vive en el disco.
+The typical destination is a second disk, and on a desktop that disk is
+usually mounted by the graphical environment at login — it is not in
+fstab and it is NOT mounted during boot. If the backup runs in that gap,
+the path exists all the same (it is an empty directory on the root disk)
+and the bundle is written there: success reported, zero protection, and
+the copy that was supposed to survive the disk lives on the disk.
 
-Por eso la primera captura anota el UUID del filesystem de destino en
-`<raiz>/.aegis-destino`, y las siguientes lo verifican. Si no coincide
-—no está montado, o es otro disco— NO se escribe. Se compara el UUID y
-no el punto de montaje porque el punto de montaje es exactamente lo que
-miente en este fallo.
+That is why the first capture notes the destination filesystem's UUID
+down in `<root>/.aegis-destino`, and the following ones verify it. If it
+does not match —it is not mounted, or it is another disk— NOTHING is
+written. The UUID is compared and not the mount point because the mount
+point is exactly what lies in this failure.
 
-── POR QUÉ CORRE DEL LADO DEL OPERADOR Y NO DENTRO DEL CLUSTER ─────
+── WHY IT RUNS ON THE OPERATOR'S SIDE AND NOT INSIDE THE CLUSTER ───
 
-No es una preferencia: es lo único que la plataforma permite sin
-aflojarla. Medido el 2026-08-09:
+It is not a preference: it is the only thing the platform allows without
+loosening it. Measured on 2026-08-09:
 
-  1. Los namespaces con datos son TODOS `restricted` (org-*,
-     garage-system, ai-system). Un Job ahí NO puede montar un hostPath,
-     así que no puede escribir en el directorio de respaldos.
-  2. El egreso de un namespace de inquilino está cerrado salvo DNS. Un
-     pod ahí adentro puede volcar la base —`allow-intra-namespace` se lo
-     permite— pero no puede SACAR el volcado por red.
-  3. Garage es distroless: sin shell. Su respaldo va por la API S3, no
-     por el filesystem.
-  4. /var/lib/rancher/k3s/storage no es legible sin root, y sus rutas
-     llevan el UUID del PVC — que en una instancia nueva es OTRO. O sea
-     que restaurar tampoco puede ser "copiar el directorio de vuelta".
+  1. The namespaces with data are ALL `restricted` (org-*, garage-system,
+     ai-system). A Job there CANNOT mount a hostPath, so it cannot write
+     into the backups directory.
+  2. The egress of a tenant namespace is closed except for DNS. A pod in
+     there can dump the database —`allow-intra-namespace` allows it— but
+     it cannot GET the dump OUT over the network.
+  3. Garage is distroless: no shell. Its backup goes through the S3 API,
+     not through the filesystem.
+  4. /var/lib/rancher/k3s/storage is not readable without root, and its
+     paths carry the PVC's UUID — which on a new instance is ANOTHER one.
+     That is, restoring cannot be "copy the directory back" either.
 
-La alternativa —un CronJob adentro— exige un namespace laxo, una regla
-de red por cada inquilino y una identidad permanente capaz de leer todas
-las bases. Eso es un blanco, y es mucha maquinaria para una plataforma
-de un nodo. Acá el transporte es `kubectl exec` (verificado sin pérdida:
-5136 bytes adentro, 5136 en el host) y `kubectl port-forward` para S3,
-que además esquiva la NetworkPolicy legítimamente porque el tráfico
-nace en el nodo.
+The alternative —a CronJob inside— demands a lax namespace, one network
+rule per tenant and a permanent identity able to read every database.
+That is a target, and it is a lot of machinery for a one-node platform.
+Here the transport is `kubectl exec` (verified without loss: 5136 bytes
+inside, 5136 on the host) and `kubectl port-forward` for S3, which
+besides dodges the NetworkPolicy legitimately because the traffic is born
+on the node.
 
-Para el modo PROGRAMADO, esto se dispara desde un timer del host. Es más
-honesto que un CronJob: el que respalda no vive dentro de lo que respalda.
+For the SCHEDULED mode, this is fired from a host timer. It is more
+honest than a CronJob: the one that backs up does not live inside what it
+backs up.
 
-── QUÉ SE CAPTURA Y CÓMO, QUE ES DONDE ESTÁ LA CORRECCIÓN ──────────
+── WHAT IS CAPTURED AND HOW, WHICH IS WHERE THE CORRECTNESS IS ─────
 
-postgres  `pg_dumpall`, NO `pg_dump`. Medido: los ROLES viven fuera de
-          cualquier base, y un `pg_dump` normal los pierde. Restaurar sin
-          ellos da una base sin dueños y una app que no puede entrar.
-          `pg_dumpall` también trae las OTRAS bases (hay una `postgres`
-          además de la del contrato).
+postgres  `pg_dumpall`, NOT `pg_dump`. Measured: the ROLES live outside
+          any database, and a normal `pg_dump` loses them. Restoring
+          without them gives a database with no owners and an app that
+          cannot get in. `pg_dumpall` also brings the OTHER databases
+          (there is a `postgres` one besides the contract's).
 
-bucket    Listado y descarga por S3 con firma SigV4. El objeto se guarda
-          con su clave y su ETag, y el ETag se re-verifica al restaurar.
+bucket    Listing and download over S3 with a SigV4 signature. The object
+          is stored with its key and its ETag, and the ETag is
+          re-verified when restoring.
 
-LA CONTRASEÑA NO SE COPIA AL BUNDLE, se guarda su HUELLA. El dump de
-globals ya trae el hash SCRAM de cada rol, así que la base restaurada
-acepta la contraseña original — la que sigue viviendo en el Secret. Lo
-que puede salir mal es que el Secret haya rotado ENTRE la captura y la
-restauración: ahí la base restaurada esperaría una contraseña y el pod
-presentaría otra. Por eso el manifiesto guarda el sha256 de la que había,
-y `--restaurar` COMPARA. Copiar el secreto habría escondido esa
-discrepancia creándola en silencio; guardar la huella la detecta.
+THE PASSWORD IS NOT COPIED INTO THE BUNDLE, its FINGERPRINT is stored.
+The globals dump already brings each role's SCRAM hash, so the restored
+database accepts the original password — the one that goes on living in
+the Secret. What can go wrong is that the Secret rotated BETWEEN the
+capture and the restore: there the restored database would expect one
+password and the pod would present another. That is why the manifest
+stores the sha256 of the one that was there, and `restore` COMPARES.
+Copying the secret would have hidden that discrepancy by creating it in
+silence; storing the fingerprint detects it.
 """
 import argparse
 import base64
@@ -127,178 +130,183 @@ import xml.etree.ElementTree as ET
 try:
     import yaml
 except ImportError:
-    sys.exit("falta pyyaml (python3-yaml)")
+    sys.exit("pyyaml is missing (python3-yaml)")
 
-# ── preámbulo canónico de python (V-102) ─────────────────────────────
-# El producto sale de la variable (bin/aegis la exporta) o de este
-# archivo; la INSTANCIA la decide lib/aegis/paths.py y nadie más.
+# ── canonical python preamble (V-102) ────────────────────────────────
+# The product comes out of the variable (bin/aegis exports it) or out of
+# this file; the INSTANCE is decided by lib/aegis/paths.py and nobody
+# else.
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
 from aegis import cli, paths             # noqa: E402
 
-# RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
-# En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
-# el comando vivía DENTRO de la instancia. Al mudar el código al
-# producto la misma línea siguió compilando y pasó a apuntar al lugar
-# equivocado — la «dependencia invisible a un grep» de C1/C2.
-RAIZ = str(paths.platform_dir())
-DIR_ORGS = os.path.join(RAIZ, "orgs")
-SERVICIOS = os.path.join(RAIZ, "services.yaml")
-DESTINO_DEF = os.environ.get(
+# PLATFORM_DIR is the INSTANCE (the live checkout of the platform), not
+# the product. In v2 this line was `dirname(dirname(__file__))` and it
+# worked because the command lived INSIDE the instance. On moving the
+# code to the product the same line went on compiling and started
+# pointing at the wrong place — C1/C2's «dependency invisible to a grep».
+PLATFORM_DIR = str(paths.platform_dir())
+ORGS_DIR = os.path.join(PLATFORM_DIR, "orgs")
+SERVICES = os.path.join(PLATFORM_DIR, "services.yaml")
+DEFAULT_DEST = os.environ.get(
     "AEGIS_BACKUPS", os.path.join(os.path.expanduser("~"), "aegis-backups"))
 
-rojo = "\033[31m"; verde = "\033[32m"; ama = "\033[33m"; gris = "\033[90m"; fin = "\033[0m"
+red = "\033[31m"; green = "\033[32m"; yellow = "\033[33m"; gray = "\033[90m"; reset = "\033[0m"
 if not sys.stdout.isatty():
-    rojo = verde = ama = gris = fin = ""
+    red = green = yellow = gray = reset = ""
 
 
-def morir(msg):
-    print(f"{rojo}✗{fin} {msg}", file=sys.stderr)
+def die(msg):
+    print(f"{red}✗{reset} {msg}", file=sys.stderr)
     sys.exit(1)
 
 
-# ── el destino: que sea el disco que creemos ────────────────────────
-def uuid_de(ruta):
-    """UUID del filesystem donde vive `ruta` (o None si no se puede)."""
-    r = subprocess.run(["findmnt", "-no", "UUID", "--target", ruta],
+# ── the destination: that it be the disk we believe ─────────────────
+def uuid_of(path):
+    """UUID of the filesystem where `path` lives (or None if it cannot be read)."""
+    r = subprocess.run(["findmnt", "-no", "UUID", "--target", path],
                        capture_output=True, text=True)
     return r.stdout.strip() or None
 
 
-def preparar_raiz(raiz):
-    """Crea la raíz de respaldos y verifica que sea el disco de siempre.
+def prepare_root(root):
+    """Creates the backups root and verifies that it is the usual disk.
 
-    El fallo que esto evita no es teórico y no avisa solo: un segundo
-    disco montado por el escritorio no está montado durante el arranque,
-    la ruta sigue existiendo como directorio vacío del disco raíz, y el
-    respaldo aterriza ahí creyendo que salió. Se descubre el día que se
-    necesita.
+    The failure this prevents is not theoretical and does not announce
+    itself: a second disk mounted by the desktop is not mounted during
+    boot, the path goes on existing as an empty directory of the root
+    disk, and the backup lands there believing it went out. It is
+    discovered the day it is needed.
     """
-    raiz = os.path.abspath(os.path.expanduser(raiz))
-    os.makedirs(raiz, exist_ok=True)
-    marca = os.path.join(raiz, ".aegis-destino")
-    actual = uuid_de(raiz)
-    if actual is None:
-        print(f"  {ama}!{fin} no pude leer el UUID del filesystem de {raiz} "
-              f"(¿findmnt?): sigo, pero SIN la guarda de disco")
-        return raiz
-    if os.path.exists(marca):
+    root = os.path.abspath(os.path.expanduser(root))
+    os.makedirs(root, exist_ok=True)
+    # `.aegis-destino` and its fields are the on-disk FORMAT: aegis-check
+    # reads this same file to tell whether the disk is the one that was
+    # noted down. Renaming them is a coordinated change between the two
+    # commands and every disk already in use, not a translation.
+    mark = os.path.join(root, ".aegis-destino")
+    current = uuid_of(root)
+    if current is None:
+        print(f"  {yellow}!{reset} I could not read the UUID of the filesystem of {root} "
+              f"(findmnt?): I go on, but WITHOUT the disk guard")
+        return root
+    if os.path.exists(mark):
         try:
-            prev = json.load(open(marca, encoding="utf-8"))
+            prev = json.load(open(mark, encoding="utf-8"))
         except Exception:
             prev = {}
-        anotado = prev.get("uuid")
-        if anotado and anotado != actual:
-            morir(
-                f"el destino de respaldos cambió de DISCO y no se escribe nada.\n"
-                f"      anotado : {anotado}\n"
-                f"      ahora   : {actual}\n"
-                f"      {raiz}\n"
-                f"      Lo habitual es que el disco de respaldos no esté montado y\n"
-                f"      esta ruta sea un directorio vacío del disco raíz — o sea, el\n"
-                f"      resguardo caería en el mismo disco que tiene que sobrevivir.\n"
-                f"      Montalo y repetí. Si el cambio es a propósito, borrá\n"
-                f"      {marca} y la próxima captura lo vuelve a anotar.")
+        noted = prev.get("uuid")
+        if noted and noted != current:
+            die(
+                f"the backups destination changed DISK and nothing is written.\n"
+                f"      noted down : {noted}\n"
+                f"      now        : {current}\n"
+                f"      {root}\n"
+                f"      The usual thing is that the backups disk is not mounted and\n"
+                f"      this path is an empty directory of the root disk — that is, the\n"
+                f"      safekeeping would fall on the same disk it has to survive.\n"
+                f"      Mount it and repeat. If the change is on purpose, delete\n"
+                f"      {mark} and the next capture notes it down again.")
     else:
         json.dump({
-            "uuid": actual,
+            "uuid": current,
             "anotado": datetime.datetime.now(datetime.timezone.utc)
                         .strftime("%Y-%m-%dT%H:%M:%SZ"),
             "porque": "si este UUID no coincide, el disco de respaldos no está "
                       "montado y el bundle caería en el disco que debe sobrevivir",
-        }, open(marca, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
-        ok(f"destino anotado: {raiz} (fs {actual})")
-    if uuid_de("/") == actual:
-        print(f"  {ama}!{fin} el destino está en el MISMO filesystem que / — un "
-              f"fallo de ese disco se lleva los datos y sus respaldos")
-    return raiz
+        }, open(mark, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+        ok(f"destination noted down: {root} (fs {current})")
+    if uuid_of("/") == current:
+        print(f"  {yellow}!{reset} the destination is on the SAME filesystem as / — a "
+              f"failure of that disk takes the data and its backups with it")
+    return root
 
 
-def paso(msg):
-    print(f"  {gris}·{fin} {msg}")
+def step(msg):
+    print(f"  {gray}·{reset} {msg}")
 
 
 def ok(msg):
-    print(f"  {verde}✓{fin} {msg}")
+    print(f"  {green}✓{reset} {msg}")
 
 
-def kubectl(args, binario=False, entrada=None):
+def kubectl(args, binary=False, stdin_data=None):
     r = subprocess.run(["kubectl"] + args, capture_output=True,
-                       input=entrada, **({} if binario else {"text": True}))
+                       input=stdin_data, **({} if binary else {"text": True}))
     return r
 
 
-# ── descubrimiento ──────────────────────────────────────────────────
+# ── discovery ───────────────────────────────────────────────────────
 #
-# Igual que aegis registry y por el mismo motivo: la lista NO se
-# escribe. Sale de los contratos y se CONTRASTA contra el cluster. Una
-# fuente que está en un lado y no en el otro es exactamente la condición
-# que hace peligroso el respaldo —capturar de menos sin enterarse— así
-# que es un error y no una advertencia.
-def fuentes():
-    bases, buckets = [], []
-    for f in sorted(os.listdir(DIR_ORGS)):
+# The same as aegis registry and for the same reason: the list is NOT
+# written. It comes out of the contracts and is CONTRASTED against the
+# cluster. A source that is on one side and not on the other is exactly
+# the condition that makes a backup dangerous —capturing too little
+# without finding out— so it is an error and not a warning.
+def sources():
+    databases, buckets = [], []
+    for f in sorted(os.listdir(ORGS_DIR)):
         if not f.endswith(".yaml"):
             continue
-        d = yaml.safe_load(open(os.path.join(DIR_ORGS, f), encoding="utf-8"))
+        d = yaml.safe_load(open(os.path.join(ORGS_DIR, f), encoding="utf-8"))
         org = d.get("organizacion") or d.get("nombre")
         ns = f"org-{org}"
         for s in d.get("servicios", []) or []:
             if s.get("tipo") == "postgres":
-                bases.append({"org": org, "ns": ns, "servicio": s["nombre"],
-                              "pod": f"{s['nombre']}-0",
-                              "secreto": f"{s['nombre']}-credenciales"})
+                databases.append({"org": org, "ns": ns, "servicio": s["nombre"],
+                                  "pod": f"{s['nombre']}-0",
+                                  "secreto": f"{s['nombre']}-credenciales"})
         if (d.get("almacenamiento") or {}).get("bucket"):
             buckets.append({"org": org, "ns": ns, "bucket": org})
 
-    # contraste contra el cluster
+    # contrast against the cluster
     r = kubectl(["get", "statefulset", "-A", "-l", "aegis.dev/component=datos",
                  "--no-headers", "-o",
                  "custom-columns=NS:.metadata.namespace,N:.metadata.name"])
     if r.returncode != 0:
-        morir("no pude leer los StatefulSet del cluster (¿kubeconfig?)")
-    vivos = {tuple(l.split()) for l in r.stdout.splitlines() if l.strip()}
-    declarados = {(b["ns"], b["servicio"]) for b in bases}
-    if vivos != declarados:
-        for x in sorted(vivos - declarados):
-            print(f"  {rojo}!{fin} {x[0]}/{x[1]} vive en el CLUSTER y no sale de ningún "
-                  f"contrato — quedaría SIN respaldar")
-        for x in sorted(declarados - vivos):
-            print(f"  {rojo}!{fin} {x[0]}/{x[1]} sale de un contrato y no está en el "
-                  f"cluster — o no sincronizó, o el contrato miente")
-        morir("los contratos y el cluster no coinciden: no se respalda a ciegas")
-    return bases, buckets
+        die("I could not read the cluster's StatefulSets (kubeconfig?)")
+    alive = {tuple(l.split()) for l in r.stdout.splitlines() if l.strip()}
+    declared = {(b["ns"], b["servicio"]) for b in databases}
+    if alive != declared:
+        for x in sorted(alive - declared):
+            print(f"  {red}!{reset} {x[0]}/{x[1]} lives in the CLUSTER and does not come out of any "
+                  f"contract — it would be left WITHOUT a backup")
+        for x in sorted(declared - alive):
+            print(f"  {red}!{reset} {x[0]}/{x[1]} comes out of a contract and is not in the "
+                  f"cluster — either it did not sync, or the contract lies")
+        die("the contracts and the cluster do not match: nothing is backed up blind")
+    return databases, buckets
 
 
-# ── firma SigV4, mínima y sin dependencias ──────────────────────────
+# ── SigV4 signature, minimal and without dependencies ───────────────
 def _sign(key, msg):
     return hmac.new(key, msg.encode(), hashlib.sha256).digest()
 
 
-def s3(metodo, host, ruta, query, ak, sk, region="garage", cuerpo=b""):
+def s3(method, host, path, query, ak, sk, region="garage", body=b""):
     t = datetime.datetime.now(datetime.timezone.utc)
     amz = t.strftime("%Y%m%dT%H%M%SZ")
-    dia = t.strftime("%Y%m%d")
-    hpay = hashlib.sha256(cuerpo).hexdigest()
+    day = t.strftime("%Y%m%d")
+    hpay = hashlib.sha256(body).hexdigest()
     qs = "&".join(f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(v, safe='')}"
                   for k, v in sorted(query.items()))
-    cr = (f"{metodo}\n{urllib.parse.quote(ruta)}\n{qs}\n"
+    cr = (f"{method}\n{urllib.parse.quote(path)}\n{qs}\n"
           f"host:{host}\nx-amz-content-sha256:{hpay}\nx-amz-date:{amz}\n\n"
           f"host;x-amz-content-sha256;x-amz-date\n{hpay}")
-    alcance = f"{dia}/{region}/s3/aws4_request"
-    sts = (f"AWS4-HMAC-SHA256\n{amz}\n{alcance}\n"
+    scope = f"{day}/{region}/s3/aws4_request"
+    sts = (f"AWS4-HMAC-SHA256\n{amz}\n{scope}\n"
            f"{hashlib.sha256(cr.encode()).hexdigest()}")
-    k = _sign(_sign(_sign(_sign(("AWS4" + sk).encode(), dia), region), "s3"), "aws4_request")
-    firma = hmac.new(k, sts.encode(), hashlib.sha256).hexdigest()
-    cab = {
-        "Authorization": (f"AWS4-HMAC-SHA256 Credential={ak}/{alcance}, "
+    k = _sign(_sign(_sign(_sign(("AWS4" + sk).encode(), day), region), "s3"), "aws4_request")
+    signature = hmac.new(k, sts.encode(), hashlib.sha256).hexdigest()
+    headers = {
+        "Authorization": (f"AWS4-HMAC-SHA256 Credential={ak}/{scope}, "
                           f"SignedHeaders=host;x-amz-content-sha256;x-amz-date, "
-                          f"Signature={firma}"),
+                          f"Signature={signature}"),
         "x-amz-content-sha256": hpay, "x-amz-date": amz, "Host": host,
     }
-    url = f"http://{host}{urllib.parse.quote(ruta)}" + (f"?{qs}" if qs else "")
-    req = urllib.request.Request(url, data=cuerpo or None, headers=cab, method=metodo)
+    url = f"http://{host}{urllib.parse.quote(path)}" + (f"?{qs}" if qs else "")
+    req = urllib.request.Request(url, data=body or None, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return r.status, r.read(), dict(r.headers)
@@ -306,16 +314,17 @@ def s3(metodo, host, ruta, query, ak, sk, region="garage", cuerpo=b""):
         return e.code, e.read(), dict(e.headers)
 
 
-class Tunel:
-    """port-forward al S3 de Garage.
+class Tunnel:
+    """port-forward to Garage's S3.
 
-    Hace falta porque el 3900 sólo acepta tráfico de namespaces de
-    inquilino, y el operador no es uno. El port-forward no viola esa
-    regla: el tráfico nace en el nodo, que es donde vive el que respalda.
+    It is needed because 3900 only accepts traffic from tenant
+    namespaces, and the operator is not one. The port-forward does not
+    violate that rule: the traffic is born on the node, which is where the
+    one that backs up lives.
     """
 
-    def __init__(self, ns, svc, puerto):
-        self.ns, self.svc, self.puerto = ns, svc, puerto
+    def __init__(self, ns, svc, port):
+        self.ns, self.svc, self.port = ns, svc, port
         self.p = None
         self.local = None
 
@@ -324,7 +333,7 @@ class Tunel:
         self.local = s.getsockname()[1]; s.close()
         self.p = subprocess.Popen(
             ["kubectl", "port-forward", "-n", self.ns, f"svc/{self.svc}",
-             f"{self.local}:{self.puerto}"],
+             f"{self.local}:{self.port}"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(50):
             try:
@@ -333,7 +342,7 @@ class Tunel:
             except OSError:
                 time.sleep(0.2)
         self.__exit__(None, None, None)
-        morir(f"el port-forward a {self.ns}/{self.svc}:{self.puerto} no levantó")
+        die(f"the port-forward to {self.ns}/{self.svc}:{self.port} did not come up")
 
     def __exit__(self, *a):
         if self.p:
@@ -348,353 +357,368 @@ class Tunel:
         return f"127.0.0.1:{self.local}"
 
 
-# ── captura ─────────────────────────────────────────────────────────
-def huella_credencial(ns, secreto):
-    """sha256 de la contraseña viva, SIN traerla al bundle."""
-    r = kubectl(["get", "secret", secreto, "-n", ns, "-o",
+# ── capture ─────────────────────────────────────────────────────────
+def credential_fingerprint(ns, secret):
+    """sha256 of the live password, WITHOUT bringing it into the bundle."""
+    r = kubectl(["get", "secret", secret, "-n", ns, "-o",
                  "jsonpath={.data.password}"])
     if r.returncode != 0 or not r.stdout.strip():
         return None
     return hashlib.sha256(base64.b64decode(r.stdout.strip())).hexdigest()
 
 
-def psql(ns, pod, base, sql):
-    """Una consulta de una línea contra una base, devuelve stdout."""
+def psql(ns, pod, database, sql):
+    """A one-line query against a database, returns stdout."""
     r = kubectl(["exec", "-n", ns, pod, "--", "sh", "-c",
-                 f'psql -U "$POSTGRES_USER" -d {base} -Atc {json.dumps(sql)}'])
+                 f'psql -U "$POSTGRES_USER" -d {database} -Atc {json.dumps(sql)}'])
     return (r.stdout or "").strip(), r.returncode
 
 
-def inventario(ns, pod, base):
-    """Tablas y filas de una base. Es contra esto que se verifica el restore.
+def inventory(ns, pod, database):
+    """Tables and rows of a database. It is against this that the restore is verified.
 
-    No alcanza con que psql termine sin gritar: el simulacro del
-    2026-08-09 dejó la base BORRADA y el comando reportó éxito. Un
-    restore tiene que MEDIR lo que consiguió, no confiar en su código de
-    salida.
+    It is not enough for psql to finish without shouting: the drill of
+    2026-08-09 left the database DELETED and the command reported
+    success. A restore has to MEASURE what it achieved, not trust its exit
+    code.
     """
-    out, rc = psql(ns, pod, base,
+    out, rc = psql(ns, pod, database,
                    "SELECT schemaname||'.'||relname FROM pg_stat_user_tables ORDER BY 1")
     if rc != 0:
         return None
-    tablas = []
+    tables = []
     for t in [x for x in out.splitlines() if x.strip()]:
-        n, rc2 = psql(ns, pod, base, f'SELECT count(*) FROM {t}')
-        tablas.append({"tabla": t, "filas": int(n) if rc2 == 0 and n.isdigit() else -1})
-    return tablas
+        n, rc2 = psql(ns, pod, database, f'SELECT count(*) FROM {t}')
+        tables.append({"tabla": t, "filas": int(n) if rc2 == 0 and n.isdigit() else -1})
+    return tables
 
 
-def bases_de(ns, pod):
+def databases_of(ns, pod):
     out, _ = psql(ns, pod, "postgres",
                   "SELECT datname FROM pg_database WHERE NOT datistemplate "
                   "AND datallowconn ORDER BY 1")
     return [x for x in out.splitlines() if x.strip()]
 
 
-def capturar_base(b, destino):
-    """Globals aparte, y una base por archivo. NO se usa pg_dumpall entero.
+def capture_database(b, target):
+    """Globals apart, and one database per file. The whole pg_dumpall is NOT used.
 
-    Las dos razones salieron del simulacro, y la segunda casi rompe la
-    organización de verdad:
+    Both reasons came out of the drill, and the second nearly broke the
+    organization for real:
 
-    1. Sin `--clean`, restaurar sobre una base con datos los DUPLICA. Por
-       poco no se ve: la primera prueba pareció salir bien porque la
-       tabla que sobrevivía tenía primary key y rechazaba los INSERT
-       repetidos. Con una tabla SIN restricción única, tres filas se
-       convirtieron en seis.
+    1. Without `--clean`, restoring over a database with data DUPLICATES
+       it. It nearly went unseen: the first test seemed to go well because
+       the table that survived had a primary key and rejected the repeated
+       INSERTs. With a table WITHOUT a unique constraint, three rows
+       turned into six.
 
-    2. Pero `pg_dumpall --clean` emite `DROP DATABASE` y `DROP ROLE`, y
-       el DROP ROLE del rol con el que uno está conectado FALLA SIEMPRE.
-       Con ON_ERROR_STOP=1 eso aborta el restore JUSTO DESPUÉS de haber
-       dropeado la base: la base desaparece y no se recrea. Pasó, en
-       vivo, y encima el comando reportó éxito.
+    2. But `pg_dumpall --clean` emits `DROP DATABASE` and `DROP ROLE`, and
+       the DROP ROLE of the role you are connected with ALWAYS FAILS. With
+       ON_ERROR_STOP=1 that aborts the restore RIGHT AFTER having dropped
+       the database: the database disappears and is not recreated. It
+       happened, live, and on top of that the command reported success.
 
-    La forma correcta es no dropear bases nunca: `pg_dumpall
-    --globals-only` para los roles (que un `pg_dump` normal pierde) y un
-    `pg_dump --clean --if-exists` por base, que borra y recrea los
-    OBJETOS de adentro sin tocar el contenedor.
+    The correct way is never to drop databases: `pg_dumpall
+    --globals-only` for the roles (which a normal `pg_dump` loses) and one
+    `pg_dump --clean --if-exists` per database, which deletes and recreates
+    the OBJECTS inside without touching the container.
     """
     pod, ns = b["pod"], b["ns"]
     v = kubectl(["exec", "-n", ns, pod, "--", "postgres", "--version"])
 
     g = kubectl(["exec", "-n", ns, pod, "--", "sh", "-c",
-                 'pg_dumpall -U "$POSTGRES_USER" --globals-only'], binario=True)
+                 'pg_dumpall -U "$POSTGRES_USER" --globals-only'], binary=True)
     if g.returncode != 0 or not g.stdout:
-        morir(f"pg_dumpall --globals-only falló sobre {ns}/{pod}: "
-              f"{(g.stderr or b'').decode(errors='replace')[:200]}")
+        die(f"pg_dumpall --globals-only failed over {ns}/{pod}: "
+            f"{(g.stderr or b'').decode(errors='replace')[:200]}")
     fg = f"{b['org']}-{b['servicio']}-globals.sql"
-    open(os.path.join(destino, fg), "wb").write(g.stdout)
+    open(os.path.join(target, fg), "wb").write(g.stdout)
 
-    bases = []
-    for base in bases_de(ns, pod):
+    databases = []
+    for database in databases_of(ns, pod):
         d = kubectl(["exec", "-n", ns, pod, "--", "sh", "-c",
-                     f'pg_dump -U "$POSTGRES_USER" --clean --if-exists -d {base}'],
-                    binario=True)
+                     f'pg_dump -U "$POSTGRES_USER" --clean --if-exists -d {database}'],
+                    binary=True)
         if d.returncode != 0:
-            morir(f"pg_dump de {base} falló: "
-                  f"{(d.stderr or b'').decode(errors='replace')[:200]}")
-        fn = f"{b['org']}-{b['servicio']}-{base}.sql"
-        open(os.path.join(destino, fn), "wb").write(d.stdout)
-        bases.append({"nombre": base, "archivo": fn, "bytes": len(d.stdout),
-                      "sha256": hashlib.sha256(d.stdout).hexdigest(),
-                      "tablas": inventario(ns, pod, base)})
+            die(f"the pg_dump of {database} failed: "
+                f"{(d.stderr or b'').decode(errors='replace')[:200]}")
+        fn = f"{b['org']}-{b['servicio']}-{database}.sql"
+        open(os.path.join(target, fn), "wb").write(d.stdout)
+        databases.append({"nombre": database, "archivo": fn, "bytes": len(d.stdout),
+                          "sha256": hashlib.sha256(d.stdout).hexdigest(),
+                          "tablas": inventory(ns, pod, database)})
 
+    # The keys of this dictionary are the bundle's MANIFEST, that is, the
+    # on-disk format that `list` and `restore` read out of `.age` files
+    # already written. They stay as they are: translating them would make
+    # every existing bundle unreadable, which is a coordinated change and
+    # not a rename.
     return {
         "tipo": "postgres", "org": b["org"], "servicio": b["servicio"], "ns": ns,
         "motor": (v.stdout or "").strip(),
         "globals": {"archivo": fg, "bytes": len(g.stdout),
                     "sha256": hashlib.sha256(g.stdout).hexdigest()},
-        "bases": bases,
-        "bytes": len(g.stdout) + sum(x["bytes"] for x in bases),
-        "credencial_sha256": huella_credencial(ns, b["secreto"]),
+        "bases": databases,
+        "bytes": len(g.stdout) + sum(x["bytes"] for x in databases),
+        "credencial_sha256": credential_fingerprint(ns, b["secreto"]),
         "secreto": b["secreto"],
     }
 
 
-def capturar_bucket(bk, destino):
+def capture_bucket(bk, target):
     r = kubectl(["get", "secret", "garage", "-n", bk["ns"], "-o", "json"])
     if r.returncode != 0:
-        morir(f"sin credencial S3 en {bk['ns']}/garage")
+        die(f"no S3 credential in {bk['ns']}/garage")
     d = json.loads(r.stdout)["data"]
     ak = base64.b64decode(d["AWS_ACCESS_KEY_ID"]).decode().strip()
     sk = base64.b64decode(d["AWS_SECRET_ACCESS_KEY"]).decode().strip()
 
-    dir_obj = os.path.join(destino, f"{bk['org']}-bucket")
-    os.makedirs(dir_obj, exist_ok=True)
-    objetos = []
-    with Tunel("garage-system", "garage", 3900) as t:
-        cont, token = True, None
-        while cont:
+    obj_dir = os.path.join(target, f"{bk['org']}-bucket")
+    os.makedirs(obj_dir, exist_ok=True)
+    objects = []
+    with Tunnel("garage-system", "garage", 3900) as t:
+        go_on, token = True, None
+        while go_on:
             q = {"list-type": "2"}
             if token:
                 q["continuation-token"] = token
-            st, cuerpo, _ = s3("GET", t.host, f"/{bk['bucket']}", q, ak, sk)
+            st, body, _ = s3("GET", t.host, f"/{bk['bucket']}", q, ak, sk)
             if st != 200:
-                morir(f"listar {bk['bucket']} dio HTTP {st}: {cuerpo[:200]!r}")
-            raiz = ET.fromstring(cuerpo)
-            nsx = {"s3": raiz.tag.split("}")[0].strip("{")} if "}" in raiz.tag else {}
+                die(f"listing {bk['bucket']} gave HTTP {st}: {body[:200]!r}")
+            root = ET.fromstring(body)
+            nsx = {"s3": root.tag.split("}")[0].strip("{")} if "}" in root.tag else {}
             def h(n, p):
                 return n.find(f"s3:{p}", nsx) if nsx else n.find(p)
-            for c in (raiz.findall("s3:Contents", nsx) if nsx else raiz.findall("Contents")):
-                clave = h(c, "Key").text
-                st2, datos, cab = s3("GET", t.host,
-                                     f"/{bk['bucket']}/{clave}", {}, ak, sk)
+            for c in (root.findall("s3:Contents", nsx) if nsx else root.findall("Contents")):
+                key = h(c, "Key").text
+                st2, data, headers = s3("GET", t.host,
+                                        f"/{bk['bucket']}/{key}", {}, ak, sk)
                 if st2 != 200:
-                    morir(f"bajar {clave} dio HTTP {st2}")
-                seguro = clave.replace("/", "%2F")
-                open(os.path.join(dir_obj, seguro), "wb").write(datos)
-                objetos.append({"clave": clave, "archivo": seguro,
-                                "bytes": len(datos),
-                                "sha256": hashlib.sha256(datos).hexdigest()})
-            tr = h(raiz, "IsTruncated")
-            cont = tr is not None and tr.text == "true"
-            nt = h(raiz, "NextContinuationToken")
+                    die(f"downloading {key} gave HTTP {st2}")
+                safe = key.replace("/", "%2F")
+                open(os.path.join(obj_dir, safe), "wb").write(data)
+                objects.append({"clave": key, "archivo": safe,
+                                "bytes": len(data),
+                                "sha256": hashlib.sha256(data).hexdigest()})
+            tr = h(root, "IsTruncated")
+            go_on = tr is not None and tr.text == "true"
+            nt = h(root, "NextContinuationToken")
             token = nt.text if nt is not None else None
     return {"tipo": "bucket", "org": bk["org"], "bucket": bk["bucket"],
-            "directorio": f"{bk['org']}-bucket", "objetos": objetos,
-            "total_bytes": sum(o["bytes"] for o in objetos)}
+            "directorio": f"{bk['org']}-bucket", "objetos": objects,
+            "total_bytes": sum(o["bytes"] for o in objects)}
 
 
-def edad_bundle(p):
+def bundle_age(p):
     return (time.time() - os.path.getmtime(p)) / 3600.0
 
 
-def capturar(raiz):
-    """Un bundle por organización, cada uno en su carpeta.
+def capture(root):
+    """One bundle per organization, each one in its folder.
 
-    El recorrido sale de `fuentes()`, que ya cruza los contratos con el
-    cluster y se niega a respaldar si discrepan. Acá solo se agrupa: una
-    organización = una carpeta = un bundle.
+    The walk comes out of `sources()`, which already crosses the contracts
+    with the cluster and refuses to back up if they disagree. Here it is
+    only grouped: one organization = one folder = one bundle.
     """
-    raiz = preparar_raiz(raiz)
-    print(f"{gris}fuentes (contratos ∩ cluster):{fin}")
-    bases, buckets = fuentes()
-    for b in bases:
-        print(f"  {gris}·{fin} postgres  {b['ns']}/{b['servicio']}")
+    root = prepare_root(root)
+    print(f"{gray}sources (contracts ∩ cluster):{reset}")
+    databases, buckets = sources()
+    for b in databases:
+        print(f"  {gray}·{reset} postgres  {b['ns']}/{b['servicio']}")
     for b in buckets:
-        print(f"  {gris}·{fin} bucket    {b['bucket']}  {gris}(garage compartido){fin}")
-    if not bases and not buckets:
-        morir("ningún contrato declara datos que respaldar")
+        print(f"  {gray}·{reset} bucket    {b['bucket']}  {gray}(shared garage){reset}")
+    if not databases and not buckets:
+        die("no contract declares data to back up")
 
-    pororg = {}
-    for b in bases:
-        pororg.setdefault(b["org"], ([], []))[0].append(b)
+    per_org = {}
+    for b in databases:
+        per_org.setdefault(b["org"], ([], []))[0].append(b)
     for bk in buckets:
-        pororg.setdefault(bk["org"], ([], []))[1].append(bk)
+        per_org.setdefault(bk["org"], ([], []))[1].append(bk)
 
-    sello = time.strftime("%Y%m%d-%H%M%S")
+    stamp = time.strftime("%Y%m%d-%H%M%S")
     rc = 0
-    hechas = []
-    for org in sorted(pororg):
-        ob, obk = pororg[org]
-        carpeta = os.path.join(raiz, f"org-{org}")
-        os.makedirs(carpeta, exist_ok=True)
-        # El nombre repite la organización aunque la carpeta ya lo diga:
-        # un bundle que viaja solo —copiado a otro disco, adjuntado a un
-        # ticket— tiene que poder decir qué es sin su contexto.
-        salida = os.path.join(carpeta, f"aegis-datos-org-{org}-{sello}.age")
-        print(f"\n{gris}── organización {org}{fin}")
-        r = capturar_org(org, ob, obk, salida)
+    done_orgs = []
+    for org in sorted(per_org):
+        ob, obk = per_org[org]
+        folder = os.path.join(root, f"org-{org}")
+        os.makedirs(folder, exist_ok=True)
+        # The name repeats the organization even though the folder already
+        # says it: a bundle that travels alone —copied to another disk,
+        # attached to a ticket— has to be able to say what it is without
+        # its context.
+        #
+        # And the name is a CONTRACT with aegis check, which looks for
+        # exactly this pattern to tell whether an organization has a
+        # backup: it is not translated.
+        out = os.path.join(folder, f"aegis-datos-org-{org}-{stamp}.age")
+        print(f"\n{gray}── organization {org}{reset}")
+        r = capture_org(org, ob, obk, out)
         rc |= r
         if r == 0:
-            hechas.append(org)
-    escribir_leeme(raiz, sorted(pororg), hechas, sello)
+            done_orgs.append(org)
+    write_readme(root, sorted(per_org), done_orgs, stamp)
     return rc
 
 
-def escribir_leeme(raiz, esperadas, hechas, sello):
-    """El mapa del árbol de respaldos, para quien lo abra dentro de un año.
+def write_readme(root, expected, done_orgs, stamp):
+    """The map of the backups tree, for whoever opens it a year from now.
 
-    Vive en la RAÍZ del destino y no en el repo, porque el momento en que
-    hace falta es justamente aquél en el que no hay repo: un disco
-    enchufado a otra máquina después de perder ésta. Un resguardo que no
-    se sabe leer es medio resguardo.
+    It lives in the ROOT of the destination and not in the repo, because
+    the moment it is needed is precisely the one in which there is no
+    repo: a disk plugged into another machine after losing this one.
+    Safekeeping you do not know how to read is half safekeeping.
 
-    Y se REESCRIBE en cada captura en vez de escribirse una vez, por la
-    razón de siempre: un archivo que se redacta a mano envejece y termina
-    describiendo un árbol que ya no existe — con la particularidad de que
-    acá nadie lo iba a contrastar nunca, porque este directorio no está
-    versionado ni lo mira ningún chequeo de git. Derivado, no puede
-    mentir más de lo que dura hasta la próxima corrida.
+    And it is REWRITTEN on every capture instead of being written once,
+    for the usual reason: a file drafted by hand ages and ends up
+    describing a tree that no longer exists — with the particularity that
+    here nobody was ever going to contrast it, because this directory is
+    not versioned and no git check looks at it. Derived, it cannot lie for
+    longer than it takes to get to the next run.
 
-    Enumera las organizaciones que los CONTRATOS declaran, no las
-    carpetas que hay: una carpeta que falta es exactamente el hallazgo, y
-    listar el directorio la escondería.
+    It enumerates the organizations the CONTRACTS declare, not the folders
+    that are there: a missing folder is exactly the finding, and listing
+    the directory would hide it.
+
+    The file is called LEER.md and stays that way: it is the on-disk name
+    on every backup disk already in use, and renaming it would leave a
+    stale twin beside the new one.
     """
-    faltan = [o for o in esperadas if o not in hechas]
-    lineas = [
-        "# Respaldos de aegis — cómo está armado esto",
+    missing = [o for o in expected if o not in done_orgs]
+    lines = [
+        "# aegis backups — how this is put together",
         "",
-        f"Última captura: {sello} (sello de los bundles de esa corrida).",
-        "ESTE ARCHIVO LO ESCRIBE `aegis data --capturar`. No lo edites:",
-        "la próxima captura lo pisa.",
+        f"Last capture: {stamp} (the stamp of that run's bundles).",
+        "THIS FILE IS WRITTEN BY `aegis data backup`. Do not edit it:",
+        "the next capture overwrites it.",
         "",
-        "## Qué hay en cada carpeta",
+        "## What is in each folder",
         "",
         "```",
-        ".aegis-destino    la marca del disco. Si su UUID no coincide con el",
-        "                  filesystem donde está esta carpeta, el disco de",
-        "                  respaldos NO está montado y la captura se niega a",
-        "                  escribir — sin eso el bundle caería en el mismo",
-        "                  disco que tiene que sobrevivir.",
-        "plataforma/       el ESTADO: secretos del store, traza del init,",
-        "                  tfstate del borde. Lo escribe aegis state backup.",
-        "org-<nombre>/     los DATOS de UNA organización: sus bases y sus",
-        "                  objetos. Un bundle por organización, nunca",
-        "                  compartido.",
+        ".aegis-destino    the disk's mark. If its UUID does not match the",
+        "                  filesystem this folder is on, the backups disk is",
+        "                  NOT mounted and the capture refuses to write —",
+        "                  without that the bundle would fall on the same",
+        "                  disk it has to survive.",
+        "platform/         the STATE: the store's secrets, the init's trail,",
+        "                  the edge's tfstate. Written by aegis state backup.",
+        "org-<name>/       the DATA of ONE organization: its databases and",
+        "                  its objects. One bundle per organization, never",
+        "                  shared.",
         "```",
         "",
-        "**Las dos mitades hacen falta.** Con el estado se levanta una",
-        "plataforma vacía; con los datos se tiene un dump que no se sabe dónde",
-        "poner.",
+        "**Both halves are needed.** With the state you raise an empty",
+        "platform; with the data you have a dump nobody knows where to put.",
         "",
-        "## Las organizaciones, según los contratos",
+        "## The organizations, according to the contracts",
         "",
     ]
-    for o in esperadas:
-        if o in hechas:
-            lineas.append(f"- `org-{o}/` — respaldada en esta corrida.")
+    for o in expected:
+        if o in done_orgs:
+            lines.append(f"- `org-{o}/` — backed up in this run.")
         else:
-            lineas.append(f"- `org-{o}/` — **SIN respaldo en esta corrida**: su "
-                          "captura falló. Lo que haya en su carpeta es más viejo.")
-    if faltan:
-        lineas += ["",
-                   "> Una organización que aparece acá y no tiene carpeta es una que",
-                   "> NUNCA se respaldó. `aegis check` la enumera contra los",
-                   "> contratos justamente para que esa ausencia tenga forma."]
-    lineas += [
+            lines.append(f"- `org-{o}/` — **WITHOUT a backup in this run**: its "
+                         "capture failed. Whatever is in its folder is older.")
+    if missing:
+        lines += ["",
+                  "> An organization that appears here and has no folder is one that",
+                  "> was NEVER backed up. `aegis check` enumerates it against the",
+                  "> contracts precisely so that that absence has a shape."]
+    lines += [
         "",
-        "## El cifrado, y la única forma de perder todo esto",
+        "## The encryption, and the only way to lose all of this",
         "",
-        "Cada `.age` está cifrado con la clave PÚBLICA del par de aegis y se abre",
-        "con la privada: `~/.config/sops/age/aegis.key`, la misma que usa SOPS",
-        "para los `.enc` del repo. Un solo par para las dos cosas.",
+        "Every `.age` is encrypted with the PUBLIC key of aegis's pair and opens",
+        "with the private one: `~/.config/sops/age/aegis.key`, the same one SOPS",
+        "uses for the repo's `.enc` files. One single pair for both things.",
         "",
-        "**Esa clave NO está en ningún bundle**, a propósito y con una guarda que",
-        "aborta la captura si aparece adentro. El huevo y la gallina en el mismo",
-        "canasto no protegen de nada. Lo que se sigue de eso hay que decirlo:",
+        "**That key is NOT in any bundle**, on purpose and with a guard that",
+        "aborts the capture if it appears inside. The chicken and the egg in the",
+        "same basket protect nothing. What follows from that has to be said:",
         "",
-        "> **Si perdiste la age key, todo lo que hay en este disco es un**",
-        "> **ladrillo.** No hay recuperación, ni parcial ni por fuerza bruta.",
-        "> La clave va a un resguardo offline, y ése tiene que ser un lugar",
-        "> DISTINTO de este disco — si viven juntos, un accidente se lleva las",
-        "> dos mitades.",
+        "> **If you lost the age key, everything on this disk is a brick.**",
+        "> There is no recovery, neither partial nor by brute force.",
+        "> The key goes to offline safekeeping, and that has to be a place",
+        "> DIFFERENT from this disk — if they live together, one accident takes",
+        "> both halves.",
         "",
-        "El cifrado no es ceremonia: el bundle de `plataforma/` lleva el tfstate",
-        "del túnel con su token EN CLARO. El `age` del bundle es lo único que lo",
-        "protege.",
+        "The encryption is not ceremony: the `platform/` bundle carries the",
+        "tunnel's tfstate with its token IN THE CLEAR. The bundle's `age` is the",
+        "only thing protecting it.",
         "",
-        "## Cómo se abre uno",
+        "## How one is opened",
         "",
-        "Sin nada de aegis, que es el caso para el que existe este archivo —",
-        "este disco enchufado a otra máquina, sin repo. Alcanza con `age` y",
-        "`tar`, y sale SQL y archivos planos:",
+        "Without anything of aegis, which is the case this file exists for —",
+        "this disk plugged into another machine, without a repo. `age` and",
+        "`tar` are enough, and out comes SQL and plain files:",
         "",
         "```",
         "age -d -i ~/.config/sops/age/aegis.key <bundle>.age | tar -xzvf -",
         "```",
         "",
-        "Con el repo a mano hay comodidad —valida el manifiesto, compara",
-        "credenciales, restaura contra la base correcta—, pero no es un formato",
-        "propietario:",
+        "With the repo at hand there is convenience —it validates the manifest,",
+        "compares credentials, restores against the right database—, but it is",
+        "not a proprietary format:",
         "",
         "```",
-        "aegis data --listar    org-<org>/aegis-datos-org-<org>-<ts>.age",
-        "aegis data --restaurar org-<org>/aegis-datos-org-<org>-<ts>.age --org <org>",
+        "aegis data list    org-<org>/aegis-datos-org-<org>-<ts>.age",
+        "aegis data restore org-<org>/aegis-datos-org-<org>-<ts>.age --org <org>",
         "```",
         "",
-        "`--listar` abre el bundle y dice qué trae sin restaurar nada.",
+        "`list` opens the bundle and says what it brings without restoring anything.",
         "",
-        "Todo bundle se verificó al escribirse: la herramienta lo descifra recién",
-        "creado y lo compara byte a byte con lo que capturó. Si alguno dice",
-        "NO-VERIFICADO, es que se produjo sin la clave privada a mano.",
+        "Every bundle was verified as it was written: the tool decrypts it right",
+        "after creating it and compares it byte by byte with what it captured. If",
+        "one says NOT-VERIFIED, it was produced without the private key at hand.",
         "",
         "## legado/",
         "",
-        "Si existe, son bundles del formato viejo (anteriores al 2026-08-11) con",
-        "TODAS las organizaciones adentro de un solo archivo. Su propio LEER.md",
-        "lo explica. No se mueven a una carpeta `org-*` porque no son de una",
-        "organización: contarlos como respaldo de una sería mentira.",
+        "If it exists, those are bundles of the old format (before 2026-08-11)",
+        "with ALL the organizations inside a single file. Its own LEER.md",
+        "explains it. They are not moved into an `org-*` folder because they do",
+        "not belong to one organization: counting them as one organization's",
+        "backup would be a lie.",
         "",
     ]
-    with open(os.path.join(raiz, "LEER.md"), "w", encoding="utf-8") as f:
-        f.write("\n".join(lineas))
-    ok(f"LEER.md al día en {raiz} ({len(esperadas)} organización(es) según los contratos)")
+    with open(os.path.join(root, "LEER.md"), "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    ok(f"LEER.md up to date in {root} ({len(expected)} organization(s) according to the contracts)")
 
 
-def capturar_org(org, bases, buckets, salida):
+def capture_org(org, databases, buckets, out):
     stage = tempfile.mkdtemp(prefix="aegis-resp-")
     pay = os.path.join(stage, "payload"); os.makedirs(pay)
     try:
-        piezas = []
-        for b in bases:
-            m = capturar_base(b, pay); piezas.append(m)
-            paso(f"postgres {m['org']}/{m['servicio']}: {m['bytes']} bytes "
+        pieces = []
+        for b in databases:
+            m = capture_database(b, pay); pieces.append(m)
+            step(f"postgres {m['org']}/{m['servicio']}: {m['bytes']} bytes "
                  f"({m['motor']})")
         for bk in buckets:
-            m = capturar_bucket(bk, pay); piezas.append(m)
-            paso(f"bucket {m['bucket']}: {len(m['objetos'])} objetos, "
+            m = capture_bucket(bk, pay); pieces.append(m)
+            step(f"bucket {m['bucket']}: {len(m['objetos'])} objects, "
                  f"{m['total_bytes']} bytes")
 
         man = {
-            "version": 2,          # v2: un bundle = una organización
+            "version": 2,          # v2: one bundle = one organization
             "organizacion": org,
             "capturado": datetime.datetime.now(datetime.timezone.utc)
                           .strftime("%Y-%m-%dT%H:%M:%SZ"),
             "instancia": subprocess.run(
                 ["kubectl", "get", "ns", "kube-system", "-o", "jsonpath={.metadata.uid}"],
                 capture_output=True, text=True).stdout.strip(),
-            "piezas": piezas,
+            "piezas": pieces,
         }
         with open(os.path.join(pay, "MANIFIESTO.json"), "w", encoding="utf-8") as f:
             json.dump(man, f, indent=2, ensure_ascii=False)
 
-        # GUARDA DURA, la misma que aegis state backup: la age key jamás
-        # entra al bundle. El huevo y la gallina no viajan juntos.
+        # HARD GUARD, the same one as aegis state backup: the age key never
+        # gets into the bundle. The chicken and the egg do not travel
+        # together.
         for r_, _, fs in os.walk(pay):
             for x in fs:
                 if x in ("aegis.key", "keys.txt") or x.endswith(".agekey"):
-                    morir("el payload contiene material de la age key — ABORTADO")
+                    die("the payload contains age key material — ABORTED")
 
         tgz = os.path.join(stage, "bundle.tgz")
         with tarfile.open(tgz, "w:gz") as tf:
@@ -702,80 +726,80 @@ def capturar_org(org, bases, buckets, salida):
 
         pub = os.environ.get("AGE_PUBLIC") or ""
         if not pub:
-            key = os.environ.get("SOPS_AGE_KEY_FILE",
-                                 os.path.expanduser("~/.config/sops/age/aegis.key"))
-            if not os.path.exists(key):
-                morir("sin AGE_PUBLIC ni age key para derivar el destinatario")
-            pub = subprocess.run(["age-keygen", "-y", key],
+            age_key = os.environ.get("SOPS_AGE_KEY_FILE",
+                                     os.path.expanduser("~/.config/sops/age/aegis.key"))
+            if not os.path.exists(age_key):
+                die("neither AGE_PUBLIC nor an age key to derive the recipient from")
+            pub = subprocess.run(["age-keygen", "-y", age_key],
                                  capture_output=True, text=True).stdout.strip()
-        os.makedirs(os.path.dirname(salida) or ".", exist_ok=True)
-        r = subprocess.run(["age", "-r", pub, "-o", salida, tgz],
+        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+        r = subprocess.run(["age", "-r", pub, "-o", out, tgz],
                            capture_output=True, text=True)
         if r.returncode != 0:
-            morir(f"age falló: {r.stderr.strip()[:200]}")
-        os.chmod(salida, 0o600)
-        ok(f"bundle age-cifrado → {salida} ({os.path.getsize(salida)} bytes)")
+            die(f"age failed: {r.stderr.strip()[:200]}")
+        os.chmod(out, 0o600)
+        ok(f"age-encrypted bundle → {out} ({os.path.getsize(out)} bytes)")
 
-        # ── ROUNDTRIP. Sin esto es "tenemos backups", no restauración
-        # probada. Se descifra de verdad y se compara byte a byte.
-        key = os.environ.get("SOPS_AGE_KEY_FILE",
-                             os.path.expanduser("~/.config/sops/age/aegis.key"))
-        if not os.path.exists(key):
-            print(f"  {ama}!{fin} sin age key privada: el bundle existe pero NO se "
-                  f"verificó (DR sin prueba de restauración)")
+        # ── ROUNDTRIP. Without this it is "we have backups", not a proven
+        # restore. It is really decrypted and compared byte by byte.
+        age_key = os.environ.get("SOPS_AGE_KEY_FILE",
+                                 os.path.expanduser("~/.config/sops/age/aegis.key"))
+        if not os.path.exists(age_key):
+            print(f"  {yellow}!{reset} without the private age key: the bundle exists but was "
+                  f"NOT verified (DR without proof of restore)")
             return 0
-        ver = tempfile.mkdtemp(prefix="aegis-ver-")
+        check_dir = tempfile.mkdtemp(prefix="aegis-ver-")
         try:
-            d = subprocess.run(["age", "-d", "-i", key, salida], capture_output=True)
+            d = subprocess.run(["age", "-d", "-i", age_key, out], capture_output=True)
             if d.returncode != 0:
-                morir("el bundle no descifra con la age key — NO confiar en él")
+                die("the bundle does not decrypt with the age key — do NOT trust it")
             with tarfile.open(fileobj=__import__("io").BytesIO(d.stdout), mode="r:gz") as tf:
-                tf.extractall(ver, filter="data")
-            malas = []
-            for p in piezas:
+                tf.extractall(check_dir, filter="data")
+            bad_ones = []
+            for p in pieces:
                 if p["tipo"] == "postgres":
-                    for pieza in [p["globals"]] + p["bases"]:
-                        q = os.path.join(ver, pieza["archivo"])
+                    for piece in [p["globals"]] + p["bases"]:
+                        q = os.path.join(check_dir, piece["archivo"])
                         if not os.path.exists(q) or \
-                           hashlib.sha256(open(q, "rb").read()).hexdigest() != pieza["sha256"]:
-                            malas.append(f"{p['org']}/{p['servicio']}:{pieza['archivo']}")
+                           hashlib.sha256(open(q, "rb").read()).hexdigest() != piece["sha256"]:
+                            bad_ones.append(f"{p['org']}/{p['servicio']}:{piece['archivo']}")
                 else:
                     for o in p["objetos"]:
-                        q = os.path.join(ver, p["directorio"], o["archivo"])
+                        q = os.path.join(check_dir, p["directorio"], o["archivo"])
                         if not os.path.exists(q) or \
                            hashlib.sha256(open(q, "rb").read()).hexdigest() != o["sha256"]:
-                            malas.append(f"{p['bucket']}:{o['clave']}")
-            if malas:
-                morir(f"ROUNDTRIP FALLÓ — no reproduce: {', '.join(malas)}")
-            ok(f"ROUNDTRIP OK — el bundle descifra y reproduce las "
-               f"{len(piezas)} piezas byte a byte")
+                            bad_ones.append(f"{p['bucket']}:{o['clave']}")
+            if bad_ones:
+                die(f"ROUNDTRIP FAILED — it does not reproduce: {', '.join(bad_ones)}")
+            ok(f"ROUNDTRIP OK — the bundle decrypts and reproduces the "
+               f"{len(pieces)} pieces byte by byte")
         finally:
-            shutil.rmtree(ver, ignore_errors=True)
+            shutil.rmtree(check_dir, ignore_errors=True)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
 
     sink = os.environ.get("AEGIS_BACKUP_SINK")
     if sink:
-        r = subprocess.run(["bash", "-c", sink, "aegis-sink", salida])
+        r = subprocess.run(["bash", "-c", sink, "aegis-sink", out])
         if r.returncode != 0:
-            morir(f"el sink FALLÓ — el bundle está en {salida} pero no salió de acá")
-        ok("sink OK — el bundle salió de la máquina")
+            die(f"the sink FAILED — the bundle is at {out} but it did not leave here")
+        ok("sink OK — the bundle left the machine")
     else:
-        print(f"  {ama}!{fin} sin AEGIS_BACKUP_SINK: el bundle queda en la MISMA "
-              f"máquina que se quiere sobrevivir")
+        print(f"  {yellow}!{reset} without AEGIS_BACKUP_SINK: the bundle stays on the SAME "
+              f"machine you want to survive")
     return 0
 
 
-# ── lectura y restauración ──────────────────────────────────────────
-def abrir(bundle):
-    key = os.environ.get("SOPS_AGE_KEY_FILE",
-                         os.path.expanduser("~/.config/sops/age/aegis.key"))
-    if not os.path.exists(key):
-        morir(f"sin age key privada ({key}) — es el irreducible; sin ella el "
-              f"bundle no descifra, y así debe ser")
-    d = subprocess.run(["age", "-d", "-i", key, bundle], capture_output=True)
+# ── reading and restoring ───────────────────────────────────────────
+def open_bundle(bundle):
+    age_key = os.environ.get("SOPS_AGE_KEY_FILE",
+                             os.path.expanduser("~/.config/sops/age/aegis.key"))
+    if not os.path.exists(age_key):
+        die(f"without the private age key ({age_key}) — it is the irreducible; without "
+            f"it the bundle does not decrypt, and so it must be")
+    d = subprocess.run(["age", "-d", "-i", age_key, bundle], capture_output=True)
     if d.returncode != 0:
-        morir(f"no descifra: {d.stderr.decode(errors='replace')[:200]}")
+        die(f"it does not decrypt: {d.stderr.decode(errors='replace')[:200]}")
     tmp = tempfile.mkdtemp(prefix="aegis-rest-")
     with tarfile.open(fileobj=__import__("io").BytesIO(d.stdout), mode="r:gz") as tf:
         tf.extractall(tmp, filter="data")
@@ -783,76 +807,76 @@ def abrir(bundle):
     return tmp, man
 
 
-def listar(bundle):
-    tmp, man = abrir(bundle)
+def list_bundle(bundle):
+    tmp, man = open_bundle(bundle)
     try:
-        print(f"{gris}capturado:{fin} {man['capturado']}   "
-              f"{gris}instancia:{fin} {man['instancia'][:12]}…")
-        print(f"{gris}antigüedad:{fin} {edad_bundle(bundle):.1f} h\n")
+        print(f"{gray}captured:{reset} {man['capturado']}   "
+              f"{gray}instance:{reset} {man['instancia'][:12]}…")
+        print(f"{gray}age:{reset} {bundle_age(bundle):.1f} h\n")
         for p in man["piezas"]:
             if p["tipo"] == "postgres":
                 print(f"  postgres  {p['org']}/{p['servicio']:10} {p['bytes']:>9} bytes  "
-                      f"{gris}{p['motor']}{fin}")
+                      f"{gray}{p['motor']}{reset}")
                 for b_ in p["bases"]:
                     tt = b_["tablas"] or []
-                    print(f"            {gris}base {b_['nombre']}: {b_['bytes']} B, "
-                          f"{len(tt)} tablas, {sum(x['filas'] for x in tt)} filas{fin}")
-                print(f"            {gris}credencial esperada sha256:"
-                      f"{(p.get('credencial_sha256') or '?')[:16]}…{fin}")
+                    print(f"            {gray}database {b_['nombre']}: {b_['bytes']} B, "
+                          f"{len(tt)} tables, {sum(x['filas'] for x in tt)} rows{reset}")
+                print(f"            {gray}expected credential sha256:"
+                      f"{(p.get('credencial_sha256') or '?')[:16]}…{reset}")
             else:
-                print(f"  bucket    {p['bucket']:20} {len(p['objetos'])} objetos, "
+                print(f"  bucket    {p['bucket']:20} {len(p['objetos'])} objects, "
                       f"{p['total_bytes']} bytes")
                 for o in p["objetos"][:5]:
-                    print(f"            {gris}{o['clave']}  {o['bytes']} B{fin}")
+                    print(f"            {gray}{o['clave']}  {o['bytes']} B{reset}")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return 0
 
 
-def bajar_consumidores(ns):
-    """Escala a cero lo que pueda tener la base abierta, y recuerda a cuánto.
+def scale_consumers_down(ns):
+    """Scales to zero whatever may have the database open, and remembers to what.
 
-    ArgoCD tiene selfHeal en estas apps, así que va a querer devolver las
-    réplicas. La ventana es de segundos y el restore es más rápido, pero
-    si alguna vez deja de serlo el síntoma sería un DROP DATABASE que
-    falla, no datos corrompidos — que es el modo de fallar correcto.
+    ArgoCD has selfHeal on these apps, so it is going to want to give the
+    replicas back. The window is seconds and the restore is faster, but if
+    one day it stops being so the symptom would be a DROP DATABASE that
+    fails, not corrupted data — which is the correct way to fail.
     """
     r = kubectl(["get", "deploy", "-n", ns, "-o",
                  "jsonpath={range .items[*]}{.metadata.name} {.spec.replicas}{\"\\n\"}{end}"])
-    previos = {}
+    previous = {}
     for l in (r.stdout or "").splitlines():
         if not l.strip():
             continue
         n, rep = l.split()
-        previos[n] = int(rep)
-    for n, rep in previos.items():
+        previous[n] = int(rep)
+    for n, rep in previous.items():
         if rep:
             kubectl(["scale", "deploy", n, "-n", ns, "--replicas=0"])
-    if previos:
-        paso(f"consumidores abajo: {', '.join(f'{n}({r})' for n, r in previos.items())}")
+    if previous:
+        step(f"consumers down: {', '.join(f'{n}({r})' for n, r in previous.items())}")
         for _ in range(30):
             q = kubectl(["get", "pods", "-n", ns, "-l", "!aegis.dev/component",
                          "--no-headers"])
             if not (q.stdout or "").strip():
                 break
             time.sleep(2)
-    return previos
+    return previous
 
 
-def subir_consumidores(ns, previos):
-    for n, rep in previos.items():
+def scale_consumers_up(ns, previous):
+    for n, rep in previous.items():
         if rep:
             kubectl(["scale", "deploy", n, "-n", ns, f"--replicas={rep}"])
-    if previos:
-        paso(f"consumidores arriba de nuevo: "
-             f"{', '.join(f'{n}({r})' for n, r in previos.items())}")
+    if previous:
+        step(f"consumers back up: "
+             f"{', '.join(f'{n}({r})' for n, r in previous.items())}")
 
 
-def cortar_conexiones(ns, pod):
-    """Las sesiones que queden después de bajar los pods.
+def cut_connections(ns, pod):
+    """The sessions left over after bringing the pods down.
 
-    Un pod que se está yendo puede dejar la conexión un rato, y basta UNA
-    para que DROP DATABASE falle.
+    A pod that is going away can leave the connection for a while, and ONE
+    is enough for DROP DATABASE to fail.
     """
     kubectl(["exec", "-n", ns, pod, "--", "sh", "-c",
              'psql -U "$POSTGRES_USER" -d postgres -Atc '
@@ -860,149 +884,150 @@ def cortar_conexiones(ns, pod):
              'WHERE pid <> pg_backend_pid() AND datname IS NOT NULL;"'])
 
 
-def restaurar(bundle, org, force):
-    tmp, man = abrir(bundle)
+def restore(bundle, org, force):
+    tmp, man = open_bundle(bundle)
     try:
-        piezas = [p for p in man["piezas"] if p["org"] == org]
-        if not piezas:
-            morir(f"el bundle no tiene nada de {org!r}. Hay: "
-                  f"{', '.join(sorted({p['org'] for p in man['piezas']}))}")
-        for p in piezas:
+        pieces = [p for p in man["piezas"] if p["org"] == org]
+        if not pieces:
+            die(f"the bundle has nothing of {org!r}. There is: "
+                f"{', '.join(sorted({p['org'] for p in man['piezas']}))}")
+        for p in pieces:
             if p["tipo"] != "postgres":
-                print(f"  {ama}!{fin} {p['bucket']}: la restauración de objetos "
-                      f"todavía no está implementada; el bundle SÍ los tiene")
+                print(f"  {yellow}!{reset} {p['bucket']}: restoring objects is "
+                      f"not implemented yet; the bundle DOES have them")
                 continue
 
-            # LA GUARDA QUE EVITA "restauré y no conecta": el dump trae
-            # el hash SCRAM del rol, así que la base restaurada volverá a
-            # esperar la contraseña que había AL CAPTURAR. Si el Secret
-            # rotó desde entonces, restaurar deja la base pidiendo una y
-            # el pod presentando otra, y el síntoma —auth failed— no se
-            # parece a la causa.
-            viva = huella_credencial(p["ns"], p["secreto"])
-            esperada = p.get("credencial_sha256")
-            if esperada and viva and viva != esperada:
-                msg = (f"la credencial de {p['ns']}/{p['secreto']} ROTÓ después de "
-                       f"esta captura.\n"
-                       f"      El dump reinstalará la contraseña vieja y el pod "
-                       f"presentará la nueva.\n"
-                       f"      Restaurá también el Secret desde git al commit de "
-                       f"esa fecha, o rotá\n"
-                       f"      la credencial DESPUÉS de restaurar.")
+            # THE GUARD THAT PREVENTS "I restored and it does not connect":
+            # the dump brings the role's SCRAM hash, so the restored
+            # database will again expect the password that was there AT
+            # CAPTURE TIME. If the Secret rotated since then, restoring
+            # leaves the database asking for one and the pod presenting
+            # another, and the symptom —auth failed— does not look like the
+            # cause.
+            live = credential_fingerprint(p["ns"], p["secreto"])
+            expected = p.get("credencial_sha256")
+            if expected and live and live != expected:
+                msg = (f"the credential of {p['ns']}/{p['secreto']} ROTATED after "
+                       f"this capture.\n"
+                       f"      The dump will reinstall the old password and the pod "
+                       f"will present the new one.\n"
+                       f"      Restore the Secret from git at that date's commit too, "
+                       f"or rotate\n"
+                       f"      the credential AFTER restoring.")
                 if not force:
-                    morir(msg)
-                print(f"  {ama}!{fin} {msg}\n      {ama}--force: sigo igual{fin}")
+                    die(msg)
+                print(f"  {yellow}!{reset} {msg}\n      {yellow}--force: I go on anyway{reset}")
 
             pod = f"{p['servicio']}-0"
-            for pieza in [p["globals"]] + p["bases"]:
-                b_ = open(os.path.join(tmp, pieza["archivo"]), "rb").read()
-                if hashlib.sha256(b_).hexdigest() != pieza["sha256"]:
-                    morir(f"{pieza['archivo']} no coincide con su sha256 del manifiesto")
+            for piece in [p["globals"]] + p["bases"]:
+                b_ = open(os.path.join(tmp, piece["archivo"]), "rb").read()
+                if hashlib.sha256(b_).hexdigest() != piece["sha256"]:
+                    die(f"{piece['archivo']} does not match its sha256 from the manifest")
 
-            # ── EL PROTOCOLO, que es más que un `psql <` ────────────
+            # ── THE PROTOCOL, which is more than a `psql <` ─────────
             #
-            # Se bajan los consumidores porque un pg_dump con --clean
-            # dropea objetos que la app puede estar usando. Y se vuelven
-            # a subir PASE LO QUE PASE: si el restore muere a la mitad,
-            # dejar la organización en cero réplicas convertiría una
-            # restauración fallida en una caída.
-            consumidores = bajar_consumidores(p["ns"])
+            # The consumers are brought down because a pg_dump with
+            # --clean drops objects the app may be using. And they are
+            # brought back up NO MATTER WHAT: if the restore dies halfway,
+            # leaving the organization at zero replicas would turn a failed
+            # restore into an outage.
+            consumers = scale_consumers_down(p["ns"])
             try:
-                cortar_conexiones(p["ns"], pod)
+                cut_connections(p["ns"], pod)
 
-                # Globals SIN ON_ERROR_STOP: los roles ya existen y
-                # decirlo es ruido esperado, no una falla.
+                # Globals WITHOUT ON_ERROR_STOP: the roles already exist
+                # and saying so is expected noise, not a failure.
                 g = open(os.path.join(tmp, p["globals"]["archivo"]), "rb").read()
                 kubectl(["exec", "-i", "-n", p["ns"], pod, "--", "sh", "-c",
                          'psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=0'],
-                        binario=True, entrada=g)
-                paso(f"roles restaurados ({len(g)} bytes)")
+                        binary=True, stdin_data=g)
+                step(f"roles restored ({len(g)} bytes)")
 
-                for base in p["bases"]:
-                    vivas = bases_de(p["ns"], pod)
-                    if base["nombre"] not in vivas:
+                for database in p["bases"]:
+                    alive_dbs = databases_of(p["ns"], pod)
+                    if database["nombre"] not in alive_dbs:
                         psql(p["ns"], pod, "postgres",
-                             f'CREATE DATABASE "{base["nombre"]}"')
-                        paso(f"base {base['nombre']} no existía: recreada")
-                    sql = open(os.path.join(tmp, base["archivo"]), "rb").read()
+                             f'CREATE DATABASE "{database["nombre"]}"')
+                        step(f"database {database['nombre']} did not exist: recreated")
+                    sql = open(os.path.join(tmp, database["archivo"]), "rb").read()
                     r = kubectl(["exec", "-i", "-n", p["ns"], pod, "--", "sh", "-c",
-                                 f'psql -U "$POSTGRES_USER" -d {base["nombre"]} '
+                                 f'psql -U "$POSTGRES_USER" -d {database["nombre"]} '
                                  f'-v ON_ERROR_STOP=1'],
-                                binario=True, entrada=sql)
+                                binary=True, stdin_data=sql)
                     err = (r.stderr or b"").decode(errors="replace")
-                    graves = [l for l in err.splitlines() if "ERROR" in l]
-                    if graves:
-                        print(f"  {rojo}!{fin} psql sobre {base['nombre']}:")
-                        for l in graves[:8]:
-                            print(f"      {gris}{l}{fin}")
-                    paso(f"base {base['nombre']} aplicada ({len(sql)} bytes)")
+                    serious = [l for l in err.splitlines() if "ERROR" in l]
+                    if serious:
+                        print(f"  {red}!{reset} psql over {database['nombre']}:")
+                        for l in serious[:8]:
+                            print(f"      {gray}{l}{reset}")
+                    step(f"database {database['nombre']} applied ({len(sql)} bytes)")
             finally:
-                subir_consumidores(p["ns"], consumidores)
+                scale_consumers_up(p["ns"], consumers)
 
-            # ── VERIFICACIÓN, la parte que faltaba ──────────────────
+            # ── VERIFICATION, the part that was missing ─────────────
             #
-            # El 2026-08-09 una restauración dejó la base BORRADA y
-            # reportó éxito, porque miraba el código de salida de psql y
-            # no el resultado. Ahora se vuelve a medir el inventario y se
-            # compara contra el que se guardó al capturar. Si no
-            # coincide, no está restaurado, diga lo que diga psql.
-            problemas = []
-            vivas = bases_de(p["ns"], pod)
-            for base in p["bases"]:
-                if base["nombre"] not in vivas:
-                    problemas.append(f"la base {base['nombre']} NO EXISTE")
+            # On 2026-08-09 a restore left the database DELETED and
+            # reported success, because it looked at psql's exit code and
+            # not at the result. Now the inventory is measured again and
+            # compared against the one stored at capture time. If it does
+            # not match, it is not restored, whatever psql says.
+            problems = []
+            alive_dbs = databases_of(p["ns"], pod)
+            for database in p["bases"]:
+                if database["nombre"] not in alive_dbs:
+                    problems.append(f"the database {database['nombre']} DOES NOT EXIST")
                     continue
-                ahora = {t["tabla"]: t["filas"] for t in (inventario(p["ns"], pod, base["nombre"]) or [])}
-                for t in base["tablas"] or []:
-                    if t["tabla"] not in ahora:
-                        problemas.append(f"{base['nombre']}: falta la tabla {t['tabla']}")
-                    elif ahora[t["tabla"]] != t["filas"]:
-                        problemas.append(
-                            f"{base['nombre']}.{t['tabla']}: {ahora[t['tabla']]} filas, "
-                            f"se esperaban {t['filas']}")
-            if problemas:
-                for x in problemas[:12]:
-                    print(f"  {rojo}✗{fin} {x}")
-                morir(f"{p['org']}/{p['servicio']}: la restauración NO reproduce lo "
-                      f"capturado — no la doy por buena")
+                now = {t["tabla"]: t["filas"] for t in (inventory(p["ns"], pod, database["nombre"]) or [])}
+                for t in database["tablas"] or []:
+                    if t["tabla"] not in now:
+                        problems.append(f"{database['nombre']}: the table {t['tabla']} is missing")
+                    elif now[t["tabla"]] != t["filas"]:
+                        problems.append(
+                            f"{database['nombre']}.{t['tabla']}: {now[t['tabla']]} rows, "
+                            f"{t['filas']} were expected")
+            if problems:
+                for x in problems[:12]:
+                    print(f"  {red}✗{reset} {x}")
+                die(f"{p['org']}/{p['servicio']}: the restore does NOT reproduce what "
+                    f"was captured — I do not call it good")
             n_t = sum(len(b_["tablas"] or []) for b_ in p["bases"])
-            ok(f"{p['org']}/{p['servicio']} restaurado y VERIFICADO "
-               f"({len(p['bases'])} bases, {n_t} tablas, filas coinciden)")
+            ok(f"{p['org']}/{p['servicio']} restored and VERIFIED "
+               f"({len(p['bases'])} databases, {n_t} tables, the rows match)")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return 0
 
 
 def main():
-    # Regla 1: verbos, no flags. Y el mismo par de nombres que
-    # `aegis state`, porque son la misma operación sobre otra cosa:
-    # `state` es la MÁQUINA, `data` son los DATOS de los inquilinos.
+    # Rule 1: verbs, not flags. And the same pair of names as
+    # `aegis state`, because they are the same operation over another
+    # thing: `state` is the MACHINE, `data` is the tenants' DATA.
     ap = argparse.ArgumentParser(prog=cli.cmd("data"))
-    sub = ap.add_subparsers(dest="verbo", required=True)
-    s = sub.add_parser("backup", help=f"un bundle por organización (default: {DESTINO_DEF})")
-    s.add_argument("directorio", nargs="?", default="", metavar="DIRECTORIO")
-    s = sub.add_parser("list", help="qué hay adentro de un bundle, sin restaurar")
+    sub = ap.add_subparsers(dest="verb", required=True)
+    s = sub.add_parser("backup", help=f"one bundle per organization (default: {DEFAULT_DEST})")
+    s.add_argument("directory", nargs="?", default="", metavar="DIRECTORY")
+    s = sub.add_parser("list", help="what is inside a bundle, without restoring")
     s.add_argument("bundle", metavar="BUNDLE.age")
-    s = sub.add_parser("restore", help="restaura los datos de UNA organización")
+    s = sub.add_parser("restore", help="restores the data of ONE organization")
     s.add_argument("bundle", metavar="BUNDLE.age")
     s.add_argument("--org", required=True,
-                   help="restaurar TODO de una vez no es una operación que convenga hacer fácil")
+                   help="restoring EVERYTHING in one go is not an operation worth making easy")
     s.add_argument("--force", action="store_true",
-                    help="seguir aunque la credencial haya rotado desde la captura")
+                    help="go on even if the credential rotated since the capture")
     a = ap.parse_args()
-    a.capturar  = a.directorio if a.verbo == "backup" else None
-    a.listar    = a.bundle if a.verbo == "list" else None
-    a.restaurar = a.bundle if a.verbo == "restore" else None
-    if a.verbo != "restore":
+    a.capture_dir   = a.directory if a.verb == "backup" else None
+    a.list_bundle   = a.bundle if a.verb == "list" else None
+    a.restore_bundle = a.bundle if a.verb == "restore" else None
+    if a.verb != "restore":
         a.org = None
         a.force = False
 
-    if a.listar:
-        return listar(a.listar)
-    if a.restaurar:
-        return restaurar(a.restaurar, a.org, a.force)
+    if a.list_bundle:
+        return list_bundle(a.list_bundle)
+    if a.restore_bundle:
+        return restore(a.restore_bundle, a.org, a.force)
 
-    return capturar(a.capturar or DESTINO_DEF)
+    return capture(a.capture_dir or DEFAULT_DEST)
 
 
 if __name__ == "__main__":

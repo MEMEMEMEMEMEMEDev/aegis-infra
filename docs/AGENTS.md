@@ -1,231 +1,286 @@
-# AGENTS.md — contrato para trabajar sobre este artefacto
+# AGENTS.md — the contract for working on this artifact
 
-Este archivo es para el agente (AI o humano) que va a MODIFICAR
-aegis-v2: agregar features, arreglar bugs, atacar ítems del backlog.
-Leelo entero antes de tocar nada — casi todas las reglas de acá
-nacieron de un incidente real que costó una corrida.
+This file is for the agent (AI or human) who is going to MODIFY
+aegis-v3: add features, fix bugs, take items off the backlog. Read
+it end to end before touching anything — almost every rule here was
+born from a real incident that cost a run.
 
-Si en cambio estás en la VM donde la plataforma CORRE → `OPERAR.md`.
-Si querés entender el porqué histórico de todo → `HISTORIA.md`.
+If instead you are on the machine where the platform RUNS →
+`OPERATE.md`. The vocabulary is law and lives in `glossary.md`. The
+historical why of v3 — the working record between the operator and
+Claude — is `plan/`, `ENCARGO.md` and `EJECUTADO.md`, and those stay
+in Spanish on purpose.
 
 ---
 
-## 1. Qué es esto y en qué estado está
+## 1. What this is and what state it is in
 
-aegis-v2 es el bootstrap declarativo de la plataforma aegis:
-`init/` (orquestador de 14 fases idempotentes) + `platform/` (el
-repo de plataforma que el init despliega: tofu Cloudflare-only,
-ansible, manifests K8s App-of-Apps, ci-images, docs).
+aegis-v3 is the declarative bootstrap of the aegis platform, split
+in two the way v2 never was:
 
-Estado: **VERSIÓN 2 CERRADA (2026-07-24)** — validada de punta a
-punta contra VM real: 14/14 fases, 146+ gates en verde incluidos los
-fail-closed, tenant aislado (netpols, RBAC, build sin privilegios,
-firma + admisión Enforce), y tools de recuperación (backup/restore/
-rotate/destroy) ejercitados. `main` es la rama de verdad.
+- the **product** (`AEGIS_ROOT`) — this repo: `bin/` (the
+  dispatcher), `libexec/` (one file per command), `lib/` (the shared
+  helpers, bash and python), `init/` (the orchestrator and its 15
+  idempotent phases), `verify/` (the verifier), `seed/` (what
+  ships). Read-only for the duration of a run.
+- the **instance** (`AEGIS_HOME`) — one machine's living state:
+  `platform/` (the GitOps repo the init deploys), `.init-state/`,
+  `.state-secrets/`, `aegis.conf`. Mutable.
 
-La secuencia canónica de fases y las decisiones D1-D11 están en
-`platform/docs/architecture/bootstrap.md`. **Si ese doc y el init
-divergen, es un bug: se corrigen juntos en el mismo commit.**
+Where each thing lives is decided in exactly one place —
+`lib/paths.sh` and its python twin `lib/aegis/paths.py` — and both
+read the same environment variables, so a bash command and a python
+one sitting side by side cannot disagree about where the instance
+is.
 
-## 2. Los dos mundos: dónde estás parado
+The platform repo is not written by hand: it is instantiated from
+`seed/platform/`. The rule is structural — **what does not go in
+through `seed/` did not go in.**
 
-- **WSL (la máquina del operador)** — acá vive EL repo
-  (`~/aegis-v2`, git, remoto privado). Acá se edita, se corre
-  `verify-static.sh`, se commitea. Es la máquina PRIMARIA del
-  operador: cuidado extremo con comandos destructivos (`rm -rf`
-  está efectivamente prohibido fuera de scratch).
-- **La VM (VirtualBox, desechable)** — acá se CORRE el init
-  (`~/workspace/aegis-v2`, un clone). Cada corrida arranca de
-  snapshot limpio. La VM se rompe y se revierte sin drama; el repo
-  en WSL jamás.
+State: **VERSION 2 CLOSED (2026-07-24)** — validated end to end
+against a real VM: 14/14 phases, 146+ gates green including the
+fail-closed ones, an isolated tenant (netpols, RBAC, unprivileged
+build, signature + Enforce admission), and recovery tools
+(backup/restore/rotate/destroy) exercised. v3 is the rebuild of that
+same artifact around the product/instance split and an English
+surface; its plan is in `plan/` and what has been executed is
+tracked in `EJECUTADO.md`.
 
-El planning (backlog W-NN, roadmap de olas, paquetes de corrida,
-evidencia) vive en un workspace separado del operador, fuera de este
-repo. Pedíselo si lo necesitás.
+The canonical sequence of phases and decisions D1–D11 are in
+`platform/docs/architecture/bootstrap.md`. **If that doc and the
+init diverge, that is a bug: they get fixed together, in the same
+commit.**
 
-## 3. El método (no negociable)
+## 2. The two worlds: where you are standing
 
-Todo cambio sigue este ciclo, sin saltos:
+- **The product repo (the operator's desktop)** — THE repo lives
+  here: `~/Escritorio/workspace/aegis-v3` (git, private remote).
+  This is where you edit, where you run `aegis verify`, where you
+  commit. It is the operator's PRIMARY machine: extreme care with
+  destructive commands (`rm -rf` is effectively forbidden outside
+  scratch).
+- **The instance (disposable)** — this is where the init RUNS and
+  where all the mutable state lands. It is disposable by design; the
+  product repo never is. v3's first real run goes on the VPS lab, in
+  the local profile (`platform/docs/protocols/vps-lab.md`, and the
+  `aegis vps` command); the house instance comes second.
+
+A wrinkle worth knowing before you run anything: `aegis preflight`
+still defaults its NICs to the VirtualBox shape v2 ran on
+(`NAT_IF=enp0s3`, `HOST_IF=enp0s8`). On any other machine, override
+them.
+
+The plan (the wave roadmap, the run packages, the decisions and the
+dissents) lives in `plan/` inside this repo, together with
+`ENCARGO.md` (what was asked for) and `EJECUTADO.md` (what has been
+done). All three are in Spanish, and stay that way: they are the
+working record, not the product.
+
+## 3. The method (non-negotiable)
+
+Every change follows this cycle, with no skipping:
 
 ```
-1. UN ítem = UN commit (Conventional Commits).
-2. El fix ataca la CLASE, no el síntoma (si el mismo tipo de bug
-   aparece 2 veces → helper canónico en init/lib/).
-3. Todo fix/feature lleva su check en init/verify-static.sh.
-4. Todo check se valida con su DIENTE: mutás el código (rompés lo
-   que el check protege) y verificás que el check FALLE. Un check
-   que no muerde no existe.
-5. verify-static.sh: TODO PASS antes de commitear.
-6. Nada está "hecho" hasta que una CORRIDA lo valida en la VM.
-   La corrida la lanza el operador; vos preparás el paquete (qué
-   vigilar, qué gates nuevos, cómo diagnosticar si frena).
+1. ONE item = ONE commit (Conventional Commits).
+2. The fix attacks the CLASS, not the symptom (if the same kind of
+   bug shows up twice → a canonical helper in lib/).
+3. Every fix/feature carries its check in verify/checks/ — one
+   check is one file, with exactly one verdict.
+4. Every check is validated with its TOOTH, in verify/teeth/: you
+   mutate the code (you break what the check protects) and verify
+   that the check FAILS. A check that does not bite does not exist.
+5. `aegis verify`: ALL PASS before committing.
+6. Nothing is "done" until a RUN validates it on a real instance.
+   The operator launches the run; you prepare the package (what to
+   watch, which gates are new, how to diagnose it if it stalls).
 ```
 
-Sobre los dientes: mutaciones débiles producen falsa confianza. La
-mutación correcta es la regresión REAL (el bug que motivó el check),
-no un cambio cosmético. Está documentado que dientes bien hechos
-cazaron bugs en los propios checks.
+On teeth: weak mutations produce false confidence. The correct
+mutation is the REAL regression (the bug that motivated the check),
+not a cosmetic change. It is documented that well-made teeth caught
+bugs in the checks themselves.
 
-Sobre las corridas: el criterio vigente es UNA pasada desde snapshot
-limpio, cero intervenciones manuales, exit 0, `gates.jsonl`
-archivado como evidencia. `--from <fase>` se permite solo durante
-debugging iterativo, nunca como validación final.
+On runs: the standing criterion is ONE pass from a clean starting
+point, zero manual interventions, exit 0, `gates.jsonl` archived as
+evidence. `--from <phase>` is allowed only during iterative
+debugging, never as final validation.
 
-## 4. Reglas duras (cada una tiene un cadáver detrás)
+## 4. Hard rules (each one has a corpse behind it)
 
-### Secretos
+### Secrets
 
-- NUNCA imprimir contenido de Secrets: ni `kubectl get secret -o
-  yaml/json`, ni `--decode`, ni base64. Shape-checks solo por
-  longitud (`wc -c` sobre archivo).
-- Secretos JAMÁS en argv (`/proc/PID/cmdline` es público):
+- NEVER print the contents of Secrets: not `kubectl get secret -o
+  yaml/json`, not `--decode`, not base64. Shape checks by length
+  only (`wc -c` over a file).
+- Secrets NEVER in argv (`/proc/PID/cmdline` is public):
   `--from-file`, stdin, `htpasswd -i`, `jq --rawfile`.
-- SOPS cifra EN la ruta del repo (la creation_rule matchea por
-  path): `mv` primero, `sops -e` después, roundtrip SIEMPRE
+- SOPS encrypts AT the repo path (the creation_rule matches by
+  path): `mv` first, `sops -e` after, roundtrip ALWAYS
   (`sops -d | head -c1`).
-- Material en claro solo en tmpfs (`/dev/shm`), chmod 700, shred al
-  salir.
-- Secrets K8s por `data:` byte-preserving; NUNCA `stringData`
-  armado a mano (el folding YAML agrega 1 byte y rompe HMACs).
-- Credenciales compartidas (htpasswd↔regcred, HMAC↔webhook): UN
-  origen, derivación en el MISMO proceso, UN commit.
-- La age key es EL irreducible: jamás en un backup bundle, jamás en
-  un log, jamás en el repo. Todo lo demás se recupera con ella.
-- La docena completa: `platform/docs/conventions/secrets.md`.
+- Cleartext material only in tmpfs (`/dev/shm`), chmod 700, shred on
+  exit.
+- K8s Secrets via `data:`, byte-preserving; NEVER a `stringData`
+  assembled by hand (YAML folding adds 1 byte and breaks HMACs).
+- Shared credentials (htpasswd↔regcred, HMAC↔webhook): ONE origin,
+  derivation in the SAME process, ONE commit.
+- The age key is THE irreducible: never in a backup bundle, never in
+  a log, never in the repo. Everything else is recoverable with it.
+- The full dozen: `platform/docs/conventions/secrets.md`.
 
-### Verificación
+### Verification
 
-- **El binario decide, la doc es una hipótesis.** Versiones, flags,
-  schemas de CRD: verificar contra lo desplegado (`kubectl explain`,
-  `--dry-run=server`, tags reales del registry remoto), nunca desde
-  memoria de entrenamiento. Este proyecto tiene 7 instancias
-  documentadas de "la doc mintió" y al menos 2 de "el pin inventado
-  de memoria no existía".
-- No afirmar "está hecho" sin verificar en la fuente. Roadmap ≠
-  estado.
-- El test definitorio es el del CONSUMIDOR real (cliente→servidor
-  real), no una lectura local que lo proxee.
-- Traer recursos byte-idénticos a los que funcionaron en vivo, no
-  reconstruirlos de memoria.
+- **The binary decides, the doc is a hypothesis.** Versions, flags,
+  CRD schemas: verify against what is deployed (`kubectl explain`,
+  `--dry-run=server`, real tags from the remote registry), never
+  from training memory. This project has 7 documented instances of
+  "the doc lied" and at least 2 of "the pin invented from memory did
+  not exist".
+- Do not claim "it is done" without verifying at the source. Roadmap
+  ≠ state.
+- The defining test is the one from the real CONSUMER
+  (client→real server), not a local read that proxies for it.
+- Bring resources byte-identical to the ones that worked live; do
+  not reconstruct them from memory.
 
-### Código del init
+### The init's code
 
-- stdout SAGRADO: todo log a stderr. Cualquier función cuyo valor
-  se capture con `$()` no puede loguear a stdout (mordió 2 veces).
-- Nunca `if (source fase)` ni condiciones que envuelvan código con
-  `set -e` — bash ignora errexit en contexto de condición (estuvo
-  muerto 15 corridas). Patrón: `set +e; (source); rc=$?; set -e`.
-- YAML nunca por texto: leer estructura con `yaml_lists_file`,
-  escribir con `inject_placeholder` (valida el YAML antes de
-  escribir). Los guards `grep -q` sobre YAML están prohibidos
-  (check 41) — matchean comentarios.
-- Convergencia antes de medir: EXISTENCIA → ESTABILIDAD → MEDIR
+- stdout is SACRED: all logging to stderr. Any function whose value
+  is captured with `$()` cannot log to stdout (it bit twice).
+- Never `if (source phase)`, nor conditions that wrap code with
+  `set -e` — bash ignores errexit in a condition context (it was
+  dead for 15 runs). The pattern is: `set +e; (source); rc=$?;
+  set -e`.
+- YAML never by text: read structure with `yaml_lists_file`, write
+  with `inject_placeholder` (which validates the YAML before
+  writing). `grep -q` guards over YAML are forbidden (check 041) —
+  they match comments.
+- Convergence before measurement: EXISTENCE → STABILITY → MEASURE
   (`wait_for` / `k8s_converged` / `deploy_current_pods_ok`).
-  Prohibido `items[0]` sobre colecciones en cascada (check 72).
-- Transitorio ≠ fallo: "no convergió" espera con timeout generoso;
-  "convergió a error" corta con diagnóstico. Firmas de red
-  centralizadas en `AEGIS_NET_SIGS`.
-- Todo gate: puede fallar, aísla la propiedad que verifica (el
-  probe cumple TODAS las demás políticas del namespace), asserta el
-  MENSAJE del rechazo, habla al fallar (`gate_diag`) y registra en
-  `gates.jsonl`.
-- Pasos de revert NUNCA con `&&` — cada paso con su exit code
+  `items[0]` over cascading collections is forbidden (check 072).
+- Transient ≠ failure: "it did not converge" waits with a generous
+  timeout; "it converged to an error" stops with a diagnosis.
+  Network signatures are centralised in `AEGIS_NET_SIGS`.
+- Every gate: can fail, isolates the property it verifies (the probe
+  satisfies ALL the namespace's other policies), asserts the
+  rejection MESSAGE, speaks when it fails (`gate_diag`) and records
+  into `gates.jsonl`.
+- Revert steps NEVER with `&&` — each step with its exit code
   visible.
-- tofu SIEMPRE vía el wrapper (`platform/tofu/tofu-apply.sh`) — a
-  pelo faltan las TF_VARs y hay destroys fantasma de recursos
-  count-gated.
-- Del lado del host: python3+pyyaml (yq NO está instalado en WSL).
+- tofu ALWAYS via the wrapper (`platform/tofu/tofu-apply.sh`) —
+  bare, the TF_VARs are missing and there are phantom destroys of
+  count-gated resources.
+- On the host side: python3+pyyaml (yq is NOT installed on the
+  operator's machine).
 
-### Git y repos
+### Git and repos
 
-- Los repos sobre los que el init escribe son DESECHABLES (topic
-  `aegis-v2-disposable`). Sin marcador → ABORTA. Jamás operar
-  contra repos reales del operador.
-- Workflow: feature branch → PR/merge a main. Merges de integración
-  con `--no-ff`. Nunca commitear directo a main sin acuerdo.
-- Nunca borrar/forzar sobre algo que no creaste sin mirar primero
-  qué hay.
+- The repos the init writes to are DISPOSABLE (topic
+  `aegis-v2-disposable`). No marker → ABORT. Never operate against
+  the operator's real repos.
+- Workflow: feature branch → PR/merge into main. Integration merges
+  with `--no-ff`. Never commit straight to main without agreement.
+- Never delete or force over something you did not create without
+  first looking at what is there.
 
-## 5. Autonomía: cuándo frenar
+## 5. Autonomy: when to stop
 
-Clasificá cada acción ANTES de ejecutarla:
+Classify every action BEFORE executing it:
 
-- **VERDE (fluí)**: leer, buscar, editar código + check + diente,
-  correr verify-static, commitear en branch propia.
-- **AMARILLO (un freno: mostrá y esperá OK)**: merge a main, push,
-  cambios de diseño no discutidos, tocar caminos ya validados por
-  corrida, cualquier cosa en la VM que mute estado del cluster.
-- **ROJO (parar y preguntar)**: todo lo irreversible (destroy real,
-  rotación de irreducibles, borrar recursos externos — webhooks,
-  DNS, repos), todo lo que toque secretos en claro, y todo
-  diagnóstico donde tu hipótesis contradiga la evidencia del
-  operador (pasó 2 veces; el operador tenía razón las 2).
+- **GREEN (flow)**: read, search, edit code + check + tooth, run
+  `aegis verify`, commit on your own branch.
+- **YELLOW (one brake: show it and wait for an OK)**: merge into
+  main, push, design changes that were not discussed, touching paths
+  already validated by a run, anything on the instance that mutates
+  cluster state.
+- **RED (stop and ask)**: everything irreversible (a real destroy,
+  rotating irreducibles, deleting external resources — webhooks,
+  DNS, repos), everything that touches secrets in the clear, and any
+  diagnosis where your hypothesis contradicts the operator's
+  evidence (it happened twice; the operator was right both times).
 
-Regla de diagnóstico: ante un síntoma con múltiples causas
-conocidas (ej. "webhook 400" tiene DOS), discriminar con evidencia
-ANTES de tocar nada. Borrar un recurso por hipótesis errada costó
-una corrida entera.
+Rule of diagnosis: faced with a symptom that has multiple known
+causes (e.g. "webhook 400" has TWO), discriminate with evidence
+BEFORE touching anything. Deleting a resource on a wrong hypothesis
+cost an entire run.
 
-## 6. Cómo correr las herramientas
+## 6. How to run the tools
 
 ```bash
-# La suite estática (desde la raíz del repo, en WSL):
-./init/verify-static.sh              # 83 checks; exit 0 = PASS
-./init/verify-static.sh --with-charts  # + renderiza los charts reales
+# The static suite (from the repo root):
+aegis verify                    # 118 checks; exit 0 = PASS
+aegis verify --with-charts      # + renders the real pinned charts
+aegis verify --only 079         # just one check
+aegis verify --teeth            # 243 teeth: mutate on purpose and
+                                # require the check to turn red
+aegis verify --harness          # the functional harnesses
 
-# exit 3 = CHECK INESTABLE (bug del verificador, no del artefacto)
+# exit 3 = A BUG IN THE VERIFIER (not in the artifact): a check with
+#          no verdict, with two, or not deterministic across passes
 
-# El init (SOLO en la VM, jamás en WSL):
-./init/aegis-init.sh --check                 # dry-run
-./init/aegis-init.sh --profile greenfield    # corrida completa
-./init/aegis-init.sh --from 50-jenkins       # retome (re-ejecuta la fase)
-AEGIS_VALIDATE_FAILCLOSED=1 ...              # habilita gates disruptivos
+# The init (ONLY on the instance, never on the product machine):
+aegis init --check                 # dry run
+aegis init --profile greenfield    # full run
+aegis init --from 50-jenkins       # resume (re-executes the phase)
+AEGIS_VALIDATE_FAILCLOSED=1 ...    # enables the disruptive gates
 
-# Tools out-of-band (VM):
-init/aegis-backup.sh        # bundle age-cifrado + ROUNDTRIP verificado
-init/aegis-restore.sh       # inverso; --force para pisar
-init/aegis-rotate.sh        # DRY-RUN default; --yes invalida del store
-init/aegis-destroy.sh       # DRY-RUN default; --yes destruye CF + purga
+# Out-of-band tools (on the instance):
+aegis state backup      # age-encrypted bundle + verified ROUNDTRIP
+aegis state restore     # the inverse; --force to overwrite
+aegis rotate            # DRY-RUN default; --yes invalidates the store
+aegis destroy           # DRY-RUN default; --yes destroys CF + purges
+
+# Maintainer tools (hidden from the main menu, but verified):
+aegis dev seed diff     # what the instance has and the seed does not
+aegis dev test-types    # acceptance test of the contract types
 ```
 
-Diagnóstico de una corrida histórica sin parsear logs ANSI:
+`bin/aegis` is the dispatcher: `aegis <name>` looks for an executable
+called `aegis-<name>` in `libexec/` and execs it. Phase 05 installs it
+into the PATH as a symlink, which is why every command resolves the
+product with the canonical preamble (readlink, then two levels up)
+and never from `$0`'s directory.
+
+Diagnosing a historical run without parsing ANSI logs:
 
 ```bash
 jq -r 'select(.result=="fail") | "\(.phase) \(.gate) \(.duration_s)s"' \
-    init/.init-state/gates.jsonl
+    "$AEGIS_HOME/.init-state/gates.jsonl"
 ```
 
-## 7. Estructura de un cambio típico (ejemplo real)
+## 7. The shape of a typical change (a real example)
 
-El commit `a068a1c` (fix del race de kube-router) es el molde:
+Commit `a068a1c` in v2's repo (the fix for the kube-router race) is
+the mould:
 
-1. Bug real en corrida: gate `trivy-responde` exit 7 con netpol
-   correcto y servicio sano.
-2. Diagnóstico en vivo con evidencia (exec-curl OK, pod fresco
-   falla 5/5 → el CNI tarda en programar el ipset).
-3. Fix de clase: retry DENTRO del pod (no fuera — un pod nuevo por
-   intento re-entra al race).
-4. Check estático: el probe de la fase 80 debe reintentar
-   intra-pod (check 79, con awk sobre el bloque real del gate).
-5. Diente: `sed 's/for i in 1 2 3/WHILE_NADA/'` → el check falla →
-   el diente muerde.
-6. Un commit, mensaje con el porqué, referencia a la corrida.
+1. A real bug in a run: gate `trivy-responde` exit 7 with a correct
+   netpol and a healthy service.
+2. Live diagnosis with evidence (exec-curl OK, a fresh pod fails
+   5/5 → the CNI is slow to program the ipset).
+3. A class fix: retry INSIDE the pod (not outside — a new pod per
+   attempt re-enters the race).
+4. A static check: the phase 80 probe must retry intra-pod (check
+   079, with awk over the gate's real block).
+5. A tooth: `sed 's/for i in 1 2 3/NOTHING_AT_ALL/'` → the check
+   fails → the tooth bites.
+6. One commit, a message with the why, a reference to the run.
 
-## 8. Orden de lectura recomendado para arrancar
+## 8. Recommended reading order to get started
 
-1. Este archivo (ya estás acá).
-2. `platform/docs/architecture/bootstrap.md` — la secuencia y sus
-   porqués.
-3. `platform/docs/conventions/secrets.md` — las reglas duras.
-4. `platform/docs/failure-modes.md` — las clases de fallo y sus
-   firmas.
-5. `HISTORIA.md` — el proceso completo si necesitás contexto
-   profundo.
-6. El código: `init/aegis-init.sh` → `init/lib/common.sh` → la fase
-   que vayas a tocar → los checks que la cubren en
-   `init/verify-static.sh` (buscá el número de fase o el nombre del
-   gate).
+1. This file (you are already here).
+2. `glossary.md` — which English word stands for which idea. It is
+   binding, and `aegis verify` enforces it (check 111).
+3. `cli/design.md` — the dispatcher, the derived help, and the
+   old→new command map of §4.
+4. `platform/docs/architecture/bootstrap.md` — the sequence and its
+   whys.
+5. `platform/docs/conventions/secrets.md` — the hard rules.
+6. `platform/docs/failure-modes.md` — the failure classes and their
+   signatures.
+7. The code: `libexec/aegis-init` → `lib/common.sh` → the phase you
+   are going to touch → the checks that cover it in
+   `verify/checks/` (search for the phase number or the gate name).
 
 ---
 
-*Última actualización: 2026-07-24, al cierre de VERSIÓN 2.*
+*Last updated: 2026-07-24, at the close of VERSION 2. Translated to
+English and brought to the v3 tree on 2026-08-24.*

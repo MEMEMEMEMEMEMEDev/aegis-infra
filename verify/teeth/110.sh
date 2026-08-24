@@ -15,7 +15,7 @@ red_3() {
     cat >> "$AEGIS_ROOT/lib/aegis/org.py" <<'PY'
 
 
-QUEUES_K8S = os.path.join(RAIZ, "k8s", "base", "queue-system", "bundle.yaml")
+QUEUES_K8S = os.path.join(PLATFORM_ROOT, "k8s", "base", "queue-system", "bundle.yaml")
 PY
 }
 

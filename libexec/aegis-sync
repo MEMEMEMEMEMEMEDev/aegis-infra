@@ -1,37 +1,37 @@
 #!/usr/bin/env bash
-# aegis-summary: Dispara un sync de ArgoCD sin romper la app
+# aegis-summary: Fires an ArgoCD sync without breaking the app
 # aegis-group:   operate
-# aegis-sync — dispara un sync de ArgoCD SIN romper la app.
+# aegis-sync — fires an ArgoCD sync WITHOUT breaking the app.
 #
-# ── por qué existe ────────────────────────────────────────────────
-# El comando obvio para sincronizar a mano es este, y está MAL:
+# ── why it exists ─────────────────────────────────────────────────
+# The obvious command for syncing by hand is this one, and it is WRONG:
 #
 #   kubectl patch application X -n argocd --type merge -p \
 #     '{"operation":{"sync":{"revision":"HEAD","syncOptions":["ServerSideApply=true"]}}}'
 #
-# Pasar `syncOptions` en la operación REEMPLAZA las de la Application en
-# vez de sumarse a ellas. Y entre las que se pierden está
-# RespectIgnoreDifferences, que es lo único que hace que un
-# `ignoreDifferences` proteja de verdad: sin esa opción el ignore solo
-# afecta al DIFF, y el apply pisa igual.
+# Passing `syncOptions` in the operation REPLACES the Application's own
+# instead of adding to them. And among the ones that get lost is
+# RespectIgnoreDifferences, which is the only thing that makes an
+# `ignoreDifferences` actually protect anything: without that option the
+# ignore only affects the DIFF, and the apply overwrites all the same.
 #
-# Medido el 2026-08-03: sincronizar así la app ai-system pisó el
-# ConfigMap ai-modo y devolvió el modo a "estado inicial declarado en
-# git". La ventana de AI abierta se cerró sola y el engine se apagó en
-# medio de una prueba. El comando decía "sincronizar"; hizo eso y además
-# borró estado de operación.
+# Measured on 2026-08-03: syncing the ai-system app this way overwrote
+# the ai-modo ConfigMap and returned the mode to "the initial state
+# declared in git". The open AI window closed by itself and the engine
+# switched off in the middle of a test. The command said "sync"; it did
+# that and on top of it deleted operational state.
 #
-# Este script no pasa syncOptions. Punto. Las de la app son las que
-# valen, que es lo que uno quiere el 100% de las veces que sincroniza a
-# mano.
+# This script does not pass syncOptions. Full stop. The app's own are
+# the ones that count, which is what one wants 100% of the times one
+# syncs by hand.
 set -euo pipefail
 
-rojo=$'\033[31m'; verde=$'\033[32m'; gris=$'\033[90m'; fin=$'\033[0m'
-[[ -t 1 ]] || { rojo=""; verde=""; gris=""; fin=""; }
+red=$'\033[31m'; green=$'\033[32m'; gray=$'\033[90m'; reset=$'\033[0m'
+[[ -t 1 ]] || { red=""; green=""; gray=""; reset=""; }
 
 if [[ $# -eq 0 ]]; then
-    echo "uso: ${AEGIS_CMD:-aegis} sync <app> [<app> ...]" >&2
-    echo "     ${AEGIS_CMD:-aegis} sync --drifted    # todas las que no estén Synced" >&2
+    echo "usage: ${AEGIS_CMD:-aegis} sync <app> [<app> ...]" >&2
+    echo "       ${AEGIS_CMD:-aegis} sync --drifted    # every one that is not Synced" >&2
     exit 2
 fi
 
@@ -41,21 +41,21 @@ if [[ "${1:-}" == "--drifted" ]]; then
         -o custom-columns='N:.metadata.name,S:.status.sync.status' \
         | awk '$2 != "Synced" {print $1}')
     if [[ ${#apps[@]} -eq 0 ]]; then
-        echo "${verde}todas las apps ya están Synced${fin}"
+        echo "${green}every app is already Synced${reset}"
         exit 0
     fi
-    echo "${gris}fuera de línea: ${apps[*]}${fin}"
+    echo "${gray}drifted: ${apps[*]}${reset}"
 fi
 
 for app in "${apps[@]}"; do
     if ! kubectl get application "$app" -n argocd >/dev/null 2>&1; then
-        echo "  ${rojo}✗${fin} $app: no existe" >&2
+        echo "  ${red}✗${reset} $app: does not exist" >&2
         continue
     fi
-    # Sin syncOptions: se respetan las de la Application.
+    # No syncOptions: the Application's own are respected.
     kubectl patch application "$app" -n argocd --type merge \
         -p "{\"operation\":{\"initiatedBy\":{\"username\":\"aegis-sync\"},\"sync\":{\"revision\":\"HEAD\"}}}" \
         >/dev/null
-    echo "  ${verde}→${fin} $app"
+    echo "  ${green}→${reset} $app"
 done
-echo "${gris}disparado. El resultado tarda; mirá con: ${AEGIS_CMD:-aegis} check${fin}"
+echo "${gray}fired. The result takes a while; watch it with: ${AEGIS_CMD:-aegis} check${reset}"

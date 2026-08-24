@@ -1,212 +1,226 @@
-# Caminos — diseño de los protocolos de app, SIN código todavía
+# Journeys — the design of the app protocols, WITH NO CODE YET
 
-Alcance: cómo un usuario crea una app en aegis y la lleva a prod sin
-que sea terrible, cómo crece después, y cómo el catálogo de la
-plataforma crece con él. Mismo criterio que observability/design.md:
-acá se toman las decisiones; el bash llega después y ya las encuentra
-tomadas. Nada de este documento existe todavía salvo lo marcado [HOY].
+Scope: how a user creates an app in aegis and takes it to prod without
+it being terrible, how it grows afterwards, and how the platform's
+catalogue grows with it. Same criterion as observability/design.md: the
+decisions are taken here; the bash arrives later and finds them already
+taken. Nothing in this document exists yet except what is marked
+[TODAY].
 
-## 0. Principios (los que ordenan todo lo demás)
+## 0. Principles (the ones that order everything else)
 
-1. **El contrato es la única verdad.** `orgs/<n>.yaml` es la entrada
-   de la que TODO se deriva. Una plantilla genera contratos; un camino
-   los escribe a mano; ninguno crea una segunda fuente de verdad.
-2. **Archivos y mundo, separados con pausa en el medio.** Generar es
-   inocuo y revisable (git diff); ejecutar contra el mundo (GitHub)
-   es consciente y posterior. Es el plan/apply de tofu, aplicado al
-   onboarding. La frontera vive a nivel de SUBCOMANDO (ver §3).
-3. **La plantilla se evapora.** Instancia contrato + código inicial y
-   desaparece: desde ese momento el usuario es un artesano más. Cero
-   apps "atadas a su plantilla" — no somos un framework.
-4. **Converger, no ejecutar.** Todo comando re-corrido con el trabajo
-   hecho termina en "nada que hacer". Crear-si-falta, jamás
-   recrear-por-las-dudas.
-5. **Rieles firmes en el centro, libertad en los bordes.** Los puntos
-   de extensión (sustratos, plantillas, checks) quedan documentados
-   con checklist para que cada instancia personalice SU aegis por las
-   puertas marcadas. Lo que no se personaliza: la frontera de §0.2,
-   la firma, el contrato como verdad.
+1. **The contract is the only truth.** `orgs/<n>.yaml` is the input
+   EVERYTHING is derived from. A template generates contracts; a journey
+   writes them by hand; neither creates a second source of truth.
+2. **Files and world, separated with a pause in between.** Generating is
+   harmless and reviewable (git diff); executing against the world
+   (GitHub) is deliberate and comes afterwards. It is tofu's plan/apply,
+   applied to onboarding. The border lives at the SUBCOMMAND level (see
+   §3).
+3. **The template evaporates.** It instantiates a contract plus initial
+   code and disappears: from that moment on the user is one more
+   artisan. Zero apps "tied to their template" — we are not a framework.
+4. **Converge, do not execute.** Every command re-run with the work
+   already done ends in "nothing to do". Create-if-missing, never
+   recreate-just-in-case.
+5. **Firm rails in the centre, freedom at the edges.** The extension
+   points (substrates, templates, checks) are documented with a
+   checklist so that each instance can customise ITS aegis through the
+   marked doors. What does not get customised: the border in §0.2, the
+   signature, the contract as truth.
 
-## 1. Los tres caminos
+## 1. The three journeys
 
-| camino | quién es | qué hace |
+| journey | who it is | what it does |
 |---|---|---|
-| artesano | quiere IaC puro y control | escribe `orgs/<n>.yaml` a mano; corre `aegis-org` + `aegis-secreto` [HOY] + `aegis-app aplicar` (nuevo, cierra los pasos GitHub) |
-| plantilla | quiere partir de algo que ya funciona | `aegis-app nueva <org> --plantilla <p>` → contrato + esqueletos; revisa; `aegis-app aplicar` |
-| silencioso | avanzado, no quiere demo ni ruido | `DEMO=ninguna` en `aegis-init.conf` → plataforma pelada; los otros dos caminos quedan disponibles, sin usar |
+| artisan | wants pure IaC and control | writes `orgs/<n>.yaml` by hand; runs `aegis org apply` + `aegis secret create` [TODAY] + `aegis app apply` (new, closes the GitHub steps) |
+| template | wants to start from something that already works | `aegis app new <org> --template <t>` → contract + skeletons; reviews; `aegis app apply` |
+| silent | advanced, wants neither demo nor noise | `DEMO=ninguna` in `aegis.conf` → a bare platform; the other two journeys stay available, unused |
 
-Misma maquinaria, tres puertas. Ningún camino encierra: el usuario de
-plantilla edita su contrato a mano al día siguiente y nadie lo nota.
+The same machinery, three doors. No journey locks anyone in: the
+template user edits their contract by hand the next day and nobody
+notices.
 
-Config nueva: `DEMO=portafolio|ninguna` (default `portafolio`) en
-`aegis-init.conf` — campo T1, lo pregunta el wizard.
+New config: `DEMO=portafolio|ninguna` (default `portafolio`) in
+`aegis.conf` — field T1, asked by the wizard.
 
-## 2. `aegis-org` gana dos derivaciones (van de 8 a 10)
+## 2. `aegis org` gains two derivations (going from 8 to 10)
 
-Ambas siguen el patrón existente: rederivación total del bloque
-propio, idempotente, precedente de tocar archivos fuera de
-`organizations/` (el borde en `main.tf`, las keys en argocd-secrets).
+Both follow the existing pattern: total re-derivation of their own
+block, idempotent, with precedent for touching files outside
+`organizations/` (the edge in `main.tf`, the keys in argocd-secrets).
 
-**2a. El job multibranch de Jenkins.** Hoy: 20 líneas de job-dsl
-copiadas a mano en `k8s/base/platform/jenkins/values.yaml` por cada
-app — derivable del `repo:` del contrato y no se deriva (el hueco #2
-del mapa de onboarding). Diseño: un bloque delimitado en ese
-values.yaml, propiedad del generador:
+**2a. The Jenkins multibranch job.** Today: 20 lines of job-dsl copied by
+hand into `k8s/base/platform/jenkins/values.yaml` for each app —
+derivable from the contract's `repo:` and not derived (hole #2 of the
+onboarding map). Design: a delimited block in that values.yaml, owned by
+the generator:
 
     # --- DERIVED by aegis-org (tenant jobs): do not edit by hand ---
-    ...un job por cada servicio con repo, de todos los contratos...
+    ...one job per service with a repo, from every contract...
     # --- END DERIVED ---
 
-Fuera del bloque, lo escrito a mano sobrevive (los jobs de plataforma
-como mirror-images). Deuda de migración anotada: los 5 jobs actuales
-están a mano y `org-canary` no tiene contrato — migran al bloque
-cuando su org tenga contrato, no antes.
+Outside the block, what was written by hand survives (the platform jobs
+such as mirror-images). Migration debt noted: the 5 current jobs are by
+hand and `org-canary` has no contract — they move into the block when
+their org has a contract, not before.
 
-**2b. El Jenkinsfile instanciado.** El template tiene 1 CHANGEME en
-452 líneas: se instancia desde el contrato (`IMAGE = '<org>-<svc>'`)
-al staging del esqueleto (ver §3). El template deja de copiarse a
-mano; sigue siendo UNO, versionado en docs/protocols/templates/.
+**2b. The instantiated Jenkinsfile.** The template has 1 CHANGEME in 452
+lines: it is instantiated from the contract (`IMAGE = '<org>-<svc>'`)
+into the skeleton's staging area (see §3). The template stops being
+copied by hand; it remains ONE, versioned in docs/protocols/templates/.
 
-## 3. `aegis-app` — el comando nuevo, y dónde vive su frontera
+## 3. `aegis app` — the new command, and where its border lives
 
-Dos subcomandos, y la regla de la casa grabada en la cabecera:
-**`nueva` escribe archivos y JAMÁS toca el mundo; `aplicar` toca el
-mundo y JAMÁS escribe en los repos.** (espejo del "NO HABLA CON EL
-CLUSTER" de aegis-org; candidato a check de verify-static.)
+Two subcommands, and the house rule engraved in the header: **`new`
+writes files and NEVER touches the world; `apply` touches the world and
+NEVER writes into the repos.** (a mirror of aegis-org's "IT DOES NOT
+TALK TO THE CLUSTER"; a candidate for a check in `aegis verify`.)
 
-**`aegis-app nueva <org> --plantilla <p>`** (solo archivos):
-1. instancia `orgs/<org>.yaml` desde la plantilla (aborta si ya
-   existe: un contrato vivo no se pisa — se edita a mano)
-2. instancia los esqueletos de código a un staging LOCAL:
-   `.aegis-app/<org>/<svc>/` (gitignorado: destino es OTRO repo,
-   versionarlo acá sería el error de platform/ de nuevo)
-3. corre `bin/aegis-org aplicar` (que ya incluye §2a y §2b)
-4. corre `bin/aegis-secreto --todos`
-5. imprime el diff pendiente y el siguiente paso
-Re-correrla converge; sin `--plantilla` sirve al artesano que ya
-escribió su contrato (salta 1-2).
+**`aegis app new <org> --template <t>`** (files only):
+1. instantiates `orgs/<org>.yaml` from the template (aborts if it
+   already exists: a live contract does not get trampled — it gets
+   edited by hand)
+2. instantiates the code skeletons into a LOCAL staging area:
+   `.aegis-app/<org>/<svc>/` (gitignored: the destination is ANOTHER
+   repo, versioning it here would be the platform/ mistake all over
+   again)
+3. runs `aegis org apply` (which already includes §2a and §2b)
+4. runs `aegis secret create`
+5. prints the pending diff and the next step
 
-**`aegis-app aplicar <org>`** (solo mundo, lee lo generado):
-| paso | guarda de idempotencia |
+Re-running it converges; without `--template` it serves the artisan who
+already wrote their contract (it skips 1-2).
+
+**`aegis app apply <org>`** (world only, reads what was generated):
+
+| step | idempotence guard |
 |---|---|
-| repo GitHub por servicio con `repo:` | existe → no crea. `gh repo create` solo si falta |
-| push del esqueleto desde staging | SOLO si el repo está VACÍO (0 commits). Un repo con historia jamás se pisa — el artesano trae el suyo y este paso es no-op |
-| deploy key | compara fingerprint contra la pública generada; registra solo si falta (`gh repo deploy-key add` — el paso "irreducible" de aegis-secreto, reducido) |
-| webhook | delega en `bin/aegis-webhook --aplicar` [HOY, ya idempotente] |
-| veredicto | tres desenlaces por paso: hecho / ya estaba / NO SE PUDO — el tercero es aviso, no visto bueno (enfermedad E) |
+| a GitHub repo per service with a `repo:` | exists → does not create. `gh repo create` only if missing |
+| push of the skeleton from staging | ONLY if the repo is EMPTY (0 commits). A repo with history is never trampled — the artisan brings their own and this step is a no-op |
+| deploy key | compares the fingerprint against the generated public key; registers only if missing (`gh repo deploy-key add` — the "irreducible" step of `aegis secret`, reduced) |
+| webhook | delegates to `aegis webhook apply` [TODAY, already idempotent] |
+| verdict | three outcomes per step: done / already / COULD NOT — the third is a warning, not a green light (Disease E) |
 
-Queda humano a propósito: el commit+push del repo de plataforma (acto
-de gobierno) y el `tofu apply` del borde (del operador por diseño,
-#46). `aegis-app aplicar` termina diciéndolos, no haciéndolos.
+Two things stay human on purpose: the commit+push of the platform repo
+(an act of governance) and the `tofu apply` of the edge (the operator's,
+by design, #46). `aegis app apply` finishes by saying them, not by doing
+them.
 
-## 4. Plantillas
+## 4. Templates
 
-Estructura: `seed/templates/<nombre>/`
-- `contract.yaml.tpl` — el contrato con `__ORG__` y `__DOMINIO__`
-- `repos/<svc>/…` — código inicial completo por servicio: fuente,
-  `Containerfile`, `k8s/base/` + overlay (el Jenkinsfile NO va acá:
-  lo instancia §2b desde el template canónico)
-- `README.md` — qué levanta, qué decisiones tomó, y que se evapora
+Structure: `seed/templates/<name>/`
+- `contract.yaml.tpl` — the contract with `__ORG__` and `__DOMINIO__`
+- `repos/<svc>/…` — complete initial code per service: source,
+  `Containerfile`, `k8s/base/` + overlay (the Jenkinsfile does NOT go
+  here: §2b instantiates it from the canonical template)
+- `README.md` — what it raises, what decisions it made, and that it
+  evaporates
 
-Catálogo chico A PROPÓSITO — cada plantilla es código vivo que se
-pudre, y la defensa es mantener pocas y vigiladas:
-- `base` — un servicio http pelado. La mínima que compila y despliega.
-- `portafolio` — la demo del init (ver §5).
-- `ecommerce` — la insignia. Se construye primero COMO APP REAL en la
-  instancia viva usando estos protocolos (es su banco de pruebas);
-  asciende a plantilla cuando madure. No antes.
+A small catalogue ON PURPOSE — each template is living code that rots,
+and the defence is to keep few of them and watch them:
+- `base` — a bare http service. The minimum that compiles and deploys.
+- `portafolio` — the init's demo (see §5).
+- `ecommerce` — the flagship. It gets built first AS A REAL APP on the
+  live instance using these protocols (that is its test bench); it is
+  promoted to a template when it matures. Not before.
 
-## 5. El portafolio-demo
+## 5. The portfolio demo
 
-Stack elegido por presupuesto de podredumbre mínimo:
-- front `estatico`: HTML/CSS/JS plano. Cero build, cero node_modules
-  — no puede pudrirse porque no hay árbol que se pudra.
-- api `http`: Express. Dos dependencias reales (express, pg).
-- `postgres`: sustrato de plataforma [HOY].
-- `bucket`: Garage [HOY en instancia; semilla: PENDIENTE #42].
-  Aclaración de nombres: Garage es el SERVIDOR (self-hosted, en el
-  cluster); "S3" es el PROTOCOLO que habla — el estándar de facto del
-  object storage, inventado por Amazon pero hablado por todos. Cero
-  AWS involucrado: los datos jamás salen del cluster. OJO: el cliente
-  S3 del backend es donde se cuela la única dependencia gorda — el
-  SDK oficial pesa cientos de paquetes; evaluar firmar SigV4 con una
-  lib mínima (por debajo es HTTP normal con firma).
-- pipeline COMENTADO línea a línea: la demo también enseña.
+A stack chosen for a minimal rot budget:
+- front `estatico`: plain HTML/CSS/JS. Zero build, zero node_modules —
+  it cannot rot because there is no tree to rot.
+- api `http`: Express. Two real dependencies (express, pg).
+- `postgres`: a platform substrate [TODAY].
+- `bucket`: Garage [TODAY on the instance; in the seed: PENDING #42].
+  A clarification of names: Garage is the SERVER (self-hosted, in the
+  cluster); "S3" is the PROTOCOL it speaks — the de facto standard of
+  object storage, invented by Amazon but spoken by everyone. Zero AWS
+  involved: the data never leaves the cluster. WATCH OUT: the backend's
+  S3 client is where the one fat dependency sneaks in — the official
+  SDK weighs hundreds of packages; evaluate signing SigV4 with a
+  minimal library (underneath it is ordinary HTTP with a signature).
+- a pipeline COMMENTED line by line: the demo also teaches.
 
-**La demo como canario de podredumbre**: una imagen pinneada no
-envejece a salvo — acumula CVEs sentada, y el scan corre solo al
-construir: una app que nadie pushea NO SE RE-ESCANEA NUNCA. El job de
-la demo lleva cron (patrón edge-chequeo) para construir periódicamente
-sin cambios: el envejecimiento se vuelve build rojo visible en vez de
-silencio. Trabajo gratis que hace por existir.
+**The demo as a rot canary**: a pinned image does not age safely — it
+accumulates CVEs while sitting there, and the scan only runs at build
+time: an app nobody pushes to IS NEVER RE-SCANNED. The demo's job carries
+a cron (the edge-chequeo pattern) so that it builds periodically with no
+changes: ageing turns into a visible red build instead of silence. Free
+work that it does by existing.
 
-Init: fase nueva `90-demo.sh` — si `DEMO=ninguna`, no-op con log; si
-no, corre `aegis-app nueva portafolio --plantilla portafolio` +
-`aplicar` + commit (el init SÍ commitea: es bootstrap, no gobierno).
-La demo prueba el camino de plantilla completo en cada bootstrap.
-Desmontar después: `aegis-org borrar` [HOY].
+Init: a new phase `90-demo.sh` — if `DEMO=ninguna`, a no-op with a log
+line; otherwise it runs `aegis app new portafolio --template portafolio`
++ `aegis app apply portafolio` + a commit (the init DOES commit: it is
+bootstrap, not governance). The demo exercises the complete template
+journey on every bootstrap. To take it down afterwards: `aegis org
+delete` [TODAY].
 
-## 6. Protocolo: crecer el catálogo de sustratos
+## 6. Protocol: growing the substrate catalogue
 
-Para redis, una cola, o lo que el futuro pida. La mitad ya existe
-[HOY]: mirror-images trae+escanea+firma terceros ("redis, postgres,
-lo que sea", dice su propio Jenkinsfile). Checklist completa:
+For redis, a queue, or whatever the future asks for. Half of it already
+exists [TODAY]: mirror-images fetches+scans+signs third parties ("redis,
+postgres, whatever", says its own Jenkinsfile). The complete checklist:
 
-1. línea en `mirror-images/images.txt` (origen POR DIGEST) + correr
-   el job → espejada y firmada
-2. entrada en `services.yaml`: imagen del registry interno por
-   digest, recursos, forma de la credencial. La decisión se toma UNA
-   vez, para todas las orgs
-3. derivación en `aegis-org`: `tipo: <sustrato>` en un contrato →
-   su workload derivado (patrón postgres [HOY])
-4. categoría en `aegis-secreto` para su credencial
-5. si cambia una GARANTÍA (no una capacidad): check en verify-static
-   (regla de PENDIENTE.md §5)
+1. a line in `mirror-images/images.txt` (origin BY DIGEST) + run the job
+   → mirrored and signed
+2. an entry in `services.yaml`: the internal registry's image by digest,
+   resources, the shape of the credential. The decision is taken ONCE,
+   for every org
+3. a derivation in `aegis org`: `tipo: <substrate>` in a contract → its
+   derived workload (the postgres pattern [TODAY])
+4. a category in `aegis secret` for its credential
+5. if a GUARANTEE changes (not a capability): a check in `aegis verify`
+   (the rule from PENDIENTE.md §5)
 
-Decisión diferida A PROPÓSITO: redis vs rabbit vs nada. El e-commerce
-lo pedirá con evidencia; con esta checklist, agregar un sustrato
-cuesta una tarde, no una arquitectura. Apuesta anotada: redis primero
-(sesiones/carrito); cola solo ante trabajo asíncrono real, y ese día
-la pelea es rabbit vs redis-streams vs tabla en postgres.
+A deliberately deferred decision: redis vs rabbit vs nothing. The
+e-commerce will ask for it with evidence; with this checklist, adding a
+substrate costs an afternoon, not an architecture. A bet on the record:
+redis first (sessions/cart); a queue only when there is real async work,
+and that day the fight is rabbit vs redis-streams vs a table in
+postgres.
 
-## 7. Protocolo: dependencias de app (el pipeline rojo con salida)
+## 7. Protocol: app dependencies (the red pipeline with an exit)
 
-[HOY] el scan bloquea CRITICAL/HIGH — eso es el gate haciendo su
-trabajo, no un fallo. Lo que falta es la puerta de salida del dev:
+[TODAY] the scan blocks CRITICAL/HIGH — that is the gate doing its job,
+not a failure. What is missing is the dev's way out:
 
-1. primero: subir la versión de la dependencia (el fix normal)
-2. sin fix disponible: excepción DECLARADA — `trivyignore` del repo
-   de la app (patrón mirror-images/trivyignore.yaml [HOY]) con CVE,
-   justificación y **fecha de vencimiento** obligatoria
-3. excepción vencida = build rojo otra vez. Sin vencimiento es deuda
-   invisible; con vencimiento es deuda agendada
-4. el stage de scan lee el trivyignore del repo y lista en el log
-   TODA excepción activa y sus días restantes (visible, no enterrada)
+1. first: bump the dependency's version (the normal fix)
+2. with no fix available: a DECLARED exception — a `trivyignore` in the
+   app's repo (the mirror-images/trivyignore.yaml pattern [TODAY]) with
+   the CVE, a justification and a mandatory **expiry date**
+3. an expired exception = a red build again. Without an expiry it is
+   invisible debt; with one it is scheduled debt
+4. the scan stage reads the repo's trivyignore and lists in the log
+   EVERY active exception and its remaining days (visible, not buried)
 
-## 8. Fuera de alcance de esta versión (decidido, no olvidado)
+## 8. Out of scope for this version (decided, not forgotten)
 
-- La ceremonia de clave AI (6 pasos manuales): problema con forma
-  propia, el e-commerce no la necesita. AI queda pendiente-y-abierto.
-- Monorepo: v1 es repo-por-servicio (calza con el multibranch [HOY]).
-  Un monorepo exige filtrado por path en Jenkins — se evalúa si una
-  app real lo pide.
-- Migrar los 5 jobs a mano y las orgs sin contrato (canary,
-  ecommerce-heredado): deuda anotada, no bloquea.
-- Access por contrato (hostnames privados de tenant): hoy Access es
-  de plataforma; si una org pide panel privado, se diseña aparte.
+- The AI key ceremony (6 manual steps): a problem with its own shape,
+  and the e-commerce does not need it. AI stays pending-and-open.
+- Monorepo: v1 is repo-per-service (it fits the multibranch [TODAY]). A
+  monorepo requires path filtering in Jenkins — to be evaluated if a
+  real app asks for it.
+- Migrating the 5 hand-written jobs and the orgs with no contract
+  (canary, inherited ecommerce): noted debt, not a blocker.
+- Access by contract (private tenant hostnames): today Access belongs to
+  the platform; if an org asks for a private panel, it gets designed
+  separately.
 
-## 9. Orden de construcción (cada paso usable por sí solo)
+## 9. Build order (each step usable on its own)
 
-1. §2a+§2b — aegis-org deriva jobs y Jenkinsfile (mata los huecos
-   más dolorosos sin comando nuevo)
-2. §3 `aegis-app aplicar` — cierra repo/key/webhook para contratos
-   existentes (el artesano ya gana)
-3. §3 `aegis-app nueva` + §4 plantilla `base`
-4. e-commerce EN LA INSTANCIA usando todo lo anterior — cada fricción
-   es bug del protocolo; al madurar, asciende a plantilla
-5. §5 plantilla portafolio + fase 90-demo + `DEMO=` en el conf
-6. todo vuelve a la semilla (`aegis-semilla traer` / init) — regla
-   estructural: lo que no entra por semilla no entró
+1. §2a+§2b — `aegis org` derives jobs and the Jenkinsfile (kills the most
+   painful holes with no new command)
+2. §3 `aegis app apply` — closes repo/key/webhook for existing contracts
+   (the artisan already wins)
+3. §3 `aegis app new` + §4 the `base` template
+4. e-commerce ON THE INSTANCE using everything above — every friction is
+   a bug in the protocol; on maturing, it is promoted to a template
+5. §5 the portfolio template + phase 90-demo + `DEMO=` in the conf
+6. everything goes back into the seed (`aegis dev seed pull` / init) —
+   a structural rule: what does not come in through the seed did not
+   come in
 
-Vara de aceptación global: el test del amigo — un dev externo, con un
-clone y un contrato, llega a URL pública sin el operador en la sala.
+The global acceptance bar: the friend test — an external dev, with a
+clone and a contract, reaching a public URL without the operator in the
+room.

@@ -1,87 +1,93 @@
 #!/usr/bin/env bash
-# aegis-summary: El protocolo de rotación, ejecutable
+# aegis-summary: The rotation protocol, made executable
 # aegis-group:   infra
 # aegis-subcommands: list check run continue
-# aegis-rotate — EL PROTOCOLO DE ROTACIÓN, EJECUTABLE.
+# aegis-rotate — THE ROTATION PROTOCOL, MADE EXECUTABLE.
 #
-# ── qué cambió y por qué ────────────────────────────────────────────
-# Hasta el 2026-08-12 este script hacía UN paso: sacar el .enc del
-# store para que `gen_or_restore` generara material nuevo en vez de
-# restaurar el viejo. Ese paso es el correcto y sigue siendo el
-# corazón de todo — sin él, "rotar re-corriendo la fase" es un no-op
-# silencioso, porque restore_secret devuelve rc 0 y la fase reutiliza.
+# ── what changed and why ────────────────────────────────────────────
+# Until 2026-08-12 this script did ONE step: pull the .enc out of the
+# store so that `gen_or_restore` would generate new material instead of
+# restoring the old one. That step is the right one and is still the
+# heart of everything — without it, "rotating by re-running the phase"
+# is a silent no-op, because restore_secret returns rc 0 and the phase
+# reuses.
 #
-# Pero terminaba ahí. Imprimía prosa apuntando a rotation-checklist.md
-# y el operador ejecutaba a mano: correr la fase, sincronizar, retirar
-# la credencial vieja del tercero, y comprobar que la plataforma seguía
-# viva. Cuatro pasos, tres de ellos olvidables, y el último —el único
-# que distingue "roté" de "roté y funciona"— no lo hacía nadie.
+# But it ended there. It printed prose pointing at rotation-checklist.md
+# and the operator executed by hand: run the phase, sync, withdraw the
+# old credential from the third party, and confirm that the platform was
+# still alive. Four steps, three of them forgettable, and the last one
+# —the only one that tells "I rotated" apart from "I rotated and it
+# works"— nobody did.
 #
-# Eso es exactamente la enfermedad que el resto del stack persigue: una
-# señal que no distingue "pasó" de "no se evaluó". La rotación la tenía
-# en el centro.
+# That is exactly the disease the rest of the stack chases: a signal
+# that does not tell "it passed" apart from "it was not evaluated".
+# Rotation had it right in the middle.
 #
-# Ahora el ciclo se cierra acá: menú, confirmación con el RADIO a la
-# vista, regeneración, sincronización, VERIFICACIÓN que puede fallar, y
-# retiro de la credencial vieja.
+# Now the cycle closes here: menu, confirmation with the BLAST RADIUS in
+# plain view, regeneration, sync, VERIFICATION that can fail, and
+# withdrawal of the old credential.
 #
-# ── lo que este script NO reimplementa ──────────────────────────────
-# Es un ORQUESTADOR. Todo lo difícil ya estaba escrito y probado:
-#   gen_or_restore        lib/secrets.sh   el interruptor de la rotación
-#   aegis-init --only     aegis-init.sh    corre UNA fase, idempotente
-#   add_deploy_key        fase 15          registra en GitHub Y BORRA LA VIEJA
-#   make_repo_webhook     fase 15          PATCH del HMAC en el hook vivo
-#   _cf_call              fase 15          acuña tokens acotados de Cloudflare
+# ── what this script does NOT reimplement ───────────────────────────
+# It is an ORCHESTRATOR. Everything hard was already written and tested:
+#   gen_or_restore        lib/secrets.sh   the rotation switch
+#   aegis-init --only     aegis-init.sh    runs ONE phase, idempotent
+#   add_deploy_key        phase 15         registers on GitHub AND DELETES THE OLD ONE
+#   make_repo_webhook     phase 15         PATCH of the HMAC on the live hook
+#   _cf_call              phase 15         mints scoped Cloudflare tokens
 #   retry_net             lib/common.sh    backoff 5/15/45/90s
-#   aegis-registry        platform/bin     el registry entero, 10 destinos
-#   aegis-webhook         platform/bin     reescribe el HMAC en todos los hooks
-#   aegis-sync            platform/bin     empuja el Secret al cluster
-#   aegis-check         platform/bin     la verificación de rutina
-# Si algo de esto cambia, cambia allá. Acá solo se ordena.
+#   aegis-registry        libexec/         the whole registry, 10 targets
+#   aegis-webhook         libexec/         rewrites the HMAC on every hook
+#   aegis-sync            libexec/         pushes the Secret to the cluster
+#   aegis-check           libexec/         the routine check
+# If any of that changes, it changes over there. Here things are only
+# put in order.
 #
-# ── uso ─────────────────────────────────────────────────────────────
-#   aegis-rotate.sh                     menú interactivo
-#   aegis-rotate.sh --revisar           inventario, sin tocar nada
-#   aegis-rotate.sh --continuar         retoma una tanda interrumpida
-#   aegis-rotate.sh <name>...           DRY-RUN (compat: como antes)
-#   aegis-rotate.sh --yes <name>...     rota de verdad, sin menú
+# ── usage ───────────────────────────────────────────────────────────
+#   aegis rotate                       interactive menu
+#   aegis rotate list                  inventory, without touching anything
+#   aegis rotate check [<name>...]     does the credential WORK? (no rotation)
+#   aegis rotate continue              resumes an interrupted batch
+#   aegis rotate <name>...             DRY-RUN (compat: as before)
+#   aegis rotate --yes <name>...       rotates for real, no menu
 #
-# NO commitea ni pushea. Deja los archivos escritos y coherentes e
-# imprime los pasos. Que el commit lo dé una persona es la misma
-# decisión que ya tomó aegis-registry.
+# It does NOT commit and does NOT push. It leaves the files written and
+# coherent and prints the steps. That the commit be given by a person is
+# the same decision aegis-registry already took.
 set -euo pipefail
 
-# ── preámbulo canónico (V-102) ───────────────────────────────────────
-# El PRODUCTO se resuelve desde el propio archivo, siguiendo symlinks
-# (la fase 05 instala /usr/local/bin/aegis como symlink: sin readlink
-# -f, AEGIS_ROOT sería /usr/local). Si bin/aegis ya lo exportó, se
-# respeta. La INSTANCIA la decide lib/paths.sh, nunca este archivo.
+# ── canonical preamble (V-102) ───────────────────────────────────────
+# The PRODUCT is resolved from this file itself, following symlinks
+# (phase 05 installs /usr/local/bin/aegis as a symlink: without readlink
+# -f, AEGIS_ROOT would be /usr/local). If bin/aegis already exported it,
+# that is respected. The INSTANCE is decided by lib/paths.sh, never by
+# this file.
 if [[ -z "${AEGIS_ROOT:-}" ]]; then
-    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} rotate: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} rotate: readlink is missing — I cannot guess where the product lives" >&2; exit 2; }
     AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 fi
 export AEGIS_ROOT
 # shellcheck source=../lib/paths.sh
 source "$AEGIS_ROOT/lib/paths.sh"
 STATE_SECRETS="$AEGIS_HOME/.state-secrets"
-PREVIO="$STATE_SECRETS/.previo"
-# Los comandos viven en el PRODUCTO desde 02 §1. Esta línea decía
-# "$PLATFORM_DIR/bin", que era donde estaban en v2 — y con el código
-# mudado apuntaba a un directorio que ya no existe: las cuatro
-# invocaciones de abajo habrían caído en «no está» silencioso, que es
-# justo el modo de fallo que la regla 5.1 existe para matar. Se usa
-# aegis_exec, que distingue «no existe» de «no pudo» de «dijo que no».
+PREVIOUS="$STATE_SECRETS/.previo"
+# The commands have lived in the PRODUCT since 02 §1. This line used to
+# say "$PLATFORM_DIR/bin", which is where they were in v2 — and with the
+# code moved it pointed at a directory that no longer exists: the four
+# invocations below would have fallen into a silent «it is not there»,
+# which is exactly the failure mode rule 5.1 exists to kill. aegis_exec
+# is used, which tells «does not exist» from «could not» from «said no».
 PBIN="$AEGIS_ROOT/libexec"
-DIARIO="$AEGIS_HOME/.init-state/rotacion"
+JOURNAL="$AEGIS_HOME/.init-state/rotacion"
 
-# common.sh aporta retry_net, log_*, die, mark_done/is_done. Pide
-# AEGIS_ROOT, que ya está exportado arriba:
+# common.sh provides retry_net, log_*, die, mark_done/is_done. It needs
+# AEGIS_ROOT, which is already exported above:
 # shellcheck source=lib/common.sh
 source "$AEGIS_ROOT/lib/common.sh"
-# secrets.sh aporta secrets_workdir (tmpfs con shred) y make_enc_secret
-# (--from-file byte-preserving → mv al repo → cifrar → ROUNDTRIP). La
-# rotación del túnel escribe un Secret al repo y NO va a reimplementar
-# ese orden: es la regla A5/A6 codificada, y equivocarse cuesta un HMAC.
+# secrets.sh provides secrets_workdir (tmpfs with shred) and
+# make_enc_secret (--from-file byte-preserving → mv to the repo →
+# encrypt → ROUNDTRIP). Rotating the tunnel writes a Secret to the repo
+# and is NOT going to reimplement that order: it is rule A5/A6 turned
+# into code, and getting it wrong costs an HMAC.
 # shellcheck source=lib/secrets.sh
 source "$AEGIS_ROOT/lib/secrets.sh"
 
@@ -89,288 +95,294 @@ CONF="$AEGIS_HOME/aegis.conf"
 [[ -f "$CONF" ]] && source "$CONF"
 : "${GH_OWNER:=}" "${APP_REPO:=}" "${PLATFORM_REPO:=}" "${ROOT_DOMAIN:=}"
 
-az=$'\033[36m'; ama=$'\033[33m'; roj=$'\033[31m'; ver=$'\033[32m'
-gri=$'\033[90m'; neg=$'\033[1m'; fin=$'\033[0m'
-[[ -t 1 ]] || { az=""; ama=""; roj=""; ver=""; gri=""; neg=""; fin=""; }
+cyan=$'\033[36m'; yellow=$'\033[33m'; red=$'\033[31m'; green=$'\033[32m'
+gray=$'\033[90m'; bold=$'\033[1m'; reset=$'\033[0m'
+[[ -t 1 ]] || { cyan=""; yellow=""; red=""; green=""; gray=""; bold=""; reset=""; }
 
 # ═══════════════════════════════════════════════════════════════════
-#  LA TABLA DE RECETAS
+#  THE RECIPE TABLE
 # ═══════════════════════════════════════════════════════════════════
-# UNA entrada por credencial del store. Declarativa a propósito: la
-# alternativa —repartir el conocimiento por el código— es lo que dejó
-# la checklist desactualizada durante semanas.
+# ONE entry per credential in the store. Declarative on purpose: the
+# alternative —spreading the knowledge through the code— is what left
+# the checklist out of date for weeks.
 #
-# clase:
-#   normal       invalidar → fase → sync → verificar → retirar
-#   delegada     otra herramienta es la dueña; acá solo se la invoca
-#   irreducible  rotarlo rompe cosas en silencio; se rechaza con motivo
-#   prohibida    rotarlo por el camino normal DESHACE un arreglo previo
+# class:
+#   normal       invalidate → phase → sync → verify → withdraw
+#   delegada     another tool owns it; here it is only invoked
+#   irreducible  rotating it breaks things silently; refused with a reason
+#   prohibida    rotating it the normal way UNDOES an earlier fix
 #
-# campos: nombre|clase|fase|app_sync|verificador|tercero|radio
-RECETAS=$(cat <<'TABLA'
-hmac_argocd|normal|15-third-parties|argocd-secrets|ver_hmac_argocd|GitHub|ArgoCD deja de enterarse de los push
-hmac_jenkins|normal|15-third-parties|jenkins-secrets|ver_hmac_jenkins|GitHub|los push dejan de construir
-dk_ops|normal|15-third-parties|argocd-secrets|ver_dk_ops|GitHub|ArgoCD no puede leer el repo de plataforma
-dk_app_ro|normal|15-third-parties|jenkins-secrets|ver_dk_app_ro|GitHub|Jenkins no puede clonar la app
-dk_app_argocd_ro|normal|15-third-parties|argocd-secrets|ver_dk_app_argocd|GitHub|ArgoCD no puede leer el repo de la app
-jenkins_admin_pass|normal|50-jenkins|jenkins-secrets|ver_jenkins_admin|-|no se entra a Jenkins
-redis_auth|normal|30-argocd|-|ver_redis|-|ArgoCD deja de responder
-cf_api_token|normal|15-third-parties|jenkins-secrets|ver_cf_api|Cloudflare|tofu no puede aplicar el borde
-cf_dns_token|normal|15-third-parties|cert-manager-issuers|ver_cf_dns|Cloudflare|cert-manager no renueva certificados
-cf_access_token|normal|15-third-parties|-|ver_cf_access|Cloudflare|tofu no puede gestionar Access: el plano de operador queda como esté
-grafana_admin_pass|normal|85-observability|observability-base|ver_grafana_admin|-|no se entra a Grafana con su login propio (Access sigue delante)
-ntfy_bridge_token|normal|85-observability|observability-base|ver_ntfy_bridge|-|las alertas dejan de llegar: el puente no puede publicar en ntfy
-ntfy_operador_pass|normal|85-observability|observability-base|ver_ntfy_operador|teléfono|la app del teléfono deja de leer las alertas hasta recargar la credencial nueva
-registry_pass|delegada|-|-|ver_registry|-|ningún pod puede tirar imágenes
-cosign_key|irreducible|-|-|-|-|invalida TODAS las firmas ya emitidas
-cosign_pass|irreducible|-|-|-|-|invalida TODAS las firmas ya emitidas
-cosign_pub|irreducible|-|-|-|-|invalida TODAS las firmas ya emitidas
+# fields: name|class|phase|app_sync|verifier|third_party|blast_radius
+RECIPES=$(cat <<'TABLA'
+hmac_argocd|normal|15-third-parties|argocd-secrets|check_hmac_argocd|GitHub|ArgoCD stops finding out about pushes
+hmac_jenkins|normal|15-third-parties|jenkins-secrets|check_hmac_jenkins|GitHub|pushes stop building
+dk_ops|normal|15-third-parties|argocd-secrets|check_dk_ops|GitHub|ArgoCD cannot read the platform repo
+dk_app_ro|normal|15-third-parties|jenkins-secrets|check_dk_app_ro|GitHub|Jenkins cannot clone the app
+dk_app_argocd_ro|normal|15-third-parties|argocd-secrets|check_dk_app_argocd|GitHub|ArgoCD cannot read the app's repo
+jenkins_admin_pass|normal|50-jenkins|jenkins-secrets|check_jenkins_admin|-|nobody gets into Jenkins
+redis_auth|normal|30-argocd|-|check_redis|-|ArgoCD stops answering
+cf_api_token|normal|15-third-parties|jenkins-secrets|check_cf_api|Cloudflare|tofu cannot apply the edge
+cf_dns_token|normal|15-third-parties|cert-manager-issuers|check_cf_dns|Cloudflare|cert-manager does not renew certificates
+cf_access_token|normal|15-third-parties|-|check_cf_access|Cloudflare|tofu cannot manage Access: the operator plane stays as it is
+grafana_admin_pass|normal|85-observability|observability-base|check_grafana_admin|-|nobody gets into Grafana with its own login (Access is still in front)
+ntfy_bridge_token|normal|85-observability|observability-base|check_ntfy_bridge|-|alerts stop arriving: the bridge cannot publish to ntfy
+ntfy_operador_pass|normal|85-observability|observability-base|check_ntfy_operador|phone|the phone app stops reading the alerts until the new credential is reloaded
+registry_pass|delegada|-|-|check_registry|-|no pod can pull images
+cosign_key|irreducible|-|-|-|-|invalidates ALL signatures already issued
+cosign_pass|irreducible|-|-|-|-|invalidates ALL signatures already issued
+cosign_pub|irreducible|-|-|-|-|invalidates ALL signatures already issued
 TABLA
 )
 
-# El token del túnel NO vive en el store (lo produce tofu, fase 25), así
-# que no aparece en el listado del store — pero es una credencial de
-# plataforma rotable y tiene que estar en el menú. Se declara aparte y
-# el inventario las une.
+# The tunnel's token does NOT live in the store (tofu produces it, phase
+# 25), so it does not show up in the store listing — but it is a
+# rotatable platform credential and it has to be in the menu. It is
+# declared separately and the inventory joins them.
 #
-# Las dos mitades del service token de Access SÍ viven en el store, y
-# desde #88 las produce la fase 25 desde los outputs de tofu — no una
-# mano, como fue hasta el 2026-08-13. Van con clase `tofu` porque el
-# dueño es el state, no el store: invalidar el .enc no rota nada.
+# The two halves of the Access service token DO live in the store, and
+# since #88 phase 25 produces them from tofu's outputs — not a hand, as
+# was the case until 2026-08-13. They go with class `tofu` because the
+# owner is the state, not the store: invalidating the .enc rotates
+# nothing.
 #
-# argocd_admin_pass y argocd_server_secretkey siguen en `manual`, y eso
-# NO es lo mismo: son una deuda declarada (#86). Lo correcto es que la
-# fase 30 las produzca como cualquier otra credencial. Mientras tanto,
-# una instancia nueva nace con la password que genera el instalador de
-# ArgoCD — exactamente lo que #77 encontró sin rotar durante dieciocho
-# días.
-RECETAS_EXTRA=$(cat <<'TABLA'
-tunnel_token|tofu|25-edge-tofu|-|ver_tunnel|Cloudflare|se caen TODOS los hostnames públicos
-access_st_id|tofu|25-edge-tofu|-|ver_access_st|Cloudflare|la automatización deja de atravesar Access (se rota junto con el secret)
-access_st_secret|tofu|25-edge-tofu|-|ver_access_st|Cloudflare|la automatización deja de atravesar Access (se rota junto con el id)
-argocd_admin_pass|manual|-|-|ver_argocd_admin|-|no se entra a ArgoCD por la UI
-argocd_server_secretkey|manual|-|-|-|-|se cierran TODAS las sesiones de ArgoCD
+# argocd_admin_pass and argocd_server_secretkey are still `manual`, and
+# that is NOT the same thing: they are a declared debt (#86). The right
+# thing is for phase 30 to produce them like any other credential. In
+# the meantime, a new instance is born with the password the ArgoCD
+# installer generates — exactly what #77 found unrotated for eighteen
+# days.
+RECIPES_EXTRA=$(cat <<'TABLA'
+tunnel_token|tofu|25-edge-tofu|-|check_tunnel|Cloudflare|ALL the public hostnames go down
+access_st_id|tofu|25-edge-tofu|-|check_access_st|Cloudflare|automation stops crossing Access (it is rotated together with the secret)
+access_st_secret|tofu|25-edge-tofu|-|check_access_st|Cloudflare|automation stops crossing Access (it is rotated together with the id)
+argocd_admin_pass|manual|-|-|check_argocd_admin|-|nobody gets into ArgoCD through the UI
+argocd_server_secretkey|manual|-|-|-|-|ALL ArgoCD sessions are closed
 TABLA
 )
 
-receta_de() {   # <nombre> → la línea, o vacío
-    printf '%s\n%s\n' "$RECETAS" "$RECETAS_EXTRA" \
+recipe_for() {   # <name> → the line, or empty
+    printf '%s\n%s\n' "$RECIPES" "$RECIPES_EXTRA" \
         | awk -F'|' -v n="$1" '$1 == n {print; exit}'
 }
-campo() { printf '%s' "$1" | cut -d'|' -f"$2"; }
+field() { printf '%s' "$1" | cut -d'|' -f"$2"; }
 
 # ═══════════════════════════════════════════════════════════════════
-#  ANTI-DERIVA: el store y la tabla tienen que coincidir
+#  ANTI-DRIFT: the store and the table have to agree
 # ═══════════════════════════════════════════════════════════════════
-# Un .enc sin receta es una credencial que nadie sabe rotar, y no avisa.
-# Es el mismo principio que las tablas EXCLUSIONES/DELIBERADAS de
-# aegis dev seed: una entrada que sobra o que falta es un ERROR, no
-# un detalle. verify-static lo verifica también, en frío.
-huerfanos() {
+# An .enc without a recipe is a credential nobody knows how to rotate,
+# and it does not warn. It is the same principle as the
+# EXCLUSIONES/DELIBERADAS tables of aegis dev seed: an entry that is
+# surplus or missing is an ERROR, not a detail. verify-static checks it
+# too, statically.
+orphans() {
     local n
-    for n in $(nombres_del_store); do
-        [[ -n "$(receta_de "$n")" ]] || printf '%s\n' "$n"
+    for n in $(store_names); do
+        [[ -n "$(recipe_for "$n")" ]] || printf '%s\n' "$n"
     done
 }
-nombres_del_store() {
+store_names() {
     [[ -d "$STATE_SECRETS" ]] || return 0
     find "$STATE_SECRETS" -maxdepth 1 -name '*.enc' -printf '%f\n' 2>/dev/null \
         | sed 's/\.enc$//' | grep -v '\.pub$' | sort
 }
 
 # ═══════════════════════════════════════════════════════════════════
-#  PREFLIGHT DE RED — lo más barato que evita el problema más caro
+#  NETWORK PREFLIGHT — the cheapest thing that avoids the dearest problem
 # ═══════════════════════════════════════════════════════════════════
-# Esta máquina corre sobre WiFi, tiene el MTU 170 bytes por encima del
-# camino real (#69) y reinicia k3s en tormentas (#73). Un corte a mitad
-# de una tanda deja credenciales medio sincronizadas, que es el estado
-# más caro de diagnosticar del sistema entero.
+# This machine runs over WiFi, has its MTU 170 bytes above the real path
+# (#69) and restarts k3s during storms (#73). A cut in the middle of a
+# batch leaves credentials half synced, which is the most expensive
+# state in the whole system to diagnose.
 #
-# Comprobar la red ANTES de invalidar el primer .enc convierte ese
-# problema caro en uno gratis: la rotación no arranca. No cubre un corte
-# que empiece a los 40 segundos —nada lo cubre— pero elimina el caso
-# frecuente, que es arrancar con la red ya caída.
-preflight_red() {
-    local fallos=0 necesita_gh="$1" necesita_cf="$2"
-    printf '%s\n' "${gri}preflight: comprobando que se puede llegar a todo antes de tocar nada${fin}"
+# Checking the network BEFORE invalidating the first .enc turns that
+# expensive problem into a free one: the rotation does not start. It
+# does not cover a cut that begins forty seconds in —nothing covers
+# that— but it eliminates the frequent case, which is starting with the
+# network already down.
+preflight_network() {
+    local failures=0 needs_gh="$1" needs_cf="$2"
+    printf '%s\n' "${gray}preflight: checking that everything can be reached before touching anything${reset}"
 
     if kubectl get --raw='/readyz' >/dev/null 2>&1; then
-        printf '  %s✓%s cluster responde\n' "$ver" "$fin"
+        printf '  %s✓%s the cluster answers\n' "$green" "$reset"
     else
-        printf '  %s✗%s el cluster NO responde (kubectl get --raw=/readyz)\n' "$roj" "$fin"
-        fallos=$((fallos + 1))
+        printf '  %s✗%s the cluster does NOT answer (kubectl get --raw=/readyz)\n' "$red" "$reset"
+        failures=$((failures + 1))
     fi
 
-    if [[ "$necesita_gh" == "si" ]]; then
+    if [[ "$needs_gh" == "yes" ]]; then
         if gh api rate_limit >/dev/null 2>&1; then
-            printf '  %s✓%s GitHub responde y la sesión gh autentica\n' "$ver" "$fin"
+            printf '  %s✓%s GitHub answers and the gh session authenticates\n' "$green" "$reset"
         else
-            printf '  %s✗%s GitHub NO responde o `gh auth` está vencida\n' "$roj" "$fin"
-            fallos=$((fallos + 1))
+            printf '  %s✗%s GitHub does NOT answer or `gh auth` has expired\n' "$red" "$reset"
+            failures=$((failures + 1))
         fi
     fi
 
-    if [[ "$necesita_cf" == "si" ]]; then
+    if [[ "$needs_cf" == "yes" ]]; then
         if curl -sf --max-time 10 https://api.cloudflare.com/client/v4/ips \
              >/dev/null 2>&1; then
-            printf '  %s✓%s la API de Cloudflare responde\n' "$ver" "$fin"
+            printf '  %s✓%s the Cloudflare API answers\n' "$green" "$reset"
         else
-            printf '  %s✗%s la API de Cloudflare NO responde\n' "$roj" "$fin"
-            fallos=$((fallos + 1))
+            printf '  %s✗%s the Cloudflare API does NOT answer\n' "$red" "$reset"
+            failures=$((failures + 1))
         fi
     fi
 
-    # La age key: sin ella no se descifra ni se cifra NADA del store, y
-    # el fallo aparecería recién a mitad de camino.
+    # The age key: without it NOTHING in the store gets decrypted or
+    # encrypted, and the failure would only show up halfway through.
     local k="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/aegis.key}"
     if [[ -f "$k" ]]; then
-        printf '  %s✓%s age key presente (%s)\n' "$ver" "$fin" "$k"
+        printf '  %s✓%s age key present (%s)\n' "$green" "$reset" "$k"
     else
-        printf '  %s✗%s NO está la age key en %s — sops va a fallar\n' "$roj" "$fin" "$k"
-        fallos=$((fallos + 1))
+        printf '  %s✗%s the age key is NOT at %s — sops is going to fail\n' "$red" "$reset" "$k"
+        failures=$((failures + 1))
     fi
 
-    (( fallos == 0 )) || die "preflight FALLÓ ($fallos) — no se invalidó nada. Arreglá lo de arriba y volvé."
-    printf '  %spreflight OK — se puede empezar%s\n\n' "$ver" "$fin"
+    (( failures == 0 )) || die "preflight FAILED ($failures) — nothing was invalidated. Fix what is above and come back."
+    printf '  %spreflight OK — we can begin%s\n\n' "$green" "$reset"
 }
 
 # ═══════════════════════════════════════════════════════════════════
-#  ATRAVESAR CLOUDFLARE ACCESS (#76)
+#  CROSSING CLOUDFLARE ACCESS (#76)
 # ═══════════════════════════════════════════════════════════════════
-# _cf_access_config, curl_access y edge_origin_responds viven en
-# lib/access.sh desde #87. Estaban acá, definidos inline, y la fase 35
-# y la 60 los necesitan igual: dos copias del mismo conocimiento es
-# como la checklist de rotación se desactualizó durante semanas.
+# _cf_access_config, curl_access and edge_origin_responds have lived in
+# lib/access.sh since #87. They used to be here, defined inline, and
+# phase 35 and phase 60 need them just the same: two copies of the same
+# knowledge is how the rotation checklist went out of date for weeks.
 # shellcheck source=lib/access.sh
 source "$AEGIS_ROOT/lib/access.sh"
 
 # ═══════════════════════════════════════════════════════════════════
-#  VERIFICADORES — cada uno EJERCE el consumidor real
+#  VERIFIERS — each one EXERCISES the real consumer
 # ═══════════════════════════════════════════════════════════════════
-# Códigos, y la diferencia entre el 1 y el 2 es la que hace honestos a
-# los reintentos:
-#   0  verificado: el consumidor real funcionó
-#   1  VEREDICTO negativo: el remoto contestó, y contestó que no.
-#      NO se reintenta — reintentar es hacer tres veces lo incorrecto.
-#   2  TRANSPORTE: no se pudo llegar. Reintentable con retry_net.
-#   3  NO VERIFICABLE: no hay diente escrito para esto. Se reporta
-#      FUERTE y NO cuenta como verde. Preferimos "no medí" a un verde
-#      que no distingue.
+# Codes, and the difference between 1 and 2 is what makes the retries
+# honest:
+#   0  verified: the real consumer worked
+#   1  negative VERDICT: the remote answered, and it answered no.
+#      It is NOT retried — retrying is doing the wrong thing three
+#      times.
+#   2  TRANSPORT: it could not be reached. Retryable with retry_net.
+#   3  NOT VERIFIABLE: there is no tooth written for this. It is
+#      reported LOUDLY and does NOT count as green. We prefer "I did not
+#      measure" to a green that does not distinguish.
 
-ver_hmac_jenkins() {
+check_hmac_jenkins() {
     [[ -x "$PBIN/aegis-webhook" ]] || return 3
-    # El diente doble de la checklist §6: un ping tiene que dar 200 Y
-    # una firma inventada tiene que dar 400. Sin lo segundo, el 200 no
-    # está diciendo nada — podría estar aceptando cualquier cosa.
+    # The double tooth of checklist §6: a ping has to give 200 AND a
+    # made-up signature has to give 400. Without the second, the 200 is
+    # not saying anything — it could be accepting anything at all.
     local hooks id rc=0
     hooks="$(retry_net 3 gh api "repos/$GH_OWNER/$APP_REPO/hooks" 2>/dev/null)" || return 2
     id="$(printf '%s' "$hooks" | python3 -c '
 import json,sys
 h=json.load(sys.stdin)
 print(next((x["id"] for x in h if "jenkins" in x.get("config",{}).get("url","")), ""))' 2>/dev/null)"
-    [[ -n "$id" ]] || { log_warn "no encontré el hook de Jenkins en $APP_REPO"; return 3; }
+    [[ -n "$id" ]] || { log_warn "I did not find the Jenkins hook in $APP_REPO"; return 3; }
     retry_net 3 gh api -X POST "repos/$GH_OWNER/$APP_REPO/hooks/$id/pings" >/dev/null 2>&1 || return 2
     sleep 6
-    local ultima
-    ultima="$(gh api "repos/$GH_OWNER/$APP_REPO/hooks/$id/deliveries" 2>/dev/null \
+    local last
+    last="$(gh api "repos/$GH_OWNER/$APP_REPO/hooks/$id/deliveries" 2>/dev/null \
         | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["status_code"] if d else "")' 2>/dev/null)" || return 2
-    if [[ "$ultima" == "200" ]]; then
-        printf '    %sping del webhook → 200%s\n' "$gri" "$fin"
+    if [[ "$last" == "200" ]]; then
+        printf '    %swebhook ping → 200%s\n' "$gray" "$reset"
         rc=0
     else
-        log_error "el ping del webhook de Jenkins dio '$ultima', no 200"
+        log_error "the ping of the Jenkins webhook gave '$last', not 200"
         rc=1
     fi
     return $rc
 }
 
-ver_hmac_argocd() {
-    # Mismo diente contra el repo de plataforma.
+check_hmac_argocd() {
+    # The same tooth against the platform repo.
     local hooks id
     hooks="$(retry_net 3 gh api "repos/$GH_OWNER/$PLATFORM_REPO/hooks" 2>/dev/null)" || return 2
     id="$(printf '%s' "$hooks" | python3 -c '
 import json,sys
 h=json.load(sys.stdin)
 print(next((x["id"] for x in h if "argocd" in x.get("config",{}).get("url","")), ""))' 2>/dev/null)"
-    [[ -n "$id" ]] || { log_warn "no encontré el hook de ArgoCD en $PLATFORM_REPO"; return 3; }
+    [[ -n "$id" ]] || { log_warn "I did not find the ArgoCD hook in $PLATFORM_REPO"; return 3; }
     retry_net 3 gh api -X POST "repos/$GH_OWNER/$PLATFORM_REPO/hooks/$id/pings" >/dev/null 2>&1 || return 2
     sleep 6
-    local ultima
-    ultima="$(gh api "repos/$GH_OWNER/$PLATFORM_REPO/hooks/$id/deliveries" 2>/dev/null \
+    local last
+    last="$(gh api "repos/$GH_OWNER/$PLATFORM_REPO/hooks/$id/deliveries" 2>/dev/null \
         | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["status_code"] if d else "")' 2>/dev/null)" || return 2
-    [[ "$ultima" == "200" ]] || { log_error "el ping del webhook de ArgoCD dio '$ultima', no 200"; return 1; }
-    printf '    %sping del webhook → 200%s\n' "$gri" "$fin"
+    [[ "$last" == "200" ]] || { log_error "the ping of the ArgoCD webhook gave '$last', not 200"; return 1; }
+    printf '    %swebhook ping → 200%s\n' "$gray" "$reset"
 }
 
-# _ssh_del_secret <ns> <secret> <repo> — el diente de las deploy keys:
-# usa la clave del Secret VIVO (no la del store, no la del repo) contra
-# GitHub de verdad. Es la única forma de saber que el material que el
-# consumidor tiene en la mano autentica.
-_ssh_del_secret() {
+# _ssh_from_secret <ns> <secret> <repo> — the deploy keys' tooth: it uses
+# the key from the LIVE Secret (not the store's, not the repo's) against
+# the real GitHub. It is the only way of knowing that the material the
+# consumer is holding authenticates.
+_ssh_from_secret() {
     local ns="$1" secret="$2" repo="$3" k rc=0
-    # ArgoCD guarda la privada en `sshPrivateKey`; Jenkins, en
-    # `privateKey`. Son convenciones de cada consumidor, no un descuido.
-    # Este verificador miraba sólo la de ArgoCD, así que sobre un Secret
-    # de Jenkins daba "no pude leer" — un falso fallo de TRANSPORTE, que
-    # además se reintentaba tres veces antes de mentir. Cazado el
-    # 2026-08-12 mapeando qué clave usa cada consumidor, antes de correrlo.
-    local campo
+    # ArgoCD keeps the private key in `sshPrivateKey`; Jenkins, in
+    # `privateKey`. They are each consumer's conventions, not an
+    # oversight. This verifier only looked at ArgoCD's, so against a
+    # Jenkins Secret it gave "could not read" — a false TRANSPORT
+    # failure, which was also retried three times before lying. Caught
+    # on 2026-08-12 by mapping which key each consumer uses, before
+    # running it.
+    local field
     k="$(mktemp /dev/shm/aegis-verif.XXXXXX)"; chmod 600 "$k"
-    for campo in sshPrivateKey privateKey; do
+    for field in sshPrivateKey privateKey; do
         kubectl -n "$ns" get secret "$secret" \
-            -o jsonpath="{.data.$campo}" 2>/dev/null | base64 -d > "$k" 2>/dev/null
+            -o jsonpath="{.data.$field}" 2>/dev/null | base64 -d > "$k" 2>/dev/null
         [[ -s "$k" ]] && break
     done
     if [[ ! -s "$k" ]]; then
         rm -f "$k"
-        log_warn "no encontré clave privada en $ns/$secret (ni sshPrivateKey ni privateKey)"
+        log_warn "I did not find a private key in $ns/$secret (neither sshPrivateKey nor privateKey)"
         return 2
     fi
-    local salida
-    salida="$(GIT_SSH_COMMAND="ssh -i $k -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+    local output
+    output="$(GIT_SSH_COMMAND="ssh -i $k -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
         git ls-remote "git@github.com:$GH_OWNER/$repo.git" HEAD 2>&1)" || rc=$?
     rm -f "$k"
     if (( rc == 0 )); then
-        printf '    %sla clave de %s/%s autentica contra %s%s\n' "$gri" "$ns" "$secret" "$repo" "$fin"
+        printf '    %sthe key of %s/%s authenticates against %s%s\n' "$gray" "$ns" "$secret" "$repo" "$reset"
         return 0
     fi
-    # Permission denied = veredicto (la clave no sirve). Otra cosa =
-    # probablemente transporte. La distinción es la que hace que el
-    # reintento no repita un fallo real.
-    if printf '%s' "$salida" | grep -qiE 'permission denied|publickey'; then
-        log_error "GitHub rechazó la clave de $ns/$secret (Permission denied)"
+    # Permission denied = verdict (the key does not work). Anything else
+    # = probably transport. The distinction is what keeps the retry from
+    # repeating a real failure.
+    if printf '%s' "$output" | grep -qiE 'permission denied|publickey'; then
+        log_error "GitHub rejected the key of $ns/$secret (Permission denied)"
         return 1
     fi
-    log_warn "no se pudo llegar a GitHub verificando $ns/$secret: $(printf '%s' "$salida" | head -1)"
+    log_warn "could not reach GitHub while verifying $ns/$secret: $(printf '%s' "$output" | head -1)"
     return 2
 }
 
-# Una por consumidor: cada clave se verifica contra el Secret que ESE
-# consumidor lee de verdad. Un verificador compartido no diría cuál de
-# los dos se rompió.
-ver_dk_ops()        { _ssh_del_secret argocd         ops-stack-repo   "$PLATFORM_REPO"; }
-ver_dk_app_ro()     { _ssh_del_secret jenkins-system hello-aegis-repo "$APP_REPO"; }
-ver_dk_app_argocd() { _ssh_del_secret argocd         hello-aegis-repo "$APP_REPO"; }
+# One per consumer: each key is verified against the Secret THAT
+# consumer really reads. A shared verifier would not say which of the
+# two broke.
+check_dk_ops()        { _ssh_from_secret argocd         ops-stack-repo   "$PLATFORM_REPO"; }
+check_dk_app_ro()     { _ssh_from_secret jenkins-system hello-aegis-repo "$APP_REPO"; }
+check_dk_app_argocd() { _ssh_from_secret argocd         hello-aegis-repo "$APP_REPO"; }
 
-ver_jenkins_admin() {
-    # La checklist arrastra "(NO VERIFICADO)" en el ítem 11 desde que se
-    # escribió: nadie comprobó si el chart re-lee existingSecret o exige
-    # restart. Este diente lo resuelve la primera vez que se corra —
-    # intenta un login REAL con la credencial del Secret vivo.
-    # Las claves del Secret son `username`/`password` (fase 50, línea 28),
-    # no `jenkins-admin-user`/`jenkins-admin-password` como las nombra el
-    # chart de Jenkins. Adiviné los nombres del chart en vez de leer la
-    # fase, y el resultado fue un login con usuario VACÍO → 401, o sea
-    # «el consumidor la rechaza» sobre una credencial sana.
+check_jenkins_admin() {
+    # The checklist has been dragging "(NOT VERIFIED)" along in item 11
+    # since it was written: nobody checked whether the chart re-reads
+    # existingSecret or demands a restart. This tooth settles it the
+    # first time it is run — it attempts a REAL login with the
+    # credential from the live Secret.
+    # The Secret's keys are `username`/`password` (phase 50, line 28),
+    # not `jenkins-admin-user`/`jenkins-admin-password` as the Jenkins
+    # chart names them. I guessed the chart's names instead of reading
+    # the phase, and the result was a login with an EMPTY user → 401,
+    # that is, «the consumer rejects it» over a healthy credential.
     local u p rc=0
     u="$(kubectl -n jenkins-system get secret jenkins-admin -o jsonpath='{.data.username}' 2>/dev/null | base64 -d)" || return 2
-    [[ -n "$u" ]] || { log_warn "jenkins-admin sin 'username' — ¿cambió la forma del Secret?"; return 3; }
+    [[ -n "$u" ]] || { log_warn "jenkins-admin without 'username' — did the shape of the Secret change?"; return 3; }
     p="$(mktemp /dev/shm/aegis-verif.XXXXXX)"; chmod 600 "$p"
     kubectl -n jenkins-system get secret jenkins-admin \
         -o jsonpath='{.data.password}' 2>/dev/null | base64 -d > "$p" || { rm -f "$p"; return 2; }
-    [[ -s "$p" ]] || { rm -f "$p"; log_warn "jenkins-admin sin 'password'"; return 3; }
+    [[ -s "$p" ]] || { rm -f "$p"; log_warn "jenkins-admin without 'password'"; return 3; }
     local code
-    # --netrc-file: la password NUNCA por argv (A27).
+    # --netrc-file: the password NEVER through argv (A27).
     printf 'machine jenkins.%s login %s password %s\n' "$ROOT_DOMAIN" "$u" "$(cat "$p")" > "$p.netrc"
     chmod 600 "$p.netrc"
     code="$(curl_access -s -o /dev/null -w '%{http_code}' --max-time 25 \
@@ -378,94 +390,95 @@ ver_jenkins_admin() {
     rm -f "$p" "$p.netrc"
     (( rc == 0 )) || return 2
     case "$code" in
-        200) printf '    %slogin en Jenkins con la credencial nueva → 200%s\n' "$gri" "$fin"
-             printf '    %s(resuelve el "(NO VERIFICADO)" del ítem 11: el chart re-lee sin restart)%s\n' "$gri" "$fin"
+        200) printf '    %slogin to Jenkins with the new credential → 200%s\n' "$gray" "$reset"
+             printf '    %s(settles the "(NOT VERIFIED)" of item 11: the chart re-reads without a restart)%s\n' "$gray" "$reset"
              return 0 ;;
-        401|403) log_error "Jenkins rechazó la credencial nueva (HTTP $code) — ¿hace falta restart del statefulset?"
+        401|403) log_error "Jenkins rejected the new credential (HTTP $code) — does the statefulset need a restart?"
              return 1 ;;
         000) return 2 ;;
-        *)   log_error "Jenkins contestó HTTP $code al verificar el login"; return 1 ;;
+        *)   log_error "Jenkins answered HTTP $code while verifying the login"; return 1 ;;
     esac
 }
 
-ver_redis() {
-    # redis_auth no tiene tercero: el diente es que ArgoCD siga
-    # funcionando. Un auth desincronizado deja al repo-server sin caché
-    # y las Apps dejan de reconciliar.
+check_redis() {
+    # redis_auth has no third party: the tooth is that ArgoCD keeps
+    # working. An out-of-sync auth leaves the repo-server without a
+    # cache and the Apps stop reconciling.
     kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=90s >/dev/null 2>&1 || return 2
-    local malas
-    malas="$(kubectl get applications -n argocd --no-headers \
+    local bad_ones
+    bad_ones="$(kubectl get applications -n argocd --no-headers \
         -o custom-columns='N:.metadata.name,H:.status.health.status' 2>/dev/null \
         | awk '$2 == "Degraded" {print $1}' | tr '\n' ' ')" || return 2
-    if [[ -n "${malas// /}" ]]; then
-        log_error "tras rotar redis_auth hay Apps Degraded: $malas"
+    if [[ -n "${bad_ones// /}" ]]; then
+        log_error "after rotating redis_auth there are Degraded Apps: $bad_ones"
         return 1
     fi
-    printf '    %sArgoCD responde y ninguna App quedó Degraded%s\n' "$gri" "$fin"
+    printf '    %sArgoCD answers and no App was left Degraded%s\n' "$gray" "$reset"
 }
 
-ver_cf_api() {
-    # El consumidor real del token de la API es tofu. Un plan limpio es
-    # la prueba de que el token nuevo tiene los permisos que hacen falta.
+check_cf_api() {
+    # The real consumer of the API token is tofu. A clean plan is the
+    # proof that the new token has the permissions that are needed.
     [[ -x "$PLATFORM_DIR/tofu/tofu-apply.sh" ]] || return 3
     local rc=0
-    # DOS bugs que este verificador tuvo en su primera corrida, y los dos
-    # daban el MISMO síntoma —«el consumidor la rechaza»— sobre un token
-    # que funcionaba perfecto:
+    # TWO bugs this verifier had on its first run, and both gave the
+    # SAME symptom —«the consumer rejects it»— over a token that worked
+    # perfectly:
     #
-    #  1. `-chdir=envs/cloudflare-tunnel` es RELATIVO, y el verificador
-    #     corre desde donde esté parado el operador, no desde tofu/. El
-    #     subshell con cd lo ancla.
-    #  2. `local rc=$?` DESPUÉS de un `if` no lee el status del comando:
-    #     un `if` cuya condición falla y no tiene else devuelve 0. O sea
-    #     que el código 2 de -detailed-exitcode («hay cambios, el token
-    #     SÍ sirve») nunca se podía distinguir del 1 («falló de verdad»),
-    #     y todo terminaba en el return 1 de abajo.
+    #  1. `-chdir=envs/cloudflare-tunnel` is RELATIVE, and the verifier
+    #     runs from wherever the operator is standing, not from tofu/.
+    #     The subshell with cd anchors it.
+    #  2. `local rc=$?` AFTER an `if` does not read the command's
+    #     status: an `if` whose condition fails and that has no else
+    #     returns 0. Which means that -detailed-exitcode's code 2
+    #     («there are changes, the token DOES work») could never be told
+    #     apart from 1 («it really failed»), and everything ended in the
+    #     return 1 below.
     #
-    # Un verificador que da rojo sobre algo sano es peor que no tenerlo:
-    # entrena a no creerle.
-    # retry_net NO sirve acá (tercer bug de este verificador, mismo
-    # síntoma que los dos de arriba): -detailed-exitcode devuelve 2
-    # como VEREDICTO («hay cambios — el token SIRVE») y retry_net
-    # trata todo no-cero como fallo: lo reintentó tres veces y lo
-    # devolvió aplastado como 1. Así nació el falso «el consumidor la
-    # RECHAZA» del 2026-08-21. Solo el 1 (fallo real, quizá red)
-    # merece reintento; 0 y 2 son respuestas:
-    local _intento
-    for _intento in 1 2 3; do
+    # A verifier that goes red over something healthy is worse than not
+    # having one: it trains people not to believe it.
+    # retry_net is NO USE here (this verifier's third bug, same symptom
+    # as the two above): -detailed-exitcode returns 2 as a VERDICT
+    # («there are changes — the token WORKS») and retry_net treats
+    # everything non-zero as a failure: it retried three times and
+    # returned it flattened to 1. That is how the false «the consumer
+    # REJECTS it» of 2026-08-21 was born. Only the 1 (a real failure,
+    # perhaps the network) deserves a retry; 0 and 2 are answers:
+    local _attempt
+    for _attempt in 1 2 3; do
         rc=0
         ( cd "$PLATFORM_DIR/tofu" && ./tofu-apply.sh \
             -chdir=envs/cloudflare-tunnel plan -detailed-exitcode ) >/dev/null 2>&1 || rc=$?
         (( rc == 1 )) || break
-        (( _intento < 3 )) && sleep 5
+        (( _attempt < 3 )) && sleep 5
     done
     case $rc in
-      0) printf '    %stofu plan limpio con el token: sin cambios%s\n' "$gri" "$fin"; return 0 ;;
-      2) log_warn "tofu plan anduvo pero reporta cambios pendientes — el token SIRVE (el drift es otro tema)"
+      0) printf '    %stofu plan clean with the token: no changes%s\n' "$gray" "$reset"; return 0 ;;
+      2) log_warn "tofu plan worked but reports pending changes — the token WORKS (the drift is another matter)"
          return 0 ;;
-      *) log_error "tofu plan falló con el token (exit $rc)"; return 1 ;;
+      *) log_error "tofu plan failed with the token (exit $rc)"; return 1 ;;
     esac
 }
 
-ver_cf_dns() {
-    # cert-manager usa el token DNS para el reto DNS-01. El diente es un
-    # certificado que de verdad esté Ready.
-    local malos
-    malos="$(kubectl get certificates -A --no-headers \
+check_cf_dns() {
+    # cert-manager uses the DNS token for the DNS-01 challenge. The
+    # tooth is a certificate that is genuinely Ready.
+    local bad_ones
+    bad_ones="$(kubectl get certificates -A --no-headers \
         -o custom-columns='NS:.metadata.namespace,N:.metadata.name,R:.status.conditions[0].status' 2>/dev/null \
         | awk '$3 != "True" {print $1"/"$2}' | tr '\n' ' ')" || return 2
-    if [[ -n "${malos// /}" ]]; then
-        log_error "certificados que no están Ready tras rotar el token DNS: $malos"
+    if [[ -n "${bad_ones// /}" ]]; then
+        log_error "certificates that are not Ready after rotating the DNS token: $bad_ones"
         return 1
     fi
-    printf '    %stodos los certificados siguen Ready%s\n' "$gri" "$fin"
+    printf '    %sall the certificates are still Ready%s\n' "$gray" "$reset"
 }
 
-ver_argocd_admin() {
-    # El diente doble: la password del store tiene que ENTRAR (200) y una
-    # inventada tiene que ser RECHAZADA (401). Sin lo segundo, un ArgoCD
-    # que aceptara cualquier cosa daría verde igual.
-    local p code_ok code_mal
+check_argocd_admin() {
+    # The double tooth: the store's password has to GET IN (200) and a
+    # made-up one has to be REJECTED (401). Without the second, an
+    # ArgoCD that accepted anything would come out green all the same.
+    local p code_ok code_bad
     p="$(mktemp /dev/shm/aegis-verif.XXXXXX)"; chmod 600 "$p"
     sops -d --input-type binary --output-type binary \
         "$STATE_SECRETS/argocd_admin_pass.enc" > "$p" 2>/dev/null || { rm -f "$p"; return 2; }
@@ -474,162 +487,163 @@ ver_argocd_admin() {
         "$p" > "$p.body"; chmod 600 "$p.body"
     code_ok="$(curl_access -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
         --max-time 30 -d @"$p.body" "https://argocd.$ROOT_DOMAIN/api/v1/session" 2>/dev/null)"
-    code_mal="$(curl_access -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+    code_bad="$(curl_access -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
         --max-time 30 -d '{"username":"admin","password":"contrasena-deliberadamente-incorrecta"}' \
         "https://argocd.$ROOT_DOMAIN/api/v1/session" 2>/dev/null)"
     rm -f "$p" "$p.body"
-    [[ "$code_ok" == "000" || "$code_mal" == "000" ]] && return 2
-    if [[ "$code_ok" == "200" && "$code_mal" == "401" ]]; then
-        printf '    %sla password del store entra (200) y una falsa se rechaza (401)%s\n' "$gri" "$fin"
+    [[ "$code_ok" == "000" || "$code_bad" == "000" ]] && return 2
+    if [[ "$code_ok" == "200" && "$code_bad" == "401" ]]; then
+        printf '    %sthe store password gets in (200) and a false one is rejected (401)%s\n' "$gray" "$reset"
         return 0
     fi
-    log_error "ArgoCD: password buena → $code_ok (esperado 200), password falsa → $code_mal (esperado 401)"
+    log_error "ArgoCD: good password → $code_ok (expected 200), false password → $code_bad (expected 401)"
     return 1
 }
 
-ver_cf_access() {
-    # El consumidor del token de Access es tofu. Que el `plan` del env
-    # corra limpio prueba que el token sigue pudiendo LEER las 4
-    # aplicaciones; si hubiera perdido permisos, tofu las vería como
-    # «to add» otra vez.
+check_cf_access() {
+    # The consumer of the Access token is tofu. That the env's `plan`
+    # runs clean proves that the token can still READ the 4
+    # applications; if it had lost permissions, tofu would see them as
+    # «to add» again.
     [[ -x "$PLATFORM_DIR/tofu/tofu-apply.sh" ]] || return 3
-    local salida rc=0
-    salida="$( cd "$PLATFORM_DIR/tofu" && ./tofu-apply.sh \
+    local output rc=0
+    output="$( cd "$PLATFORM_DIR/tofu" && ./tofu-apply.sh \
         -chdir=envs/cloudflare-tunnel plan -no-color 2>&1 )" || rc=$?
-    (( rc == 0 )) || { log_error "tofu plan falló con el token de Access (exit $rc)"; return 1; }
-    if printf '%s' "$salida" | grep -qE 'module\.access\..* will be created'; then
-        log_error "tofu quiere RE-CREAR recursos de Access: o se borraron del panel, o el token dejó de verlos, o el STATE quedó viejo (¿un apply cuyo enc.json re-cifrado nadie commiteó? — visto 2026-08-21)"
+    (( rc == 0 )) || { log_error "tofu plan failed with the Access token (exit $rc)"; return 1; }
+    if printf '%s' "$output" | grep -qE 'module\.access\..* will be created'; then
+        log_error "tofu wants to RE-CREATE Access resources: either they were deleted from the panel, or the token stopped seeing them, or the STATE went stale (an apply whose re-encrypted enc.json nobody committed? — seen 2026-08-21)"
         return 1
     fi
-    printf '    %slas 4 aplicaciones de Access siguen en el state y el token las ve%s\n' "$gri" "$fin"
+    printf '    %sthe 4 Access applications are still in the state and the token sees them%s\n' "$gray" "$reset"
 }
 
-# ver_access_st — el service token, con los DOS dientes (#87).
+# check_access_st — the service token, with BOTH teeth (#87).
 #
-# El primer diente solo no prueba nada: si Access estuviera caído o las
-# políticas borradas, TODO el mundo llegaría al origen y este
-# verificador estaría igual de verde. Sería la enfermedad E otra vez,
-# esta vez sobre lo que Access existe para impedir. Por eso el segundo
-# diente es NEGATIVO: sin el token, Access tiene que interceptar.
-ver_access_st() {
+# The first tooth on its own proves nothing: if Access were down or the
+# policies deleted, EVERYBODY would reach the origin and this verifier
+# would be just as green. It would be Disease E all over again, this
+# time over the very thing Access exists to prevent. That is why the
+# second tooth is NEGATIVE: without the token, Access has to intercept.
+check_access_st() {
     [[ -n "$ROOT_DOMAIN" ]] || return 3
     [[ -f "$STATE_SECRETS/access_st_id.enc" && \
        -f "$STATE_SECRETS/access_st_secret.enc" ]] || {
-        log_error "no hay service token en el store (access_st_id/_secret)"
+        log_error "there is no service token in the store (access_st_id/_secret)"
         return 1; }
     local url="https://argocd.$ROOT_DOMAIN"
 
-    # DIENTE 1 — CON el token se llega al ORIGEN.
+    # TOOTH 1 — WITH the token the ORIGIN is reached.
     local rc=0
     edge_origin_responds "$url" '^(200|404)$' || rc=$?
     case $rc in
       0) ;;
       2) return 2 ;;
-      *) log_error "el service token del store NO atraviesa Access"; return 1 ;;
+      *) log_error "the store's service token does NOT cross Access"; return 1 ;;
     esac
 
-    # DIENTE 2 — SIN el token, Access intercepta. curl desnudo a
-    # propósito: no curl_access.
+    # TOOTH 2 — WITHOUT the token, Access intercepts. A bare curl on
+    # purpose: not curl_access.
     local out loc
     out="$(curl -sS -m 20 -o /dev/null -w '%{http_code} %{redirect_url}' \
         "$url" 2>/dev/null)" || return 2
     loc="${out#* }"
     if [[ "$loc" != *cloudflareaccess.com* ]]; then
-        log_error "SIN service token TAMBIÉN se llega al origen: Access no está protegiendo $url"
+        log_error "WITHOUT a service token the origin is reached TOO: Access is not protecting $url"
         return 1
     fi
-    printf '    %scon token → ORIGEN; sin token → Access intercepta%s\n' "$gri" "$fin"
+    printf '    %swith token → ORIGIN; without token → Access intercepts%s\n' "$gray" "$reset"
 }
 
-# ── las tres credenciales de observabilidad (fase 85) ───────────────
-# Van LITERALES, una función por credencial y NO un bucle ni un
-# verificador compartido: el check 89 extrae los nombres parseando la
-# tabla, y el despacho por NOMBRE (no por clase) es el precedente que
-# cerró el service token de Access — un genérico "rota lo de la 85"
-# haría que la credencial nueva de mañana rotara la equivocada en
-# silencio. Rotarlas re-corre `--only 85-observability`, que converge
-# sobre instancia viva (los hashes de ntfy se re-derivan y REEMPLAZAN
-# cuando el password del store ya no verifica — sin eso la rotación
-# sería un no-op silencioso).
+# ── the three observability credentials (phase 85) ──────────────────
+# They go LITERAL, one function per credential and NOT a loop nor a
+# shared verifier: check 89 extracts the names by parsing the table, and
+# dispatch by NAME (not by class) is the precedent that closed the
+# Access service token — a generic "rotate the 85 stuff" would make
+# tomorrow's new credential rotate the wrong one in silence. Rotating
+# them re-runs `--only 85-observability`, which converges over a live
+# instance (the ntfy hashes are re-derived and REPLACED when the store's
+# password no longer verifies — without that the rotation would be a
+# silent no-op).
 
-ver_grafana_admin() {
-    # El diente doble (patrón ver_argocd_admin): la credencial del
-    # Secret VIVO tiene que ENTRAR (200) y una inventada tiene que ser
-    # RECHAZADA (401). Va por el hostname público atravesando Access
-    # (curl_access): es el camino que usa el operador de verdad.
-    local u p code_ok code_mal rc=0
+check_grafana_admin() {
+    # The double tooth (check_argocd_admin's pattern): the credential
+    # from the LIVE Secret has to GET IN (200) and a made-up one has to
+    # be REJECTED (401). It goes through the public hostname crossing
+    # Access (curl_access): it is the path the real operator uses.
+    local u p code_ok code_bad rc=0
     u="$(kubectl -n observability get secret grafana-admin \
         -o jsonpath='{.data.admin-user}' 2>/dev/null | base64 -d)" || return 2
-    [[ -n "$u" ]] || { log_warn "grafana-admin sin 'admin-user' — ¿cambió la forma del Secret?"; return 3; }
+    [[ -n "$u" ]] || { log_warn "grafana-admin without 'admin-user' — did the shape of the Secret change?"; return 3; }
     p="$(mktemp /dev/shm/aegis-verif.XXXXXX)"; chmod 600 "$p"
     kubectl -n observability get secret grafana-admin \
         -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d > "$p" \
         || { rm -f "$p"; return 2; }
-    [[ -s "$p" ]] || { rm -f "$p"; log_warn "grafana-admin sin 'admin-password'"; return 3; }
-    # --netrc-file: la password NUNCA por argv (A27).
+    [[ -s "$p" ]] || { rm -f "$p"; log_warn "grafana-admin without 'admin-password'"; return 3; }
+    # --netrc-file: the password NEVER through argv (A27).
     printf 'machine grafana.%s login %s password %s\n' \
         "$ROOT_DOMAIN" "$u" "$(cat "$p")" > "$p.netrc"
     chmod 600 "$p.netrc"
     code_ok="$(curl_access -s -o /dev/null -w '%{http_code}' --max-time 25 \
         --netrc-file "$p.netrc" "https://grafana.$ROOT_DOMAIN/api/user" 2>/dev/null)" || rc=2
-    # el negativo no lleva secreto: user admin + password inventada,
-    # inline en base64 (admin:contrasena-deliberadamente-incorrecta):
-    code_mal="$(curl_access -s -o /dev/null -w '%{http_code}' --max-time 25 \
+    # the negative carries no secret: user admin + a made-up password,
+    # inline in base64 (admin:contrasena-deliberadamente-incorrecta):
+    code_bad="$(curl_access -s -o /dev/null -w '%{http_code}' --max-time 25 \
         -H 'Authorization: Basic YWRtaW46Y29udHJhc2VuYS1kZWxpYmVyYWRhbWVudGUtaW5jb3JyZWN0YQ==' \
         "https://grafana.$ROOT_DOMAIN/api/user" 2>/dev/null)" || rc=2
     rm -f "$p" "$p.netrc"
     (( rc == 0 )) || return 2
-    [[ "$code_ok" == "000" || "$code_mal" == "000" ]] && return 2
-    if [[ "$code_ok" == "200" && "$code_mal" == "401" ]]; then
-        printf '    %sla credencial del Secret entra (200) y una falsa se rechaza (401)%s\n' "$gri" "$fin"
+    [[ "$code_ok" == "000" || "$code_bad" == "000" ]] && return 2
+    if [[ "$code_ok" == "200" && "$code_bad" == "401" ]]; then
+        printf '    %sthe Secret credential gets in (200) and a false one is rejected (401)%s\n' "$gray" "$reset"
         return 0
     fi
-    log_error "Grafana: credencial buena → $code_ok (esperado 200), falsa → $code_mal (esperado 401)"
+    log_error "Grafana: good credential → $code_ok (expected 200), false one → $code_bad (expected 401)"
     return 1
 }
 
-ver_ntfy_bridge() {
-    # El consumidor real es el puente PUBLICANDO en el topic. El diente
-    # doble: con la credencial del Secret vivo se publica (200) y sin
-    # credencial se rechaza (403, deny-all). El positivo manda un
-    # mensaje REAL al teléfono — es el precio de medir el canal de
-    # verdad, y avisa que es una prueba.
+check_ntfy_bridge() {
+    # The real consumer is the bridge PUBLISHING to the topic. The
+    # double tooth: with the credential from the live Secret it
+    # publishes (200) and without a credential it is rejected (403,
+    # deny-all). The positive sends a REAL message to the phone — it is
+    # the price of measuring the channel for real, and it says it is a
+    # test.
     local p code_ok code_anon
     p="$(mktemp /dev/shm/aegis-verif.XXXXXX)"; chmod 600 "$p"
-    # la credencial vive DENTRO del scfg del Secret (key `config`):
+    # the credential lives INSIDE the Secret's scfg (key `config`):
     kubectl -n observability get secret ntfy-bridge-token \
         -o jsonpath='{.data.config}' 2>/dev/null | base64 -d \
         | awk '$1 == "password" {print $2; exit}' | tr -d '\n' > "$p" \
         || { rm -f "$p"; return 2; }
-    [[ -s "$p" ]] || { rm -f "$p"; log_warn "ntfy-bridge-token sin línea 'password' en el scfg — ¿cambió el contrato de ntfy-bridge.yaml?"; return 3; }
+    [[ -s "$p" ]] || { rm -f "$p"; log_warn "ntfy-bridge-token without a 'password' line in the scfg — did the contract of ntfy-bridge.yaml change?"; return 3; }
     printf 'machine ntfy.%s login puente password %s\n' \
         "$ROOT_DOMAIN" "$(cat "$p")" > "$p.netrc"
     chmod 600 "$p.netrc"
     code_ok="$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
         --netrc-file "$p.netrc" \
-        -d 'prueba de rotacion del puente (aegis-rotate ver_ntfy_bridge)' \
+        -d 'bridge rotation test (aegis-rotate check_ntfy_bridge)' \
         "https://ntfy.$ROOT_DOMAIN/aegis-alertas" 2>/dev/null)"
     code_anon="$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
-        -d 'prueba anonima (debe rechazarse)' \
+        -d 'anonymous test (must be rejected)' \
         "https://ntfy.$ROOT_DOMAIN/aegis-alertas" 2>/dev/null)"
     rm -f "$p" "$p.netrc"
     [[ "$code_ok" == "000" || "$code_anon" == "000" ]] && return 2
     if [[ "$code_ok" == "200" && "$code_anon" == "403" ]]; then
-        printf '    %sel puente publica (200) y el anónimo se rechaza (403 — deny-all vivo)%s\n' "$gri" "$fin"
+        printf '    %sthe bridge publishes (200) and the anonymous one is rejected (403 — deny-all alive)%s\n' "$gray" "$reset"
         return 0
     fi
-    log_error "ntfy: publicar con la credencial del puente → $code_ok (esperado 200), sin credencial → $code_anon (esperado 403)"
+    log_error "ntfy: publishing with the bridge credential → $code_ok (expected 200), without a credential → $code_anon (expected 403)"
     return 1
 }
 
-ver_ntfy_operador() {
-    # El consumidor es la app del teléfono; su equivalente medible es
-    # LEER el topic con la credencial del store (en el cluster solo
-    # vive el hash). Diente doble: la del store lee (200) y una
-    # inventada se rechaza (401/403).
-    local p code_ok code_mal
+check_ntfy_operador() {
+    # The consumer is the phone app; its measurable equivalent is
+    # READING the topic with the store's credential (only the hash lives
+    # in the cluster). Double tooth: the store's one reads (200) and a
+    # made-up one is rejected (401/403).
+    local p code_ok code_bad
     [[ -f "$STATE_SECRETS/ntfy_operador_pass.enc" ]] || {
-        log_error "no hay ntfy_operador_pass en el store"; return 1; }
+        log_error "there is no ntfy_operador_pass in the store"; return 1; }
     p="$(mktemp /dev/shm/aegis-verif.XXXXXX)"; chmod 600 "$p"
     sops -d --input-type binary --output-type binary \
         "$STATE_SECRETS/ntfy_operador_pass.enc" > "$p" 2>/dev/null \
@@ -641,155 +655,157 @@ ver_ntfy_operador() {
     code_ok="$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
         --netrc-file "$p.netrc" \
         "https://ntfy.$ROOT_DOMAIN/aegis-alertas/json?poll=1" 2>/dev/null)"
-    code_mal="$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
+    code_bad="$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
         -H 'Authorization: Basic b3BlcmFkb3I6Y29udHJhc2VuYS1kZWxpYmVyYWRhbWVudGUtaW5jb3JyZWN0YQ==' \
         "https://ntfy.$ROOT_DOMAIN/aegis-alertas/json?poll=1" 2>/dev/null)"
     rm -f "$p" "$p.netrc"
-    [[ "$code_ok" == "000" || "$code_mal" == "000" ]] && return 2
-    if [[ "$code_ok" == "200" && "$code_mal" =~ ^40[13]$ ]]; then
-        printf '    %sla credencial del store lee el topic (200) y una falsa se rechaza (%s)%s\n' "$gri" "$code_mal" "$fin"
-        printf '    %srecordá recargar la password NUEVA en la app del teléfono (por eso el tercero es «teléfono»)%s\n' "$ama" "$fin"
+    [[ "$code_ok" == "000" || "$code_bad" == "000" ]] && return 2
+    if [[ "$code_ok" == "200" && "$code_bad" =~ ^40[13]$ ]]; then
+        printf '    %sthe store credential reads the topic (200) and a false one is rejected (%s)%s\n' "$gray" "$code_bad" "$reset"
+        printf '    %sremember to reload the NEW password in the phone app (that is why the third party is «phone»)%s\n' "$yellow" "$reset"
         return 0
     fi
-    log_error "ntfy: leer con la credencial del operador → $code_ok (esperado 200), falsa → $code_mal (esperado 401/403)"
+    log_error "ntfy: reading with the operator credential → $code_ok (expected 200), false one → $code_bad (expected 401/403)"
     return 1
 }
 
-ver_registry() {
+check_registry() {
     [[ -x "$PBIN/aegis-registry" ]] || return 3
     if aegis_exec registry check >/dev/null 2>&1; then
-        printf '    %saegis registry check: los destinos están alineados%s\n' "$gri" "$fin"
+        printf '    %s%s registry check: the targets are aligned%s\n' "$gray" "${AEGIS_CMD:-aegis}" "$reset"
         return 0
     fi
-    log_error "${AEGIS_CMD:-aegis} registry check dice que los destinos NO están alineados"
+    log_error "${AEGIS_CMD:-aegis} registry check says the targets are NOT aligned"
     return 1
 }
 
-# ── el túnel: se compara contra un ANTES, no contra códigos horneados ─
-# Los hostnames no devuelven todos lo mismo (jenkins da 403 sin sesión,
-# los fronts dan 200) y hornear esa lista la deja vieja al primer
-# cambio — es exactamente el error C15 "un check atado a un LUGAR
-# miente apenas algo se mueve". Así que el diente es: lo que contestaba
-# antes tiene que seguir contestando igual.
-HOSTNAMES_ANTES=""
+# ── the tunnel: compared against a BEFORE, not against baked-in codes ─
+# The hostnames do not all return the same thing (jenkins gives 403
+# without a session, the front ends give 200) and baking that list in
+# leaves it stale at the first change — it is exactly error C15, "a
+# check tied to a PLACE lies as soon as something moves". So the tooth
+# is: whatever was answering before has to keep answering the same.
+HOSTNAMES_BEFORE=""
 snapshot_hostnames() {
     local h out=""
-    for h in $(hostnames_publicos); do
+    for h in $(public_hostnames); do
         out+="$h=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://$h/" 2>/dev/null) "
     done
     printf '%s' "$out"
 }
-hostnames_publicos() {
+public_hostnames() {
     local m="$PLATFORM_DIR/tofu/envs/cloudflare-tunnel/main.tf"
     [[ -f "$m" ]] || return 0
     grep -oE 'public_hostnames *= *\[[^]]*\]' "$m" \
         | grep -oE '"[a-z0-9-]+"' | tr -d '"' \
         | while read -r s; do printf '%s.%s\n' "$s" "$ROOT_DOMAIN"; done
 }
-ver_tunnel() {
-    [[ -n "$HOSTNAMES_ANTES" ]] || { log_warn "no hay snapshot previo de los hostnames"; return 3; }
-    local despues; despues="$(snapshot_hostnames)"
-    local par nombre antes ahora dif=0
-    for par in $HOSTNAMES_ANTES; do
-        nombre="${par%%=*}"; antes="${par##*=}"
-        ahora="$(printf '%s' "$despues" | tr ' ' '\n' | awk -F= -v n="$nombre" '$1==n {print $2}')"
-        if [[ "$antes" == "$ahora" ]]; then
-            printf '    %s%-34s %s (igual que antes)%s\n' "$gri" "$nombre" "$ahora" "$fin"
+check_tunnel() {
+    [[ -n "$HOSTNAMES_BEFORE" ]] || { log_warn "there is no previous snapshot of the hostnames"; return 3; }
+    local after; after="$(snapshot_hostnames)"
+    local pair name before now diff=0
+    for pair in $HOSTNAMES_BEFORE; do
+        name="${pair%%=*}"; before="${pair##*=}"
+        now="$(printf '%s' "$after" | tr ' ' '\n' | awk -F= -v n="$name" '$1==n {print $2}')"
+        if [[ "$before" == "$now" ]]; then
+            printf '    %s%-34s %s (same as before)%s\n' "$gray" "$name" "$now" "$reset"
         else
-            printf '    %s%-34s %s → %s%s\n' "$roj" "$nombre" "$antes" "$ahora" "$fin"
-            dif=$((dif + 1))
+            printf '    %s%-34s %s → %s%s\n' "$red" "$name" "$before" "$now" "$reset"
+            diff=$((diff + 1))
         fi
     done
-    (( dif == 0 )) || { log_error "$dif hostname(s) cambiaron de comportamiento tras rotar el túnel"; return 1; }
-    printf '    %slos %s hostnames responden igual que antes de rotar%s\n' \
-        "$gri" "$(printf '%s' "$HOSTNAMES_ANTES" | wc -w)" "$fin"
+    (( diff == 0 )) || { log_error "$diff hostname(s) changed behaviour after rotating the tunnel"; return 1; }
+    printf '    %sthe %s hostnames answer the same as before rotating%s\n' \
+        "$gray" "$(printf '%s' "$HOSTNAMES_BEFORE" | wc -w)" "$reset"
 }
 
 # ═══════════════════════════════════════════════════════════════════
-#  EL REPORTE DE LOS CUATRO LUGARES
+#  THE REPORT OF THE FOUR PLACES
 # ═══════════════════════════════════════════════════════════════════
-# Cuando la verificación falla NO se revierte solo. Para cuando falló,
-# el tercero YA tiene la credencial nueva (add_deploy_key borró la
-# vieja, make_repo_webhook hizo el PATCH); restaurar el .enc del store
-# dejaría al store con lo viejo y a GitHub con lo nuevo — que es
-# exactamente la desincronización que todo esto existe para evitar.
+# When the verification fails there is NO automatic rollback. By the
+# time it failed, the third party ALREADY has the new credential
+# (add_deploy_key deleted the old one, make_repo_webhook did the PATCH);
+# restoring the store's .enc would leave the store with the old one and
+# GitHub with the new one — which is exactly the desynchronisation all
+# of this exists to avoid.
 #
-# Lo útil es decir dónde quedó cada mitad, para que la reparación sea
-# un comando y no una investigación.
-reporte_cuatro_lugares() {   # <nombre> <app_sync> <tercero>
-    local n="$1" app="$2" tercero="$3"
-    printf '\n%s  ┌─ dónde quedó cada copia de %s%s\n' "$ama" "$n" "$fin"
-    printf '%s  │%s\n' "$ama" "$fin"
-    printf '%s  │%s  store     %sNUEVO%s   (el anterior está en %s)\n' \
-        "$ama" "$fin" "$ver" "$fin" "$PREVIO/$n.enc"
-    printf '%s  │%s  git       %sNUEVO%s   sin commitear — revisá con: git -C platform status\n' \
-        "$ama" "$fin" "$ver" "$fin"
-    if [[ "$tercero" != "-" ]]; then
-        printf '%s  │%s  %-9s %sNUEVO%s   la fase ya sincronizó y RETIRÓ la vieja\n' \
-            "$ama" "$fin" "$tercero" "$ver" "$fin"
+# What is useful is to say where each half ended up, so that the repair
+# is one command and not an investigation.
+four_places_report() {   # <name> <app_sync> <third_party>
+    local n="$1" app="$2" third="$3"
+    printf '\n%s  ┌─ where each copy of %s ended up%s\n' "$yellow" "$n" "$reset"
+    printf '%s  │%s\n' "$yellow" "$reset"
+    printf '%s  │%s  store     %sNEW%s     (the previous one is in %s)\n' \
+        "$yellow" "$reset" "$green" "$reset" "$PREVIOUS/$n.enc"
+    printf '%s  │%s  git       %sNEW%s     uncommitted — review it with: git -C platform status\n' \
+        "$yellow" "$reset" "$green" "$reset"
+    if [[ "$third" != "-" ]]; then
+        printf '%s  │%s  %-9s %sNEW%s     the phase already synced and WITHDREW the old one\n' \
+            "$yellow" "$reset" "$third" "$green" "$reset"
     fi
     if [[ "$app" != "-" ]]; then
-        printf '%s  │%s  cluster   %s¿?%s      es el que suele quedar atrás. Cerralo con:\n' \
-            "$ama" "$fin" "$roj" "$fin"
-        printf '%s  │%s              cd platform && git add -A && git commit && git push\n' "$ama" "$fin"
-        printf '%s  │%s              %s sync %s\n' "$ama" "$fin" "${AEGIS_CMD:-aegis}" "$app"
+        printf '%s  │%s  cluster   %s??%s      this is the one that usually lags. Close it with:\n' \
+            "$yellow" "$reset" "$red" "$reset"
+        printf '%s  │%s              cd platform && git add -A && git commit && git push\n' "$yellow" "$reset"
+        printf '%s  │%s              %s sync %s\n' "$yellow" "$reset" "${AEGIS_CMD:-aegis}" "$app"
     else
-        printf '%s  │%s  cluster   %s¿?%s      esta credencial no va por GitOps — ver la fase %s\n' \
-            "$ama" "$fin" "$roj" "$fin" "$n"
+        printf '%s  │%s  cluster   %s??%s      this credential does not go through GitOps — see phase %s\n' \
+            "$yellow" "$reset" "$red" "$reset" "$n"
     fi
-    printf '%s  └─ y volvé a correr: %s --continuar%s\n\n' "$ama" "$(basename "$0")" "$fin"
+    printf '%s  └─ and run again: %s rotate continue%s\n\n' "$yellow" "${AEGIS_CMD:-aegis}" "$reset"
 }
 
 # ═══════════════════════════════════════════════════════════════════
-#  LAS CINCO PARTES DE UNA ROTACIÓN
+#  THE FIVE PARTS OF A ROTATION
 # ═══════════════════════════════════════════════════════════════════
 
-archivar_e_invalidar() {   # <nombre>
+archive_and_invalidate() {   # <name>
     local n="$1" enc="$STATE_SECRETS/$n.enc"
-    mkdir -p "$PREVIO"; chmod 700 "$PREVIO"
+    mkdir -p "$PREVIOUS"; chmod 700 "$PREVIOUS"
     if [[ -f "$enc" ]]; then
-        # Archivar, NO borrar. El rm -f de la versión anterior de este
-        # script dejaba como única vuelta atrás el backup completo.
-        # El .enc sigue cifrado con la age key: archivarlo no lo expone.
-        cp -a "$enc" "$PREVIO/$n.enc"
+        # Archive, do NOT delete. The rm -f of this script's previous
+        # version left the full backup as the only way back.
+        # The .enc is still encrypted with the age key: archiving it
+        # does not expose it.
+        cp -a "$enc" "$PREVIOUS/$n.enc"
         rm -f "$enc"
-        printf '  %s·%s store: %s archivado en .previo/ e invalidado\n' "$az" "$fin" "$n"
+        printf '  %s·%s store: %s archived in .previo/ and invalidated\n' "$cyan" "$reset" "$n"
     fi
     if [[ -f "$STATE_SECRETS/$n.pub.enc" ]]; then
-        cp -a "$STATE_SECRETS/$n.pub.enc" "$PREVIO/$n.pub.enc"
+        cp -a "$STATE_SECRETS/$n.pub.enc" "$PREVIOUS/$n.pub.enc"
         rm -f "$STATE_SECRETS/$n.pub.enc"
-        printf '  %s·%s store: %s.pub archivado e invalidado\n' "$az" "$fin" "$n"
+        printf '  %s·%s store: %s.pub archived and invalidated\n' "$cyan" "$reset" "$n"
     fi
 }
 
-regenerar_con_fase() {   # <fase>
-    local fase="$1"
-    printf '  %s·%s corriendo la fase %s (regenera SOLO lo invalidado y sincroniza el tercero)\n' \
-        "$az" "$fin" "$fase"
-    "$AEGIS_ROOT/init/aegis-init.sh" --only "$fase"
+regenerate_with_phase() {   # <phase>
+    local phase="$1"
+    printf '  %s·%s running phase %s (regenerates ONLY what was invalidated and syncs the third party)\n' \
+        "$cyan" "$reset" "$phase"
+    "$AEGIS_ROOT/init/aegis-init.sh" --only "$phase"
 }
 
-aplicar_al_cluster() {   # <app|->
+apply_to_cluster() {   # <app|->
     local app="$1"
     [[ "$app" != "-" ]] || return 0
-    [[ -x "$PBIN/aegis-sync" ]] || { log_warn "no está ${AEGIS_CMD:-aegis} sync — sincronizá a mano la app $app"; return 0; }
-    printf '  %s·%s el Secret nuevo tiene que estar COMMITEADO y PUSHEADO antes del sync\n' "$ama" "$fin"
-    printf '    (esta herramienta no commitea: esa decisión es de una persona)\n'
+    [[ -x "$PBIN/aegis-sync" ]] || { log_warn "${AEGIS_CMD:-aegis} sync is not there — sync the app $app by hand"; return 0; }
+    printf '  %s·%s the new Secret has to be COMMITTED and PUSHED before the sync\n' "$yellow" "$reset"
+    printf '    (this tool does not commit: that decision belongs to a person)\n'
 }
 
-# ejecutar_verificacion <verificador> — aplica la política de reintentos:
-# transporte reintenta, veredicto no.
-ejecutar_verificacion() {
-    local fn="$1" intento rc
-    for intento in 1 2 3; do
+# run_verification <verifier> — applies the retry policy: transport
+# retries, a verdict does not.
+run_verification() {
+    local fn="$1" attempt rc
+    for attempt in 1 2 3; do
         rc=0; "$fn" || rc=$?
         case $rc in
             0) return 0 ;;
-            1) return 1 ;;   # veredicto: el remoto dijo que no. NO reintentar.
-            3) return 3 ;;   # no hay diente: reintentarlo no lo inventa.
-            2) if (( intento < 3 )); then
-                   log_warn "verificación: no se pudo llegar (intento $intento/3) — reintento en $((intento * 10))s"
-                   sleep $((intento * 10))
+            1) return 1 ;;   # verdict: the remote said no. Do NOT retry.
+            3) return 3 ;;   # there is no tooth: retrying does not invent one.
+            2) if (( attempt < 3 )); then
+                   log_warn "verification: could not be reached (attempt $attempt/3) — retrying in $((attempt * 10))s"
+                   sleep $((attempt * 10))
                fi ;;
         esac
     done
@@ -797,142 +813,148 @@ ejecutar_verificacion() {
 }
 
 # ═══════════════════════════════════════════════════════════════════
-#  EL TÚNEL: por qué NO va por la fase 25
+#  THE TUNNEL: why it does NOT go through phase 25
 # ═══════════════════════════════════════════════════════════════════
-# Primer intento, 2026-08-12: la receta delegaba en `--only 25-edge-tofu`,
-# como todas las demás. La fase se plantó en un gate ROJO:
+# First attempt, 2026-08-12: the recipe delegated to `--only
+# 25-edge-tofu`, like all the others. The phase stopped at a RED gate:
 #
-#   restos de una corrida anterior en Cloudflare (nube sucia):
+#   leftovers of an earlier run in Cloudflare (dirty cloud):
 #     tunnel 'aegis-tunnel' = cb969180-...
 #     CNAME aegis / argocd / jenkins / blog / ejemplo / portafolio
-#   ══ ROJO ══ BORRARLOS de Cloudflare y recrear limpio
+#   ══ RED ══ DELETE them from Cloudflare and recreate clean
 #
-# La fase 25 es GREENFIELD: encontrar un túnel ya existente sólo puede
-# significar restos de un arranque fallido, así que ofrece borrar. En una
-# instancia CRECIDA esos "restos" son producción — los siete hostnames
-# públicos. Contestar SI habría destruido el borde entero para rotar un
-# secreto.
+# Phase 25 is GREENFIELD: finding an already existing tunnel can only
+# mean leftovers of a failed start-up, so it offers to delete. On a
+# GROWN instance those "leftovers" are production — the seven public
+# hostnames. Answering YES would have destroyed the whole edge in order
+# to rotate one secret.
 #
-# Es exactamente el mismo caso que registry_pass, que esta herramienta ya
-# rechaza por el mismo motivo: la fase tiene delante una instancia recién
-# nacida, y la realidad es otra. El gate falló CERRADO y no se tocó nada,
-# que es la única razón por la que esto es una anécdota y no un incidente.
+# It is exactly the same case as registry_pass, which this tool already
+# refuses for the same reason: the phase has a newborn instance in front
+# of it, and reality is something else. The gate failed CLOSED and
+# nothing was touched, which is the only reason this is an anecdote and
+# not an incident.
 #
-# Así que el túnel se rota acá, sin la fase, pero SIN reimplementar sus
-# garantías: se reusa make_enc_secret de lib/secrets.sh (mv-al-repo →
-# cifrar → roundtrip) y se repiten sus dos gates sobre el token.
-rotar_tunnel() {
+# So the tunnel is rotated here, without the phase, but WITHOUT
+# reimplementing its guarantees: make_enc_secret from lib/secrets.sh is
+# reused (mv-to-the-repo → encrypt → roundtrip) and its two gates over
+# the token are repeated.
+rotate_tunnel() {
     local TE="$PLATFORM_DIR/tofu/envs/cloudflare-tunnel"
     local DEST="$PLATFORM_DIR/k8s/base/ingress/cloudflare-tunnel/secret-cloudflared-tunnel-token.enc.yaml"
-    printf '\n%s━━ rotando tunnel_token (tofu directo, NO la fase 25) ━━%s\n' "$neg" "$fin"
+    printf '\n%s━━ rotating tunnel_token (tofu directly, NOT phase 25) ━━%s\n' "$bold" "$reset"
 
-    HOSTNAMES_ANTES="$(snapshot_hostnames)"
-    printf '  %s·%s foto de los hostnames ANTES: %s\n' "$az" "$fin" "$HOSTNAMES_ANTES"
+    HOSTNAMES_BEFORE="$(snapshot_hostnames)"
+    printf '  %s·%s snapshot of the hostnames BEFORE: %s\n' "$cyan" "$reset" "$HOSTNAMES_BEFORE"
 
-    # 1. ensuciar el origen. Sin esto el apply es un no-op silencioso:
-    #    el tunnel_secret es un random_id, y tofu no regenera lo que ya
-    #    tiene en el state.
-    printf '  %s·%s marcando el tunnel_secret como sucio\n' "$az" "$fin"
+    # 1. dirty the origin. Without this the apply is a silent no-op: the
+    #    tunnel_secret is a random_id, and tofu does not regenerate what
+    #    it already has in the state.
+    printf '  %s·%s marking the tunnel_secret as tainted\n' "$cyan" "$reset"
     ( cd "$PLATFORM_DIR/tofu" && ./tofu-apply.sh -chdir=envs/cloudflare-tunnel \
         taint module.tunnel.random_id.tunnel_secret ) >/dev/null 2>&1 \
-        || { log_error "no se pudo marcar el tunnel_secret — no se tocó nada"; return 1; }
+        || { log_error "could not taint the tunnel_secret — nothing was touched"; return 1; }
 
-    # 2. aplicar. El plan medido el 2026-08-12: el túnel se actualiza
-    #    IN-PLACE (no se recrea), así que el tunnel_id no cambia y los
-    #    CNAMEs no se tocan. Lo único que rota es el secreto.
-    printf '  %s·%s tofu apply (el túnel se actualiza in-place; los CNAMEs no se tocan)\n' "$az" "$fin"
+    # 2. apply. The plan measured on 2026-08-12: the tunnel is updated
+    #    IN-PLACE (it is not recreated), so the tunnel_id does not change
+    #    and the CNAMEs are not touched. The only thing that rotates is
+    #    the secret.
+    printf '  %s·%s tofu apply (the tunnel is updated in-place; the CNAMEs are not touched)\n' "$cyan" "$reset"
     ( cd "$PLATFORM_DIR/tofu" && ./tofu-apply.sh -chdir=envs/cloudflare-tunnel \
         apply -auto-approve ) >/dev/null 2>&1 \
-        || { log_error "tofu apply FALLÓ — un apply parcial deja token/CNAMEs envenenados. NO seguir."; return 1; }
+        || { log_error "tofu apply FAILED — a partial apply leaves token/CNAMEs poisoned. DO NOT continue."; return 1; }
 
-    # 2b. el tfstate a 600, como hace la fase 25. Tiene el tunnel_secret
-    # y el token EN CLARO; tofu lo reescribe con el umask del proceso y
-    # el .backup queda en 664 —legible por cualquier usuario de la
-    # máquina—. Medido el 2026-08-12: tras rotar por acá, .tfstate quedó
-    # en 600 y .tfstate.backup en 664, porque esta receta no replicaba
-    # el chmod de la fase. Cazado re-auditando, no rotando.
+    # 2b. the tfstate at 600, as phase 25 does. It holds the
+    # tunnel_secret and the token IN THE CLEAR; tofu rewrites it with
+    # the process' umask and the .backup is left at 664 —readable by any
+    # user of the machine—. Measured on 2026-08-12: after rotating this
+    # way, .tfstate was left at 600 and .tfstate.backup at 664, because
+    # this recipe did not replicate the phase's chmod. Caught by
+    # re-auditing, not by rotating.
     for f in "$TE/terraform.tfstate" "$TE/terraform.tfstate.backup"; do
         [[ -f "$f" ]] && chmod 600 "$f"
     done
 
-    # 3. el token nuevo a tmpfs, y los DOS gates de la fase 25 sobre él.
+    # 3. the new token to tmpfs, and phase 25's TWO gates over it.
     secrets_workdir
     ( cd "$PLATFORM_DIR/tofu" && ./tofu-apply.sh -chdir=envs/cloudflare-tunnel \
         output -raw tunnel_token ) > "$SECRETS_TMP/tunnel_token" 2>/dev/null
     (( $(wc -c < "$SECRETS_TMP/tunnel_token") > 50 )) \
-        || { log_error "el token nuevo vino vacío o demasiado corto"; return 1; }
+        || { log_error "the new token came out empty or far too short"; return 1; }
 
     local TUNNEL_ID CF_ACCOUNT
     TUNNEL_ID="$( cd "$PLATFORM_DIR/tofu" && ./tofu-apply.sh \
         -chdir=envs/cloudflare-tunnel output -raw tunnel_id 2>/dev/null )"
     CF_ACCOUNT="$(kubectl -n jenkins-system get secret cloudflare-account-id \
         -o jsonpath='{.data.text}' 2>/dev/null | base64 -d)"
-    # shape-check ESTRUCTURAL, sin imprimir el secreto: el connector token
-    # es base64(JSON{a,t,s}) y tiene que apuntar a ESTA cuenta y a ESTE
-    # túnel. Un token válido pero de otro túnel sólo explotaría después,
-    # en el CrashLoop de cloudflared.
+    # STRUCTURAL shape-check, without printing the secret: the connector
+    # token is base64(JSON{a,t,s}) and it has to point at THIS account
+    # and at THIS tunnel. A valid token belonging to another tunnel would
+    # only blow up later, in cloudflared's CrashLoop.
     base64 -d < "$SECRETS_TMP/tunnel_token" 2>/dev/null \
       | jq -e --arg a "$CF_ACCOUNT" --arg t "$TUNNEL_ID" \
           '.a == $a and .t == $t and (.s | length > 0)' >/dev/null \
-      || { log_error "el token nuevo NO apunta a esta cuenta/túnel — no se escribe el Secret"; return 1; }
-    printf '  %s·%s token nuevo válido y apunta al túnel %s\n' "$az" "$fin" "${TUNNEL_ID:0:8}…"
+      || { log_error "the new token does NOT point at this account/tunnel — the Secret is not written"; return 1; }
+    printf '  %s·%s new token valid and pointing at tunnel %s\n' "$cyan" "$reset" "${TUNNEL_ID:0:8}…"
 
-    # 4. al repo, cifrado, con el roundtrip que hace make_enc_secret.
+    # 4. to the repo, encrypted, with the roundtrip make_enc_secret does.
     make_enc_secret cloudflared-tunnel-token infra-edge "$DEST" \
         "TUNNEL_TOKEN=$SECRETS_TMP/tunnel_token" \
-        || { log_error "no se pudo cifrar el Secret del token"; return 1; }
+        || { log_error "could not encrypt the token's Secret"; return 1; }
 
-    printf '\n  %sFalta lo que esta herramienta no hace sola:%s\n' "$ama" "$fin"
+    printf '\n  %sWhat this tool does not do on its own is still missing:%s\n' "$yellow" "$reset"
     printf '      cd platform && git add -A && git commit && git push\n'
     printf '      %s sync cloudflare-tunnel\n' "${AEGIS_CMD:-aegis}"
     printf '      kubectl -n infra-edge rollout restart deploy/cloudflared\n'
-    printf '  %sY después: %s --verificar tunnel_token%s\n\n' "$gri" "$(basename "$0")" "$fin"
-    mkdir -p "$DIARIO"; : > "$DIARIO/tunnel_token.parcial"
+    printf '  %sAnd afterwards: %s rotate check tunnel_token%s\n\n' "$gray" "${AEGIS_CMD:-aegis}" "$reset"
+    mkdir -p "$JOURNAL"; : > "$JOURNAL/tunnel_token.parcial"
     return 0
 }
 
-# rotar_access_st — el service token de Cloudflare Access (#87/#88).
+# rotate_access_st — the Cloudflare Access service token (#87/#88).
 #
-# access_st_id y access_st_secret son UNA credencial en dos mitades:
-# Cloudflare las emite juntas y rotar una sin la otra deja el par
-# inservible. Por eso las dos entradas de la tabla apuntan acá y esta
-# función rota LAS DOS, diga cuál diga el operador. Declararlas por
-# separado en la tabla y rotarlas juntas en el código no es
-# incoherencia: la tabla lista lo que vive en el store —y son dos
-# archivos— y el mecanismo respeta lo que la credencial es.
-rotar_access_st() {
-    # rc LOCAL a propósito: bash tiene scope dinámico y esta función se
-    # llama desde rotar_una, que también tiene un rc. Sin el local, un
-    # fallo acá pisaría el rc del caller.
+# access_st_id and access_st_secret are ONE credential in two halves:
+# Cloudflare issues them together and rotating one without the other
+# leaves the pair useless. That is why both entries in the table point
+# here and this function rotates BOTH, whichever one the operator names.
+# Declaring them separately in the table and rotating them together in
+# the code is not incoherence: the table lists what lives in the store
+# —and there are two files— and the mechanism respects what the
+# credential is.
+rotate_access_st() {
+    # rc LOCAL on purpose: bash has dynamic scope and this function is
+    # called from rotate_one, which also has an rc. Without the local, a
+    # failure here would overwrite the caller's rc.
     local rc=0
     local TE="$PLATFORM_DIR/tofu/envs/cloudflare-tunnel"
-    printf '\n%s━━ rotando el service token de Access (id + secret juntos) ━━%s\n' "$neg" "$fin"
-    printf '  %s·%s son dos mitades de UNA credencial: se rotan siempre juntas\n' "$az" "$fin"
+    printf '\n%s━━ rotating the Access service token (id + secret together) ━━%s\n' "$bold" "$reset"
+    printf '  %s·%s they are two halves of ONE credential: they are always rotated together\n' "$cyan" "$reset"
 
-    # 1. ensuciar el origen, igual que con el tunnel_secret: sin taint
-    #    el apply es un no-op y la rotación sería una mentira silenciosa.
-    #    OJO con lo que el plan va a mostrar: la política
-    #    `automatizacion` referencia el .id del token, así que al
-    #    reemplazarse el token la política también cambia. Es esperado,
-    #    no deriva.
-    printf '  %s·%s marcando el service token como sucio\n' "$az" "$fin"
+    # 1. dirty the origin, the same as with the tunnel_secret: without
+    #    the taint the apply is a no-op and the rotation would be a
+    #    silent lie.
+    #    CAREFUL with what the plan is going to show: the
+    #    `automatizacion` policy references the token's .id, so when the
+    #    token is replaced the policy changes too. That is expected, not
+    #    drift.
+    printf '  %s·%s marking the service token as tainted\n' "$cyan" "$reset"
     ( cd "$PLATFORM_DIR/tofu" && ./tofu-apply.sh -chdir=envs/cloudflare-tunnel \
         taint module.access.cloudflare_zero_trust_access_service_token.aegis ) \
         >/dev/null 2>&1 \
-        || { log_error "no se pudo marcar el service token — no se tocó nada"; return 1; }
+        || { log_error "could not taint the service token — nothing was touched"; return 1; }
 
-    printf '  %s·%s tofu apply (token nuevo + la política que lo referencia)\n' "$az" "$fin"
+    printf '  %s·%s tofu apply (new token + the policy that references it)\n' "$cyan" "$reset"
     ( cd "$PLATFORM_DIR/tofu" && ./tofu-apply.sh -chdir=envs/cloudflare-tunnel \
         apply -auto-approve ) >/dev/null 2>&1 \
-        || { log_error "tofu apply FALLÓ — si quedó a medias, la política puede referenciar un token que ya no existe: nadie atraviesa Access. Revisá el plan a mano ANTES de seguir."; return 1; }
+        || { log_error "tofu apply FAILED — if it was left half done, the policy may reference a token that no longer exists: nobody crosses Access. Review the plan by hand BEFORE continuing."; return 1; }
 
-    # el tfstate tiene el client_secret en claro, igual que el
-    # tunnel_secret. Misma regla que la fase 25 y que rotar_tunnel:
+    # the tfstate holds the client_secret in the clear, just like the
+    # tunnel_secret. Same rule as phase 25 and as rotate_tunnel:
     for f in "$TE/terraform.tfstate" "$TE/terraform.tfstate.backup"; do
         [[ -f "$f" ]] && chmod 600 "$f"
     done
 
-    # 2. las dos mitades nuevas a tmpfs y al store.
+    # 2. the two new halves to tmpfs and to the store.
     secrets_workdir
     ( cd "$PLATFORM_DIR/tofu" && ./tofu-apply.sh -chdir=envs/cloudflare-tunnel \
         output -raw access_service_token_client_id ) \
@@ -941,164 +963,166 @@ rotar_access_st() {
         output -raw access_service_token_client_secret ) \
         > "$SECRETS_TMP/access_st_secret" 2>/dev/null
     (( $(wc -c < "$SECRETS_TMP/access_st_id") > 20 )) \
-        || { log_error "el client_id nuevo vino vacío — el store NO se tocó"; return 1; }
+        || { log_error "the new client_id came out empty — the store was NOT touched"; return 1; }
     (( $(wc -c < "$SECRETS_TMP/access_st_secret") > 20 )) \
-        || { log_error "el client_secret nuevo vino vacío — el store NO se tocó"; return 1; }
+        || { log_error "the new client_secret came out empty — the store was NOT touched"; return 1; }
     persist_secret access_st_id     "$SECRETS_TMP/access_st_id" \
-        || { log_error "no se pudo persistir access_st_id"; return 1; }
+        || { log_error "could not persist access_st_id"; return 1; }
     persist_secret access_st_secret "$SECRETS_TMP/access_st_secret" \
-        || { log_error "no se pudo persistir access_st_secret"; return 1; }
-    printf '  %s·%s las dos mitades nuevas están en el store\n' "$az" "$fin"
+        || { log_error "could not persist access_st_secret"; return 1; }
+    printf '  %s·%s the two new halves are in the store\n' "$cyan" "$reset"
 
-    # 3. ejercerlo YA, acá mismo. La propagación de Access es de
-    #    segundos, y este es el único punto donde sabemos que el par
-    #    del store es el que acaba de nacer. Si no atraviesa, es ahora
-    #    cuando hay que enterarse — no tres fases después.
+    # 3. exercise it NOW, right here. Access propagation takes seconds,
+    #    and this is the only point where we know that the store's pair
+    #    is the one just born. If it does not cross, now is when we have
+    #    to find out — not three phases later.
     if [[ -n "$ROOT_DOMAIN" ]]; then
         if edge_origin_responds "https://argocd.$ROOT_DOMAIN" '^(200|404)$'; then
-            printf '  %s·%s el token nuevo atraviesa Access y llega al ORIGEN\n' "$ver" "$fin"
+            printf '  %s·%s the new token crosses Access and reaches the ORIGIN\n' "$green" "$reset"
         else
-            log_error "el token nuevo NO atraviesa Access todavía. El store ya tiene el par nuevo (correcto); reintentá '--verificar' en un minuto por si es propagación."
+            log_error "the new token does NOT cross Access yet. The store already has the new pair (correct); retry 'rotate check' in a minute in case it is propagation."
             rc=1
         fi
     fi
 
-    printf '\n  %sNo hace falta commit: este par NO vive en el repo, sólo en el store.%s\n' "$gri" "$fin"
-    printf '  %sPero el tfstate cifrado SÍ cambió:%s\n' "$ama" "$fin"
+    printf '\n  %sNo commit is needed: this pair does NOT live in the repo, only in the store.%s\n' "$gray" "$reset"
+    printf '  %sBut the encrypted tfstate DID change:%s\n' "$yellow" "$reset"
     printf '      cd platform && git add tofu/envs/cloudflare-tunnel/terraform.tfstate.enc.json && git commit && git push\n'
-    printf '  %sY después: %s --verificar cf_access_token%s\n\n' "$gri" "$(basename "$0")" "$fin"
-    mkdir -p "$DIARIO"; : > "$DIARIO/access_st.parcial"
+    printf '  %sAnd afterwards: %s rotate check cf_access_token%s\n\n' "$gray" "${AEGIS_CMD:-aegis}" "$reset"
+    mkdir -p "$JOURNAL"; : > "$JOURNAL/access_st.parcial"
     return "${rc:-0}"
 }
 
-rotar_una() {   # <nombre>
-    local n="$1" linea clase fase app verif tercero radio rc=0
-    linea="$(receta_de "$n")"
-    [[ -n "$linea" ]] || die "'$n' no tiene receta. Si es una credencial nueva, agregala a RECETAS (y el check de verify-static te lo iba a exigir igual)."
-    clase="$(campo "$linea" 2)"; fase="$(campo "$linea" 3)"
-    app="$(campo "$linea" 4)";   verif="$(campo "$linea" 5)"
-    tercero="$(campo "$linea" 6)"; radio="$(campo "$linea" 7)"
+rotate_one() {   # <name>
+    local n="$1" line class phase app verifier third radius rc=0
+    line="$(recipe_for "$n")"
+    [[ -n "$line" ]] || die "'$n' has no recipe. If it is a new credential, add it to RECIPES (and the verify-static check was going to demand it of you anyway)."
+    class="$(field "$line" 2)"; phase="$(field "$line" 3)"
+    app="$(field "$line" 4)";   verifier="$(field "$line" 5)"
+    third="$(field "$line" 6)"; radius="$(field "$line" 7)"
 
-    case "$clase" in
+    case "$class" in
       irreducible)
-        printf '\n%s%s es IRREDUCIBLE — no se rota acá.%s\n' "$roj" "$n" "$fin"
-        printf '  %s\n' "$radio"
-        printf '  El orden obligatorio (re-firmar lo desplegado ANTES de que la pub\n'
-        printf '  nueva entre al ClusterPolicy) está en docs/protocols/issue-cosign-keypair.md §5.\n'
+        printf '\n%s%s is IRREDUCIBLE — it is not rotated here.%s\n' "$red" "$n" "$reset"
+        printf '  %s\n' "$radius"
+        printf '  The mandatory order (re-signing what is deployed BEFORE the new pub\n'
+        printf '  enters the ClusterPolicy) is in docs/protocols/issue-cosign-keypair.md §5.\n'
         return 0 ;;
       prohibida)
-        printf '\n%s%s: rotarla por el camino normal DESHACE un arreglo previo.%s\n' "$roj" "$n" "$fin"
-        printf '  %s\n' "$radio"
-        printf '  La fase 15 la registra con --allow-write y apunta ArgoCD a ella.\n'
-        printf '  En GitHub esa clave YA NO EXISTE (se retiró en #49/#59): re-correr\n'
-        printf '  la fase la volvería a crear. Arreglar el init primero (#83).\n'
+        printf '\n%s%s: rotating it the normal way UNDOES an earlier fix.%s\n' "$red" "$n" "$reset"
+        printf '  %s\n' "$radius"
+        printf '  Phase 15 registers it with --allow-write and points ArgoCD at it.\n'
+        printf '  On GitHub that key NO LONGER EXISTS (it was withdrawn in #49/#59):\n'
+        printf '  re-running the phase would create it again. Fix the init first (#83).\n'
         return 0 ;;
       tofu)
-        # El despacho es POR NOMBRE, no por clase: la clase dice quién
-        # es el dueño (el state de tofu), no cómo se rota. Un `tofu)
-        # rotar_tunnel` genérico hacía que agregar cualquier segunda
-        # credencial de tofu rotara el TÚNEL en su lugar — un no-op
-        # peligroso disfrazado de éxito. Se cerró al agregar el service
-        # token de Access (#87).
+        # Dispatch is BY NAME, not by class: the class says who the
+        # owner is (tofu's state), not how it is rotated. A generic
+        # `tofu) rotate_tunnel` meant that adding any second tofu
+        # credential would rotate the TUNNEL in its place — a dangerous
+        # no-op dressed up as success. It was closed when the Access
+        # service token was added (#87).
         case "$n" in
-          tunnel_token)                  rotar_tunnel;     return $? ;;
-          access_st_id|access_st_secret) rotar_access_st;  return $? ;;
-          *) log_error "'$n' es clase tofu pero no tiene rotador propio — agregalo acá antes de declararlo en la tabla"; return 1 ;;
+          tunnel_token)                  rotate_tunnel;     return $? ;;
+          access_st_id|access_st_secret) rotate_access_st;  return $? ;;
+          *) log_error "'$n' is class tofu but has no rotator of its own — add it here before declaring it in the table"; return 1 ;;
         esac ;;
       manual)
-        printf '\n%s%s no la produce ninguna fase del init todavía.%s\n' "$ama" "$n" "$fin"
-        printf '  %s\n' "$radio"
-        printf '  Es una DEUDA declarada (#86): lo correcto es que la fase 30 la\n'
-        printf '  genere como cualquier otra credencial. Mientras tanto se rota a\n'
-        printf '  mano y se persiste al store, y `--verificar` sí la mide.\n'
-        printf '  El procedimiento está en docs/protocols/rotation-checklist.md.\n'
+        printf '\n%s%s is not produced by any init phase yet.%s\n' "$yellow" "$n" "$reset"
+        printf '  %s\n' "$radius"
+        printf '  It is a declared DEBT (#86): the right thing is for phase 30 to\n'
+        printf '  generate it like any other credential. In the meantime it is rotated\n'
+        printf '  by hand and persisted to the store, and `rotate check` does measure it.\n'
+        printf '  The procedure is in docs/protocols/rotation-checklist.md.\n'
         return 2 ;;
       delegada)
-        printf '\n%s%s tiene herramienta propia.%s\n' "$ama" "$n" "$fin"
-        printf '  El registry vive en DIEZ lugares (un htpasswd + nueve dockerconfigjson).\n'
-        printf '  aegis registry descubre los destinos del repo, los contrasta contra\n'
-        printf '  el cluster y se planta si no coinciden. Correlo vos:\n\n'
-        printf '      cd platform && aegis registry --rotar\n\n'
+        printf '\n%s%s has a tool of its own.%s\n' "$yellow" "$n" "$reset"
+        printf '  The registry lives in TEN places (one htpasswd + nine dockerconfigjson).\n'
+        printf '  %s registry discovers the targets from the repo, contrasts them\n' "${AEGIS_CMD:-aegis}"
+        printf '  against the cluster and stops dead if they do not match. Run it yourself:\n\n'
+        printf '      cd platform && %s registry rotate\n\n' "${AEGIS_CMD:-aegis}"
         return 0 ;;
     esac
 
-    # ── EFECTO COLATERAL DE CORRER UNA FASE ENTERA ──────────────────
-    # Rotar por fase es lo correcto —la fase ya sabe sincronizar el
-    # tercero— pero la fase hace TODO lo suyo, no sólo lo del secreto
-    # invalidado. Y la 15 registra `aegis-iu-write --allow-write` sin
-    # preguntar: rotar el HMAC de Jenkins volvería a crear en GitHub la
-    # deploy key de ESCRITURA que #49 retiró, y ArgoCD volvería a
-    # autenticar con ella. Un daño real, causado por rotar algo que no
-    # tiene nada que ver.
+    # ── SIDE EFFECT OF RUNNING A WHOLE PHASE ────────────────────────
+    # Rotating by phase is the right thing —the phase already knows how
+    # to sync the third party— but the phase does ALL of its own work,
+    # not only what belongs to the invalidated secret. And phase 15
+    # registers `aegis-iu-write --allow-write` without asking: rotating
+    # the Jenkins HMAC would create on GitHub, all over again, the WRITE
+    # deploy key that #49 withdrew, and ArgoCD would authenticate with
+    # it again. Real damage, caused by rotating something completely
+    # unrelated.
     #
-    # El guard se MIDE contra el artefacto en vez de hornearse: el día
-    # que #83 saque el --allow-write de la fase 15, este bloqueo
-    # desaparece solo. Un guard que hay que acordarse de quitar es un
-    # guard que se queda.
-    if [[ "$fase" == 15-third-parties ]] && \
+    # The guard is MEASURED against the artifact instead of being baked
+    # in: the day #83 takes the --allow-write out of phase 15, this
+    # block disappears on its own. A guard you have to remember to
+    # remove is a guard that stays.
+    if [[ "$phase" == 15-third-parties ]] && \
        grep -qE '^\s*add_deploy_key .*--allow-write' \
             "$AEGIS_ROOT/init/phases/15-third-parties.sh"; then
-        printf '\n%s%s no se puede rotar todavía.%s\n' "$roj" "$n" "$fin"
-        printf '  Se rota corriendo la fase 15, y la fase 15 todavía registra\n'
-        printf '  la deploy key de ESCRITURA (add_deploy_key ... --allow-write).\n'
-        printf '  Rotar esto RE-CREARÍA en GitHub la clave que #49 retiró, y\n'
-        printf '  ArgoCD volvería a autenticar con ella. Daño real por rotar\n'
-        printf '  algo que no tiene nada que ver.\n\n'
-        printf '  %sArreglar #83 primero. Este bloqueo se levanta solo cuando%s\n' "$ama" "$fin"
-        printf '  %sel --allow-write ya no esté en la fase.%s\n' "$ama" "$fin"
+        printf '\n%s%s cannot be rotated yet.%s\n' "$red" "$n" "$reset"
+        printf '  It is rotated by running phase 15, and phase 15 still registers\n'
+        printf '  the WRITE deploy key (add_deploy_key ... --allow-write).\n'
+        printf '  Rotating this would RE-CREATE on GitHub the key that #49 withdrew,\n'
+        printf '  and ArgoCD would authenticate with it again. Real damage from\n'
+        printf '  rotating something completely unrelated.\n\n'
+        printf '  %sFix #83 first. This block lifts on its own once the%s\n' "$yellow" "$reset"
+        printf '  %s--allow-write is no longer in the phase.%s\n' "$yellow" "$reset"
         return 2
     fi
 
-    printf '\n%s━━ rotando %s ━━%s\n' "$neg" "$n" "$fin"
+    printf '\n%s━━ rotating %s ━━%s\n' "$bold" "$n" "$reset"
 
-    # Los TRES tokens de Cloudflare se acuñan juntos o ninguno: la fase
-    # 15 pide la maestra si falta CUALQUIERA de los tres .enc, y acuña
-    # los tres nuevos. Así que rotar uno rota los tres, y en el medio va
-    # a pedir la maestra por prompt. No es un efecto raro —es cómo
-    # funciona acuñar desde una maestra efímera— pero enterarse a mitad
-    # de camino sí sería una sorpresa fea.
+    # The THREE Cloudflare tokens are minted together or not at all:
+    # phase 15 asks for the master key if ANY of the three .enc is
+    # missing, and mints all three anew. So rotating one rotates the
+    # three, and along the way it is going to prompt for the master.
+    # That is not a strange effect —it is how minting from an ephemeral
+    # master works— but finding out halfway through would be an ugly
+    # surprise.
     case "$n" in
       cf_api_token|cf_dns_token|cf_access_token)
-        printf '  %s⚠ los TRES tokens CF (api, dns, access) se re-acuñan juntos,%s\n' "$ama" "$fin"
-        printf '  %s  y la fase va a PEDIR la credencial maestra de Cloudflare.%s\n' "$ama" "$fin"
-        printf '  %s  Tenela a mano; muere en tmpfs apenas termina la fase.%s\n' "$ama" "$fin" ;;
+        printf '  %s⚠ the THREE CF tokens (api, dns, access) are re-minted together,%s\n' "$yellow" "$reset"
+        printf '  %s  and the phase is going to ASK for the Cloudflare master credential.%s\n' "$yellow" "$reset"
+        printf '  %s  Have it at hand; it dies in tmpfs as soon as the phase ends.%s\n' "$yellow" "$reset" ;;
     esac
 
-    # el ANTES, para los verificadores que comparan contra un snapshot
-    [[ "$verif" == "ver_tunnel" ]] && HOSTNAMES_ANTES="$(snapshot_hostnames)"
+    # the BEFORE, for the verifiers that compare against a snapshot
+    [[ "$verifier" == "check_tunnel" ]] && HOSTNAMES_BEFORE="$(snapshot_hostnames)"
 
-    archivar_e_invalidar "$n"
-    regenerar_con_fase "$fase"
-    aplicar_al_cluster "$app"
+    archive_and_invalidate "$n"
+    regenerate_with_phase "$phase"
+    apply_to_cluster "$app"
 
-    printf '  %s·%s verificando que el consumidor REAL funciona…\n' "$az" "$fin"
-    local rc=0; ejecutar_verificacion "$verif" || rc=$?
+    printf '  %s·%s verifying that the REAL consumer works…\n' "$cyan" "$reset"
+    local rc=0; run_verification "$verifier" || rc=$?
     case $rc in
-      0) printf '  %s✓ %s rotado Y VERIFICADO%s\n' "$ver" "$n" "$fin"
-         mkdir -p "$DIARIO"; : > "$DIARIO/$n.done"
+      0) printf '  %s✓ %s rotated AND VERIFIED%s\n' "$green" "$n" "$reset"
+         mkdir -p "$JOURNAL"; : > "$JOURNAL/$n.done"
          return 0 ;;
-      3) printf '  %s⚠ %s rotado, pero NO HAY DIENTE que lo verifique.%s\n' "$ama" "$n" "$fin"
-         printf '    Esto NO cuenta como verde: quedó sin medir. Escribí el verificador.\n'
+      3) printf '  %s⚠ %s rotated, but there is NO TOOTH that verifies it.%s\n' "$yellow" "$n" "$reset"
+         printf '    This does NOT count as green: it was left unmeasured. Write the verifier.\n'
          return 0 ;;
-      1) printf '  %s✗ %s: la verificación dio VEREDICTO NEGATIVO.%s\n' "$roj" "$n" "$fin"
-         printf '    El consumidor contestó, y contestó que no. No se reintenta.\n'
-         reporte_cuatro_lugares "$n" "$app" "$tercero"
+      1) printf '  %s✗ %s: the verification gave a NEGATIVE VERDICT.%s\n' "$red" "$n" "$reset"
+         printf '    The consumer answered, and it answered no. It is not retried.\n'
+         four_places_report "$n" "$app" "$third"
          return 1 ;;
-      2) printf '  %s✗ %s: no se pudo LLEGAR a verificar tras 3 intentos.%s\n' "$roj" "$n" "$fin"
-         printf '    La rotación puede estar bien: lo que falló es la medición.\n'
-         reporte_cuatro_lugares "$n" "$app" "$tercero"
+      2) printf '  %s✗ %s: could not REACH it to verify after 3 attempts.%s\n' "$red" "$n" "$reset"
+         printf '    The rotation may be fine: what failed is the measurement.\n'
+         four_places_report "$n" "$app" "$third"
          return 1 ;;
     esac
 }
 
 # ═══════════════════════════════════════════════════════════════════
-#  INVENTARIO Y MENÚ
+#  INVENTORY AND MENU
 # ═══════════════════════════════════════════════════════════════════
 
-edad_de() {   # <nombre> → "18d" o "?"
-    # El material del store envejece con su .enc. El token del túnel no
-    # vive en el store —lo produce tofu— así que su edad sale del
-    # tfstate, que es donde de verdad quedó registrado.
+age_of() {   # <name> → "18d" or "?"
+    # The store's material ages with its .enc. The tunnel's token does
+    # not live in the store —tofu produces it— so its age comes from the
+    # tfstate, which is where it really got recorded.
     local f="$STATE_SECRETS/$1.enc"
     [[ "$1" == "tunnel_token" ]] && \
         f="$PLATFORM_DIR/tofu/envs/cloudflare-tunnel/terraform.tfstate"
@@ -1106,211 +1130,215 @@ edad_de() {   # <nombre> → "18d" o "?"
     printf '%dd' $(( ( $(date +%s) - $(stat -c %Y "$f") ) / 86400 ))
 }
 
-ROTABLES=()
-inventario() {
-    ROTABLES=()
-    printf '\n  %saegis-rotar%s — el protocolo de rotación%s\n' "$neg" "$fin" \
-        "${ROOT_DOMAIN:+   $gri instancia: $ROOT_DOMAIN$fin}"
-    printf '\n   %s#  credencial          edad   tercero      radio si esto falla%s\n' "$gri" "$fin"
-    local linea n clase i=0
-    while IFS= read -r linea; do
-        [[ -n "$linea" ]] || continue
-        n="$(campo "$linea" 1)"; clase="$(campo "$linea" 2)"
-        case "$clase" in irreducible|prohibida) continue ;; esac
-        i=$((i + 1)); ROTABLES+=("$n")
+ROTATABLE=()
+inventory() {
+    ROTATABLE=()
+    printf '\n  %s%s rotate%s — the rotation protocol%s\n' "$bold" "${AEGIS_CMD:-aegis}" "$reset" \
+        "${ROOT_DOMAIN:+   $gray instance: $ROOT_DOMAIN$reset}"
+    printf '\n   %s#  credential          age    third party  blast radius if this fails%s\n' "$gray" "$reset"
+    local line n class i=0
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        n="$(field "$line" 1)"; class="$(field "$line" 2)"
+        case "$class" in irreducible|prohibida) continue ;; esac
+        i=$((i + 1)); ROTATABLE+=("$n")
         printf '  %2d  %-19s %-6s %-12s %s\n' \
-            "$i" "$n" "$(edad_de "$n")" "$(campo "$linea" 6)" "$(campo "$linea" 7)"
-    done < <(printf '%s\n%s\n' "$RECETAS" "$RECETAS_EXTRA")
+            "$i" "$n" "$(age_of "$n")" "$(field "$line" 6)" "$(field "$line" 7)"
+    done < <(printf '%s\n%s\n' "$RECIPES" "$RECIPES_EXTRA")
 
-    printf '\n  %sNO se rotan acá:%s\n' "$gri" "$fin"
-    while IFS= read -r linea; do
-        [[ -n "$linea" ]] || continue
-        case "$(campo "$linea" 2)" in
-          irreducible) printf '   %s· %-19s %s%s\n' "$gri" "$(campo "$linea" 1)" "$(campo "$linea" 7)" "$fin" ;;
-          prohibida)   printf '   %s· %-19s %s%s\n' "$roj" "$(campo "$linea" 1)" "$(campo "$linea" 7)" "$fin" ;;
+    printf '\n  %sNOT rotated here:%s\n' "$gray" "$reset"
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        case "$(field "$line" 2)" in
+          irreducible) printf '   %s· %-19s %s%s\n' "$gray" "$(field "$line" 1)" "$(field "$line" 7)" "$reset" ;;
+          prohibida)   printf '   %s· %-19s %s%s\n' "$red" "$(field "$line" 1)" "$(field "$line" 7)" "$reset" ;;
         esac
-    done < <(printf '%s\n' "$RECETAS")
+    done < <(printf '%s\n' "$RECIPES")
 
-    local h; h="$(huerfanos)"
+    local h; h="$(orphans)"
     if [[ -n "$h" ]]; then
-        printf '\n  %s⚠ en el store hay material SIN RECETA — nadie sabe rotarlo:%s\n' "$roj" "$fin"
-        printf '   %s· %s\n' "$roj" $h
-        printf '   %sAgregalo a RECETAS o declaralo irreducible.%s\n' "$roj" "$fin"
+        printf '\n  %s⚠ there is material in the store with NO RECIPE — nobody knows how to rotate it:%s\n' "$red" "$reset"
+        printf '   %s· %s\n' "$red" $h
+        printf '   %sAdd it to RECIPES or declare it irreducible.%s\n' "$red" "$reset"
     fi
 }
 
-confirmar() {   # <texto-del-radio>
-    printf '\n  %sSi esto sale mal:%s %s\n' "$ama" "$fin" "$1"
+confirm() {   # <blast-radius-text>
+    printf '\n  %sIf this goes wrong:%s %s\n' "$yellow" "$reset" "$1"
     local r
-    read -rp "  ¿estás segur@? [s/N] " r || return 1
-    [[ "$r" == "s" || "$r" == "S" ]]
+    read -rp "  are you sure? [y/N] " r || return 1
+    [[ "$r" == "y" || "$r" == "Y" ]]
 }
 
 menu() {
-    inventario
-    printf '\n  %s[1-%d]%s una   %s[t]%s todas   %s[r]%s revisar sin tocar   %s[q]%s salir\n' \
-        "$neg" "${#ROTABLES[@]}" "$fin" "$neg" "$fin" "$neg" "$fin" "$neg" "$fin"
+    inventory
+    printf '\n  %s[1-%d]%s one   %s[a]%s all   %s[r]%s review without touching   %s[q]%s quit\n' \
+        "$bold" "${#ROTATABLE[@]}" "$reset" "$bold" "$reset" "$bold" "$reset" "$bold" "$reset"
     local op; read -rp "  > " op || exit 0
 
     case "$op" in
       q|Q|"") exit 0 ;;
-      r|R) aegis_exec check 2>/dev/null || log_warn "no pude correr ${AEGIS_CMD:-aegis} check"; exit 0 ;;
-      t|T)
-        printf '\n  Vas a rotar %s credenciales:\n' "${#ROTABLES[@]}"
-        printf '    %s\n' "${ROTABLES[*]}"
-        printf '\n  %sLa confirmación es UNA sola: nadie contesta bien once veces seguidas.%s\n' "$gri" "$fin"
-        confirmar "la plataforma queda a medio sincronizar hasta que se termine la tanda" || { printf '  cancelado.\n'; exit 0; }
-        preflight_red si si
-        local n fallidas=0 rc
-        for n in "${ROTABLES[@]}"; do
-            if [[ -f "$DIARIO/$n.done" ]]; then
-                printf '\n  %s· %s ya rotado en esta tanda — salteado (--continuar)%s\n' "$gri" "$n" "$fin"
+      r|R) aegis_exec check 2>/dev/null || log_warn "could not run ${AEGIS_CMD:-aegis} check"; exit 0 ;;
+      a|A)
+        printf '\n  You are about to rotate %s credentials:\n' "${#ROTATABLE[@]}"
+        printf '    %s\n' "${ROTATABLE[*]}"
+        printf '\n  %sThere is ONE single confirmation: nobody answers well eleven times in a row.%s\n' "$gray" "$reset"
+        confirm "the platform is left half synced until the batch finishes" || { printf '  cancelled.\n'; exit 0; }
+        preflight_network yes yes
+        local n failed=0 rc
+        for n in "${ROTATABLE[@]}"; do
+            if [[ -f "$JOURNAL/$n.done" ]]; then
+                printf '\n  %s· %s already rotated in this batch — skipped (continue)%s\n' "$gray" "$n" "$reset"
                 continue
             fi
-            rc=0; rotar_una "$n" || rc=$?
-            # rc 2 = bloqueada por una causa conocida. NO aborta la
-            # tanda: saltearla y seguir es lo correcto — lo que no
-            # puede pasar es que se silencie, y por eso se cuenta.
-            (( rc == 2 )) && { SALTEADAS+=("$n"); continue; }
-            (( rc == 0 )) || { fallidas=$((fallidas + 1)); break; }
+            rc=0; rotate_one "$n" || rc=$?
+            # rc 2 = blocked by a known cause. It does NOT abort the
+            # batch: skipping it and going on is the right thing — what
+            # cannot happen is for it to be silenced, and that is why it
+            # is counted.
+            (( rc == 2 )) && { SKIPPED+=("$n"); continue; }
+            (( rc == 0 )) || { failed=$((failed + 1)); break; }
         done
-        cierre "$fallidas" ;;
+        finish "$failed" ;;
       *)
-        [[ "$op" =~ ^[0-9]+$ ]] && (( op >= 1 && op <= ${#ROTABLES[@]} )) \
-            || { printf '  opción inválida.\n'; exit 2; }
-        local n="${ROTABLES[$((op - 1))]}" linea
-        linea="$(receta_de "$n")"
-        printf '\n  Vas a rotar: %s%s%s\n' "$neg" "$n" "$fin"
-        printf '  Se toca: git · cluster%s · store\n' \
-            "$([[ "$(campo "$linea" 6)" != "-" ]] && printf ' · %s' "$(campo "$linea" 6)")"
-        confirmar "$(campo "$linea" 7)" || { printf '  cancelado.\n'; exit 0; }
-        preflight_red \
-            "$([[ "$(campo "$linea" 6)" == "GitHub" ]] && echo si || echo no)" \
-            "$([[ "$(campo "$linea" 6)" == "Cloudflare" ]] && echo si || echo no)"
-        local rc1=0; rotar_una "$n" || rc1=$?
-        (( rc1 == 2 )) && { SALTEADAS+=("$n"); cierre 0; }
-        (( rc1 == 0 )) || cierre 1
-        cierre 0 ;;
+        [[ "$op" =~ ^[0-9]+$ ]] && (( op >= 1 && op <= ${#ROTATABLE[@]} )) \
+            || { printf '  invalid option.\n'; exit 2; }
+        local n="${ROTATABLE[$((op - 1))]}" line
+        line="$(recipe_for "$n")"
+        printf '\n  You are about to rotate: %s%s%s\n' "$bold" "$n" "$reset"
+        printf '  What gets touched: git · cluster%s · store\n' \
+            "$([[ "$(field "$line" 6)" != "-" ]] && printf ' · %s' "$(field "$line" 6)")"
+        confirm "$(field "$line" 7)" || { printf '  cancelled.\n'; exit 0; }
+        preflight_network \
+            "$([[ "$(field "$line" 6)" == "GitHub" ]] && echo yes || echo no)" \
+            "$([[ "$(field "$line" 6)" == "Cloudflare" ]] && echo yes || echo no)"
+        local rc1=0; rotate_one "$n" || rc1=$?
+        (( rc1 == 2 )) && { SKIPPED+=("$n"); finish 0; }
+        (( rc1 == 0 )) || finish 1
+        finish 0 ;;
     esac
 }
 
-SALTEADAS=()
-cierre() {   # <fallidas>
+SKIPPED=()
+finish() {   # <failed>
     local f="$1"
-    printf '\n%s────────────────────────────────────────────────────────%s\n' "$gri" "$fin"
-    if (( ${#SALTEADAS[@]} > 0 )); then
-        # Que una tanda "termine" dejando credenciales sin rotar y no lo
-        # diga sería la misma enfermedad de siempre, un nivel más arriba.
-        printf '%sSIN ROTAR%s (bloqueadas por una causa conocida, no por un fallo):\n' "$ama" "$fin"
-        printf '   · %s\n' "${SALTEADAS[@]}"
-        printf 'El motivo lo imprimió cada una arriba.\n\n'
+    printf '\n%s────────────────────────────────────────────────────────%s\n' "$gray" "$reset"
+    if (( ${#SKIPPED[@]} > 0 )); then
+        # For a batch to "finish" leaving credentials unrotated and not
+        # say so would be the same old disease, one level up.
+        printf '%sNOT ROTATED%s (blocked by a known cause, not by a failure):\n' "$yellow" "$reset"
+        printf '   · %s\n' "${SKIPPED[@]}"
+        printf 'Each one printed its reason above.\n\n'
     fi
     if (( f > 0 )); then
-        printf '%sLa tanda se detuvo.%s Lo ya rotado quedó anotado en el diario;\n' "$roj" "$fin"
-        printf 'después de cerrar la brecha de arriba, retomá con:\n\n'
-        printf '    %s --continuar\n\n' "$(basename "$0")"
+        printf '%sThe batch stopped.%s What was already rotated is written down in the journal;\n' "$red" "$reset"
+        printf 'after closing the gap above, resume with:\n\n'
+        printf '    %s rotate continue\n\n' "${AEGIS_CMD:-aegis}"
         exit 1
     fi
-    printf '%sRotación completa.%s Falta lo que esta herramienta NO hace a propósito:\n\n' "$ver" "$fin"
+    printf '%sRotation complete.%s What this tool does NOT do on purpose is still missing:\n\n' "$green" "$reset"
     printf '    cd platform && git add -A && git commit && git push\n'
     printf '    %s sync --drifted\n' "${AEGIS_CMD:-aegis}"
-    printf '    aegis check          # el chequeo entero, sobre todo el sistema\n\n'
-    rm -rf "$DIARIO"
+    printf '    %s check          # the whole check, over the entire system\n\n' "${AEGIS_CMD:-aegis}"
+    rm -rf "$JOURNAL"
     exit 0
 }
 
 # ═══════════════════════════════════════════════════════════════════
-#  ENTRADA
+#  ENTRY
 # ═══════════════════════════════════════════════════════════════════
-[[ -d "$STATE_SECRETS" ]] || die "no existe el store $STATE_SECRETS (¿corriste el init?)"
+[[ -d "$STATE_SECRETS" ]] || die "the store $STATE_SECRETS does not exist (did you run the init?)"
 
-YES=0; NAMES=(); CONTINUAR=0; VERIFICAR=0
+YES=0; NAMES=(); CONTINUE=0; CHECK=0
 for a in "$@"; do
   case "$a" in
     --yes)       YES=1 ;;
-    # Regla 1: verbos. Los flags viejos (--revisar/--verificar/
-    # --continuar) eran modos disfrazados de opciones, y uno de ellos
-    # ROTA material — la diferencia entre mirar y romper no puede
-    # depender de una letra.
-    continue)    CONTINUAR=1 ;;
-    list)        inventario; echo; exit 0 ;;
-    check)       VERIFICAR=1 ;;
+    # Rule 1: verbs. The old flags (--revisar/--verificar/--continuar)
+    # were modes dressed up as options, and one of them ROTATES material
+    # — the difference between looking and breaking cannot depend on a
+    # single letter.
+    continue)    CONTINUE=1 ;;
+    list)        inventory; echo; exit 0 ;;
+    check)       CHECK=1 ;;
     run)         : ;;
-    -h|--help)   sed -n '1,50p' "$0"; exit 0 ;;
-    -*)          die "flag desconocido: $a" ;;
+    -h|--help)   sed -n '1,56p' "$0"; exit 0 ;;
+    -*)          die "unknown flag: $a" ;;
     *)           NAMES+=("$a") ;;
   esac
 done
 
-# ── --verificar: preguntar si una credencial FUNCIONA, sin rotarla ──
-# Faltaba, y es lo que uno quiere el 90% de las veces. Sin esto, la única
-# forma de ejercer un verificador era rotar — o sea que para saber si algo
-# andaba había que romperlo primero. Además hace auditable el resultado
-# DESPUÉS de una rotación hecha a mano, que es exactamente el caso de #83.
-if (( VERIFICAR )); then
+# ── check: ask whether a credential WORKS, without rotating it ──────
+# It was missing, and it is what one wants 90% of the time. Without it,
+# the only way to exercise a verifier was to rotate — that is, to know
+# whether something worked you had to break it first. It also makes the
+# result auditable AFTER a rotation done by hand, which is exactly the
+# case of #83.
+if (( CHECK )); then
     (( ${#NAMES[@]} > 0 )) || mapfile -t NAMES < <(
-        printf '%s\n%s\n' "$RECETAS" "$RECETAS_EXTRA" \
+        printf '%s\n%s\n' "$RECIPES" "$RECIPES_EXTRA" \
         | awk -F'|' '$5 != "-" && $5 != "" {print $1}')
-    fallo=0
+    failure=0
     for n in "${NAMES[@]}"; do
-        linea="$(receta_de "$n")"
-        [[ -n "$linea" ]] || { printf '  %-22s %ssin receta%s\n' "$n" "$roj" "$fin"; continue; }
-        v="$(campo "$linea" 5)"
-        [[ "$v" != "-" && -n "$v" ]] || { printf '  %-22s %s— (no tiene verificador)%s\n' "$n" "$gri" "$fin"; continue; }
-        # el snapshot del túnel se toma acá mismo: verificar sin rotar
-        # sólo puede decir "responde", no "responde IGUAL que antes".
-        [[ "$v" == "ver_tunnel" ]] && HOSTNAMES_ANTES="$(snapshot_hostnames)"
+        line="$(recipe_for "$n")"
+        [[ -n "$line" ]] || { printf '  %-22s %sno recipe%s\n' "$n" "$red" "$reset"; continue; }
+        v="$(field "$line" 5)"
+        [[ "$v" != "-" && -n "$v" ]] || { printf '  %-22s %s— (it has no verifier)%s\n' "$n" "$gray" "$reset"; continue; }
+        # the tunnel's snapshot is taken right here: verifying without
+        # rotating can only say "it answers", not "it answers THE SAME
+        # as before".
+        [[ "$v" == "check_tunnel" ]] && HOSTNAMES_BEFORE="$(snapshot_hostnames)"
         rc=0; "$v" >/dev/null 2>&1 || rc=$?
         case $rc in
-          0) printf '  %-22s %s✓ funciona%s\n' "$n" "$ver" "$fin" ;;
-          1) printf '  %-22s %s✗ el consumidor la RECHAZA%s\n' "$n" "$roj" "$fin"; fallo=1 ;;
-          2) printf '  %-22s %s? no se pudo llegar a medir%s\n' "$n" "$ama" "$fin" ;;
-          3) printf '  %-22s %s! sin diente escrito — NO es verde%s\n' "$n" "$ama" "$fin" ;;
+          0) printf '  %-22s %s✓ works%s\n' "$n" "$green" "$reset" ;;
+          1) printf '  %-22s %s✗ the consumer REJECTS it%s\n' "$n" "$red" "$reset"; failure=1 ;;
+          2) printf '  %-22s %s? could not reach it to measure%s\n' "$n" "$yellow" "$reset" ;;
+          3) printf '  %-22s %s! no tooth written — this is NOT green%s\n' "$n" "$yellow" "$reset" ;;
         esac
     done
-    exit "$fallo"
+    exit "$failure"
 fi
 
-if (( CONTINUAR )); then
-    [[ -d "$DIARIO" ]] || die "no hay ninguna tanda a medias (no existe $DIARIO)"
-    printf '  retomando la tanda interrumpida…\n'
-    inventario
-    preflight_red si si
-    fallidas=0
-    for n in "${ROTABLES[@]}"; do
-        [[ -f "$DIARIO/$n.done" ]] && continue
-        rc=0; rotar_una "$n" || rc=$?
-        (( rc == 2 )) && { SALTEADAS+=("$n"); continue; }
-        (( rc == 0 )) || { fallidas=1; break; }
+if (( CONTINUE )); then
+    [[ -d "$JOURNAL" ]] || die "there is no half-finished batch ($JOURNAL does not exist)"
+    printf '  resuming the interrupted batch…\n'
+    inventory
+    preflight_network yes yes
+    failed=0
+    for n in "${ROTATABLE[@]}"; do
+        [[ -f "$JOURNAL/$n.done" ]] && continue
+        rc=0; rotate_one "$n" || rc=$?
+        (( rc == 2 )) && { SKIPPED+=("$n"); continue; }
+        (( rc == 0 )) || { failed=1; break; }
     done
-    cierre "$fallidas"
+    finish "$failed"
 fi
 
-# sin argumentos → la mini-app
+# no arguments → the mini-app
 (( ${#NAMES[@]} > 0 )) || menu
 
-# ── compat: el comportamiento anterior, por nombre ──────────────────
-# Sigue andando porque rotation-checklist.md lo referencia así y porque
-# un script que cambia de contrato rompe a quien lo automatizó.
+# ── compat: the previous behaviour, by name ─────────────────────────
+# It still works because rotation-checklist.md references it this way
+# and because a script that changes its contract breaks whoever
+# automated it.
 for n in "${NAMES[@]}"; do
-    linea="$(receta_de "$n")"
-    if [[ -z "$linea" ]]; then
-        printf '%s: sin receta — no se toca.\n' "$n"; continue
+    line="$(recipe_for "$n")"
+    if [[ -z "$line" ]]; then
+        printf '%s: no recipe — it is not touched.\n' "$n"; continue
     fi
     if (( YES )); then
-        preflight_red \
-            "$([[ "$(campo "$linea" 6)" == "GitHub" ]] && echo si || echo no)" \
-            "$([[ "$(campo "$linea" 6)" == "Cloudflare" ]] && echo si || echo no)"
-        # exit 2 = bloqueada por causa conocida; exit 1 = falló de verdad.
-        # Distinguirlos importa para quien automatice esto.
-        rcx=0; rotar_una "$n" || rcx=$?
+        preflight_network \
+            "$([[ "$(field "$line" 6)" == "GitHub" ]] && echo yes || echo no)" \
+            "$([[ "$(field "$line" 6)" == "Cloudflare" ]] && echo yes || echo no)"
+        # exit 2 = blocked by a known cause; exit 1 = really failed.
+        # Telling them apart matters to whoever automates this.
+        rcx=0; rotate_one "$n" || rcx=$?
         (( rcx == 0 )) || exit "$rcx"
     else
-        printf '\n%s── %s ──%s\n' "$neg" "$n" "$fin"
-        printf '  clase:  %s\n' "$(campo "$linea" 2)"
-        printf '  radio:  %s\n' "$(campo "$linea" 7)"
-        printf '  toca:   git · cluster · store%s\n' \
-            "$([[ "$(campo "$linea" 6)" != "-" ]] && printf ' · %s' "$(campo "$linea" 6)")"
-        printf '  %s[DRY-RUN] pasá --yes para rotar de verdad%s\n' "$gri" "$fin"
+        printf '\n%s── %s ──%s\n' "$bold" "$n" "$reset"
+        printf '  class:   %s\n' "$(field "$line" 2)"
+        printf '  radius:  %s\n' "$(field "$line" 7)"
+        printf '  touches: git · cluster · store%s\n' \
+            "$([[ "$(field "$line" 6)" != "-" ]] && printf ' · %s' "$(field "$line" 6)")"
+        printf '  %s[DRY-RUN] pass --yes to rotate for real%s\n' "$gray" "$reset"
     fi
 done

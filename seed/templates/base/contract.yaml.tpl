@@ -1,7 +1,7 @@
 # orgs/__ORG__.yaml — el contrato de tu organización.
 #
 # NACIÓ DE LA PLANTILLA `base` Y LA PLANTILLA YA NO IMPORTA. Desde este
-# momento este archivo es la ÚNICA verdad (caminos/design.md §0.1): todo
+# momento este archivo es la ÚNICA verdad (journeys/design.md §0.1): todo
 # lo que la plataforma monta para vos —namespace, cuota, Application de
 # ArgoCD, NetworkPolicy, ruteo, job de CI, hostname del borde— se DERIVA
 # de estas líneas. Para cambiar algo no se busca a la plantilla: se edita

@@ -1,39 +1,47 @@
-# teeth for check 111 (the glossary's ratchet)
+# teeth of check 111 (the glossary's ratchet)
 #
-# The real risk is not that somebody rewrites `paths.py` as `rutas.py`
-# on purpose: it is that a NEW file is born out of the old habit and
-# nobody notices, because the tree is still half in Spanish and one
-# more word does not draw attention.
+# The real risk is not that someone deliberately rewrites `paths.py` as
+# `rutas.py`: it is that a NEW file is born with the old habit and
+# nobody notices, because the tree is still half in Spanish and one more
+# word does not stand out.
 red_1() {
     printf '\nOLD_PATHS = "lib/aegis/rutas.py"\n' >> "$AEGIS_ROOT/lib/aegis/paths.py"
 }
 
-# the same return by way of the artifact, which is where it hurts most:
-# a manifest that names the file by its retired name again.
+# the same thing from the artifact's side, which is where it hurts
+# most: a manifest that names a file by its retired name again.
 red_2() {
     printf '\n# nothing\nold: planes.yaml\n' \
         >> "$AEGIS_ROOT/seed/platform/k8s/bootstrap/appprojects.yaml"
 }
 
-# and the case that proves the list is DERIVED from the document and is
-# not written in the check: adding a word to the glossary has to start
+# and the case that proves the list is DERIVED from the document and not
+# written into the check: adding a word to the glossary has to start
 # watching it immediately.
+#
+# The word has to be ALIVE in the code, or the tooth proves nothing. The
+# first version used `gris`, and on the very day it was written another
+# front translated it to `gray`: the tooth lost its subject and stopped
+# biting — which the full teeth run reported, since that is exactly what
+# it exists for. It now uses `organizacion`, a CONTRACT KEY and
+# therefore the last thing that will move (that is the coordinated
+# change still pending).
 red_3() {
-    sed -i 's|^| `dominio_raiz` | `root_domain` | contract and edge key |$|\0\n| `gris` | `gray` | |' \
-        "$AEGIS_ROOT/docs/glossary.md" 2>/dev/null || \
-    python3 - "$AEGIS_ROOT/docs/glossary.md" <<'PY'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-anchor = "| `equivalencia-org.sh` | `org-equivalence.sh` | |\n"
-s = s.replace(anchor, anchor + "| `gris` | `gray` | |\n", 1)
-open(p, "w").write(s)
-PY
+    # INSIDE section 3, not at the end of the file: the check reads the
+    # rows between "## 3." and "## 3b.", so a row appended after §4
+    # would be watched by nobody. That is how the first attempt failed;
+    # the second failed too, anchoring on `|---|---|---|`, because the
+    # FIRST three-column separator in the document belongs to §2's
+    # outcomes table. The anchor has to be a row that exists only in §3.
+    # (and the sed delimiter is # and not |, because the rows are full
+    #  of pipes — the third way this same tooth managed to fail.)
+    sed -i 's#^| `marcas\.py` | `markers\.py` | |$#&\n| `organizacion` | `org` | |#' \
+        "$AEGIS_ROOT/docs/glossary.md"
 }
 
-# control: telling the story in a COMMENT that names a retired word is
-# legitimate, and it is what checks 108 and 001 do. If this turned red,
-# the ratchet would be erasing the repo's memory.
+# control: telling the history in a COMMENT, naming a retired word, is
+# legitimate — it is what checks 108 and 001 do. If this turned red, the
+# ratchet would be erasing the repo's memory.
 control_1() {
     printf '\n# history: this used to be called rutas.py and planes.yaml\n' \
         >> "$AEGIS_ROOT/lib/aegis/paths.py"

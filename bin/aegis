@@ -12,7 +12,7 @@
 # 1. THE NAME COMES FROM argv[0]. $AEGIS_CMD is exported and every
 #    message that names a command to the operator is built from it, never
 #    as a literal. It is the class-level answer to the ~155 Class E
-#    strings (docs/cli/inconsistencias.md): they are not translated one
+#    strings (docs/cli/inconsistencies.md): they are not translated one
 #    by one, they are derived from one. If the binary is renamed
 #    tomorrow, the messages follow. Check V-103 watches it.
 #

@@ -2,7 +2,7 @@
 
 It exists for a measured reason: in v2 six commands loaded `aegis-org`
 with SourceFileLoader to reuse its validation and its derivations
-(docs/cli/inconsistencias.md C1). Loading an EXECUTABLE by path as if it
+(docs/cli/inconsistencies.md C1). Loading an EXECUTABLE by path as if it
 were a module has three consequences, and all three were paid for:
 
   · check 4 passed identically with the file ABSENT (A2 in the register):

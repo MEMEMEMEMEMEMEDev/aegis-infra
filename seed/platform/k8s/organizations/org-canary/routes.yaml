@@ -33,7 +33,7 @@
 # protección justo por ser el que prueba que todo funciona.
 #
 # Son BYTE A BYTE los que `aegis-org` genera para una organización con
-# contrato (render_ruteo). Eso es duplicación real, y se acepta a
+# contrato (render_routes). Eso es duplicación real, y se acepta a
 # cambio de que el canario siga sin depender del camino que existe
 # para probar. El check 91 de verify-static compara los dos lados: si
 # alguien cambia el generador y se olvida de acá, se pone rojo.

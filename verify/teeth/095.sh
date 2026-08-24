@@ -3,6 +3,6 @@
 
 # removes from the artifact exactly what the check says it measures
 red_1() {
-    grep -vE 'cd "\$RAIZ/tofu" && "\$WRAPPER"' "$AEGIS_ROOT/libexec/aegis-vps" > "$AEGIS_ROOT/libexec/aegis-vps.tooth" \
+    grep -vE 'cd "\$ROOT/tofu" && "\$WRAPPER"' "$AEGIS_ROOT/libexec/aegis-vps" > "$AEGIS_ROOT/libexec/aegis-vps.tooth" \
         && mv "$AEGIS_ROOT/libexec/aegis-vps.tooth" "$AEGIS_ROOT/libexec/aegis-vps"
 }

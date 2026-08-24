@@ -3,6 +3,6 @@
 
 # removes from the artifact exactly what the check says it measures
 red_1() {
-    grep -vE '\(\(\s*dijo\s*\)\)\s*\|\|\s*aviso' "$AEGIS_ROOT/libexec/aegis-check" > "$AEGIS_ROOT/libexec/aegis-check.tooth" \
+    grep -vE '\(\(\s*said\s*\)\)\s*\|\|\s*notice' "$AEGIS_ROOT/libexec/aegis-check" > "$AEGIS_ROOT/libexec/aegis-check.tooth" \
         && mv "$AEGIS_ROOT/libexec/aegis-check.tooth" "$AEGIS_ROOT/libexec/aegis-check"
 }

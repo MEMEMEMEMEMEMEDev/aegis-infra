@@ -1,43 +1,41 @@
 #!/usr/bin/env python3
-# aegis-summary: ¿Los hostnames que los contratos declaran existen y responden?
+# aegis-summary: Do the hostnames the contracts declare exist and answer?
 # aegis-group:   infra
 # aegis-subcommands: check
-"""aegis-edge — ¿los hostnames que los contratos declaran EXISTEN?
+"""aegis-edge — do the hostnames the contracts declare EXIST?
 
-POR QUÉ EXISTE. El modo de fallo del borde es el peor que hay: si un
-hostname no se aplicó, simplemente NO EXISTE. Sin error, sin alarma,
-sin nada rojo — el IngressRoute del cluster está perfecto, el
-certificado está emitido, y nadie llega. Pasó con ai.__ROOT_DOMAIN__
-(#35) y casi pasa con blog el 2026-08-03.
+WHY IT EXISTS. The edge's failure mode is the worst there is: if a
+hostname was not applied, it simply DOES NOT EXIST. No error, no alarm,
+nothing red — the cluster's IngressRoute is perfect, the certificate is
+issued, and nobody arrives. It happened with ai.__ROOT_DOMAIN__ (#35)
+and it nearly happened with blog on 2026-08-03.
 
-POR QUÉ NO USA EL STATE DE TOFU. Dos razones, y la segunda es la que
-importa:
+WHY IT DOES NOT USE TOFU'S STATE. Two reasons, and the second is the
+one that matters:
 
-  1. El state necesita la age key para descifrarse (#46), y la age key
-     no entra a CI. Este chequeo tiene que poder correr ahí.
+  1. The state needs the age key to be decrypted (#46), and the age key
+     does not go into CI. This check has to be able to run there.
 
-  2. Más de fondo: el state dice lo que tofu CREE que existe. Este
-     chequeo pregunta lo que existe DE VERDAD. Si los dos coincidieran
-     siempre no haría falta ninguno de los dos; la única razón de
-     mirar es que pueden diferir. Un detector de deriva que lee el
-     mismo archivo que el aplicador no detecta nada.
+  2. More fundamentally: the state says what tofu BELIEVES exists. This
+     check asks what REALLY exists. If the two always agreed neither of
+     them would be needed; the only reason to look is that they can
+     differ. A drift detector that reads the same file as the applier
+     detects nothing.
 
-LO QUE ESTE CHEQUEO NO CUBRE, dicho de frente: mira los CNAME de la
-zona, que es exactamente el fallo de #35. NO mira las reglas de
-ingress del túnel — un CNAME que existe con un túnel que no lo enruta
-da 404, y eso este script no lo ve. Para mirarlo haría falta el
-tunnel_id, que vive en el state. Está anotado como límite y no como
-"ya está cubierto", porque un chequeo que promete de más es peor que
-no tenerlo.
+WHAT THIS CHECK DOES NOT COVER, said up front: it looks at the zone's
+CNAMEs, which is exactly the failure of #35. It does NOT look at the
+tunnel's ingress rules — a CNAME that exists with a tunnel that does
+not route it gives a 404, and this script does not see that. To look at
+that one would need the tunnel_id, which lives in the state. It is
+written down as a limit and not as "already covered", because a check
+that promises too much is worse than not having it.
 
-Uso:
-    aegis edge                 # compara y reporta
-    TF_VAR_cloudflare_api_token=... aegis edge    # modo CI
+Usage:
+    aegis edge                 # compares and reports
+    TF_VAR_cloudflare_api_token=... aegis edge    # CI mode
 
-Salida: 0 todo declarado existe · 1 falta alguno · 2 no se pudo evaluar
+Exit: 0 everything declared exists · 1 some are missing · 2 could not evaluate
 """
-import importlib.machinery
-import importlib.util
 import json
 import os
 import subprocess
@@ -45,173 +43,184 @@ import sys
 import urllib.error
 import urllib.request
 
-# ── preámbulo canónico de python (V-102) ─────────────────────────────
-# El producto sale de la variable (bin/aegis la exporta) o de este
-# archivo; la INSTANCIA la decide lib/aegis/paths.py y nadie más.
+# ── canonical python preamble (V-102) ────────────────────────────────
+# The product comes from the variable (bin/aegis exports it) or from
+# this file; the INSTANCE is decided by lib/aegis/paths.py and nobody
+# else.
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
 from aegis import cli, paths             # noqa: E402
 
-# RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
-# En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
-# el comando vivía DENTRO de la instancia. Al mudar el código al
-# producto la misma línea siguió compilando y pasó a apuntar al lugar
-# equivocado — la «dependencia invisible a un grep» de C1/C2.
-RAIZ = str(paths.platform_dir())
-TOKENS = os.path.join(RAIZ, "tofu", "secrets", "tokens.enc.yaml")
+# PLATFORM is the INSTANCE (the live checkout of the platform), not the
+# product. In v2 this line was `dirname(dirname(__file__))` and it
+# worked because the command lived INSIDE the instance. When the code
+# moved to the product the same line kept compiling and started
+# pointing at the wrong place — C1/C2's «dependency invisible to a
+# grep».
+PLATFORM = str(paths.platform_dir())
+TOKENS = os.path.join(PLATFORM, "tofu", "secrets", "tokens.enc.yaml")
 CONF = os.environ.get(
-    "AEGIS_INIT_CONF", os.path.join(RAIZ, "..", "init", "aegis-init.conf"))
+    "AEGIS_INIT_CONF", os.path.join(PLATFORM, "..", "init", "aegis-init.conf"))
 
-rojo = "\033[31m"; verde = "\033[32m"; ama = "\033[33m"; gris = "\033[90m"; fin = "\033[0m"
+red = "\033[31m"; green = "\033[32m"; yellow = "\033[33m"; gray = "\033[90m"; reset = "\033[0m"
 if not sys.stdout.isatty():
-    rojo = verde = ama = gris = fin = ""
+    red = green = yellow = gray = reset = ""
 
 
-def generador():
-    """bin/aegis-org como módulo — la lista de hostnames sale de AHÍ.
+def generator():
+    """The generator, as a MODULE of the package — the hostname list
+    comes from THERE.
 
-    Reimplementar la derivación acá sería tener dos fuentes para la
-    misma lista, que es la duplicación que #45 vino a eliminar. Si las
-    dos se separan, el chequeo compara contra algo que nadie despliega
-    y pasa siempre.
+    Reimplementing the derivation here would mean two sources for the
+    same list, which is the duplication #45 came to eliminate. If the
+    two drift apart, the check compares against something nobody
+    deploys and always passes.
+
+    Until 2026-08-24 this loaded `<instance>/platform/bin/aegis-org`
+    with SourceFileLoader — register case C1, and a path that stopped
+    existing when the code moved to the product: `aegis edge check`
+    died with FileNotFoundError on the very line that was going to
+    tell it what the hostnames should be. Now it is a real import: if
+    the package is missing, it fails here with the reason.
     """
-    p = os.path.join(RAIZ, "bin", "aegis-org")
-    spec = importlib.util.spec_from_loader(
-        "aegis_org", importlib.machinery.SourceFileLoader("aegis_org", p))
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    return m
+    from aegis import org
+    return org
 
 
-def de_conf(clave):
-    """Lee una clave del aegis-init.conf sin sourcearlo."""
+def from_conf(key):
+    """Reads a key out of aegis-init.conf without sourcing it."""
     try:
         with open(CONF, encoding="utf-8") as f:
-            for linea in f:
-                linea = linea.strip()
-                if linea.startswith(clave + "="):
-                    return linea.split("=", 1)[1].strip().strip('"').strip("'")
+            for line in f:
+                line = line.strip()
+                if line.startswith(key + "="):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
     except FileNotFoundError:
         pass
     return None
 
 
-def credenciales():
-    """(token, zone_id). El entorno tiene PRECEDENCIA — misma regla que
-    tofu-apply.sh, y por el mismo motivo: así CI corre sin la age key."""
+def credentials():
+    """(token, zone_id). The environment takes PRECEDENCE — the same rule
+    as tofu-apply.sh, and for the same reason: that way CI runs without
+    the age key."""
     token = (os.environ.get("TF_VAR_cloudflare_api_token")
              or os.environ.get("CF_API_TOKEN"))
-    zona = (os.environ.get("TF_VAR_cloudflare_zone_id")
-            or os.environ.get("CF_ZONE_ID") or de_conf("CF_ZONE_ID"))
+    zone = (os.environ.get("TF_VAR_cloudflare_zone_id")
+            or os.environ.get("CF_ZONE_ID") or from_conf("CF_ZONE_ID"))
 
     if not token:
         if not os.environ.get("SOPS_AGE_KEY_FILE"):
-            return None, zona
+            return None, zone
         try:
-            # El token NO pasa por argv: sops escribe a stdout y se lee
-            # acá adentro.
-            crudo = subprocess.run(["sops", "-d", TOKENS], check=True,
-                                   capture_output=True, text=True).stdout
+            # The token does NOT travel through argv: sops writes to
+            # stdout and it is read in here.
+            raw = subprocess.run(["sops", "-d", TOKENS], check=True,
+                                 capture_output=True, text=True).stdout
         except (subprocess.CalledProcessError, FileNotFoundError):
-            return None, zona
+            return None, zone
         import yaml
-        doc = yaml.safe_load(crudo) or {}
+        doc = yaml.safe_load(raw) or {}
         v = (doc.get("cloudflare") or {}).get("api_token")
         token = v.get("value") if isinstance(v, dict) else v
-    return token, zona
+    return token, zone
 
 
-def cnames_vivos(token, zona):
-    """Los CNAME que Cloudflare dice que existen, paginando de verdad.
+def live_cnames(token, zone):
+    """The CNAMEs Cloudflare says exist, paginating for real.
 
-    Sin paginar, una zona con más de 100 registros reportaría faltantes
-    que sí existen — un falso positivo que enseña a ignorar el chequeo.
+    Without paginating, a zone with more than 100 records would report
+    as missing things that do exist — a false positive that teaches
+    people to ignore the check.
     """
-    vivos = set()
-    pagina = 1
+    live = set()
+    page = 1
     while True:
-        url = (f"https://api.cloudflare.com/client/v4/zones/{zona}/dns_records"
-               f"?type=CNAME&per_page=100&page={pagina}")
+        url = (f"https://api.cloudflare.com/client/v4/zones/{zone}/dns_records"
+               f"?type=CNAME&per_page=100&page={page}")
         req = urllib.request.Request(url, headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=20) as r:
-            cuerpo = json.load(r)
-        if not cuerpo.get("success"):
-            raise RuntimeError(f"la API de Cloudflare respondió errores: "
-                               f"{cuerpo.get('errors')}")
-        for reg in cuerpo.get("result") or []:
-            vivos.add(reg["name"])
-        info = cuerpo.get("result_info") or {}
-        if pagina >= (info.get("total_pages") or 1):
-            return vivos
-        pagina += 1
+            body = json.load(r)
+        if not body.get("success"):
+            raise RuntimeError(f"the Cloudflare API answered with errors: "
+                               f"{body.get('errors')}")
+        for rec in body.get("result") or []:
+            live.add(rec["name"])
+        info = body.get("result_info") or {}
+        if page >= (info.get("total_pages") or 1):
+            return live
+        page += 1
 
 
 def main():
-    # Un verbo, aunque hoy sea el único: `aegis edge check` dice lo que
-    # hace, y deja lugar para los que vengan (apply, por ejemplo) sin
-    # que el default cambie de significado a mitad de camino. Sin
-    # argumentos también funciona: es lo que la ronda invoca.
+    # One verb, even though today it is the only one: `aegis edge check`
+    # says what it does, and leaves room for the ones that come after
+    # (apply, for instance) without the default changing meaning
+    # halfway through. With no arguments it works too: that is what the
+    # round invokes.
     ap = cli.parser("edge", __doc__.split("\n")[0],
                     protocol="docs/protocols/edge.md")
-    sub = ap.add_subparsers(dest="verbo")
-    sub.add_parser("check", help="compara los hostnames vivos contra los que derivan de los contratos")
+    sub = ap.add_subparsers(dest="verb")
+    sub.add_parser("check", help="compares the live hostnames against the ones derived from the contracts")
     ap.add_argument("--json", action="store_true", dest="json_mode",
-                    help="el contrato de salida en vez de la narración")
+                    help="the exit contract instead of the narration")
     ap.parse_args()
 
-    g = generador()
+    g = generator()
     import yaml
-    edge = yaml.safe_load(open(os.path.join(RAIZ, "edge.yaml"), encoding="utf-8"))
+    edge = yaml.safe_load(open(os.path.join(PLATFORM, "edge.yaml"), encoding="utf-8"))
     root_domain = edge["root_domain"]
-    esperados = {f"{e}.{root_domain}" for e in g.etiquetas_del_borde()}
+    expected = {f"{e}.{root_domain}" for e in g.edge_labels()}
 
-    token, zona = credenciales()
-    # NO se cae en silencio ni se da por bueno. "No se pudo evaluar" es
-    # un resultado distinto de "pasó", y confundirlos es la Enfermedad E
+    token, zone = credentials()
+    # It does NOT fall silent, and it does not give itself the benefit
+    # of the doubt. "Could not evaluate" is a different result from "it
+    # passed", and confusing them is Disease E
     # (docs/failure-modes.md).
-    if not token or not zona:
-        falta = "token de Cloudflare" if not token else "CF_ZONE_ID"
-        print(f"  {ama}!{fin} borde NO EVALUADO — falta {falta}")
-        print(f"    {gris}Exportá TF_VAR_cloudflare_api_token, o SOPS_AGE_KEY_FILE\n"
-              f"    para que se descifre de tofu/secrets/tokens.enc.yaml.\n"
-              f"    Esto NO es un visto bueno: es un chequeo que no corrió.{fin}")
+    if not token or not zone:
+        missing_piece = "the Cloudflare token" if not token else "CF_ZONE_ID"
+        print(f"  {yellow}!{reset} edge NOT EVALUATED — {missing_piece} is missing")
+        print(f"    {gray}Export TF_VAR_cloudflare_api_token, or SOPS_AGE_KEY_FILE\n"
+              f"    so that it gets decrypted out of tofu/secrets/tokens.enc.yaml.\n"
+              f"    This is NOT approval: it is a check that did not run.{reset}")
         return 2
 
     try:
-        vivos = cnames_vivos(token, zona)
+        live = live_cnames(token, zone)
     except (urllib.error.URLError, RuntimeError, KeyError) as e:
-        print(f"  {ama}!{fin} borde NO EVALUADO — la API de Cloudflare no respondió")
-        print(f"    {gris}{e}{fin}")
+        print(f"  {yellow}!{reset} edge NOT EVALUATED — the Cloudflare API did not answer")
+        print(f"    {gray}{e}{reset}")
         return 2
 
-    faltan = sorted(esperados - vivos)
-    # Solo los CNAME del dominio raíz: la zona puede tener registros de
-    # otras cosas del operador que aegis no gestiona ni debe reclamar.
-    nuestros = {v for v in vivos if v.endswith("." + root_domain)}
-    sobran = sorted(nuestros - esperados)
+    missing = sorted(expected - live)
+    # Only the CNAMEs of the root domain: the zone may hold records of
+    # other things belonging to the operator that aegis neither manages
+    # nor should lay claim to.
+    ours = {v for v in live if v.endswith("." + root_domain)}
+    extra = sorted(ours - expected)
 
-    if faltan:
-        print(f"  {rojo}✗{fin} {len(faltan)} hostname(s) declarado(s) que NO EXISTEN:")
-        for h in faltan:
+    if missing:
+        print(f"  {red}✗{reset} {len(missing)} declared hostname(s) that DO NOT EXIST:")
+        for h in missing:
             print(f"      {h}")
-        print(f"    {gris}Nadie llega a esos sitios y nada más lo va a avisar.\n"
-              f"    Aplicá el borde:  cd platform/tofu && \\\n"
+        print(f"    {gray}Nobody reaches those sites and nothing else is going to say so.\n"
+              f"    Apply the edge:  cd platform/tofu && \\\n"
               f"      SOPS_AGE_KEY_FILE=~/.config/sops/age/aegis.key \\\n"
-              f"      ./tofu-apply.sh -chdir=envs/cloudflare-tunnel apply{fin}")
+              f"      ./tofu-apply.sh -chdir=envs/cloudflare-tunnel apply{reset}")
     else:
-        print(f"  {verde}✓{fin} los {len(esperados)} hostnames de los contratos existen en Cloudflare")
+        print(f"  {green}✓{reset} the {len(expected)} hostnames of the contracts exist in Cloudflare")
 
-    if sobran:
-        print(f"  {ama}!{fin} {len(sobran)} CNAME(s) que ningún contrato pide:")
-        for h in sobran:
+    if extra:
+        print(f"  {yellow}!{reset} {len(extra)} CNAME(s) that no contract asks for:")
+        for h in extra:
             print(f"      {h}")
-        print(f"    {gris}Sobra en el borde lo que ya no está en git. Borrarlos es\n"
-              f"    un apply CON destroy, así que va a mano y con el plan leído.{fin}")
+        print(f"    {gray}What is left over at the edge is what is no longer in git. Deleting\n"
+              f"    them is an apply WITH destroy, so it goes by hand and with the plan read.{reset}")
 
-    return 1 if faltan else 0
+    return 1 if missing else 0
 
 
 if __name__ == "__main__":

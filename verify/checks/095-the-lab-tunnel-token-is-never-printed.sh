@@ -27,8 +27,8 @@ else
     # RELATIVE -chdir (#46), so it has to be invoked while standing in
     # tofu/ — from another cwd the env "does not exist" and an EMPTY
     # token travels to the VPS:
-    grep -q 'cd "\$RAIZ/tofu" && "\$WRAPPER"' "$VPS_BIN" \
-        || D95="$D95 the wrapper is not invoked from \$RAIZ/tofu: with a relative -chdir the token comes out empty (it happened on 2026-08-23);"
+    grep -q 'cd "\$ROOT/tofu" && "\$WRAPPER"' "$VPS_BIN" \
+        || D95="$D95 the wrapper is not invoked from \$ROOT/tofu: with a relative -chdir the token comes out empty (it happened on 2026-08-23);"
 fi
 if [[ -n "$D95" ]]; then fail "95:$D95"
 else pass "aegis-vps: the token travels through a variable and stdin, and dies with shred"; fi

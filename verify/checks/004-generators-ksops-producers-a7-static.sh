@@ -101,16 +101,16 @@ try:
         raise StopIteration
     for c_path in sorted((P/"orgs").glob("*.y*ml")):
         c = yaml.safe_load(c_path.open()) or {}
-        for s in gen.secretos_de(c):
+        for s in gen.secrets_of(c):
             by_contract[s] = f"aegis-secret --todos orgs/{c_path.name}"
         # The deploy key with which ArgoCD reads the organization's
         # repo. It lives in the ArgoCD namespace but it belongs to THE
         # ORGANIZATION: it comes out of its `repo:`. The same --todos
         # pass creates it (#48).
-        for app_name in gen.repos_de(c).values():
+        for app_name in gen.repos_of(c).values():
             by_contract[f"secret-{app_name}-repo.enc.yaml"] = \
                 f"aegis-secret --todos orgs/{c_path.name}"
-    for org in gen.orgs_con_bucket():
+    for org in gen.orgs_with_bucket():
         by_contract[f"secret-garage-{org}.enc.yaml"] = "aegis-secret --reubicar"
     # platform-wide, with its own recipe in aegis-secret:
     by_contract["secret-garage-credentials.enc.yaml"] = "aegis-secret (platform recipe)"

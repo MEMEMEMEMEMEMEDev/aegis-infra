@@ -63,7 +63,7 @@ for app in (root/"seed").iterdir():
               f"IngressRoute naming them (neither here nor in the platform) "
               f"and no explicit 'expose: false'")
         ok = False
-# Templates (caminos/design.md §4) carry the SAME invariant in ANOTHER
+# Templates (journeys/design.md §4) carry the SAME invariant in ANOTHER
 # form: their IngressRoute cannot exist in the seed because aegis-org
 # derives it FROM THE CONTRACT at instantiation time (#54 — the kind
 # does not even belong to the app's repo). What the template can and

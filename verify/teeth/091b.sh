@@ -7,6 +7,6 @@
 # it up. A debt that collects itself.
 red_1() {
     mkdir -p "$AEGIS_ROOT/lib/aegis"
-    printf 'def render_ruteo(*a, **k):\n    raise NotImplementedError\n' \
+    printf 'def render_routes(*a, **k):\n    raise NotImplementedError\n' \
         > "$AEGIS_ROOT/lib/aegis/derivar.py"
 }

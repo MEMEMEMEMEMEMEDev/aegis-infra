@@ -12,7 +12,7 @@ check() {
 # rotated nobody would know how — without a single error, because
 # nothing names it.
 #
-# It is the same principle as aegis dev seed's EXCLUSIONES/DELIBERADAS
+# It is the same principle as aegis dev seed's EXCLUSIONS/DELIBERATE
 # tables: a missing entry is an ERROR, not a detail.
 #
 # It is deliberately NOT measured against init/.state-secrets/. That

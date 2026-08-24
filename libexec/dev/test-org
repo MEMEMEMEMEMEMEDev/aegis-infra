@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-# aegis-summary: Prueba de aceptación del protocolo de organizaciones
+# aegis-summary: Acceptance test of the organizations protocol
 # aegis-group:   dev
 # aegis-hidden:  true
-"""Prueba de aceptación #1 del protocolo de organizaciones.
+"""Acceptance test #1 of the organizations protocol.
 
-Compara los OBJETOS de Kubernetes que produce el generador contra los
-que hay escritos a mano en el repo, para una organización que ya está
-desplegada.
+Compares the Kubernetes OBJECTS the generator produces against the ones
+written by hand in the repo, for an organization that is already
+deployed.
 
-Compara objetos y no bytes a propósito: reproducir comentarios escritos
-a mano no tiene valor ni es posible. Lo que importa es que salgan los
-mismos objetos con los mismos campos. Si no salen, el modelo del
-protocolo no describe la realidad — y eso hay que saberlo ANTES de
-generar organizaciones nuevas con él.
+It compares objects and not bytes on purpose: reproducing hand-written
+comments has no value and is not possible. What matters is that the same
+objects come out with the same fields. If they do not, the protocol's
+model does not describe reality — and that has to be known BEFORE
+generating new organizations with it.
 
     aegis dev test-org orgs/portafolio.yaml
 """
@@ -23,114 +23,115 @@ import sys
 
 import yaml
 
-# RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
-# En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
-# el comando vivía DENTRO de la instancia. Al mudar el código al
-# producto la misma línea siguió compilando y pasó a apuntar al lugar
-# equivocado — la «dependencia invisible a un grep» de C1/C2.
-RAIZ = str(paths.platform_dir())
-AQUI = os.path.join(_AEGIS_ROOT, "libexec")
-
-# ── preámbulo canónico de python (V-102) ─────────────────────────────
+# ── canonical python preamble (V-102) ────────────────────────────────
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
 from aegis import paths                  # noqa: E402
 
-# El generador es un MÓDULO, no un ejecutable cargado por su ruta: si
-# el paquete falta, esto revienta acá y no pasa por «no aplica» (A2).
+# PLATFORM_DIR is the INSTANCE (the live checkout of the platform), not
+# the product. In v2 this line was `dirname(dirname(__file__))` and it
+# worked because the command lived INSIDE the instance. On moving the
+# code to the product the same line went on compiling and started
+# pointing at the wrong place — C1/C2's «dependency invisible to a grep».
+PLATFORM_DIR = str(paths.platform_dir())
+HERE = os.path.join(_AEGIS_ROOT, "libexec")
+
+# The generator is a MODULE, not an executable loaded by its path: if
+# the package is missing, this blows up here and does not pass for «does
+# not apply» (A2).
 from aegis import org as gen             # noqa: E402
 
-rojo = "\033[31m"; verde = "\033[32m"; ama = "\033[33m"; gris = "\033[90m"; fin = "\033[0m"
+red = "\033[31m"; green = "\033[32m"; yellow = "\033[33m"; gray = "\033[90m"; reset = "\033[0m"
 
 
-def objetos(texto):
-    """(kind, name) -> objeto, ignorando los documentos vacíos."""
+def objects(text):
+    """(kind, name) -> object, ignoring the empty documents."""
     out = {}
-    for d in yaml.safe_load_all(texto):
+    for d in yaml.safe_load_all(text):
         if not d:
             continue
         out[(d["kind"], d["metadata"]["name"])] = d
     return out
 
 
-def diferencias(a, b, ruta=""):
-    """Diferencias campo a campo. Devuelve lista de textos."""
+def differences(a, b, path=""):
+    """Differences field by field. Returns a list of texts."""
     ds = []
     if type(a) is not type(b):
-        return [f"{ruta}: tipo {type(a).__name__} vs {type(b).__name__}"]
+        return [f"{path}: type {type(a).__name__} vs {type(b).__name__}"]
     if isinstance(a, dict):
         for k in sorted(set(a) | set(b)):
             if k not in b:
-                ds.append(f"{ruta}/{k}: SOLO a mano = {a[k]!r}")
+                ds.append(f"{path}/{k}: ONLY by hand = {a[k]!r}")
             elif k not in a:
-                ds.append(f"{ruta}/{k}: SOLO generado = {b[k]!r}")
+                ds.append(f"{path}/{k}: ONLY generated = {b[k]!r}")
             else:
-                ds += diferencias(a[k], b[k], f"{ruta}/{k}")
+                ds += differences(a[k], b[k], f"{path}/{k}")
     elif isinstance(a, list):
         if len(a) != len(b):
-            ds.append(f"{ruta}: {len(a)} elementos a mano vs {len(b)} generados")
+            ds.append(f"{path}: {len(a)} elements by hand vs {len(b)} generated")
         else:
             for i, (x, y) in enumerate(zip(a, b)):
-                ds += diferencias(x, y, f"{ruta}[{i}]")
+                ds += differences(x, y, f"{path}[{i}]")
     elif a != b:
-        ds.append(f"{ruta}: a mano={a!r}  generado={b!r}")
+        ds.append(f"{path}: by hand={a!r}  generated={b!r}")
     return ds
 
 
-def main(ruta_contrato):
-    crudo = open(ruta_contrato, encoding="utf-8").read()
-    planes = yaml.safe_load(open(os.path.join(RAIZ, "plans.yaml"), encoding="utf-8"))
-    c = gen.validar(yaml.safe_load(crudo), planes)
+def main(contract_path):
+    raw = open(contract_path, encoding="utf-8").read()
+    plans = yaml.safe_load(open(os.path.join(PLATFORM_DIR, "plans.yaml"), encoding="utf-8"))
+    c = gen.validate(yaml.safe_load(raw), plans)
     org = c["organizacion"]
-    dir_org = os.path.join(RAIZ, "k8s", "organizations", f"org-{org}")
+    org_dir = os.path.join(PLATFORM_DIR, "k8s", "organizations", f"org-{org}")
 
-    salida, _ = gen.renderizar(c, planes, crudo)
+    out, _ = gen.render(c, plans, raw)
 
-    # A mano: todo lo que kustomize incorporaría como recursos.
-    a_mano = {}
+    # By hand: everything kustomize would incorporate as resources.
+    by_hand = {}
     for f in ("bundle.yaml", "netpol.yaml", "apps.yaml"):
-        p = os.path.join(dir_org, f)
+        p = os.path.join(org_dir, f)
         if os.path.exists(p):
-            a_mano.update(objetos(open(p, encoding="utf-8").read()))
+            by_hand.update(objects(open(p, encoding="utf-8").read()))
 
-    generado = {}
+    generated = {}
     for f in ("bundle.yaml", "netpol.yaml", "apps.yaml"):
-        if f in salida:
-            generado.update(objetos(salida[f]))
+        if f in out:
+            generated.update(objects(out[f]))
 
-    print(f"\n{'='*66}\nPRUEBA DE ACEPTACIÓN #1 — org-{org}\n{'='*66}")
-    print(f"a mano:   {len(a_mano)} objetos")
-    print(f"generado: {len(generado)} objetos\n")
+    print(f"\n{'='*66}\nACCEPTANCE TEST #1 — org-{org}\n{'='*66}")
+    print(f"by hand:   {len(by_hand)} objects")
+    print(f"generated: {len(generated)} objects\n")
 
-    fallos = 0
-    for clave in sorted(set(a_mano) | set(generado)):
-        kind, nombre = clave
-        etiqueta = f"{kind}/{nombre}"
-        if clave not in generado:
-            print(f"  {rojo}✗{fin} {etiqueta}  {rojo}el generador NO lo produce{fin}")
-            fallos += 1
+    failures = 0
+    for key in sorted(set(by_hand) | set(generated)):
+        kind, name = key
+        label = f"{kind}/{name}"
+        if key not in generated:
+            print(f"  {red}✗{reset} {label}  {red}the generator does NOT produce it{reset}")
+            failures += 1
             continue
-        if clave not in a_mano:
-            print(f"  {ama}+{fin} {etiqueta}  {gris}solo generado (no existía a mano){fin}")
+        if key not in by_hand:
+            print(f"  {yellow}+{reset} {label}  {gray}only generated (it did not exist by hand){reset}")
             continue
-        ds = diferencias(a_mano[clave], generado[clave])
+        ds = differences(by_hand[key], generated[key])
         if not ds:
-            print(f"  {verde}✓{fin} {etiqueta}")
+            print(f"  {green}✓{reset} {label}")
         else:
-            print(f"  {ama}~{fin} {etiqueta}  {gris}{len(ds)} diferencia(s){fin}")
+            print(f"  {yellow}~{reset} {label}  {gray}{len(ds)} difference(s){reset}")
             for d in ds[:8]:
-                print(f"        {gris}{d}{fin}")
-            fallos += 1
+                print(f"        {gray}{d}{reset}")
+            failures += 1
 
     print()
-    if fallos:
-        print(f"{ama}{fallos} objeto(s) con diferencias.{fin}")
-        print(f"{gris}Cada diferencia es una decisión: o el generador está mal, o el\n"
-              f"objeto a mano tiene una particularidad que hay que llevar al\n"
-              f"contrato, o es una inconsistencia real que conviene corregir.{fin}\n")
+    if failures:
+        print(f"{yellow}{failures} object(s) with differences.{reset}")
+        print(f"{gray}Every difference is a decision: either the generator is wrong, or\n"
+              f"the object written by hand has a particularity that has to be taken\n"
+              f"to the contract, or it is a real inconsistency worth correcting.{reset}\n")
         return 1
-    print(f"{verde}El generador reproduce org-{org} objeto por objeto.{fin}\n")
+    print(f"{green}The generator reproduces org-{org} object by object.{reset}\n")
     return 0
 
 

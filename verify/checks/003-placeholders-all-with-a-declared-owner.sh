@@ -11,7 +11,7 @@ check() {
 # public keys — checks 94/95).
 #
 # The fourth class is template-class and it is NOT written here: it is
-# DERIVED from `aegis app`, which is its only owner (_valores_de).
+# DERIVED from `aegis app`, which is its only owner (_values_for).
 # Writing it by hand would be a second source of truth, and the day the
 # template asks for something new the check would lie in the
 # comfortable direction.

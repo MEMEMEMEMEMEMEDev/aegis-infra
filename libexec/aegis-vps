@@ -1,59 +1,61 @@
 #!/usr/bin/env bash
-# aegis-summary: El VPS de laboratorio: user-data, token del túnel, shred
+# aegis-summary: The lab VPS: user-data, tunnel token, shred
 # aegis-group:   infra
 # aegis-subcommands: render entregar shred
 # aegis-hidden:  true
 # aegis-vps — render | entregar | shred
 #
-# Herramienta del MANTENEDOR para el VPS de laboratorio (no del
-# amigo). Tres verbos y una regla que gobierna los tres: el token del
-# túnel JAMÁS se imprime, jamás viaja por argv (argv es visible en
-# /proc para cualquier proceso del host), jamás toca el disco fuera
-# de /dev/shm.
+# MAINTAINER's tool for the lab VPS (not the friend's). Three verbs and
+# one rule that governs all three: the tunnel's token is NEVER printed,
+# never travels through argv (argv is visible in /proc to any process
+# on the host), never touches disk outside /dev/shm.
 #
-#   render          arma el user-data real desde el .tpl: token del
-#                   env vps-lab + llaves públicas del operador →
+#   render          builds the real user-data from the .tpl: token from
+#                   the vps-lab env + the operator's public keys →
 #                   /dev/shm/aegis-vps.XXXX/user-data.yaml (umask 077).
-#                   Imprime SOLO la ruta y el tamaño. Es el dueño de
-#                   __CF_TUNNEL_TOKEN__ y __SSH_PUBKEY_*__ (check 3).
-#   entregar <host> instala/actualiza el token en un VPS que ya corre:
-#                   output -raw tunnel_token | ssh <host> 'sudo
-#                   cloudflared service install "$(cat)"' — por stdin.
-#   shred           destruye los directorios de render en /dev/shm.
+#                   Prints ONLY the path and the size. It is the owner
+#                   of __CF_TUNNEL_TOKEN__ and __SSH_PUBKEY_*__ (check 3).
+#   entregar <host> installs/updates the token on a VPS that is already
+#                   running: output -raw tunnel_token | ssh <host> 'sudo
+#                   cloudflared service install "$(cat)"' — through stdin.
+#   shred           destroys the render directories in /dev/shm.
 #
-# Tres desenlaces como todo comando de la casa: 0 hecho, 1 falta/mal,
-# 2 no se pudo evaluar.
+# Three outcomes like every command of the house: 0 done, 1 missing/wrong,
+# 2 could not evaluate.
 set -euo pipefail
 
-RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WRAPPER="$RAIZ/tofu/tofu-apply.sh"
-TPL="$RAIZ/vps/clouding-lab.cloud-init.yaml.tpl"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WRAPPER="$ROOT/tofu/tofu-apply.sh"
+TPL="$ROOT/vps/clouding-lab.cloud-init.yaml.tpl"
 
 die() { printf '%s vps: %s\n' "${AEGIS_CMD:-aegis}" "$*" >&2; exit "${2:-1}"; }
 
-[[ -x "$WRAPPER" ]] || die "no existe el wrapper $WRAPPER — ¿estás en el checkout vivo (platform/)? El env vps-lab y su state viven ahí, no en la semilla" 2
+[[ -x "$WRAPPER" ]] || die "the wrapper $WRAPPER does not exist — are you in the live checkout (platform/)? The vps-lab env and its state live there, not in the seed" 2
 
-leer_token() {
-    # a una variable, nunca a un archivo ni a la pantalla. stdout del
-    # wrapper es sagrado (H4): esto captura el token y nada más.
-    # DESDE tofu/: el wrapper exige -chdir RELATIVO (#46) y tofu lo
-    # resuelve contra el cwd — llamado desde otro lado, el env "no
-    # existe" y el token sale vacío (bug real, primera entrega
-    # 2026-08-23: un token vacío viajó hasta el VPS).
-    (cd "$RAIZ/tofu" && "$WRAPPER" -chdir=envs/vps-lab output -raw tunnel_token) \
-        || die "no pude leer tunnel_token del env vps-lab (¿apply corrido? ¿SOPS_AGE_KEY_FILE?)" 2
+read_token() {
+    # into a variable, never into a file nor onto the screen. The
+    # wrapper's stdout is sacred (H4): this captures the token and
+    # nothing else.
+    # FROM tofu/: the wrapper demands a RELATIVE -chdir (#46) and tofu
+    # resolves it against the cwd — called from anywhere else the env
+    # "does not exist" and the token comes out empty (real bug, first
+    # delivery 2026-08-23: an empty token travelled all the way to the
+    # VPS).
+    (cd "$ROOT/tofu" && "$WRAPPER" -chdir=envs/vps-lab output -raw tunnel_token) \
+        || die "I could not read tunnel_token from the vps-lab env (apply run? SOPS_AGE_KEY_FILE?)" 2
 }
 
 case "${1:-}" in
 render)
     for k in ~/.ssh/aegis_vps_rsa.pub ~/.ssh/aegis_vps.pub; do
-        [[ -f "$k" ]] || die "falta la llave pública $k" 2
+        [[ -f "$k" ]] || die "the public key $k is missing" 2
     done
     umask 077
     DIR="$(mktemp -d /dev/shm/aegis-vps.XXXX)"
-    # el token entra por ENV al proceso hijo (no por argv); python
-    # sustituye los tres placeholders y escribe de una vez.
-    CF_TUNNEL_TOKEN="$(leer_token)" \
+    # the token enters the child process through the ENV (not through
+    # argv); python substitutes the three placeholders and writes it in
+    # one go.
+    CF_TUNNEL_TOKEN="$(read_token)" \
     PUB_RSA="$(cat ~/.ssh/aegis_vps_rsa.pub)" \
     PUB_ED="$(cat ~/.ssh/aegis_vps.pub)" \
     TPL="$TPL" OUT="$DIR/user-data.yaml" python3 - <<'PY'
@@ -64,38 +66,38 @@ for ph, env in (("__CF_TUNNEL_TOKEN__", "CF_TUNNEL_TOKEN"),
                 ("__SSH_PUBKEY_ED25519__", "PUB_ED")):
     v = os.environ[env].strip()
     if not v:
-        raise SystemExit(f"{os.environ.get('AEGIS_CMD', 'aegis')} vps: {env} vacío")
+        raise SystemExit(f"{os.environ.get('AEGIS_CMD', 'aegis')} vps: {env} is empty")
     if ph not in t:
-        raise SystemExit(f"{os.environ.get('AEGIS_CMD', 'aegis')} vps: el tpl no tiene {ph}")
+        raise SystemExit(f"{os.environ.get('AEGIS_CMD', 'aegis')} vps: the tpl has no {ph}")
     t = t.replace(ph, v)
 if "__" in "".join(l for l in t.splitlines() if not l.lstrip().startswith("#")):
-    raise SystemExit("aegis vps: quedó un placeholder vivo fuera de comentarios")
+    raise SystemExit("aegis vps: a placeholder was left alive outside comments")
 open(os.environ["OUT"], "w").write(t)
 PY
-    printf 'hecho: user-data renderizado en %s (%s bytes)\n' \
+    printf 'done: user-data rendered at %s (%s bytes)\n' \
         "$DIR/user-data.yaml" "$(wc -c < "$DIR/user-data.yaml")"
-    printf 'pegalo en el panel de Clouding y después: %s vps shred\n' "${AEGIS_CMD:-aegis}"
+    printf 'paste it into the Clouding panel and afterwards: %s vps shred\n' "${AEGIS_CMD:-aegis}"
     ;;
 entregar)
     HOST="${2:-}"
-    [[ -n "$HOST" ]] || die "uso: ${AEGIS_CMD:-aegis} vps entregar <host-ssh>"
-    leer_token | ssh "$HOST" 'sudo cloudflared service install "$(cat)" && sudo systemctl restart cloudflared' \
-        || die "la entrega a $HOST falló — el token NO quedó instalado"
-    printf 'hecho: token entregado a %s por stdin; cloudflared reiniciado\n' "$HOST"
+    [[ -n "$HOST" ]] || die "usage: ${AEGIS_CMD:-aegis} vps entregar <ssh-host>"
+    read_token | ssh "$HOST" 'sudo cloudflared service install "$(cat)" && sudo systemctl restart cloudflared' \
+        || die "the delivery to $HOST failed — the token was NOT installed"
+    printf 'done: token delivered to %s through stdin; cloudflared restarted\n' "$HOST"
     ;;
 shred)
-    ENCONTRADOS=0
+    FOUND=0
     for d in /dev/shm/aegis-vps.*; do
         [[ -d "$d" ]] || continue
-        ENCONTRADOS=1
+        FOUND=1
         find "$d" -type f -exec shred -u {} +
         rmdir "$d"
-        printf 'hecho: %s destruido\n' "$d"
+        printf 'done: %s destroyed\n' "$d"
     done
-    [[ "$ENCONTRADOS" == 1 ]] || printf 'ya estaba: nada que destruir en /dev/shm\n'
+    [[ "$FOUND" == 1 ]] || printf 'already: nothing to destroy in /dev/shm\n'
     ;;
 *)
-    printf 'uso: %s vps render | entregar <host> | shred\n' "${AEGIS_CMD:-aegis}" >&2
+    printf 'usage: %s vps render | entregar <host> | shred\n' "${AEGIS_CMD:-aegis}" >&2
     exit 1
     ;;
 esac

@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
-# aegis-summary: Prueba de aceptación de los tipos de servicio
+# aegis-summary: Acceptance test of the service types
 # aegis-group:   dev
 # aegis-hidden:  true
-"""Prueba de aceptación #2 — que `tipo` signifique algo.
+"""Acceptance test #2 — that `tipo` should mean something.
 
-Hasta el 2026-08-04 el campo `tipo` de un servicio se validaba contra
-una lista y después no lo consumía nadie: se podía declarar un `worker`
-público en el puerto 443, o un front estático con `usa: [ai]` —es decir,
-con una credencial que termina publicada en el navegador— y el generador
-decía que sí.
+Until 2026-08-04 a service's `tipo` field was validated against a list
+and after that nobody consumed it: you could declare a public `worker`
+on port 443, or a static front with `usa: [ai]` —that is, with a
+credential that ends up published in the browser— and the generator said
+yes.
 
-Un tipo que no restringe nada no es un tipo, es una etiqueta.
+A type that restricts nothing is not a type, it is a label.
 
-Esta prueba recorre cada regla con su CONTRAEJEMPLO y exige que el
-generador la rechace. Es lo contrario de la prueba #1: aquella comprueba
-que lo bueno se reproduce, esta que lo malo no pasa. Sin la segunda,
-podría relajar cualquier validación sin que nada avisara.
+This test walks every rule with its COUNTEREXAMPLE and demands that the
+generator reject it. It is the opposite of test #1: that one checks that
+the good is reproduced, this one that the bad does not get through.
+Without the second, I could relax any validation and nothing would say
+so.
 
     aegis dev test-types
 """
@@ -26,27 +27,28 @@ import sys
 
 import yaml
 
-# RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
-# En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
-# el comando vivía DENTRO de la instancia. Al mudar el código al
-# producto la misma línea siguió compilando y pasó a apuntar al lugar
-# equivocado — la «dependencia invisible a un grep» de C1/C2.
-RAIZ = str(paths.platform_dir())
-AQUI = os.path.join(_AEGIS_ROOT, "libexec")
-
-# ── preámbulo canónico de python (V-102) ─────────────────────────────
+# ── canonical python preamble (V-102) ────────────────────────────────
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
 from aegis import paths                  # noqa: E402
 
-# El generador es un MÓDULO, no un ejecutable cargado por su ruta: si
-# el paquete falta, esto revienta acá y no pasa por «no aplica» (A2).
+# PLATFORM_DIR is the INSTANCE (the live checkout of the platform), not
+# the product. In v2 this line was `dirname(dirname(__file__))` and it
+# worked because the command lived INSIDE the instance. On moving the
+# code to the product the same line went on compiling and started
+# pointing at the wrong place — C1/C2's «dependency invisible to a grep».
+PLATFORM_DIR = str(paths.platform_dir())
+HERE = os.path.join(_AEGIS_ROOT, "libexec")
+
+# The generator is a MODULE, not an executable loaded by its path: if
+# the package is missing, this blows up here and does not pass for «does
+# not apply» (A2).
 from aegis import org as gen             # noqa: E402
 
-rojo = "\033[31m"; verde = "\033[32m"; gris = "\033[90m"; fin = "\033[0m"
+red = "\033[31m"; green = "\033[32m"; gray = "\033[90m"; reset = "\033[0m"
 if not sys.stdout.isatty():
-    rojo = verde = gris = fin = ""
+    red = green = gray = reset = ""
 
 BASE = """\
 version: 1
@@ -61,39 +63,44 @@ ai:
 servicios:
 """
 
-# (qué se prueba, servicios, fragmento que el error DEBE nombrar)
+# (what is tested, services, fragment the error MUST name)
 #
-# El tercer campo importa: un rechazo por el motivo equivocado pasaría
-# igual de verde, y sería el mismo error que ya se cometió cuatro veces
-# esta semana — un guard que aprueba o rechaza por otra cosa.
-MALOS = [
-    ("estatico con usa: la credencial terminaría en el navegador",
-     "  - {nombre: f, tipo: estatico, publico: /, usa: [ai]}", "estatico y declara usa"),
-    ("estatico con puerto propio",
-     "  - {nombre: f, tipo: estatico, publico: /, puerto: 3000}", "declara puerto"),
-    ("estatico que nadie puede visitar",
-     "  - {nombre: f, tipo: estatico}", "no declara `publico`"),
-    ("http sin puerto: el tráfico no llegaría y en silencio",
-     "  - {nombre: a, tipo: http, publico: /api}", "no declara `puerto`"),
-    ("worker con puerto: un worker no escucha",
-     "  - {nombre: w, tipo: worker, puerto: 9000}", "worker y declara `puerto`"),
-    ("worker publicado",
-     "  - {nombre: w, tipo: worker, publico: /w}", "worker y declara `publico`"),
-    ("postgres con repo: la base la provee la plataforma",
-     "  - {nombre: d, tipo: postgres, repo: 'git@github.com:x/y.git'}", "postgres y declara `repo`"),
-    ("postgres publicado a internet",
-     "  - {nombre: d, tipo: postgres, publico: /db}", "postgres y declara `publico`"),
-    ("postgres consumiendo servicios",
-     "  - {nombre: d, tipo: postgres, usa: [ai]}", "postgres y declara usa"),
-    ("usa:[postgres] sin ninguna base declarada",
-     "  - {nombre: a, tipo: http, puerto: 8080, usa: [postgres]}", "no declaró ningún servicio de tipo postgres"),
-    ("tipo inventado",
-     "  - {nombre: x, tipo: lambda, publico: /}", "desconocido"),
+# The third field matters: a rejection for the wrong reason would go
+# green just the same, and it would be the same mistake already made
+# four times this week — a guard that approves or rejects on account of
+# something else.
+#
+# THE FRAGMENTS ARE THE MESSAGES' OWN WORDS: they are matched against
+# the error text of lib/aegis/org.py, so they only move when that
+# module's messages do — together, in one change.
+BAD = [
+    ("estatico with usa: the credential would end up in the browser",
+     "  - {nombre: f, tipo: estatico, publico: /, usa: [ai]}", "estatico and declares usa"),
+    ("estatico with a port of its own",
+     "  - {nombre: f, tipo: estatico, publico: /, puerto: 3000}", "declares puerto"),
+    ("estatico that nobody can visit",
+     "  - {nombre: f, tipo: estatico}", "does not declare `publico`"),
+    ("http without a port: the traffic would not arrive, and silently",
+     "  - {nombre: a, tipo: http, publico: /api}", "does not declare `puerto`"),
+    ("worker with a port: a worker does not listen",
+     "  - {nombre: w, tipo: worker, puerto: 9000}", "worker and declares `puerto`"),
+    ("published worker",
+     "  - {nombre: w, tipo: worker, publico: /w}", "worker and declares `publico`"),
+    ("postgres with repo: the database is provided by the platform",
+     "  - {nombre: d, tipo: postgres, repo: 'git@github.com:x/y.git'}", "postgres and declares `repo`"),
+    ("postgres published to the internet",
+     "  - {nombre: d, tipo: postgres, publico: /db}", "postgres and declares `publico`"),
+    ("postgres consuming services",
+     "  - {nombre: d, tipo: postgres, usa: [ai]}", "postgres and declares usa"),
+    ("usa:[postgres] without a single database declared",
+     "  - {nombre: a, tipo: http, puerto: 8080, usa: [postgres]}", "did not declare any service of type postgres"),
+    ("invented type",
+     "  - {nombre: x, tipo: lambda, publico: /}", "unknown"),
 ]
 
-# El contrato que SÍ tiene que pasar. Sin este caso, una validación que
-# rechace todo saldría verde en los once de arriba.
-BUENO = """\
+# The contract that DOES have to pass. Without this case, a validation
+# that rejected everything would come out green on the eleven above.
+GOOD = """\
   - {nombre: front, tipo: estatico, publico: /}
   - {nombre: api,   tipo: http, puerto: 8080, publico: /api, usa: [ai, postgres]}
   - {nombre: cron,  tipo: worker, usa: [postgres]}
@@ -101,49 +108,49 @@ BUENO = """\
 """
 
 
-# ── contratos ENTEROS ─────────────────────────────────────────────
+# ── WHOLE contracts ───────────────────────────────────────────────
 #
-# Estos no se pueden probar con BASE, porque lo que se prueba es
-# justamente la AUSENCIA de `repo` o de `dominio`. Van completos.
+# These cannot be tested with BASE, because what is being tested is
+# precisely the ABSENCE of `repo` or of `dominio`. They go complete.
 #
-# Las dos reglas dicen lo mismo desde dos lados: un contrato declara lo
-# que sus servicios necesitan, ni más ni menos. Pedir `repo` a una
-# organización de pura infraestructura la obligaba a inventar uno
-# vacío; pedir `dominio` a algo que no publica nada la obligaba a
-# inventar un CNAME que después nadie sabe por qué está.
-CONTRATOS_MALOS = [
-    ("un http sin repo en ningún lado: nadie construye esa imagen", """\
+# The two rules say the same thing from two sides: a contract declares
+# what its services need, no more and no less. Demanding `repo` from a
+# pure-infrastructure organization forced it to invent an empty one;
+# demanding `dominio` from something that publishes nothing forced it to
+# invent a CNAME that nobody afterwards knows why it is there.
+BAD_CONTRACTS = [
+    ("an http without a repo anywhere: nobody builds that image", """\
 version: 1
 organizacion: prueba
 cuota: pequena
 servicios:
   - {nombre: api, tipo: http, puerto: 8080}
-""", "se CONSTRUYEN: api (http)"),
+""", "are BUILT: api (http)"),
 
-    ("algo público sin dominio: arranca y no recibe tráfico nunca", """\
+    ("something public without a domain: it starts and never receives traffic", """\
 version: 1
 organizacion: prueba
 cuota: pequena
 repo: git@github.com:ejemplo/repo.git
 servicios:
   - {nombre: front, tipo: estatico, publico: /}
-""", "hace falta 'dominio'"),
+""", "'dominio' is required"),
 
-    ("dominio sin nada público: un CNAME a un sitio que no existe", """\
+    ("a domain with nothing public: a CNAME to a site that does not exist", """\
 version: 1
 organizacion: prueba
 dominio: prueba.__ROOT_DOMAIN__
 cuota: pequena
 servicios:
   - {nombre: db, tipo: postgres}
-""", "ningún servicio es"),
+""", "no service is"),
 ]
 
-# Y el que TIENE que pasar: pura infraestructura. Sin repo porque no se
-# construye nada, y sin dominio porque no publica nada. Es el orden
-# natural de armar una organización —primero la base y el bucket,
-# después la app— y estaba prohibido.
-CONTRATO_INFRA = """\
+# And the one that HAS to pass: pure infrastructure. Without a repo
+# because nothing is built, and without a domain because it publishes
+# nothing. It is the natural order for assembling an organization —first
+# the database and the bucket, then the app— and it was forbidden.
+INFRA_CONTRACT = """\
 version: 1
 organizacion: prueba
 cuota: pequena
@@ -154,69 +161,69 @@ servicios:
 """
 
 
-def valida(servicios):
-    """Devuelve None si valida, o el texto del error."""
-    return valida_contrato(BASE + servicios)
+def validate(services):
+    """Returns None if it validates, or the text of the error."""
+    return validate_contract(BASE + services)
 
 
-def valida_contrato(texto):
-    planes = yaml.safe_load(open(os.path.join(RAIZ, "plans.yaml"), encoding="utf-8"))
+def validate_contract(text):
+    plans = yaml.safe_load(open(os.path.join(PLATFORM_DIR, "plans.yaml"), encoding="utf-8"))
     try:
-        gen.validar(yaml.safe_load(texto), planes)
+        gen.validate(yaml.safe_load(text), plans)
         return None
-    except gen.Invalido as e:
+    except gen.Invalid as e:
         return str(e)
 
 
 def main():
-    print(f"\n{'=' * 66}\nPRUEBA DE ACEPTACIÓN #2 — el `tipo` restringe\n{'=' * 66}")
-    fallos = 0
+    print(f"\n{'=' * 66}\nACCEPTANCE TEST #2 — `tipo` restricts\n{'=' * 66}")
+    failures = 0
 
-    for que, servicios, esperado in MALOS:
-        err = valida(servicios)
+    for what, services, expected in BAD:
+        err = validate(services)
         if err is None:
-            print(f"  {rojo}✗{fin} {que}\n      {rojo}ACEPTADO — la regla no existe o no se aplica{fin}")
-            fallos += 1
-        elif esperado not in err:
-            print(f"  {rojo}✗{fin} {que}\n      {rojo}rechazado por OTRA razón{fin}: {err.splitlines()[0]}")
-            fallos += 1
+            print(f"  {red}✗{reset} {what}\n      {red}ACCEPTED — the rule does not exist or is not applied{reset}")
+            failures += 1
+        elif expected not in err:
+            print(f"  {red}✗{reset} {what}\n      {red}rejected for ANOTHER reason{reset}: {err.splitlines()[0]}")
+            failures += 1
         else:
-            print(f"  {verde}✓{fin} {que}")
+            print(f"  {green}✓{reset} {what}")
 
-    print(f"\n  {gris}y el contrato completo con los cuatro tipos:{fin}")
-    err = valida(BUENO)
+    print(f"\n  {gray}and the complete contract with the four types:{reset}")
+    err = validate(GOOD)
     if err is not None:
-        print(f"  {rojo}✗{fin} un contrato válido fue rechazado:\n      {err.splitlines()[0]}")
-        fallos += 1
+        print(f"  {red}✗{reset} a valid contract was rejected:\n      {err.splitlines()[0]}")
+        failures += 1
     else:
-        print(f"  {verde}✓{fin} estatico + http + worker + postgres valida")
+        print(f"  {green}✓{reset} estatico + http + worker + postgres validates")
 
-    print(f"\n  {gris}y el contrato declara lo que sus servicios necesitan:{fin}")
-    for que, texto, esperado in CONTRATOS_MALOS:
-        err = valida_contrato(texto)
+    print(f"\n  {gray}and the contract declares what its services need:{reset}")
+    for what, text, expected in BAD_CONTRACTS:
+        err = validate_contract(text)
         if err is None:
-            print(f"  {rojo}✗{fin} {que}\n      {rojo}ACEPTADO — la regla no existe o no se aplica{fin}")
-            fallos += 1
-        elif esperado not in err:
-            print(f"  {rojo}✗{fin} {que}\n      {rojo}rechazado por OTRA razón{fin}: {err.splitlines()[0]}")
-            fallos += 1
+            print(f"  {red}✗{reset} {what}\n      {red}ACCEPTED — the rule does not exist or is not applied{reset}")
+            failures += 1
+        elif expected not in err:
+            print(f"  {red}✗{reset} {what}\n      {red}rejected for ANOTHER reason{reset}: {err.splitlines()[0]}")
+            failures += 1
         else:
-            print(f"  {verde}✓{fin} {que}")
+            print(f"  {green}✓{reset} {what}")
 
-    err = valida_contrato(CONTRATO_INFRA)
+    err = validate_contract(INFRA_CONTRACT)
     if err is not None:
-        print(f"  {rojo}✗{fin} pura infraestructura (postgres + bucket, sin repo ni dominio)"
-              f"\n      {rojo}rechazado{fin}: {err.splitlines()[0]}")
-        fallos += 1
+        print(f"  {red}✗{reset} pure infrastructure (postgres + bucket, without repo or domain)"
+              f"\n      {red}rejected{reset}: {err.splitlines()[0]}")
+        failures += 1
     else:
-        print(f"  {verde}✓{fin} pura infraestructura valida: sin repo y sin dominio")
+        print(f"  {green}✓{reset} pure infrastructure validates: without repo and without domain")
 
     print()
-    if fallos:
-        print(f"{rojo}{fallos} regla(s) sin efecto.{fin}\n")
+    if failures:
+        print(f"{red}{failures} rule(s) with no effect.{reset}\n")
         return 1
-    print(f"{verde}Las {len(MALOS) + len(CONTRATOS_MALOS)} reglas rechazan, "
-          f"y los dos contratos válidos pasan.{fin}\n")
+    print(f"{green}The {len(BAD) + len(BAD_CONTRACTS)} rules reject, "
+          f"and the two valid contracts pass.{reset}\n")
     return 0
 
 

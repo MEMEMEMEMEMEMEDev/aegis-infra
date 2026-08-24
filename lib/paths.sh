@@ -5,7 +5,7 @@
 # ever had to choose: the artifact's repo was also the directory where
 # platform/, .init-state/ and the store lived. When the instance moved on
 # by itself, that double role became half of the debt
-# (docs/cli/inconsistencias.md F1-F4).
+# (docs/cli/inconsistencies.md F1-F4).
 #
 #   AEGIS_ROOT  the PRODUCT — this repo, versioned, read-only for the
 #               duration of a run: bin/ libexec/ lib/ init/ verify/

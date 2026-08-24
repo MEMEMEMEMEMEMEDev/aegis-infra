@@ -1,35 +1,35 @@
-# Observabilidad v2 — puntos de enganche (la cañería puesta)
+# Observability v2 — the hook points (the plumbing laid)
 
-Dónde se enchufa la herramienta, por fase/componente. Cada hook
-existe HOY como superficie estable. Desde el 2026-08-19 el stack
-está decidido (design.md §4) y cada enchufe tiene consumidor
-CONCRETO: vmagent (scrape de métricas), Vector (logs/eventos),
-blackbox-exporter (sondas), VictoriaLogs (`vlogs` logs cortos /
-`vlogs-events` retención larga). La fase que los aplica: 85
-(fase-85.md §7). Instalar el stack NO requirió tocar las fases
-previas — que era la promesa de este archivo.
+Where the tool plugs in, by phase/component. Every hook exists
+TODAY as a stable surface. Since 2026-08-19 the stack is decided
+(design.md §4) and every hook has a CONCRETE consumer: vmagent
+(metrics scrape), Vector (logs/events), blackbox-exporter (probes),
+VictoriaLogs (`vlogs` for short-lived logs / `vlogs-events` for long
+retention). The phase that applies them: 85 (fase-85.md §7).
+Installing the stack did NOT require touching the previous phases —
+which was this file's promise.
 
-| Componente | Hook existente | Qué expone | Consumidor concreto |
+| Component | Existing hook | What it exposes | Concrete consumer |
 |------------|----------------|------------|---------------------|
-| aegis-init | gates.jsonl (JSON-line por gate: ts, fase, gate, resultado, duración — `_gate_record`, common.sh:87-98) + .init-state/*.done (mtime) | duración/resultado por gate y por fase | fase 85 ingesta el gates.jsonl histórico a vlogs-events (curl al endpoint jsonline); B3 agrega el push best-effort por gate (≤3 líneas en `_gate_record`, `\|\| true` — el registro JAMÁS voltea un gate, y antes de la fase 85 el endpoint no existe) |
-| ArgoCD | /metrics nativo (application-controller :8082, server :8083, repo-server :8084) | sync status, drift, latencias | scrape de vmagent; pide entry en la netpol de argocd (default-deny — fase-85 §7) |
-| cert-manager | /metrics nativo (:9402) | certmanager_certificate_expiration_timestamp_seconds | scrape de vmagent — como CONTEXTO. La alerta B11 NO sale de acá: esta métrica mide el Secret (la declaración); lo servido lo mide blackbox (fila registry, y design.md §4.2b) |
-| Traefik | /metrics nativo (entrypoint metrics del chart — VERIFICAR puerto/valores en 40.3.0) | RPS, códigos, latencia por router | scrape de vmagent |
-| cloudflared | flag --metrics soportado por la imagen | reconexiones, conexiones activas del tunnel | vmagent; el flag + containerPort se agregan al Deployment (2 líneas — fase 85). Alerta e) con umbral por perfil |
-| Kyverno | /metrics nativo (:8000) | admisiones permitidas/rechazadas por policy (con resource_namespace — VERIFICAR nombre exacto de la métrica en la versión pinneada), latencia webhook | scrape de vmagent; regla de vmalert: rechazos en org-* > 0 |
-| Jenkins | plugin de métricas instalable por installPlugins | duración builds, cola, ejecutores | 1 línea en installPlugins (fase 85) + scrape de vmagent; entry en la netpol de jenkins-system. Se elige el plugin `prometheus` (expone /prometheus scrapeable sin API key; el plugin `metrics` a secas exige clave por query param — hostil a scrape). VERIFICAR shortname |
-| pipeline (Jenkinsfile) | stage 'report' — log estructurado al final del build: `AEGIS_EVENT {json}` (digest, scan, firma, build, branch, ts) | el evento supply-chain completo | **CORREGIDO 2026-08-22**: se creía que Vector lo levantaría del stdout del pod, con CERO líneas nuevas. FALSO en un agente Kubernetes de Jenkins: la salida de un paso `sh` no va al stdout del contenedor — durable-task la escribe a un archivo y la manda por el canal de remoting a la consola del build, donde Vector no mira. El stream jenkins-build tuvo CERO filas desde siempre. Hoy el stage postea directo a vlogs-events, como gates.jsonl en la fase 85. Costo real: 6 líneas, no cero |
-| Trivy server | /healthz + edad de la DB en el PVC (metadata.json) | vigía del vigía | blackbox sondea /healthz (entry en netpol de trivy-system); la EDAD no tiene métrica nativa — CronJob trivy-db-age (nuevo, lado observabilidad: monta el PVC, pushea la edad a vmsingle — fase-85 §2). El trivy en sí: 0 líneas tocadas |
-| registry | /metrics de distribution (debug.prometheus en config) | pulls/pushes, errores auth | 3 líneas en el ConfigMap + 1 puerto en el Service (fase 85) → scrape de vmagent. Y blackbox sondea https://…:5000/v2/ validando contra el CA — de ahí sale probe_ssl_earliest_cert_expiry, LA alerta B11 (design.md §4.2b) |
+| aegis init | gates.jsonl (one JSON line per gate: ts, phase, gate, result, duration — `_gate_record`, common.sh:87-98) + .init-state/*.done (mtime) | duration/result per gate and per phase | phase 85 ingests the historical gates.jsonl into vlogs-events (a curl to the jsonline endpoint); B3 adds the best-effort push per gate (≤3 lines in `_gate_record`, `\|\| true` — the recording NEVER flips a gate, and before phase 85 the endpoint does not exist) |
+| ArgoCD | native /metrics (application-controller :8082, server :8083, repo-server :8084) | sync status, drift, latencies | vmagent scrape; it needs an entry in argocd's netpol (default-deny — fase-85 §7) |
+| cert-manager | native /metrics (:9402) | certmanager_certificate_expiration_timestamp_seconds | vmagent scrape — as CONTEXT. The B11 alert does NOT come from here: this metric measures the Secret (the declaration); what is served is measured by blackbox (the registry row, and design.md §4.2b) |
+| Traefik | native /metrics (the chart's metrics entrypoint — VERIFY the port/values in 40.3.0) | RPS, codes, latency per router | vmagent scrape |
+| cloudflared | the --metrics flag supported by the image | reconnections, active tunnel connections | vmagent; the flag + containerPort are added to the Deployment (2 lines — phase 85). Alert e) with a per-profile threshold |
+| Kyverno | native /metrics (:8000) | admissions allowed/rejected per policy (with resource_namespace — VERIFY the exact metric name in the pinned version), webhook latency | vmagent scrape; a vmalert rule: rejections in org-* > 0 |
+| Jenkins | a metrics plugin installable via installPlugins | build duration, queue, executors | 1 line in installPlugins (phase 85) + vmagent scrape; an entry in jenkins-system's netpol. The `prometheus` plugin is the one chosen (it exposes a scrapeable /prometheus with no API key; the plain `metrics` plugin demands a key as a query param — hostile to scraping). VERIFY the shortname |
+| pipeline (Jenkinsfile) | the 'report' stage — a structured log at the end of the build: `AEGIS_EVENT {json}` (digest, scan, signature, build, branch, ts) | the complete supply-chain event | **CORRECTED 2026-08-22**: it was believed that Vector would pick it up from the pod's stdout, with ZERO new lines. FALSE on a Jenkins Kubernetes agent: the output of an `sh` step does not go to the container's stdout — durable-task writes it to a file and sends it over the remoting channel to the build's console, where Vector does not look. The jenkins-build stream had ZERO rows from the very beginning. Today the stage posts directly to vlogs-events, like gates.jsonl in phase 85. Real cost: 6 lines, not zero |
+| Trivy server | /healthz + the age of the DB in the PVC (metadata.json) | the watchman's watchman | blackbox probes /healthz (an entry in trivy-system's netpol); the AGE has no native metric — the trivy-db-age CronJob (new, on the observability side: it mounts the PVC and pushes the age to vmsingle — fase-85 §2). Trivy itself: 0 lines touched |
+| registry | distribution's /metrics (debug.prometheus in the config) | pulls/pushes, auth errors | 3 lines in the ConfigMap + 1 port in the Service (phase 85) → vmagent scrape. And blackbox probes https://…:5000/v2/ validating against the CA — that is where probe_ssl_earliest_cert_expiry comes from, THE B11 alert (design.md §4.2b) |
 
-Regla de la cañería, VERIFICADA contra el stack elegido: cada
-enchufe es ≤3 líneas por archivo versionado ya existente —
-cloudflared 2 (arg + puerto), Jenkins 1 (plugin), registry 3+1 en
-dos archivos (ConfigMap + Service, cada uno dentro del tope),
-netpols 1 entry por namespace cerrado, `_gate_record` 3. El
-Jenkinsfile y el trivy-server: CERO. La regla aguanta; lo que es
-MÁS que 3 líneas (blackbox, CronJob trivy-db-age, el stack mismo)
-no es enchufe sino cañería nueva, y vive TODA del lado de
-observability/ — ningún componente observado se rediseñó. Si un
-enchufe futuro pide más que esto, el diseño falló: volver a
-design.md antes de instalar nada.
+The plumbing rule, VERIFIED against the chosen stack: every hook is
+≤3 lines in an already existing versioned file — cloudflared 2 (arg
++ port), Jenkins 1 (plugin), registry 3+1 across two files
+(ConfigMap + Service, each within the cap), netpols 1 entry per
+closed namespace, `_gate_record` 3. The Jenkinsfile and the
+trivy-server: ZERO. The rule holds; what is MORE than 3 lines
+(blackbox, the trivy-db-age CronJob, the stack itself) is not a hook
+but new plumbing, and it all lives on the observability/ side — no
+observed component was redesigned. If a future hook asks for more
+than this, the design has failed: go back to design.md before
+installing anything.

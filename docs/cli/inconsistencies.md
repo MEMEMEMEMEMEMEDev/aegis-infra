@@ -1,465 +1,508 @@
-# REGISTRO DE INCONSISTENCIAS — el renombrado de la superficie CLI
+# REGISTER OF INCONSISTENCIES — the rename of the CLI surface
 
-**Levantado el 2026-08-21**, por cuatro auditorías paralelas, ANTES de tocar
-una sola línea. Es un inventario, no un plan: el plan vive en `cli/design.md`
-cuando exista.
+**Raised on 2026-08-21**, by four parallel audits, BEFORE touching a
+single line. It is an inventory, not a plan: the plan lives in
+`cli/design.md` once it exists.
 
-## La regla
+Every `file:line` coordinate below points into the **v2 tree**, which is
+the tree that was audited. Where a name's language is the point being
+made — the ten collisions, class F — the name is written as it stood
+then, in Spanish. That is the evidence; rewriting it would destroy the
+finding.
 
-**Nada se renombra si no está en esta lista.** Y al revés, que es lo que
-importa: **si algo no está en la lista, no es que esté bien — es que nadie lo
-miró.** El registro se tacha entero o el renombrado no está hecho.
+## The rule
 
-## El alcance acordado
+**Nothing gets renamed if it is not on this list.** And the other way
+round, which is the part that matters: **if something is not on the
+list, it is not that it is fine — it is that nobody looked at it.** The
+register gets crossed off in full or the rename is not done.
 
-Se renombra: nombres de comando, subcomandos, flags, y todo texto que imprime
-un `--help`.
+## The agreed scope
 
-NO se toca: el vocabulario de los contratos (`organizacion:`, `usa:`,
-`cuota:`), los comentarios del código, los mensajes que un comando narra
-mientras corre, ni los nombres derivados en el cluster
-(`shop-cabeceras`, `allow-api-a-internet`).
+What gets renamed: command names, subcommands, flags, and every piece of
+text a `--help` prints.
 
-Ese recorte tiene una consecuencia que aparece en A3 y hay que leer con
-atención: **el día que alguien traduzca los mensajes, hay una bomba armada.**
+What is NOT touched: the contracts' vocabulary (`organizacion:`, `usa:`,
+`cuota:`), the code's comments, the messages a command narrates while it
+runs, nor the derived names in the cluster (`shop-cabeceras`,
+`allow-api-a-internet`).
 
-## Los números
+That trimming has a consequence that shows up in A3 and has to be read
+carefully: **the day somebody translates the messages, there is an armed
+bomb.**
 
-| dimensión | cantidad |
+## The numbers
+
+| dimension | count |
 |---|---|
-| Dependencias DURAS (un comando ejecuta a otro) | 77 |
-| Strings visibles al operador que nombran comandos | ~155 (48 de criticidad alta) |
-| Menciones crudas totales del nombre | 452 |
-| Casos de Enfermedad E confirmados | 7 (5 plenos) |
-| Comandos de `platform/bin/` que algún check verifica | **1 de 12** |
-| Comandos que la semilla lleva | **3 de 12** |
+| HARD dependencies (one command executes another) | 77 |
+| Strings visible to the operator that name commands | ~155 (48 of high criticality) |
+| Total raw mentions of the name | 452 |
+| Confirmed cases of Disease E | 7 (5 full) |
+| Commands in `platform/bin/` that any check verifies | **1 of 12** |
+| Commands the seed carries | **3 of 12** |
 
 ---
 
-# CLASE A — ROMPE EN SILENCIO (Enfermedad E)
+# CLASS A — BREAKS IN SILENCE (Disease E)
 
-Lo más grave del registro. En todos estos casos el renombrado **no produce un
-error**: produce un verde o un amarillo que se lee como estado normal.
+The gravest part of the register. In every one of these cases the rename
+**does not produce an error**: it produces a green or an amber that reads
+as a normal state.
 
-El patrón que los genera es siempre el mismo: **el código de "el archivo no
-está" (127, rc 2, `False`) colisiona con un código que ya estaba reservado
-para una degradación legítima y esperada.**
+The pattern that generates them is always the same: **the code for "the
+file is not there" (127, rc 2, `False`) collides with a code that was
+already reserved for a legitimate, expected degradation.**
 
-### A1 · `aegis-chequeo` deja de medir el borde y los webhooks, y dice "sin fallos"
+### A1 · `aegis-chequeo` stops measuring the edge and the webhooks, and says "no failures"
 
-- **Dónde**: `platform/bin/aegis-chequeo:635` y `:654`
-- **Qué pasa**: invoca `aegis-borde` y `aegis-webhook` por ruta relativa, sin
-  guarda de existencia. Corre con `set -uo pipefail` **sin errexit**, así que
-  un binario ausente devuelve 127, y el `case $?` no tiene rama para 127: cae
-  en `*)` → `avisos++`. `fallos` nunca sube → el veredicto final imprime
-  **`sin fallos, N aviso(s)` y sale 0.**
-- **Qué se pierde**: la sección que compara los hostnames declarados contra
-  los que existen de verdad en Cloudflare, y la que verifica que un push
-  llegue a Jenkins. El 2026-08-05 esa segunda encontró que **dos de cuatro
-  repos no tenían webhook**.
-- **Por qué duele**: la rama `*)` se escribió para el rc=2 honesto de
-  `aegis-borde` ("no pude hablar con Cloudflare"). El renombrado inyecta un
-  127 **disfrazado de rc=2**, indistinguible de la degradación esperada.
-- **Arreglo**: guarda `[[ -x ... ]]` antes de invocar, o rama explícita
-  `127) mal "..." ;;`.
-- [ ] pendiente
+- **Where**: `platform/bin/aegis-chequeo:635` and `:654`
+- **What happens**: it invokes `aegis-borde` and `aegis-webhook` by
+  relative path, with no existence guard. It runs with `set -uo pipefail`
+  **without errexit**, so a missing binary returns 127, and the
+  `case $?` has no branch for 127: it falls into `*)` → `avisos++`.
+  `fallos` never goes up → the final verdict prints **`sin fallos, N
+  aviso(s)` and exits 0.**
+- **What is lost**: the section that compares the declared hostnames
+  against the ones that really exist in Cloudflare, and the one that
+  verifies that a push reaches Jenkins. On 2026-08-05 that second one
+  found that **two out of four repos had no webhook**.
+- **Why it hurts**: the `*)` branch was written for the honest rc=2 of
+  `aegis-borde` ("I could not talk to Cloudflare"). The rename injects a
+  127 **disguised as rc=2**, indistinguishable from the expected
+  degradation.
+- **Fix**: an `[[ -x ... ]]` guard before invoking, or an explicit
+  `127) mal "..." ;;` branch.
+- [ ] pending
 
-### A2 · El check 4 de `verify-static` pasa exactamente igual sin medir nada
+### A2 · Check 4 of `verify-static` passes exactly the same without measuring anything
 
-- **Dónde**: `init/verify-static.sh:165`
+- **Where**: `init/verify-static.sh:165`
   (`hay_generador = (P/"bin"/"aegis-org").is_file()`)
-- **Qué pasa**: si el archivo no está, `hay_generador=False` → `StopIteration`
-  → `por_contrato = {}` → el check imprime **PASS idéntico**, con una línea
-  informativa extra que se lee como "la semilla nace sin organizaciones".
-- **Qué se pierde**: el productor 2 completo (la razón por la que el check se
-  reescribió en #48), y el **único consumidor estático** de la API interna del
-  generador — `gen.secretos_de`, `gen.repos_de`, `gen.orgs_con_bucket`.
-- **La asimetría que lo hace venenoso**: si `aegis-org` existe pero revienta al
-  importarse → `FAIL` correcto. Si **no existe** → silencio. El camino "no
-  está" está tratado como legítimo, y el renombrado lo vuelve indistinguible de
-  "lo movimos y nadie lo actualizó".
-- **Arreglo**: derivar la ausencia del generador de la ausencia de
-  `orgs/*.yaml`, no de la ausencia del archivo. Si hay contratos, el generador
-  DEBE existir.
-- [ ] pendiente
+- **What happens**: if the file is not there, `hay_generador=False` →
+  `StopIteration` → `por_contrato = {}` → the check prints an **identical
+  PASS**, with one extra informational line that reads as "the seed is
+  born with no organizations".
+- **What is lost**: producer 2 in full (the reason the check was
+  rewritten in #48), and the **only static consumer** of the generator's
+  internal API — `gen.secrets_of`, `gen.repos_of`, `gen.orgs_with_bucket`.
+- **The asymmetry that makes it poisonous**: if `aegis-org` exists but
+  blows up on import → a correct `FAIL`. If it **does not exist** →
+  silence. The "not there" path is treated as legitimate, and the rename
+  makes it indistinguishable from "we moved it and nobody updated this".
+- **Fix**: derive the generator's absence from the absence of
+  `orgs/*.yaml`, not from the absence of the file. If there are
+  contracts, the generator MUST exist.
+- [ ] pending
 
-### A3 · Un webhook recién creado se reporta como "ya estaba" — **la bomba de la capa de mensajes**
+### A3 · A freshly created webhook is reported as "already there" — **the message-layer bomb**
 
-- **Dónde**: `platform/bin/aegis-app:713`
+- **Where**: `platform/bin/aegis-app:713`
   (`creo = escribir and "webhook creado" in r.stdout`)
-- **Productor del string**: `platform/bin/aegis-webhook:182`
-- **Qué pasa**: `aegis-app aplicar` decide si convergió o no **grepeando un
-  literal en español** del stdout de otro comando. Si ese mensaje cambia,
-  `creo=False` y la tabla marca `ya estaba` en vez de `hecho`. Sin excepción,
-  sin rc distinto, sin rastro.
-- **Por qué es EL caso especial de este registro**: es el único disparado por
-  traducir un **mensaje**, no un nombre. Como acordamos dejar los mensajes en
-  español, **hoy no se activa** — pero queda armado para el día que alguien
-  toque esa capa. Es el argumento para arreglarlo ahora que estamos acá.
-- **Lo dice el propio comentario** (`:710-713`), sin saber que se autodescribe:
-  *"Se lee del reporte del delegado — sus estados son estables"*. El renombrado
-  es exactamente el evento que rompe esa suposición.
-- **Arreglo**: que `aegis-webhook` comunique el estado por rc o por una línea
-  máquina-legible (`STATE=created`), nunca por prosa traducible.
-- [ ] pendiente
+- **Producer of the string**: `platform/bin/aegis-webhook:182`
+- **What happens**: `aegis-app aplicar` decides whether it converged or
+  not **by grepping a Spanish literal** out of another command's stdout.
+  If that message changes, `creo=False` and the table marks `ya estaba`
+  instead of `hecho`. No exception, no different rc, no trace.
+- **Why it is THE special case of this register**: it is the only one
+  triggered by translating a **message**, not a name. Since we agreed to
+  leave the messages in Spanish, **today it does not fire** — but it is
+  left armed for the day somebody touches that layer. It is the argument
+  for fixing it now, while we are here.
+- **Its own comment says so** (`:710-713`), without knowing it is
+  describing itself: *"Se lee del reporte del delegado — sus estados son
+  estables"*. The rename is exactly the event that breaks that
+  assumption.
+- **Fix**: have `aegis-webhook` communicate the state by rc or by a
+  machine-readable line (`STATE=created`), never by translatable prose.
+- [ ] pending
 
-### A4 · La rotación devuelve ÉXITO si el sincronizador no está
+### A4 · The rotation returns SUCCESS if the synchroniser is not there
 
-- **Dónde**: `init/aegis-rotate.sh:757`
-- **Qué pasa**: `[[ -x "$PBIN/aegis-sync" ]] || { log_warn ...; return 0; }` —
-  **`return 0` es éxito**. Rotar una credencial sin empujar el Secret nuevo
-  deja el cluster con el material viejo.
-- **El único rastro** es un `log_warn` que dice "sincronizá a mano", que se lee
-  como instrucción de rutina y no como "el paso mecanizado desapareció".
-- [ ] pendiente
+- **Where**: `init/aegis-rotate.sh:757`
+- **What happens**: `[[ -x "$PBIN/aegis-sync" ]] || { log_warn ...;
+  return 0; }` — **`return 0` is success**. Rotating a credential without
+  pushing the new Secret leaves the cluster with the old material.
+- **The only trace** is a `log_warn` saying "sincronizá a mano", which
+  reads as a routine instruction and not as "the mechanised step has
+  disappeared".
+- [ ] pending
 
-### A5 · Dos verificadores se desactivan y la rotación se declara completa
+### A5 · Two verifiers switch themselves off and the rotation is declared complete
 
-- **Dónde**: `init/aegis-rotate.sh:243` y `:641`
-  (`[[ -x "$PBIN/aegis-webhook" ]] || return 3`, ídem `aegis-registro`)
-- **Qué pasa**: rc=3 significa "NO VERIFICABLE" y está bien documentado, pero
-  el consumidor (`:1062-1065`) hace `return 0` al que llama.
-- **Lo peor es el mensaje**: dice *"NO HAY DIENTE que lo verifique. Escribí el
-  verificador"* — **atribuye activamente la causa equivocada**. Manda a
-  escribir un verificador que ya existe, y el operador lo archiva como deuda
-  conocida mientras la rotación del HMAC de Jenkins y la del registry se
-  declaran hechas sin haberse verificado nunca.
-- **Atenuante**: no se escribe el marcador `.done`, queda rastro en disco.
-- [ ] pendiente
+- **Where**: `init/aegis-rotate.sh:243` and `:641`
+  (`[[ -x "$PBIN/aegis-webhook" ]] || return 3`, same for
+  `aegis-registro`)
+- **What happens**: rc=3 means "NOT VERIFIABLE" and is well documented,
+  but the consumer (`:1062-1065`) does `return 0` to its caller.
+- **The worst part is the message**: it says *"NO HAY DIENTE que lo
+  verifique. Escribí el verificador"* — **it actively attributes the
+  wrong cause**. It sends you off to write a verifier that already
+  exists, and the operator files it away as known debt while the
+  rotation of the Jenkins HMAC and of the registry are declared done
+  without ever having been verified.
+- **Mitigating factor**: the `.done` marker is not written, so a trace is
+  left on disk.
+- [ ] pending
 
-### A6 · El job de CI del borde queda AMARILLO permanente con diagnóstico falso
+### A6 · The edge's CI job goes permanently AMBER with a false diagnosis
 
-- **Dónde**: `platform/edge-chequeo/Jenkinsfile:117` (`python3 bin/aegis-borde`)
-- **Qué pasa**: con el archivo ausente, `python3` sale con **rc 2** — que es
-  justo el código reservado para "no se pudo evaluar". El job queda `UNSTABLE`
-  con el mensaje *"falta credencial o Cloudflare no respondió"*.
-- **Parcial** porque no es verde. Pero un amarillo recurrente con causa externa
-  plausible es exactamente cómo un check deja de leerse.
-- **La ironía**: el comentario inmediatamente arriba (`:119-122`) nombra la
-  Enfermedad E como su razón de existir.
-- [ ] pendiente
+- **Where**: `platform/edge-chequeo/Jenkinsfile:117`
+  (`python3 bin/aegis-borde`)
+- **What happens**: with the file missing, `python3` exits with **rc 2** —
+  which is precisely the code reserved for "could not be evaluated". The
+  job goes `UNSTABLE` with the message *"falta credencial o Cloudflare no
+  respondió"*.
+- **Partial** because it is not green. But a recurring amber with a
+  plausible external cause is exactly how a check stops being read.
+- **The irony**: the comment immediately above (`:119-122`) names Disease
+  E as its reason for existing.
+- [ ] pending
 
-### A7 · El check 86 degrada en silencio si se toca `aegis-init.conf`
+### A7 · Check 86 degrades in silence if `aegis-init.conf` is touched
 
-- **Dónde**: `init/verify-static.sh:2893-2906`
-- **Qué pasa**: si el conf no está, el refuerzo que detecta valores de la
-  instancia filtrados a la semilla **desaparece y el check pasa igual**, con
-  un sufijo en el mensaje de PASS.
-- **Condicional**: `aegis-init.conf` no está en el alcance del renombrado, pero
-  está en el mismo radio de explosión que `aegis-init.sh`.
-- [ ] pendiente
+- **Where**: `init/verify-static.sh:2893-2906`
+- **What happens**: if the conf is not there, the reinforcement that
+  detects instance values leaked into the seed **disappears and the check
+  passes anyway**, with a suffix on the PASS message.
+- **Conditional**: `aegis-init.conf` is not in the rename's scope, but it
+  is in the same blast radius as `aegis-init.sh`.
+- [ ] pending
 
 ---
 
-# CLASE B — CONTRATOS DE TEXTO (centinelas que se parsean)
+# CLASS B — TEXT CONTRACTS (sentinels that get parsed)
 
-Literales que no son mensajes: son **estructura**. Si el texto y su lector se
-desincronizan, el mecanismo deja de funcionar sin avisar.
+Literals that are not messages: they are **structure**. If the text and
+its reader fall out of sync, the mechanism stops working without warning.
 
-### B1 · El centinela que evita pisar ediciones manuales
+### B1 · The sentinel that avoids trampling manual edits
 
-- **Dónde**: `platform/bin/aegis-org:1162`
+- **Where**: `platform/bin/aegis-org:1162`
   (`if "GENERADO POR \`aegis org\`" in viejo and ...`)
-- **Escrito en**: las cabeceras de `:355, 1721, 1838, 2008, 2135, 2160, 2250`
-- **Qué protege**: decide si un archivo generado fue editado a mano y no debe
-  pisarse. **Si la cabecera y el centinela se renombran en commits distintos,
-  el guardia deja de disparar y empezamos a pisar ediciones manuales.**
-- [ ] pendiente
+- **Written in**: the headers at `:355, 1721, 1838, 2008, 2135, 2160,
+  2250`
+- **What it protects**: it decides whether a generated file was edited by
+  hand and must not be trampled. **If the header and the sentinel get
+  renamed in different commits, the guard stops firing and we start
+  trampling manual edits.**
+- [ ] pending
 
-### B2 · La marca que delimita el bloque de jobs de Jenkins
+### B2 · The marker that delimits the Jenkins jobs block
 
-- **Dónde**: `platform/bin/aegis-org:2393`
-  (`JOBS_BLOCK_START = "# --- DERIVADO por aegis-org (jobs de tenant)..."`)
-- **Leída en**: `platform/k8s/base/platform/jenkins/values.yaml:102,107`
-- **Qué protege**: es un contrato de texto entre el generador y un YAML
-  versionado. Sin la marca, el bloque derivado se reescribe en el lugar
-  equivocado o no se reescribe.
-- [ ] pendiente
+- **Where**: `platform/bin/aegis-org:2393`
+  (`JOBS_BLOCK_START = "# --- DERIVADO por aegis-org (jobs de
+  tenant)..."`)
+- **Read in**: `platform/k8s/base/platform/jenkins/values.yaml:102,107`
+- **What it protects**: it is a text contract between the generator and a
+  versioned YAML. Without the marker, the derived block gets rewritten in
+  the wrong place, or does not get rewritten at all.
+- [ ] pending
 
-### B3 · El literal "Resume:" que un check valida por texto exacto
+### B3 · The literal "Resume:" that a check validates by exact text
 
-- **Dónde**: `init/aegis-init.sh:212`, validado por `init/verify-static.sh:2171`
-- **Doble acople**: un nombre de archivo *dentro* de un mensaje impreso, que
-  además otro archivo grepea literal.
-- [ ] pendiente
+- **Where**: `init/aegis-init.sh:212`, validated by
+  `init/verify-static.sh:2171`
+- **Double coupling**: a filename *inside* a printed message, which on
+  top of that another file greps literally.
+- [ ] pending
 
 ---
 
-# CLASE C — DEPENDENCIAS DURAS (77) — fallan, pero ruidosamente
+# CLASS C — HARD DEPENDENCIES (77) — they fail, but loudly
 
-Un comando ejecuta o importa a otro. Rompen de verdad; al menos gritan.
+One command executes or imports another. These really do break; at least
+they shout.
 
-### C1 · Los seis `SourceFileLoader` — **hay que grepear DOS formas**
+### C1 · The six `SourceFileLoader`s — **you have to grep TWO forms**
 
-El módulo se carga como `aegis_org` (guion **bajo**) desde el archivo
-`aegis-org` (guion **medio**). Un grep por una forma no encuentra la otra.
+The module is loaded as `aegis_org` (**under**score) from the file
+`aegis-org` (hyphen). A grep for one form does not find the other.
 
 - `platform/bin/aegis-app:132-134`
 - `platform/bin/aegis-borde:63-65`
 - `platform/bin/aegis-secreto:516-518`
 - `platform/bin/aegis-org-prueba:26-27`
 - `platform/bin/aegis-tipos-prueba:29-30`
-- `seed/platform/bin/aegis-secreto:518`
-- `seed/platform/bin/aegis-tipos-prueba:30`
-- [ ] pendiente
+- `semilla/plataforma/bin/aegis-secreto:518`
+- `semilla/plataforma/bin/aegis-tipos-prueba:30`
+- [ ] pending
 
-### C2 · Invocaciones armadas por tupla o variable (invisibles a un grep simple)
+### C2 · Invocations assembled from a tuple or a variable (invisible to a simple grep)
 
-- `platform/bin/aegis-app:513-516` — `["aegis-org", "aplicar", ruta]` y
-  `["aegis-secreto", "--todos", ruta]` como **elementos de lista**: el string
-  `"bin/aegis-org aplicar"` no existe en ningún lado.
-- `platform/bin/aegis-app:100,704` — `WEBHOOK = os.path.join(AQUI, "aegis-webhook")`
-- `init/aegis-rotate.sh:56` — `PBIN="$PLATFORM_DIR/bin"` y luego
+- `platform/bin/aegis-app:513-516` — `["aegis-org", "aplicar", ruta]` and
+  `["aegis-secreto", "--todos", ruta]` as **list elements**: the string
+  `"bin/aegis-org aplicar"` does not exist anywhere.
+- `platform/bin/aegis-app:100,704` —
+  `WEBHOOK = os.path.join(AQUI, "aegis-webhook")`
+- `init/aegis-rotate.sh:56` — `PBIN="$PLATFORM_DIR/bin"` and then
   `"$PBIN/aegis-webhook"`, `"$PBIN/aegis-registro"`, `"$PBIN/aegis-sync"`,
-  `"$PBIN/aegis-chequeo"`. Un `grep "platform/bin/aegis"` **no los ve**.
-- `platform/bin/aegis-chequeo:635,654` — `$(dirname "${BASH_SOURCE[0]}")/aegis-borde`
-- [ ] pendiente
+  `"$PBIN/aegis-chequeo"`. A `grep "platform/bin/aegis"` **does not see
+  them**.
+- `platform/bin/aegis-chequeo:635,654` —
+  `$(dirname "${BASH_SOURCE[0]}")/aegis-borde`
+- [ ] pending
 
-### C3 · La única llamada de una fase del init a `platform/bin/`
+### C3 · The only call from an init phase into `platform/bin/`
 
-- **Dónde**: `init/phases/85-observability.sh:298`
+- **Where**: `init/phases/85-observabilidad.sh:298`
   (`bin/aegis-org borde`)
-- **Modo de falla**: muere en la fase 85 de una corrida real, **horas adentro
-  del bootstrap**. Y el check 17 (*"archivos que las fases referencian
-  EXISTEN"*) **no lo cubre**: su regex solo mira `ansible/...` e
+- **Failure mode**: it dies in phase 85 of a real run, **hours into the
+  bootstrap**. And check 17 (*"the files the phases reference EXIST"*)
+  **does not cover it**: its regex only looks at `ansible/...` and
   `$AEGIS_ROOT/init/...`.
-- [ ] pendiente
+- [ ] pending
 
-### C4 · El resto de las duras
+### C4 · The rest of the hard ones
 
 - `init/aegis-rotate.sh:751` → `aegis-init.sh --only <fase>`
 - `init/aegis-rotate.sh:642` → `aegis-registro --revisar`
 - `init/aegis-rotate.sh:1139` → `aegis-chequeo`
 - `platform/edge-chequeo/Jenkinsfile:117` + `jenkins/values.yaml:275`
   (`scriptPath('edge-chequeo/Jenkinsfile')`)
-- `init/verify-static.sh` — ~17 referencias por ruta literal y grep:
+- `init/verify-static.sh` — ~17 references by literal path and grep:
   `:397, 459-460, 969, 999, 1652, 1715-1717, 2028-2030, 2171, 2502-2517,
   2597-2620, 2628-2646, 2655-2668, 3067-3069`
-- Los 19 `source "$AEGIS_HOME/aegis.conf"` (13 fases + 6 más)
-- [ ] pendiente
+- The 19 `source "$AEGIS_HOME/aegis.conf"` (13 phases + 6 more)
+- [ ] pending
 
 ---
 
-# CLASE D — CONTRATOS DE NOMBRE ADYACENTES
+# CLASS D — ADJACENT NAME CONTRACTS
 
-No son la CLI, pero se rompen si el renombrado los arrastra — o si NO los
-arrastra.
+They are not the CLI, but they break if the rename drags them along — or
+if it does NOT drag them along.
 
-| # | contrato | acoplado con | riesgo |
+| # | contract | coupled with | risk |
 |---|---|---|---|
-| D1 | `.aegis-app/` (staging) en `platform/.gitignore:37` | `aegis-app:99` `DIR_STAGING`, y `aegis-org:55` usa el mismo | Renombrar el dir sin tocar el ignore = **commitear material generado** |
-| D2 | glob `aegis-state-*.age` | escrito por `init/aegis-backup.sh:51`, leído por `aegis-chequeo:845` | El chequeo de respaldos no encuentra nada |
-| D3 | glob `aegis-datos-org-<org>-*.age` | escrito por `aegis-respaldo:518`, leído por `aegis-chequeo:883` | ídem |
-| D4 | marca `.aegis-destino` | `aegis-respaldo:164` ↔ `aegis-chequeo:831` | |
-| D5 | `/etc/sudoers.d/010-aegis-init-nopasswd` | `aegis-preflight.sh:31-32`, `lib/common.sh:737,739,755`, `phases/00-preflight.sh:60` | 5 lugares |
-| D6 | topic de GitHub `aegis-app` | `aegis-app:106` | los repos ya creados lo llevan |
-| D7 | `initiatedBy.username: "aegis-sync"` | `aegis-sync:56` | **queda grabado en el historial de ArgoCD**; decidir aparte |
-| D8 | `aegis-preflight.sh` se autocopia a `$HOME` con nombre hardcodeado | `:169` y `:175` | |
-| D9 | La regla `("bin/aegis-org-prueba", ...)` en `bin/aegis-semilla:129` | `:252-256` `morir()` si no matchea | **Mata los tres subcomandos de `aegis-semilla`.** Único fallo ruidoso del renombrado — y es un falso positivo |
+| D1 | `.aegis-app/` (staging) in `platform/.gitignore:37` | `aegis-app` `STAGING_DIR`, and `aegis-org` uses the same | Renaming the dir without touching the ignore = **committing generated material** |
+| D2 | glob `aegis-estado-*.age` | written by `init/aegis-backup.sh:51`, read by `aegis-chequeo:845` | The backup check finds nothing |
+| D3 | glob `aegis-datos-org-<org>-*.age` | written by `aegis-respaldo:518`, read by `aegis-chequeo:883` | same |
+| D4 | marker `.aegis-destino` | `aegis-respaldo:164` ↔ `aegis-chequeo:831` | |
+| D5 | `/etc/sudoers.d/010-aegis-init-nopasswd` | `aegis-preflight.sh:31-32`, `lib/common.sh:737,739,755`, `phases/00-preflight.sh:60` | 5 places |
+| D6 | the GitHub topic `aegis-app` | `aegis-app:106` | the repos already created carry it |
+| D7 | `initiatedBy.username: "aegis-sync"` | `aegis-sync:56` | **it stays engraved in ArgoCD's history**; to be decided separately |
+| D8 | `aegis-preflight.sh` copies itself into `$HOME` under a hardcoded name | `:169` and `:175` | |
+| D9 | The rule `("bin/aegis-org-prueba", ...)` in `bin/aegis-semilla:129` | `:252-256` `morir()` if it does not match | **Kills all three subcommands of `aegis-semilla`.** The rename's only loud failure — and it is a false positive |
 
-- [ ] pendiente
-
----
-
-# CLASE E — STRINGS AL OPERADOR (~155, de los cuales 48 críticos)
-
-No rompen nada. **Solo guían mal**, que en esta casa es peor.
-
-Los 10 donde un usuario nuevo queda sin siguiente movimiento:
-
-1. `init/aegis-init.sh:212` — `"Resume: ... --profile ... --from ..."`. Única
-   salida tras una fase fallida del bootstrap. (Y ver B3.)
-2. `platform/bin/aegis-app:573-578` — el bloque **"siguientes pasos, EN ORDEN"**.
-   Es el handoff completo del alta de una organización.
-3. `platform/bin/aegis-org:1200` — `"se crean con: bin/aegis-secreto --todos"`.
-   El comentario del código dice *"El comando exacto, no 'creá los secretos'"*.
-4. `init/aegis-rotate.sh:1196-1199` — cierre de una rotación. Sin esto la
-   plataforma queda a medio sincronizar.
-5. `init/aegis-rotate.sh:717,722` — lo mismo, pero mid-tanda: el estado más
-   frágil del sistema.
-6. `platform/bin/aegis-app:295` — diagnóstico + remedio en un solo string.
-7. `lib/config.sh:184` — bloquea toda corrida desatendida.
-8. `platform/bin/aegis-sync:31-32,59` — tres en un archivo de 59 líneas.
-   `aegis-sync` es el comando más citado por otros comandos.
-9. `seed/platform/orgs/README.md:11-14` — **el README que se siembra en
-   cada instancia nueva**. Cuatro comandos consecutivos que mueren juntos.
-10. `platform/bin/aegis-app:371` y `:556-557` — las dos paredes de entrada al
-    comando de alta.
-
-- [ ] pendiente (inventario completo en las auditorías; 24 archivos)
+- [ ] pending
 
 ---
 
-# CLASE F — LA SEED
+# CLASS E — STRINGS TO THE OPERATOR (~155, of which 48 critical)
 
-### F1 · Solo lleva 3 de los 12 comandos
+They break nothing. **They only misguide**, which in this house is
+worse.
 
-`seed/platform/bin/` tiene `aegis-org`, `aegis-secreto`,
-`aegis-tipos-prueba`. **Faltan los otros 9.**
+The 10 where a new user is left with no next move:
 
-### F2 · Su `aegis-org` está atrasado y diverge en contenido real
+1. `init/aegis-init.sh:212` — `"Retomar: ... --profile ... --from ..."`.
+   The only exit after a failed bootstrap phase. (And see B3.)
+2. `platform/bin/aegis-app:573-578` — the **"siguientes pasos, EN ORDEN"**
+   block. It is the complete handoff of provisioning an organization.
+3. `platform/bin/aegis-org:1200` — `"se crean con: bin/aegis-secreto
+   --todos"`. The code's comment says *"El comando exacto, no 'creá los
+   secretos'"*.
+4. `init/aegis-rotate.sh:1196-1199` — the closing of a rotation. Without
+   this, the platform is left half-synchronised.
+5. `init/aegis-rotate.sh:717,722` — the same, but mid-batch: the system's
+   most fragile state.
+6. `platform/bin/aegis-app:295` — diagnosis + remedy in a single string.
+7. `lib/config.sh:184` — it blocks every unattended run.
+8. `platform/bin/aegis-sync:31-32,59` — three in a 59-line file.
+   `aegis-sync` is the command most cited by other commands.
+9. `semilla/plataforma/orgs/README.md:11-14` — **the README that gets
+   seeded into every new instance**. Four consecutive commands that die
+   together.
+10. `platform/bin/aegis-app:371` and `:556-557` — the two entry walls of
+    the provisioning command.
 
-124.690 B (vivo, 2026-08-21) contra 105.042 B (semilla, 2026-08-11) —
-**444 líneas de diff**. Le falta `USOS = {..., "internet"}`, todo el bloque de
-derivación de jobs de Jenkins (`JOBS_BLOCK_START`), las cabeceras CSP, y la
-validación de `prompt` por clase. **No es des-renderizado: es atraso.**
-
-### F3 · `init/` no forma parte del árbol comparado
-
-No existe `semilla/init/`. `aegis-semilla` solo compara `platform/` ↔
-`seed/platform/`. **Un renombrado en `init/` no lo detecta nadie por esta
-vía** — y encima `verify-static.sh` mide la SEED, no la instancia.
-
-### F4 · El fallo aparece en otra máquina, no acá
-
-`seed/platform/bin/aegis-tipos-prueba:30` carga `aegis-org` por nombre. Si
-los dos árboles se desincronizan, la prueba del artefacto entregado revienta en
-**el bootstrap de una instancia nueva**, no en el commit que lo causó. Es
-exactamente el modo de fallo que `aegis-semilla` existe para evitar.
-
-- [ ] pendiente
+- [ ] pending (the complete inventory is in the audits; 24 files)
 
 ---
 
-# CLASE G — DOCUMENTACIÓN QUE SE EJECUTA
+# CLASS F — THE SEED
 
-Solo la de OPERADOR es peligrosa (alguien la sigue paso a paso):
+### F1 · It carries only 3 of the 12 commands
 
-| archivo | bloques | nota |
+`semilla/plataforma/bin/` has `aegis-org`, `aegis-secreto`,
+`aegis-tipos-prueba`. **The other 9 are missing.**
+
+### F2 · Its `aegis-org` is behind and diverges in real content
+
+124,690 B (live, 2026-08-21) against 105,042 B (seed, 2026-08-11) —
+**444 lines of diff**. It is missing `USOS = {..., "internet"}`, the
+whole block that derives the Jenkins jobs (`JOBS_BLOCK_START`), the CSP
+headers, and the validation of `prompt` by class. **It is not
+un-rendering: it is being behind.**
+
+### F3 · `init/` is not part of the compared tree
+
+There is no `semilla/init/`. `aegis-semilla` only compares `platform/` ↔
+`semilla/plataforma/`. **A rename inside `init/` is detected by nobody
+along this route** — and on top of that `verify-static.sh` measures the
+SEED, not the instance.
+
+### F4 · The failure shows up on another machine, not here
+
+`semilla/plataforma/bin/aegis-tipos-prueba:30` loads `aegis-org` by name.
+If the two trees fall out of sync, the test of the delivered artifact
+blows up in **the bootstrap of a new instance**, not in the commit that
+caused it. That is exactly the failure mode `aegis-semilla` exists to
+prevent.
+
+- [ ] pending
+
+---
+
+# CLASS G — DOCUMENTATION THAT GETS EXECUTED
+
+Only the OPERATOR's is dangerous (somebody follows it step by step):
+
+| file | blocks | note |
 |---|---|---|
-| `OPERAR.md` | 16 | **El manual de guardia. El más peligroso del repo.** |
-| `docs/protocols/organization.md` ×2 | 28 c/u | Copias byte-idénticas: doble mantenimiento |
-| `docs/protocols/rotation-checklist.md` ×2 | 2 | Se sigue ítem por ítem |
-| `docs/protocols/rotate-age-key.md` ×2 | 34 | Ceremonia ejecutada literal |
-| `docs/protocols/edge.md` | 8 | Solo en `platform/`, no viaja a la semilla |
-| `seed/templates/base/README.md` | 0 (7 menciones) | Lo lee quien crea una app |
-| `seed/platform/orgs/README.md` | 4 | Ver E9 |
-| `caminos/design.md` | 0 (24 menciones) | **Es la fuente de verdad del diseño de la CLI** — renombrar sin tocarlo deja el diseño mintiendo |
-| `AGENTS.md` | 6 | Instrucciones que un agente ejecuta |
+| `OPERAR.md` | 16 | **The guard's manual. The most dangerous file in the repo.** |
+| `docs/protocols/organization.md` ×2 | 28 each | Byte-identical copies: double maintenance |
+| `docs/protocols/rotation-checklist.md` ×2 | 2 | Followed item by item |
+| `docs/protocols/rotate-age-key.md` ×2 | 34 | A ceremony executed literally |
+| `docs/protocols/edge.md` | 8 | Only in `platform/`, does not travel to the seed |
+| `semilla/plantillas/base/README.md` | 0 (7 mentions) | Read by whoever creates an app |
+| `semilla/plataforma/orgs/README.md` | 4 | See E9 |
+| `caminos/design.md` | 0 (24 mentions) | **It is the source of truth for the CLI's design** — renaming without touching it leaves the design lying |
+| `AGENTS.md` | 6 | Instructions an agent executes |
 
-Bitácoras (`RUTA.md` 31 menciones, `PROGRESO.md`, `VALIDACION.md`,
-`HISTORIA.md`): **no se tocan.** Son registro histórico.
+Logbooks (`RUTA.md` 31 mentions, `PROGRESO.md`, `VALIDACION.md`,
+`HISTORIA.md`): **not touched.** They are the historical record.
 
-- [ ] pendiente
+- [ ] pending
 
 ---
 
-# CLASE H — YA ESTÁ ROTO HOY (hallazgos, no consecuencias)
+# CLASS H — ALREADY BROKEN TODAY (findings, not consequences)
 
-Esto lo encontró la auditoría y **existe antes del renombrado**. Vale
-arreglarlo de paso.
+The audit found these and they **exist before the rename**. Worth fixing
+along the way.
 
-| # | qué | dónde |
+| # | what | where |
 |---|---|---|
-| H1 | `aegis-rotate.sh` se anuncia como **`aegis-rotar`**, un nombre que no existe | `init/aegis-rotate.sh:1094` |
-| H2 | Los `.tf` citan `aegis-rotate --verificar`, **sin el `.sh`** | `tofu/modules/cloudflare-access/main.tf:29,30,43`, `grafana.tf:16`, `envs/cloudflare-tunnel/variables.tf:106` |
-| H3 | La doc documenta **`aegis org rotar <org> <secreto>`**, subcomando inexistente | `docs/protocols/organization.md:342` |
-| H4 | **35 archivos generados llevan `aegis org` (forma despachador, que no existe) Y `bin/aegis-org` en el mismo archivo** | banners de `k8s/organizations/*/`, `k8s/argocd-apps/tenants.yaml`, etc. |
-| H5 | Tres convenciones de banner vivas a la vez | las 35 de H4 + `k8s/base/ai-system/{ruteo,registro,kustomization}.yaml` en minúsculas |
-| H6 | **Las dos pruebas de aceptación son huérfanas**: nadie las corre, `verify-static` no las invoca, no hay CI (`.github/` no existe) | `aegis-org-prueba`, `aegis-tipos-prueba` |
-| H7 | El check 15(a) se auto-matchea con `'Bitwarden'` si se renombra `verify-static.sh` (la `--exclude` deja de morder y `:439` es la única ocurrencia del patrón en el árbol) | `init/verify-static.sh:441` |
+| H1 | `aegis-rotate.sh` announces itself as **`aegis-rotar`**, a name that does not exist | `init/aegis-rotate.sh:1094` |
+| H2 | The `.tf` files cite `aegis-rotate --verificar`, **without the `.sh`** | `tofu/modules/cloudflare-access/main.tf:29,30,43`, `grafana.tf:16`, `envs/cloudflare-tunnel/variables.tf:106` |
+| H3 | The docs document **`aegis org rotar <org> <secreto>`**, a nonexistent subcommand | `docs/protocols/organization.md:342` |
+| H4 | **35 generated files carry `aegis org` (the dispatcher form, which does not exist) AND `bin/aegis-org` in the same file** | banners in `k8s/organizations/*/`, `k8s/argocd-apps/tenants.yaml`, etc. |
+| H5 | Three banner conventions alive at once | the 35 from H4 + `k8s/base/ai-system/{ruteo,registro,kustomization}.yaml` in lowercase |
+| H6 | **The two acceptance tests are orphans**: nobody runs them, `verify-static` does not invoke them, there is no CI (`.github/` does not exist) | `aegis-org-prueba`, `aegis-tipos-prueba` |
+| H7 | Check 15(a) matches itself against `'Bitwarden'` if `verify-static.sh` is renamed (the `--exclude` stops biting and `:439` is the only occurrence of the pattern in the tree) | `init/verify-static.sh:441` |
 
-- [ ] pendiente
-
----
-
-# COBERTURA AUSENTE — lo que nada verifica
-
-Esto no es una inconsistencia: es el hueco por donde entran todas las demás.
-
-1. **Ningún check verifica la existencia de 11 de los 12 comandos de
-   `platform/bin/`.** La única referencia en los 91 checks es el check 4 →
-   `aegis-org`, y ese check ES el caso A2. **Mover los otros 11 al despachador
-   es invisible: la suite sale `TODO PASS`.**
-2. `verify-static.sh` apunta a `seed/platform`, no a `platform/`.
-3. El check 17 no alcanza `bin/aegis-org borde` de la fase 85 (ver C3).
-4. No hay CI: `.github/` no existe. Nada corre solo.
-
-**Contrapartida obligatoria del renombrado**: un check nuevo que exija que cada
-comando declarado exista, sea ejecutable y declare su `summary` y su `group`.
-Sin eso, el despachador agrega una capa más donde algo puede faltar en
-silencio.
+- [ ] pending
 
 ---
 
-# MAPA DE LA MEZCLA DE IDIOMAS (referencia, no acción)
+# ABSENT COVERAGE — what nothing verifies
 
-El repo **ya es bilingüe** y nadie lo había mapeado. El corte es casi limpio
-por árbol: **`init/` tiende al inglés, `platform/bin/` al español**, con
-`aegis-rotate.sh` y `aegis-app` como las excepciones que rompen la regla.
+This is not an inconsistency: it is the hole all the others come in
+through.
 
-### Los diez conflictos mismo-concepto-dos-idiomas
+1. **No check verifies the existence of 11 of the 12 commands in
+   `platform/bin/`.** The only reference in the 91 checks is check 4 →
+   `aegis-org`, and that check IS case A2. **Moving the other 11 to the
+   dispatcher is invisible: the suite comes out `ALL PASS`.**
+2. `verify-static.sh` points at `semilla/plataforma`, not at
+   `platform/`.
+3. Check 17 does not reach `bin/aegis-org borde` in phase 85 (see C3).
+4. There is no CI: `.github/` does not exist. Nothing runs on its own.
 
-1. **"check" tiene cuatro formas**: `aegis-chequeo`, `--check`, `--revisar`,
-   `--verificar`, más `verify-static.sh` y `edge-chequeo/`. Y
-   `aegis-rotate.sh` usa `--revisar` **y** `--verificar` en el mismo script
-   para dos cosas distintas que en inglés serían ambas *check*.
-2. **"edge" vs "borde"**: `edge.yaml` (EN) es leído por `bin/aegis-borde` (ES);
-   namespace `infra-edge` (EN), dashboard `borde.yaml` (ES),
-   `docs/protocols/edge.md` (EN), y `platform/edge-chequeo/` que es
-   **inglés-guion-español en un solo identificador**.
-3. **"backup" vs "respaldo"**: `init/aegis-backup.sh` (EN) **invoca**
-   `bin/aegis-respaldo` (ES). `OPERAR.md:269` los explica juntos.
-4. **"rotate" vs "rotar"**: `aegis-rotate.sh` (EN) con flags `--rotar`,
-   `--revisar`, `--verificar`, `--continuar` (ES). El caso más chirriante.
-5. **"canary" vs "canary"**: `seed/canary/` (ES) genera
+**Mandatory counterpart of the rename**: a new check that demands every
+declared command exists, is executable and declares its `summary` and its
+`group`. Without that, the dispatcher adds one more layer where something
+can go missing in silence.
+
+---
+
+# MAP OF THE LANGUAGE MIX (reference, not action)
+
+The repo **is already bilingual** and nobody had mapped it. The cut is
+almost clean by tree: **`init/` leans English, `platform/bin/` leans
+Spanish**, with `aegis-rotate.sh` and `aegis-app` as the exceptions that
+break the rule.
+
+### The ten same-concept-two-language collisions
+
+1. **"check" has four forms**: `aegis-chequeo`, `--check`, `--revisar`,
+   `--verificar`, plus `verify-static.sh` and `edge-chequeo/`. And
+   `aegis-rotate.sh` uses `--revisar` **and** `--verificar` in the same
+   script for two different things that in English would both be *check*.
+2. **"edge" vs "borde"**: `edge.yaml` (EN) is read by `bin/aegis-borde`
+   (ES); namespace `infra-edge` (EN), dashboard `borde.yaml` (ES),
+   `docs/protocols/edge.md` (EN), and `platform/edge-chequeo/` which is
+   **English-hyphen-Spanish inside a single identifier**.
+3. **"backup" vs "respaldo"**: `init/aegis-backup.sh` (EN) **invokes**
+   `bin/aegis-respaldo` (ES). `OPERAR.md:269` explains them together.
+4. **"rotate" vs "rotar"**: `aegis-rotate.sh` (EN) with the flags
+   `--rotar`, `--revisar`, `--verificar`, `--continuar` (ES). The most
+   grating case.
+5. **"canary" vs "canario"**: `semilla/canario/` (ES) generates
    `org-canary` (EN).
-6. **"template" vs "plantilla"**: `seed/templates/` (ES) vs
+6. **"template" vs "plantilla"**: `semilla/plantillas/` (ES) vs
    `docs/protocols/templates/` (EN); flag `--plantilla` (ES).
-7. **"tenant" vs "organización"**: el mismo objeto según la capa —
-   `orgs/`/`org-shop` vs `aegis-tenant-shop`/`aegis-tenants` vs
-   `aegis-organizaciones`. Y `allow-tenants-a-gateway` es
-   **inglés-español-inglés dentro de un solo nombre de recurso**.
-8. **`platform/` (EN) y `seed/platform/` (ES) son el mismo árbol.**
-9. **"routing"**: todo `ruteo` (ES) genera objetos `IngressRoute` (EN).
-10. **`ai stop` y `ai cerrar` son alias del mismo comando en dos idiomas.**
+7. **"tenant" vs "organización"**: the same object depending on the layer
+   — `orgs/`/`org-shop` vs `aegis-tenant-shop`/`aegis-tenants` vs
+   `aegis-organizaciones`. And `allow-tenants-a-gateway` is
+   **English-Spanish-English inside a single resource name**.
+8. **`platform/` (EN) and `semilla/plataforma/` (ES) are the same
+   tree.**
+9. **"routing"**: everything is `ruteo` (ES) and it generates
+   `IngressRoute` (EN) objects.
+10. **`ai stop` and `ai cerrar` are aliases of the same command in two
+    languages.**
 
-### Archivos hermanos en dos idiomas
+### Sibling files in two languages
 
-- Los tres contratos maestros: `edge.yaml` (EN), `plans.yaml` (ES),
-  `services.yaml` (ES).
-- Los cuatro dashboards: `bootstrap.yaml` + `supply-chain.yaml` (EN) junto a
-  `borde.yaml` + `plataforma.yaml` (ES).
-- Las catorce fases del init: todas EN salvo `85-observability.sh` y
-  `15-third-parties.sh`.
-- Los cuatro contratos de organización: `blog`/`shop` (EN),
+- The three master contracts: `edge.yaml` (EN), `planes.yaml` (ES),
+  `servicios.yaml` (ES).
+- The four dashboards: `bootstrap.yaml` + `supply-chain.yaml` (EN)
+  alongside `borde.yaml` + `plataforma.yaml` (ES).
+- The fourteen init phases: all EN except `85-observabilidad.sh` and
+  `15-terceros.sh`.
+- The four organization contracts: `blog`/`shop` (EN),
   `ejemplo`/`portafolio` (ES).
-- Tres engines: `engine-cpu`, `engine-llm` (EN), `engine-charla` (ES).
+- Three engines: `engine-cpu`, `engine-llm` (EN), `engine-charla` (ES).
 
-### Nombres de comando
+### Command names
 
-**12 inglés** · **6 español** (`aegis-borde`, `aegis-chequeo`,
+**12 English** · **6 Spanish** (`aegis-borde`, `aegis-chequeo`,
 `aegis-registro`, `aegis-respaldo`, `aegis-secreto`, `aegis-semilla`) ·
-**2 híbridos** (`aegis-org-prueba`, `aegis-tipos-prueba`).
+**2 hybrids** (`aegis-org-prueba`, `aegis-tipos-prueba`).
 
-Nota curiosa: **`registro` significa dos conceptos distintos en el repo**
-(`aegis-registro` = registry de imágenes; `ai-system/registro.yaml` = catálogo
-de tareas de AI), y ninguno coincide con su namespace, que es
+A curious note: **`registro` means two different concepts in the repo**
+(`aegis-registro` = the image registry; `ai-system/registro.yaml` = the
+catalogue of AI tasks), and neither matches its namespace, which is
 `registry-system`.
 
 ### Flags
 
-- **Inglés**: `--check`, `--force`, `--help`, `--yes`, `--only`, `--from`,
-  `--list`, `--org`, `--profile`, `--configure`, `--non-interactive`,
-  `--reset-state`, `--purge-secrets`, `--stdin`, `--with-charts`
-- **Español**: `--todos`, `--rotar`, `--revisar`, `--verificar`, `--continuar`,
-  `--capturar`, `--listar`, `--restaurar`, `--reubicar`, `--aplicar`,
-  `--plantilla`, `--hasta`, `--fuera-de-linea`, `--a`
+- **English**: `--check`, `--force`, `--help`, `--yes`, `--only`,
+  `--from`, `--list`, `--org`, `--profile`, `--configure`,
+  `--non-interactive`, `--reset-state`, `--purge-secrets`, `--stdin`,
+  `--with-charts`
+- **Spanish**: `--todos`, `--rotar`, `--revisar`, `--verificar`,
+  `--continuar`, `--capturar`, `--listar`, `--restaurar`, `--reubicar`,
+  `--aplicar`, `--plantilla`, `--hasta`, `--fuera-de-linea`, `--a`
 
-`aegis-app` tiene `--plantilla` (ES) y `--check` (EN) **en el mismo comando**.
-`ai` tiene `--force` (EN) y `--hasta` (ES) en el mismo `case`.
+`aegis-app` has `--plantilla` (ES) and `--check` (EN) **in the same
+command**. `ai` has `--force` (EN) and `--hasta` (ES) in the same `case`.
 
 ---
 
-## Orden sugerido de ataque
+## Suggested order of attack
 
-1. **Clase A primero, ANTES de renombrar nada.** Arreglar los siete casos de
-   Enfermedad E convierte el renombrado en una operación ruidosa: cualquier
-   cosa que rompamos va a gritar. Hacerlo al revés es renombrar a ciegas.
-2. **La cobertura ausente**, en el mismo movimiento: el check que exige que
-   cada comando exista y se declare.
-3. Clase B (los centinelas) — cabecera y lector en el **mismo commit**.
-4. Clase C y D — el renombrado propiamente dicho.
-5. Clase E y G — strings y documentación de operador.
-6. Clase F — la semilla, que además arrastra la deuda F2 que ya existía.
-7. Clase H — de paso, porque ya está roto.
+1. **Class A first, BEFORE renaming anything.** Fixing the seven cases of
+   Disease E turns the rename into a noisy operation: anything we break
+   is going to shout. Doing it the other way round is renaming blind.
+2. **The absent coverage**, in the same movement: the check that demands
+   every command exists and declares itself.
+3. Class B (the sentinels) — header and reader in the **same commit**.
+4. Classes C and D — the rename proper.
+5. Classes E and G — strings and operator documentation.
+6. Class F — the seed, which also drags along the F2 debt that already
+   existed.
+7. Class H — along the way, because it is already broken.

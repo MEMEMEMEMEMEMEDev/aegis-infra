@@ -14,9 +14,9 @@ else
     [[ -x "$ILOG" ]] || D96="$D96 it is not executable;"
     grep -q 'script -qefc' "$ILOG" \
         || D96="$D96 it does not use script -qefc (without -e init's rc is lost; without script there is no TTY for the wizard);"
-    L_EXP="$(grep -n "printf 'expediente:" "$ILOG" | head -1 | cut -d: -f1)"
+    L_EXP="$(grep -n "printf 'dossier:" "$ILOG" | head -1 | cut -d: -f1)"
     L_SCR="$(grep -n 'script -qefc' "$ILOG" | tail -1 | cut -d: -f1)"
-    if [[ -z "$L_EXP" ]]; then D96="$D96 it does not print 'expediente:' (the operator would not know where to read);"
+    if [[ -z "$L_EXP" ]]; then D96="$D96 it does not print 'dossier:' (the operator would not know where to read);"
     elif [[ -n "$L_SCR" && "$L_EXP" -gt "$L_SCR" ]]; then
         D96="$D96 the dossier's path is printed AFTER running: a hung run never shows it;"
     fi

@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# aegis-summary: Deja la máquina en el estado que el init necesita
+# aegis-summary: Leaves the machine in the state the init needs
 # aegis-group:   setup
-# aegis-preflight — deja una VM en el estado que aegis-init necesita antes de
-# correr (fixes de entorno descubiertos en las corridas reales). Idempotente:
-# re-correr debe dar todo OK. Auto-repara lo que puede (reloj, DNS, paquetes,
-# identidad git via prompt). Nada aca esta atado a un usuario, dominio o cuenta
-# concretos: la personalizacion vive en init/aegis-init.conf.
+# aegis-preflight — leaves a VM in the state aegis-init needs before running
+# (environment fixes discovered in the real runs). Idempotent: re-running
+# must give all OK. Auto-repairs what it can (clock, DNS, packages, git
+# identity via prompt). Nothing here is tied to a particular user, domain or
+# account: the customization lives in init/aegis-init.conf.
 set -u
-NAT_IF="${NAT_IF:-enp0s3}"                               # NIC NAT de VirtualBox
-HOST_IF="${HOST_IF:-enp0s8}"                             # NIC host-only/bridge
-NAT_DNS="${NAT_DNS:-10.0.2.3}"                           # DNS del NAT de VirtualBox
-WORKSPACE="${AEGIS_WORKSPACE:-$HOME/workspace/aegis-v2}" # donde vive el artefacto
-MAX_DRIFT="${MAX_DRIFT:-120}"                            # segundos tolerados de deriva
+NAT_IF="${NAT_IF:-enp0s3}"                               # VirtualBox NAT NIC
+HOST_IF="${HOST_IF:-enp0s8}"                             # host-only/bridge NIC
+NAT_DNS="${NAT_DNS:-10.0.2.3}"                           # DNS of VirtualBox's NAT
+WORKSPACE="${AEGIS_WORKSPACE:-$HOME/workspace/aegis-v2}" # where the artifact lives
+MAX_DRIFT="${MAX_DRIFT:-120}"                            # seconds of drift tolerated
 PASS=0; FAIL=0; WARNS=0
 ok(){   echo "  [OK]   $1"; PASS=$((PASS+1)); }
 bad(){  echo "  [FAIL] $1"; FAIL=$((FAIL+1)); }
 warn(){ echo "  [WARN] $1"; WARNS=$((WARNS+1)); }
 info(){ echo "  [..]   $1"; }
 
-# deriva absoluta (s) contra el header Date de github; vacio si no se pudo medir
+# absolute drift (s) against github's Date header; empty if it could not be measured
 clock_drift(){
   local remote_ts d
   remote_ts=$(date -d "$(curl -sI -4 --max-time 10 https://github.com \
@@ -28,15 +28,15 @@ clock_drift(){
   d=$(( $(date +%s) - remote_ts )); echo "${d#-}"
 }
 
-echo "== 1/9 sudo NOPASSWD (el init lo descubre recien en fase 20) =="
+echo "== 1/9 sudo NOPASSWD (the init only discovers it at phase 20) =="
 if ! sudo -n true 2>/dev/null; then
   sudo bash -c "printf '%s ALL=(ALL) NOPASSWD:ALL\n' '$USER' > /etc/sudoers.d/010-aegis-init-nopasswd \
     && chmod 0440 /etc/sudoers.d/010-aegis-init-nopasswd && visudo -c >/dev/null"
 fi
 sudo -K
-if sudo -n true 2>/dev/null; then ok "NOPASSWD activo para $USER"; else bad "NOPASSWD no quedo activo"; fi
+if sudo -n true 2>/dev/null; then ok "NOPASSWD active for $USER"; else bad "NOPASSWD did not stay active"; fi
 
-echo "== 2/9 IPv6 deshabilitado persistente (RA anuncia ruta v6 sin salida) =="
+echo "== 2/9 IPv6 persistently disabled (the RA advertises a v6 route with no way out) =="
 sudo tee /etc/sysctl.d/99-disable-ipv6.conf >/dev/null <<EOF
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
@@ -46,15 +46,15 @@ EOF
 sudo sysctl --system >/dev/null 2>&1
 [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)" = "1" ] \
   && ok "IPv6 off (runtime + /etc/sysctl.d/99-disable-ipv6.conf)" \
-  || bad "IPv6 sigue habilitado - buildah intenta v6 y los pulls mueren"
+  || bad "IPv6 is still enabled - buildah tries v6 and the pulls die"
 
-echo "== 3/9 DNS por interfaz (la NIC bridge suele traer un DNS inalcanzable) =="
-sudo resolvectl dns "$NAT_IF" "$NAT_DNS" 2>/dev/null || warn "no pude setear DNS en $NAT_IF"
+echo "== 3/9 per-interface DNS (the bridge NIC usually brings an unreachable DNS) =="
+sudo resolvectl dns "$NAT_IF" "$NAT_DNS" 2>/dev/null || warn "I could not set DNS on $NAT_IF"
 ip link show "$HOST_IF" >/dev/null 2>&1 && sudo resolvectl dns "$HOST_IF" "" 2>/dev/null
-# persistencia: resolvectl es runtime-only -> oneshot que re-aplica en cada boot
+# persistence: resolvectl is runtime-only -> a oneshot that re-applies on every boot
 sudo tee /etc/systemd/system/aegis-dns-fix.service >/dev/null <<EOF
 [Unit]
-Description=aegis: DNS solo por NAT ($NAT_IF -> $NAT_DNS), $HOST_IF sin DNS
+Description=aegis: DNS only through NAT ($NAT_IF -> $NAT_DNS), $HOST_IF without DNS
 After=network-online.target systemd-resolved.service
 Wants=network-online.target
 [Service]
@@ -65,27 +65,27 @@ ExecStart=-/usr/bin/resolvectl dns $HOST_IF ""
 WantedBy=multi-user.target
 EOF
 sudo systemctl daemon-reload && sudo systemctl enable aegis-dns-fix.service >/dev/null 2>&1 \
-  && ok "aegis-dns-fix.service habilitado (sobrevive reboot)" \
-  || bad "no pude habilitar aegis-dns-fix.service"
+  && ok "aegis-dns-fix.service enabled (survives a reboot)" \
+  || bad "I could not enable aegis-dns-fix.service"
 R=0; for i in 1 2 3; do resolvectl query github.com >/dev/null 2>&1 && R=$((R+1)); done
-[ "$R" -eq 3 ] && ok "github.com resuelve 3/3" || bad "DNS inestable ($R/3) - revisar resolvectl status"
+[ "$R" -eq 3 ] && ok "github.com resolves 3/3" || bad "unstable DNS ($R/3) - check resolvectl status"
 
-echo "== 4/9 reloj (TLS/ACME/cosign/apt dependen de esto) — auto-repara =="
-# Lecciones reales: NTPSynchronized=yes mintio con 7 dias de atraso; y con
-# chrony instalado corrige por slew (tardaria semanas) y timedatectl no es
-# confiable. La verdad es la deriva medida contra una fuente externa.
+echo "== 4/9 clock (TLS/ACME/cosign/apt depend on this) — auto-repairs =="
+# Real lessons: NTPSynchronized=yes lied with 7 days of lag; and with chrony
+# installed it corrects by slew (it would take weeks) and timedatectl is not
+# trustworthy. The truth is the drift measured against an external source.
 sudo timedatectl set-ntp true >/dev/null 2>&1
 drift="$(clock_drift || echo '')"
 if [ -z "$drift" ]; then
-  warn "no pude medir la deriva (sin salida a github?) - revisar 7/9"
+  warn "I could not measure the drift (no way out to github?) - check 7/9"
 elif [ "$drift" -le "$MAX_DRIFT" ]; then
-  ok "reloj ok (deriva ${drift}s vs github)"
+  ok "clock ok (drift ${drift}s vs github)"
 else
-  info "deriva ${drift}s: forzando resync..."
-  for intento in 1 2 3; do
+  info "drift ${drift}s: forcing a resync..."
+  for attempt in 1 2 3; do
     if command -v chronyc >/dev/null 2>&1; then
       sudo systemctl restart chrony >/dev/null 2>&1
-      sudo chronyc makestep >/dev/null 2>&1     # chrony: salto inmediato
+      sudo chronyc makestep >/dev/null 2>&1     # chrony: immediate step
       sleep 4
     else
       sudo timedatectl set-ntp false >/dev/null 2>&1
@@ -96,87 +96,87 @@ else
     fi
     drift="$(clock_drift || echo '')"
     [ -n "$drift" ] && [ "$drift" -le "$MAX_DRIFT" ] && break
-    info "intento $intento: deriva ${drift:-?}s, reintentando..."
+    info "attempt $attempt: drift ${drift:-?}s, retrying..."
   done
   if [ -n "${drift:-}" ] && [ "$drift" -le "$MAX_DRIFT" ]; then
     command -v hwclock >/dev/null && sudo hwclock --systohc 2>/dev/null
-    ok "reloj corregido automaticamente (deriva ${drift}s) - $(date -u)"
+    ok "clock corrected automatically (drift ${drift}s) - $(date -u)"
   else
-    bad "reloj sigue desfasado ${drift:-?}s - revisar chronyc tracking / systemd-timesyncd"
+    bad "clock is still off by ${drift:-?}s - check chronyc tracking / systemd-timesyncd"
   fi
 fi
 
-echo "== 5/9 paquetes que el init NO instala pero usa =="
-sudo apt-get update -qq 2>/dev/null || sudo apt-get update -qq || warn "apt update fallo (mirar el reloj de 4/9)"
+echo "== 5/9 packages the init does NOT install but does use =="
+sudo apt-get update -qq 2>/dev/null || sudo apt-get update -qq || warn "apt update failed (look at the clock in 4/9)"
 sudo apt-get install -y -qq tmux python3-yaml jq >/dev/null 2>&1
-command -v tmux >/dev/null && ok "tmux instalado (correr el init adentro)" || bad "tmux no instalado"
-command -v jq   >/dev/null && ok "jq presente (gate bootstrap-bins de la 00)" || bad "jq falta"
-python3 -c 'import yaml' 2>/dev/null && ok "PyYAML presente (inyeccion de placeholders, fase 80)" || bad "PyYAML falta"
-for b in curl git python3; do command -v "$b" >/dev/null && ok "$b presente" || bad "$b FALTA"; done
-# tmux usable: mouse (scroll + seleccion con Shift) y scrollback largo para capture-pane
+command -v tmux >/dev/null && ok "tmux installed (run the init inside it)" || bad "tmux not installed"
+command -v jq   >/dev/null && ok "jq present (phase 00's bootstrap-bins gate)" || bad "jq missing"
+python3 -c 'import yaml' 2>/dev/null && ok "PyYAML present (placeholder injection, phase 80)" || bad "PyYAML missing"
+for b in curl git python3; do command -v "$b" >/dev/null && ok "$b present" || bad "$b MISSING"; done
+# usable tmux: mouse (scroll + selection with Shift) and a long scrollback for capture-pane
 [ -f "$HOME/.tmux.conf" ] || printf 'set -g mouse on\nset -g history-limit 100000\n' > "$HOME/.tmux.conf"
 grep -q "mouse on" "$HOME/.tmux.conf" 2>/dev/null \
-  && ok "~/.tmux.conf con mouse+scrollback (Shift+arrastrar copia al portapapeles real)" \
-  || warn "~/.tmux.conf sin 'mouse on' - el scroll movera el historial de comandos"
+  && ok "~/.tmux.conf with mouse+scrollback (Shift+drag copies to the real clipboard)" \
+  || warn "~/.tmux.conf without 'mouse on' - the scroll will move the command history"
 
-echo "== 6/9 identidad y auth de git/gh (el init commitea y clona con esto) =="
+echo "== 6/9 git/gh identity and auth (the init commits and clones with these) =="
 g_name="$(git config --global user.name  2>/dev/null || true)"
 g_mail="$(git config --global user.email 2>/dev/null || true)"
 if [ -z "$g_name" ] || [ -z "$g_mail" ]; then
   if [ -t 0 ]; then
-    echo "  git no tiene identidad global (el init commitea al repo de plataforma)."
-    [ -z "$g_name" ] && read -r -p "  Nombre para los commits: " g_name
-    [ -z "$g_mail" ] && read -r -p "  Email  para los commits: " g_mail
+    echo "  git has no global identity (the init commits to the platform repo)."
+    [ -z "$g_name" ] && read -r -p "  Name for the commits:  " g_name
+    [ -z "$g_mail" ] && read -r -p "  Email for the commits: " g_mail
     [ -n "$g_name" ] && [ -n "$g_mail" ] \
       && { git config --global user.name "$g_name"; git config --global user.email "$g_mail"; }
   else
-    warn "sin TTY: no puedo pedir la identidad de git interactivamente"
+    warn "no TTY: I cannot ask for the git identity interactively"
   fi
 fi
 g_name="$(git config --global user.name  2>/dev/null || true)"
 g_mail="$(git config --global user.email 2>/dev/null || true)"
 [ -n "$g_name" ] && [ -n "$g_mail" ] \
-  && ok "git con identidad: $g_name <$g_mail>" \
-  || bad "git sin identidad -> git config --global user.name/user.email (cualquiera valida)"
+  && ok "git with identity: $g_name <$g_mail>" \
+  || bad "git without identity -> git config --global user.name/user.email (any valid one)"
 if command -v gh >/dev/null; then
   gh auth status >/dev/null 2>&1 \
-    && ok "gh autenticado como $(gh api user --jq .login 2>/dev/null || echo '?')" \
-    || bad "gh SIN auth -> gh auth login (necesita scopes repo + delete_repo)"
+    && ok "gh authenticated as $(gh api user --jq .login 2>/dev/null || echo '?')" \
+    || bad "gh WITHOUT auth -> gh auth login (needs the repo + delete_repo scopes)"
 else
-  warn "gh no instalado (el init lo asume en fase 00)"
+  warn "gh not installed (the init assumes it at phase 00)"
 fi
 
-echo "== 7/9 conectividad real a los endpoints que usan las fases =="
-# 404 es respuesta VALIDA: api.cloudflare.com/client/v4 sin token contesta 404 (el server responde)
+echo "== 7/9 real connectivity to the endpoints the phases use =="
+# 404 is a VALID answer: api.cloudflare.com/client/v4 without a token answers 404 (the server responds)
 for u in https://github.com https://api.github.com https://api.cloudflare.com/client/v4 \
          https://get.k3s.io https://registry-1.docker.io/v2/ https://dl.k8s.io; do
   code=$(curl -4 -s -o /dev/null --max-time 10 -w '%{http_code}' "$u" 2>/dev/null)
-  case "$code" in 2*|3*|401|404) ok "alcanzable: $u ($code)";; *) bad "NO alcanzable: $u (code=$code)";; esac
+  case "$code" in 2*|3*|401|404) ok "reachable: $u ($code)";; *) bad "NOT reachable: $u (code=$code)";; esac
 done
 
-echo "== 8/9 recursos de la maquina =="
+echo "== 8/9 the machine's resources =="
 free_g=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
-[ "${free_g:-0}" -ge 25 ] && ok "disco libre en /: ${free_g}G (>=25G)" || bad "disco libre ${free_g}G (<25G)"
+[ "${free_g:-0}" -ge 25 ] && ok "free disk on /: ${free_g}G (>=25G)" || bad "free disk ${free_g}G (<25G)"
 mem_g=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
-[ "${mem_g:-0}" -ge 7 ] && ok "RAM total: ${mem_g}G" || warn "RAM ${mem_g}G - jenkins+kyverno+trivy quedan justos, ideal 8G+"
+[ "${mem_g:-0}" -ge 7 ] && ok "total RAM: ${mem_g}G" || warn "RAM ${mem_g}G - jenkins+kyverno+trivy end up tight, 8G+ is ideal"
 [ -d /dev/shm ] && touch /dev/shm/.aegis-probe 2>/dev/null && rm -f /dev/shm/.aegis-probe \
-  && ok "/dev/shm escribible (ceremonias age/cosign)" || bad "/dev/shm no escribible"
+  && ok "/dev/shm writable (age/cosign ceremonies)" || bad "/dev/shm not writable"
 
-echo "== 9/9 restos de corridas previas (deben NO existir en el snap) =="
+echo "== 9/9 leftovers from previous runs (they must NOT exist in the snap) =="
 for p in "$WORKSPACE/.init-state" /etc/rancher/k3s /var/lib/rancher/k3s; do
-  [ -e "$p" ] && warn "existe $p - este snap no es 'pre-aegis' limpio" || ok "limpio: $p"
+  [ -e "$p" ] && warn "$p exists - this snap is not a clean 'pre-aegis'" || ok "clean: $p"
 done
 
-# copia estable (por si /tmp se limpia con el reboot del ciclo de snapshot)
+# stable copy (in case /tmp gets cleaned by the reboot of the snapshot cycle)
 cp -f "$0" "$HOME/aegis-preflight.sh" 2>/dev/null && chmod +x "$HOME/aegis-preflight.sh"
 
 echo
-echo "================== RESUMEN =================="
+echo "================== SUMMARY =================="
 echo "  OK: $PASS   WARN: $WARNS   FAIL: $FAIL"
 if [ "$FAIL" -eq 0 ]; then
-  echo "  VM lista. Ahora: reboot, re-correr (~/aegis-preflight.sh quedo guardado;"
-  echo "  todo debe seguir OK sin preguntar nada) y RECIEN AHI tomar el snapshot."
+  echo "  VM ready. Now: reboot, re-run (~/aegis-preflight.sh was saved;"
+  echo "  everything must stay OK without asking anything) and ONLY THEN take the snapshot."
 else
-  echo "  Corregir los FAIL antes de snapshotear."
+  echo "  Fix the FAILs before snapshotting."
 fi
 exit "$FAIL"

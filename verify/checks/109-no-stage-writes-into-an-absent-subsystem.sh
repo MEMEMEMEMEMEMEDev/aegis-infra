@@ -18,7 +18,7 @@ check() {
 # out later.
 #
 # That is why the check measures the CLASS and not the case: for each
-# `aplicar_*` stage it resolves which file it writes to, asks whether
+# `apply_*` stage it resolves which file it writes to, asks whether
 # that directory exists in the SEED, and if it does not exist it demands
 # one of two things —create it with `os.makedirs`, or ask and exit with
 # a reason before writing. What is not accepted is writing blind.
@@ -32,7 +32,7 @@ source, seed = sys.argv[1], sys.argv[2]
 tree = ast.parse(open(source, encoding="utf-8").read())
 
 # The path constants, resolved from their assignment: os.path.join(
-# RAIZ, "k8s", "base", …) -> ("k8s", "base", …). RAIZ is the instance,
+# PLATFORM_ROOT, "k8s", …) -> ("k8s", …). PLATFORM_ROOT is the instance,
 # so the parts that follow are the relative path inside the tree.
 constants = {}
 for n in tree.body:
@@ -60,8 +60,8 @@ def writes(fn):
             yield n, n.args[0].id
 
 # What counts as ASKING about the directory. This check's first version
-# accepted «any early return», and its own tooth reported it: `if viejo
-# == nuevo: return 0` was already in every stage, so the guard seemed to
+# accepted «any early return», and its own tooth reported it: `if old
+# == new: return 0` was already in every stage, so the guard seemed to
 # exist without existing. A check that settles for the shape instead of
 # the meaning protects nothing.
 QUESTIONS = {"isdir", "exists", "is_dir", "makedirs"}
@@ -79,7 +79,7 @@ helpers = {f.name for f in tree.body
 
 failures, n_stages, n_guarded = [], 0, 0
 for fn in tree.body:
-    if not (isinstance(fn, ast.FunctionDef) and fn.name.startswith("aplicar_")):
+    if not (isinstance(fn, ast.FunctionDef) and fn.name.startswith("apply_")):
         continue
     n_stages += 1
     for node, const in writes(fn):

@@ -1,66 +1,69 @@
-# edge.yaml — lo que el borde tiene que exponer.
+# edge.yaml — what the edge has to expose.
 #
-# La lista de hostnames públicos de tofu se DERIVA de acá más los
-# `dominio:` de todos los contratos en orgs/. Nadie edita
-# `public_hostnames` en main.tf a mano nunca más.
+# tofu's list of public hostnames is DERIVED from here plus the
+# `dominio:` of every contract in orgs/. Nobody edits
+# `public_hostnames` in main.tf by hand ever again.
 #
-# POR QUÉ. El hostname estaba declarado dos veces: en el contrato de la
-# organización y a mano en el .tf. Esa duplicación ya costó dos veces:
+# WHY. The hostname used to be declared twice: in the organization's
+# contract and by hand in the .tf. That duplication has already cost
+# twice:
 #
-#  - ai.__ROOT_DOMAIN__ quedó en main.tf y nunca se aplicó (tarea #35). El
-#    IngressRoute existía en el cluster esperando tráfico que no llegaba.
-#  - blog.__ROOT_DOMAIN__ hubo que acordarse de agregarlo a mano el
+#  - ai.__ROOT_DOMAIN__ stayed in main.tf and was never applied (task
+#    #35). The IngressRoute existed in the cluster, waiting for traffic
+#    that never arrived.
+#  - blog.__ROOT_DOMAIN__ had to be remembered and added by hand on
 #    2026-08-03.
 #
-# Y el modo de fallo es el peor: si falta, el hostname simplemente NO
-# EXISTE. No hay error, no hay alarma, no hay nada rojo. El manifiesto
-# del cluster está perfecto y nadie llega.
+# And the failure mode is the worst one there is: if it is missing, the
+# hostname simply DOES NOT EXIST. No error, no alarm, nothing red. The
+# cluster's manifest is perfect and nobody arrives.
 #
-# Con la derivación, declarar `dominio:` en el contrato es TODO lo que
-# hay que hacer.
+# With the derivation, declaring `dominio:` in the contract is ALL there
+# is to do.
 
-# El dominio raíz. Los contratos declaran el FQDN completo
-# (`blog.__ROOT_DOMAIN__`) porque es lo que un humano reconoce; tofu quiere
-# solo la etiqueta (`blog`), y el generador hace la resta.
+# The root domain. The contracts declare the full FQDN
+# (`blog.__ROOT_DOMAIN__`) because that is what a human recognises; tofu
+# wants only the label (`blog`), and the generator does the subtraction.
 root_domain: __ROOT_DOMAIN__
 
-# Las puertas de la PLATAFORMA, que no salen de ningún contrato porque
-# no pertenecen a ninguna organización. Son del sustrato mismo.
+# The PLATFORM's own doors, which come out of no contract because they
+# belong to no organization. They are the substrate's own.
 #
-# `ai` YA NO ESTÁ ACÁ, retirado en #25 el 2026-08-07, y el motivo vale
-# más que la línea que falta.
+# `ai` IS NO LONGER HERE — withdrawn in #25 on 2026-08-07, and the
+# reason is worth more than the missing line.
 #
-# El razonamiento original era bueno: darle hostname propio a la AI para
-# que su kill switch y sus rate limits fueran independientes de
-# cualquier sitio. Lo que ese razonamiento daba por hecho era que la AI
-# se consume DESDE INTERNET, y medido resultó que no:
+# The original reasoning was good: give the AI its own hostname so that
+# its kill switch and its rate limits would be independent of any site.
+# What that reasoning took for granted was that the AI is consumed FROM
+# THE INTERNET, and measured, it is not:
 #
-#   - ningún front de blog, portafolio ni ejemplo nombra el hostname
-#   - los BFF hablan con la puerta INTERNA por DNS de cluster
-#   - la puerta pública no sirve inferencia (dos muxes distintos, y hay
-#     un test del gateway que falla si alguien la mete ahí)
+#   - no front end of blog, portfolio or example names the hostname
+#   - the BFFs talk to the INTERNAL door over cluster DNS
+#   - the public door does not serve inference (two different muxes, and
+#     there is a gateway test that fails if anyone puts it there)
 #
-# O sea que lo único que ese hostname le ofrecía a internet era
-# `GET /status` sin credencial: modo, engine, cola y versión. Le contaba
-# a cualquiera cuándo la GPU está encendida —justo cuando hay algo que
-# atacar— y qué build corre. Reconocimiento gratis a cambio de nada.
+# So the only thing that hostname offered the internet was
+# `GET /status` with no credential: mode, engine, queue and version. It
+# told anyone when the GPU is switched on — exactly when there is
+# something worth attacking — and which build is running. Free
+# reconnaissance in exchange for nothing.
 #
-# El kill switch no se pierde: sigue siendo `ai cerrar`, que baja el
-# engine a cero réplicas. Eso siempre fue más fuerte que cualquier WAF.
+# The kill switch is not lost: it is still `ai stop`, which takes the
+# engine down to zero replicas. That was always stronger than any WAF.
 #
-# CUÁNDO VUELVE: cuando exista el flujo de tickets (§7.2 del diseño),
-# que es el único caso que necesita que un navegador hable directo con
-# la AI. Ese endpoint ya está escrito, apagado por bandera y devolviendo
-# 501. El día que se encienda, este hostname vuelve JUNTO con Turnstile
-# delante — no después.
+# WHEN IT COMES BACK: when the ticket flow exists (§7.2 of the design),
+# which is the only case that needs a browser talking directly to the
+# AI. That endpoint is already written, switched off behind a flag and
+# returning 501. The day it is switched on, this hostname comes back
+# TOGETHER with Turnstile in front of it — not afterwards.
 platform:
   - aegis
   - argocd
   - jenkins
-  # grafana y ntfy (fase-85 §5): la observabilidad es sustrato, no
-  # organización. grafana va TRAS Access (módulo cloudflare-access,
-  # grafana.tf); ntfy sale SIN Access —la app del teléfono no puede
-  # autenticarse ante Cloudflare— y se defiende con su deny-all propio
-  # más los tres middlewares del borde (check 91).
+  # grafana and ntfy (phase 85 §5): observability is substrate, not an
+  # organization. grafana goes BEHIND Access (the cloudflare-access
+  # module, grafana.tf); ntfy goes out WITHOUT Access — the phone app
+  # cannot authenticate against Cloudflare — and defends itself with its
+  # own deny-all plus the edge's three middlewares (check 91).
   - grafana
   - ntfy

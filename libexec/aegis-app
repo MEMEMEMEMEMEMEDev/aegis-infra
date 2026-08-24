@@ -1,85 +1,84 @@
 #!/usr/bin/env python3
-# aegis-summary: El alta de una organización: contrato primero, aplicar después
+# aegis-summary: Signing an organization up: contract first, apply afterwards
 # aegis-group:   apps
 # aegis-subcommands: new apply
-"""aegis-app — el alta de una organización: `nueva` escribe archivos, `aplicar` toca GitHub.
+"""aegis-app — signing an organization up: `new` writes files, `apply` touches GitHub.
 
-EL PROBLEMA QUE RESUELVE
-────────────────────────
-Dar de alta una organización dejaba tres pasos que ninguna herramienta
-cerraba, y los tres son contra GitHub: crear el repo de la app,
-registrar la deploy key, y poner el webhook — los pasos 4, 6 y 8 del
-camino manual (caminos/design.md §3). aegis-org genera los archivos y
-aegis-secret la credencial; de ahí en adelante el operador quedaba
-solo con `gh` y una lista mental. El paso que aegis-secret imprime
-como «FALTA UN PASO, y es a mano» —registrar la mitad pública en
-GitHub— era irreducible solo mientras nadie lo mecanizara: GitHub no
-acepta que la clave se registre sola, pero sí acepta `gh repo
-deploy-key add`. `aplicar` es ese paso, reducido.
+THE PROBLEM IT SOLVES
+─────────────────────
+Signing an organization up left three steps that no tool closed, and all
+three are against GitHub: create the app's repo, register the deploy key,
+and set up the webhook — steps 4, 6 and 8 of the manual path
+(journeys/design.md §3). aegis-org generates the files and aegis-secret
+the credential; from there on the operator was left alone with `gh` and a
+mental list. The step aegis-secret prints as «ONE STEP IS MISSING, and it
+is by hand» —registering the public half in GitHub— was irreducible only
+while nobody mechanized it: GitHub does not accept the key registering
+itself, but it does accept `gh repo deploy-key add`. `apply` is that step,
+reduced.
 
-Y del otro lado de la misma alta: escribir el contrato, el esqueleto
-del repo y correr las derivaciones era una receta de cuatro comandos
-que había que saberse. `nueva` es esa receta, en orden y de una vez —
-el camino de plantilla de caminos/design.md §1, sin encerrar a nadie:
-lo que genera es EXACTAMENTE lo que el artesano escribe a mano, y al
-segundo siguiente el usuario ES un artesano (la plantilla se evapora,
-§0.3).
+And on the other side of the same sign-up: writing the contract, the
+repo's skeleton and running the derivations was a four-command recipe you
+had to know by heart. `new` is that recipe, in order and in one go — the
+template path of journeys/design.md §1, without locking anybody in: what
+it generates is EXACTLY what the artisan writes by hand, and a second
+later the user IS an artisan (the template evaporates, §0.3).
 
-LA FRONTERA (la regla de la casa, grabada acá como en aegis-org)
-────────────────────────────────────────────────────────────────
-Los dos subcomandos viven a un lado y al otro de la MISMA línea, y esa
-línea es todo el diseño (caminos/design.md §0.2 y §3):
+THE BORDER (the house rule, carved here as in aegis-org)
+────────────────────────────────────────────────────────
+The two subcommands live on either side of the SAME line, and that line
+is the whole design (journeys/design.md §0.2 and §3):
 
-  `nueva`   ESCRIBE ARCHIVOS Y JAMÁS TOCA EL MUNDO. Contrato, staging,
-            derivaciones, secretos cifrados: todo es git diff, todo es
-            revisable, nada salió de esta máquina. No usa `gh`, no usa
-            la red. Generar es inocuo.
-  `aplicar` HABLA CON EL MUNDO (GitHub) Y JAMÁS ESCRIBE EN LOS REPOS —
-            ni en platform/ ni en el repo de la app CON HISTORIA.
+  `new`    WRITES FILES AND NEVER TOUCHES THE WORLD. Contract, staging,
+           derivations, encrypted secrets: everything is a git diff,
+           everything is reviewable, nothing left this machine. It does not
+           use `gh`, it does not use the network. Generating is harmless.
+  `apply`  TALKS TO THE WORLD (GitHub) AND NEVER WRITES INTO THE REPOS —
+           neither into platform/ nor into the app's repo WITH HISTORY.
 
-Es el espejo del «NO HABLA CON EL CLUSTER» de aegis-org, partido en
-dos: entre generar y ejecutar hay una PAUSA con un humano adentro (el
-plan/apply de tofu, aplicado al onboarding). La única siembra que
-`aplicar` hace en un repo ajeno es empujar el esqueleto a un repo
-VACÍO (0 commits en la rama default): plantar donde no hay nada.
-Un repo con historia jamás se pisa — no hay `--force` en este archivo
-y no debe haberlo nunca. (El init sí fuerza en la fase 12, y puede:
-sus repos están marcados desechables POR CONSTRUCCIÓN. Los de una
-organización no lo están, y esa diferencia es toda la regla.)
+It is the mirror of aegis-org's «IT DOES NOT TALK TO THE CLUSTER», split
+in two: between generating and executing there is a PAUSE with a human
+inside (tofu's plan/apply, applied to onboarding). The only planting
+`apply` does in somebody else's repo is pushing the skeleton into an EMPTY
+repo (0 commits on the default branch): planting where there is nothing.
+A repo with history is never trampled — there is no `--force` in this file
+and there never must be. (The init does force at phase 12, and it may: its
+repos are marked disposable BY CONSTRUCTION. An organization's are not,
+and that difference is the whole rule.)
 
-QUIÉN GENERA Y QUIÉN EJECUTA
-────────────────────────────
-aegis-org DERIVA (manifiestos, jobs, Jenkinsfiles al staging
-.aegis-app/) y aegis-secret CREA la credencial cifrada; este comando
-EJECUTA esa derivación contra GitHub. La lista de repos sale de
-`repos_de()` del generador — la MISMA que decide las Applications, el
-sourceRepos del AppProject y las credenciales. Cuarta consumidora de
-la misma fuente, y por lo mismo de siempre: dos listas calculadas
-aparte es cómo se desincronizan. Los webhooks no se listan acá: su
-fuente honesta es el values de Jenkins, y ese invariante ya tiene
-dueño (bin/aegis-webhook) — se delega, no se duplica.
+WHO GENERATES AND WHO EXECUTES
+──────────────────────────────
+aegis-org DERIVES (manifests, jobs, Jenkinsfiles into the .aegis-app/
+staging area) and aegis-secret CREATES the encrypted credential; this
+command EXECUTES that derivation against GitHub. The list of repos comes
+out of the generator's `repos_of()` — the SAME one that decides the
+Applications, the AppProject's sourceRepos and the credentials. Fourth
+consumer of the same source, and for the same reason as always: two lists
+computed apart is how they go out of sync. The webhooks are not listed
+here: their honest source is Jenkins's values, and that invariant already
+has an owner (bin/aegis-webhook) — it is delegated, not duplicated.
 
-TRES DESENLACES POR PASO (doctrina de la casa)
-──────────────────────────────────────────────
-hecho / ya estaba / NO SE PUDO EVALUAR. El tercero es un AVISO y jamás
-un visto bueno: no poder mirar no es lo mismo que estar bien (el rc 2
-de aegis-edge y aegis-webhook, por la misma enfermedad E). Re-correr
-con todo hecho termina en puro «ya estaba» — converger, no ejecutar
-(caminos/design.md §0.4). Vale para los dos subcomandos: `nueva`
-re-corrida con todo hecho también termina en puro «ya estaba».
+THREE OUTCOMES PER STEP (the house doctrine)
+────────────────────────────────────────────
+done / already / COULD NOT EVALUATE. The third is a WARNING and never an
+approval: not being able to look is not the same as being fine (the rc 2
+of aegis-edge and aegis-webhook, from the same disease E). Re-running with
+everything done ends up as pure «already» — converge, do not execute
+(journeys/design.md §0.4). It holds for both subcommands: `new` re-run
+with everything done also ends up as pure «already».
 
-    bin/aegis-app nueva tienda --plantilla base   # contrato + esqueleto + derivar
-    bin/aegis-app nueva tienda                    # artesano: el contrato ya está,
-                                                  # solo re-deriva (re-entrada)
-    bin/aegis-app aplicar orgs/ejemplo.yaml       # converge contra GitHub
-    bin/aegis-app aplicar ejemplo --check         # dice qué haría, sin tocar
+    bin/aegis-app new tienda --template base   # contract + skeleton + derive
+    bin/aegis-app new tienda                   # artisan: the contract is already
+                                               # there, it only re-derives (re-entry)
+    bin/aegis-app apply orgs/ejemplo.yaml      # converges against GitHub
+    bin/aegis-app apply ejemplo --check        # says what it would do, without touching
 
-Devuelve 0 si todo estaba o quedó hecho, 1 si falta algo por hacer
-(--check), 2 si algo NO SE PUDO EVALUAR o abortó.
+It returns 0 if everything was or has been done, 1 if something is left to
+do (--check), 2 if something COULD NOT BE EVALUATED or aborted.
 
-Queda humano a propósito (caminos/design.md §3): el commit+push de
-platform/ —acto de gobierno— y el `tofu apply` del borde (#46). Este
-comando los dice al final, no los hace.
+Left human on purpose (journeys/design.md §3): the commit+push of
+platform/ —an act of government— and the edge's `tofu apply` (#46). This
+command names them at the end, it does not do them.
 """
 import argparse
 import base64
@@ -94,734 +93,738 @@ import tempfile
 try:
     import yaml
 except ImportError:
-    sys.exit("falta pyyaml (python3-yaml)")
+    sys.exit("pyyaml is missing (python3-yaml)")
 
-# ── preámbulo canónico de python (V-102) ─────────────────────────────
+# ── canonical python preamble (V-102) ────────────────────────────────
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
 from aegis import cli, paths             # noqa: E402
 
-# RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
-# En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
-# el comando vivía DENTRO de la instancia. Al mudar el código al
-# producto la misma línea siguió compilando y pasó a apuntar al lugar
-# equivocado — la «dependencia invisible a un grep» de C1/C2.
-RAIZ = str(paths.platform_dir())
-AQUI = os.path.join(_AEGIS_ROOT, "libexec")
-DIR_ORGS = os.path.join(RAIZ, "orgs")
-DIR_STAGING = os.path.join(RAIZ, ".aegis-app")
-WEBHOOK = os.path.join(AQUI, "aegis-webhook")
+# PLATFORM_DIR is the INSTANCE (the live checkout of the platform), not
+# the product. In v2 this line was `dirname(dirname(__file__))` and it
+# worked because the command lived INSIDE the instance. On moving the
+# code to the product the same line went on compiling and started
+# pointing at the wrong place — C1/C2's «dependency invisible to a grep».
+PLATFORM_DIR = str(paths.platform_dir())
+HERE = os.path.join(_AEGIS_ROOT, "libexec")
+ORGS_DIR = os.path.join(PLATFORM_DIR, "orgs")
+STAGING_DIR = os.path.join(PLATFORM_DIR, ".aegis-app")
+WEBHOOK = os.path.join(HERE, "aegis-webhook")
 
-# Los repos que ESTE comando crea llevan un topic propio, no el
-# `aegis-v2-disposable` del init: ese marcador significa «el init puede
-# pisarme con --force», y un repo de organización es exactamente lo
-# contrario de eso. El topic dice quién lo creó, nada más.
+# The repos THIS command creates carry a topic of their own, not the
+# init's `aegis-v2-disposable`: that marker means «the init may trample
+# me with --force», and an organization's repo is exactly the opposite of
+# that. The topic says who created it, nothing more.
 TOPIC = "aegis-app"
-TITULO_KEY = "aegis-argocd-ro"   # el mismo que aegis-secret manda a poner a mano
+KEY_TITLE = "aegis-argocd-ro"   # the same one aegis-secret tells you to set by hand
 
 REPO_URL = re.compile(
     r"^(?:git@github\.com:|https://github\.com/)([^/]+)/(.+?)(?:\.git)?/?$")
 
-rojo = "\033[31m"; verde = "\033[32m"; ama = "\033[33m"; gris = "\033[90m"; fin = "\033[0m"
+red = "\033[31m"; green = "\033[32m"; yellow = "\033[33m"; gray = "\033[90m"; reset = "\033[0m"
 if not sys.stdout.isatty():
-    rojo = verde = ama = gris = fin = ""
+    red = green = yellow = gray = reset = ""
 
 
 class Error(Exception):
     pass
 
 
-def _generador():
-    """El generador, como MÓDULO del paquete.
+def _generator():
+    """The generator, as a MODULE of the package.
 
-    La lista de repos sale de AHÍ: reimplementar `repos_de` acá sería
-    la cuarta copia de la misma regla, y la forma de fallar sería fea
-    —el repo se crea con un nombre, la Application lee otro, y el error
-    habla de permisos y no de que dos listas divergieron—.
+    The list of repos comes from THERE: reimplementing `repos_of` here
+    would be the fourth copy of the same rule, and the way it would fail
+    is ugly —the repo is created under one name, the Application reads
+    another, and the error talks about permissions and not about two
+    lists having diverged—.
 
-    En v2 esto cargaba el ejecutable aegis-org con SourceFileLoader
-    (C1). Ahora es un import de verdad: si el paquete no está, falla
-    acá con el motivo, en vez de degradarse en silencio.
+    In v2 this loaded the aegis-org executable with SourceFileLoader
+    (C1). Now it is a real import: if the package is not there, it fails
+    here with the reason, instead of degrading in silence.
     """
     from aegis import org
     return org
 
 
-def _contrato(arg):
-    """Resuelve `orgs/x.yaml` o `x` al contrato VALIDADO.
+def _contract(arg):
+    """Resolves `orgs/x.yaml` or `x` to the VALIDATED contract.
 
-    Se valida con el validador del generador y no con un safe_load a
-    secas: un contrato inválido no debe llegar a tocar GitHub, y el
-    validador ya sabe decir por qué con el dedo en la línea.
+    It is validated with the generator's validator and not with a bare
+    safe_load: an invalid contract must not get as far as touching
+    GitHub, and the validator already knows how to say why with its
+    finger on the line.
     """
-    ruta = arg if os.path.exists(arg) else os.path.join(DIR_ORGS, f"{arg}.yaml")
-    if not os.path.exists(ruta):
-        raise Error(f"no existe {arg} (ni como archivo ni como orgs/{arg}.yaml)")
-    gen = _generador()
-    planes = yaml.safe_load(open(gen.PLANES, encoding="utf-8"))
+    path = arg if os.path.exists(arg) else os.path.join(ORGS_DIR, f"{arg}.yaml")
+    if not os.path.exists(path):
+        raise Error(f"{arg} does not exist (neither as a file nor as orgs/{arg}.yaml)")
+    gen = _generator()
+    plans = yaml.safe_load(open(gen.PLANS, encoding="utf-8"))
     try:
-        c = gen.validar(yaml.safe_load(open(ruta, encoding="utf-8")), planes)
-    except gen.Invalido as e:
-        raise Error(f"{ruta}: {e}")
-    return ruta, c
+        c = gen.validate(yaml.safe_load(open(path, encoding="utf-8")), plans)
+    except gen.Invalid as e:
+        raise Error(f"{path}: {e}")
+    return path, c
 
 
 def _owner_repo(url):
     m = REPO_URL.match(url or "")
     if not m:
-        raise Error(f"no entiendo la URL {url!r} (espero git@github.com:owner/repo.git)")
+        raise Error(f"I do not understand the URL {url!r} (I expect git@github.com:owner/repo.git)")
     return m.group(1), m.group(2)
 
 
-def _gh(*args, entrada=None):
-    return subprocess.run(["gh", *args], input=entrada, capture_output=True, text=True)
+def _gh(*args, stdin_text=None):
+    return subprocess.run(["gh", *args], input=stdin_text, capture_output=True, text=True)
 
 
-def _repo_existe(owner, repo):
-    """True/False, o Error si no se pudo MIRAR — que no es lo mismo que no estar."""
+def _repo_exists(owner, repo):
+    """True/False, or Error if it could not be LOOKED AT — which is not the same as not being there."""
     r = _gh("api", f"repos/{owner}/{repo}", "--jq", ".id")
     if r.returncode == 0:
         return True
     if "HTTP 404" in r.stderr:
         return False
-    raise Error(f"no pude mirar {owner}/{repo}: {r.stderr.strip()}")
+    raise Error(f"I could not look at {owner}/{repo}: {r.stderr.strip()}")
 
 
-def _tiene_historia(owner, repo):
-    """¿Hay al menos un commit en la rama default?
+def _has_history(owner, repo):
+    """Is there at least one commit on the default branch?
 
-    Se le pregunta a la API y no a un clone: GitHub responde 409 «Git
-    Repository is empty» para un repo sin commits, que es exactamente
-    la distinción que la guarda del esqueleto necesita.
+    The API is asked and not a clone: GitHub answers 409 «Git Repository
+    is empty» for a repo without commits, which is exactly the
+    distinction the skeleton's guard needs.
     """
     r = _gh("api", f"repos/{owner}/{repo}/commits?per_page=1", "--jq", "length")
     if r.returncode == 0:
         return True
     if "HTTP 409" in r.stderr or "is empty" in r.stderr:
         return False
-    raise Error(f"no pude mirar la historia de {owner}/{repo}: {r.stderr.strip()}")
+    raise Error(f"I could not look at the history of {owner}/{repo}: {r.stderr.strip()}")
 
 
-def _crear_repo(owner, repo, org):
-    """`gh repo create` con la convención del init (fase 12): privado + topic."""
+def _create_repo(owner, repo, org):
+    """`gh repo create` with the init's convention (phase 12): private + topic."""
     r = _gh("repo", "create", f"{owner}/{repo}", "--private",
-            "--description", f"aegis — organización {org}")
+            "--description", f"aegis — organization {org}")
     if r.returncode != 0:
-        raise Error(f"gh repo create {owner}/{repo} falló: {r.stderr.strip()}")
+        raise Error(f"gh repo create {owner}/{repo} failed: {r.stderr.strip()}")
     r = _gh("api", "-X", "PUT", f"repos/{owner}/{repo}/topics", "-f", f"names[]={TOPIC}")
     if r.returncode != 0:
-        raise Error(f"no pude marcar {owner}/{repo} con el topic {TOPIC}: {r.stderr.strip()}")
+        raise Error(f"I could not mark {owner}/{repo} with the topic {TOPIC}: {r.stderr.strip()}")
 
 
-# ── el esqueleto ──────────────────────────────────────────────────────
+# ── the skeleton ──────────────────────────────────────────────────────
 
-def _staging_de(c, url):
-    """El staging que corresponde a este repo, o (None, por qué no).
+def _staging_for(c, url):
+    """The staging area that corresponds to this repo, or (None, why not).
 
-    Para un repo declarado EN UN SERVICIO la respuesta es directa:
-    `.aegis-app/<org>/<svc>/`. Para el repo DE LA ORGANIZACIÓN solo hay
-    respuesta si exactamente UN servicio construible lo usa: con dos o
-    más, el layout del monorepo (¿qué va en la raíz? ¿qué Jenkinsfile,
-    si el multibranch lee uno solo?) no es derivable — es la herencia
-    anotada en RUTA.md: el modelo v1 es repo-por-servicio, y blog y
-    portafolio viven con un Jenkinsfile adaptado a mano. Inventar un
-    layout acá sería decidir por el artesano.
+    For a repo declared IN A SERVICE the answer is direct:
+    `.aegis-app/<org>/<svc>/`. For the ORGANIZATION's repo there is an
+    answer only if exactly ONE buildable service uses it: with two or
+    more, the monorepo's layout (what goes at the root? which Jenkinsfile,
+    if the multibranch reads only one?) is not derivable — it is the
+    inheritance noted in RUTA.md: the v1 model is repo-per-service, and
+    blog and portafolio live with a Jenkinsfile adapted by hand.
+    Inventing a layout here would be deciding for the artisan.
     """
     org = c["organizacion"]
-    gen = _generador()
+    gen = _generator()
     for s in c.get("servicios") or []:
         if s.get("repo") == url:
-            return os.path.join(DIR_STAGING, org, s["nombre"]), None
-    candidatos = [s["nombre"] for s in c.get("servicios") or []
-                  if s.get("tipo") in gen.TIPOS_CON_IMAGEN and not s.get("repo")]
-    if len(candidatos) == 1:
-        return os.path.join(DIR_STAGING, org, candidatos[0]), None
-    if not candidatos:
-        return None, "ningún servicio construible usa este repo"
-    return None, (f"lo comparten {len(candidatos)} servicios "
-                  f"({', '.join(candidatos)}) y el layout del monorepo no es "
-                  f"derivable — sembralo a mano (v1 es repo-por-servicio)")
+            return os.path.join(STAGING_DIR, org, s["nombre"]), None
+    candidates = [s["nombre"] for s in c.get("servicios") or []
+                  if s.get("tipo") in gen.TYPES_WITH_IMAGE and not s.get("repo")]
+    if len(candidates) == 1:
+        return os.path.join(STAGING_DIR, org, candidates[0]), None
+    if not candidates:
+        return None, "no buildable service uses this repo"
+    return None, (f"{len(candidates)} services share it "
+                  f"({', '.join(candidates)}) and the monorepo's layout is not "
+                  f"derivable — plant it by hand (v1 is repo-per-service)")
 
 
-def _sembrar(owner, repo, staging):
-    """Empuja el staging a un repo VACÍO. Push normal, JAMÁS --force.
+def _plant(owner, repo, staging):
+    """Pushes the staging area into an EMPTY repo. A normal push, NEVER --force.
 
-    Si entre el chequeo de vacío y este push apareció historia, el push
-    FALLA con non-fast-forward — y fallar es el comportamiento correcto:
-    la guarda es «no pisar», no «ganar la carrera».
+    If history appeared between the emptiness check and this push, the
+    push FAILS with non-fast-forward — and failing is the correct
+    behaviour: the guard is «do not trample», not «win the race».
 
-    El push va por https con el credential helper de gh (la fase 12 del
-    init lo deja configurado con `gh auth setup-git`); las deploy keys
-    SSH son de los consumidores in-cluster, no de esta máquina.
+    The push goes over https with gh's credential helper (phase 12 of the
+    init leaves it configured with `gh auth setup-git`); the SSH deploy
+    keys belong to the in-cluster consumers, not to this machine.
     """
     d = tempfile.mkdtemp(prefix="aegis-app.")
 
     def git(*args):
         r = subprocess.run(["git", "-C", d, *args], capture_output=True, text=True)
         if r.returncode != 0:
-            raise Error(f"git {args[0]} falló: {r.stderr.strip() or r.stdout.strip()}\n"
-                        f"  (si es por identidad: git config --global user.name/user.email\n"
-                        f"   — la fase 12 del init lo deja hecho)")
+            raise Error(f"git {args[0]} failed: {r.stderr.strip() or r.stdout.strip()}\n"
+                        f"  (if it is about identity: git config --global user.name/user.email\n"
+                        f"   — phase 12 of the init leaves that done)")
         return r
 
     try:
         shutil.copytree(staging, d, dirs_exist_ok=True)
         git("init", "-b", "main")
         git("add", "-A")
-        git("commit", "-m", f"feat: esqueleto inicial (sembrado por aegis-app aplicar)",
+        git("commit", "-m", f"feat: initial skeleton (planted by aegis app apply)",
             "--no-verify")
         git("remote", "add", "origin", f"https://github.com/{owner}/{repo}.git")
-        git("push", "-u", "origin", "main")   # sin --force: ver arriba
+        git("push", "-u", "origin", "main")   # without --force: see above
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
 
-# ── la deploy key ─────────────────────────────────────────────────────
+# ── the deploy key ────────────────────────────────────────────────────
 
-def _publica_de(nombre):
-    """La mitad pública de la deploy key de la organización.
+def _public_of(name):
+    """The public half of the organization's deploy key.
 
-    La pública no está persistida en ningún lado, y es a propósito:
-    aegis-secret la imprime UNA vez al crear el par y guarda solo la
-    privada, cifrada. Así que acá se DERIVA — y se deriva del Secret
-    VIVO en argocd, no del archivo cifrado, por la misma doctrina que
-    el HMAC de aegis-webhook: la clave que importa es la que ArgoCD
-    PRESENTA, no la que git dice que debería presentar. De paso, leer
-    el cluster no necesita la age key; descifrar con sops sí.
+    The public half is not persisted anywhere, and that is on purpose:
+    aegis-secret prints it ONCE when creating the pair and stores only the
+    private one, encrypted. So here it is DERIVED — and it is derived from
+    the LIVE Secret in argocd, not from the encrypted file, by the same
+    doctrine as aegis-webhook's HMAC: the key that matters is the one
+    ArgoCD PRESENTS, not the one git says it should present. As a bonus,
+    reading the cluster does not need the age key; decrypting with sops
+    does.
 
-    El material privado pasa por acá y por eso la receta es la MISMA
-    que _deploy_key de aegis-secret: tmpfs (/dev/shm), directorio 700,
-    archivo 600, shred antes de borrar. `ssh-keygen -y` no sabe leer de
-    stdin —necesita un -f— y esa es la única razón de que toque disco.
-    La privada NO se imprime, no pasa por argv, no sale de tmpfs.
+    The private material passes through here and that is why the recipe is
+    the SAME as aegis-secret's _deploy_key: tmpfs (/dev/shm), a 700
+    directory, a 600 file, shred before deleting. `ssh-keygen -y` does not
+    know how to read from stdin —it needs a -f— and that is the only
+    reason it touches disk. The private half is NOT printed, does not pass
+    through argv, does not leave tmpfs.
     """
     r = subprocess.run(
-        ["kubectl", "get", "secret", f"{nombre}-repo", "-n", "argocd",
+        ["kubectl", "get", "secret", f"{name}-repo", "-n", "argocd",
          "-o", "jsonpath={.data.sshPrivateKey}"],
         capture_output=True, text=True)
     if r.returncode != 0 or not r.stdout.strip():
-        raise Error(f"no pude leer el Secret argocd/{nombre}-repo "
-                    f"(¿kubectl configurado? ¿corrió aegis secret create y "
-                    f"sincronizó argocd-secrets?)")
-    privada = base64.b64decode(r.stdout.strip()).decode()
+        raise Error(f"I could not read the Secret argocd/{name}-repo "
+                    f"(is kubectl configured? did aegis secret create run and "
+                    f"did argocd-secrets sync?)")
+    private = base64.b64decode(r.stdout.strip()).decode()
 
     if not os.path.isdir("/dev/shm"):
-        raise Error("no hay /dev/shm: el material transitorio solo va a tmpfs")
+        raise Error("there is no /dev/shm: transient material only goes to tmpfs")
     d = tempfile.mkdtemp(prefix="aegis-app.", dir="/dev/shm")
     os.chmod(d, 0o700)
     priv = os.path.join(d, "k")
     try:
         with open(os.open(priv, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w",
                   encoding="utf-8") as f:
-            f.write(privada if privada.endswith("\n") else privada + "\n")
+            f.write(private if private.endswith("\n") else private + "\n")
         r = subprocess.run(["ssh-keygen", "-y", "-f", priv],
                            capture_output=True, text=True)
         if r.returncode != 0:
-            raise Error(f"ssh-keygen -y no pudo derivar la pública: {r.stderr.strip()}")
-        # tipo + blob, sin comentario: es la forma en que GitHub la devuelve.
+            raise Error(f"ssh-keygen -y could not derive the public half: {r.stderr.strip()}")
+        # type + blob, without the comment: it is the shape GitHub returns it in.
         return " ".join(r.stdout.split()[:2])
     finally:
         subprocess.run(["shred", "-u", priv], capture_output=True)
         shutil.rmtree(d, ignore_errors=True)
 
 
-def _keys_de(owner, repo):
+def _keys_of(owner, repo):
     r = _gh("api", f"repos/{owner}/{repo}/keys")
     if r.returncode != 0:
-        raise Error(f"no pude listar las deploy keys de {owner}/{repo}: {r.stderr.strip()}")
+        raise Error(f"I could not list the deploy keys of {owner}/{repo}: {r.stderr.strip()}")
     return json.loads(r.stdout)
 
 
-def _registrar_key(owner, repo, publica):
-    """`gh repo deploy-key add`, en su forma API. read_only EXPLÍCITO.
+def _register_key(owner, repo, public):
+    """`gh repo deploy-key add`, in its API form. read_only EXPLICIT.
 
-    Es el default de GitHub, pero acá va declarado igual: una deploy
-    key con escritura en el repo de una app deja que quien tenga el
-    cluster escriba en el repo, que es la dirección equivocada — la
-    misma advertencia que aegis-secret imprime en rojo. El cuerpo
-    entra por stdin por hábito de la casa, aunque la pública sea
-    pública.
+    It is GitHub's default, but here it goes declared anyway: a deploy key
+    with write access on an app's repo lets whoever holds the cluster
+    write into the repo, which is the wrong direction — the same warning
+    aegis-secret prints in red. The body goes in through stdin out of the
+    house's habit, even though the public half is public.
     """
-    cuerpo = {"title": TITULO_KEY, "key": publica, "read_only": True}
+    body = {"title": KEY_TITLE, "key": public, "read_only": True}
     r = _gh("api", "-X", "POST", f"repos/{owner}/{repo}/keys", "--input", "-",
-            entrada=json.dumps(cuerpo))
+            stdin_text=json.dumps(body))
     if r.returncode != 0:
-        raise Error(f"no pude registrar la deploy key en {owner}/{repo}: {r.stderr.strip()}")
+        raise Error(f"I could not register the deploy key in {owner}/{repo}: {r.stderr.strip()}")
 
 
-# ── nueva: el camino de plantilla (solo archivos) ─────────────────────
+# ── new: the template path (files only) ───────────────────────────────
 
-def _dir_plantillas():
-    """Dónde viven las plantillas: `seed/templates/` del PRODUCTO.
+def _templates_dir():
+    """Where the templates live: the PRODUCT's `seed/templates/`.
 
-    La resolución asume el layout de aegis dev seed: platform/ (la
-    instancia, RAIZ de este script) vive ANIDADO en la raíz del repo
-    producto (aegis-v2), con semilla/ al lado. O sea:
+    The resolution assumes the layout of aegis dev seed: platform/ (the
+    instance, this script's PLATFORM_DIR) lives NESTED inside the root of
+    the product repo (aegis-v2), with the seed beside it. That is:
 
-        <producto>/            ← os.path.dirname(RAIZ)
-        ├── seed/templates/   las plantillas (el catálogo de §4)
-        └── platform/             esta instancia (RAIZ)
+        <product>/            ← os.path.dirname(PLATFORM_DIR)
+        ├── seed/templates/   the templates (the catalogue of §4)
+        └── platform/         this instance (PLATFORM_DIR)
 
-    En una instancia SIN el repo producto alrededor —un clone suelto de
-    ops-stack— ese directorio no existe, y la respuesta honesta es un
-    error que nombra lo que falta y el camino que queda (el artesano no
-    necesita plantillas), no un traceback de os.listdir. El retorno de
-    las plantillas a la instancia empaquetada es de A7 (RUTA.md), no de
-    este comando.
+    On an instance WITHOUT the product repo around it —a loose clone of
+    ops-stack— that directory does not exist, and the honest answer is an
+    error that names what is missing and the path that remains (the
+    artisan does not need templates), not a traceback from os.listdir. The
+    return of the templates to the packaged instance belongs to A7
+    (RUTA.md), not to this command.
     """
-    d = os.path.join(os.path.dirname(RAIZ), "seed", "templates")
+    d = os.path.join(os.path.dirname(PLATFORM_DIR), "seed", "templates")
     if not os.path.isdir(d):
         raise Error(
-            f"no encuentro las plantillas: no existe {d}\n"
-            f"  Las plantillas viven en el repo PRODUCTO (aegis-v2), con esta\n"
-            f"  instancia anidada adentro. Este clone parece estar suelto, sin el\n"
-            f"  producto alrededor. Salidas: correr desde un checkout del producto,\n"
-            f"  o el camino artesano — escribí orgs/<org>.yaml a mano y corré\n"
-            f"  `bin/aegis-app nueva <org>` SIN --plantilla, que solo deriva.")
+            f"I cannot find the templates: {d} does not exist\n"
+            f"  The templates live in the PRODUCT repo (aegis-v2), with this\n"
+            f"  instance nested inside it. This clone looks loose, without the\n"
+            f"  product around it. Ways out: run from a checkout of the product,\n"
+            f"  or the artisan path — write orgs/<org>.yaml by hand and run\n"
+            f"  `bin/aegis-app new <org>` WITHOUT --template, which only derives.")
     return d
 
 
-def _plantilla(nombre):
-    """El directorio de UNA plantilla, o el catálogo real en el error."""
-    d = os.path.join(_dir_plantillas(), nombre)
+def _template(name):
+    """The directory of ONE template, or the real catalogue in the error."""
+    d = os.path.join(_templates_dir(), name)
     if not os.path.isdir(d):
-        hay = sorted(x for x in os.listdir(_dir_plantillas())
-                     if os.path.isdir(os.path.join(_dir_plantillas(), x)))
-        raise Error(f"la plantilla {nombre!r} no existe. "
-                    f"Hay: {', '.join(hay) or '(ninguna)'}")
+        available = sorted(x for x in os.listdir(_templates_dir())
+                           if os.path.isdir(os.path.join(_templates_dir(), x)))
+        raise Error(f"the template {name!r} does not exist. "
+                    f"There is: {', '.join(available) or '(none)'}")
     return d
 
 
-# [A-Z0-9_] y no [A-Z]: hasta el 2026-08-24 este patrón era
-# `__[A-Z]+__`, que NO reconoce ningún placeholder con guion bajo
-# adentro — o sea ni __ROOT_DOMAIN__ ni __GH_OWNER__ ni
-# __PLATFORM_REPO__, que son 83 de las 130 apariciones de la
-# semilla. El guard de _render_tpl existe para que una plantilla
-# que pide algo que no sé derivar frene acá; con el patrón viejo
-# entregaba el repo de la app con el literal adentro.
+# [A-Z0-9_] and not [A-Z]: until 2026-08-24 this pattern was
+# `__[A-Z]+__`, which does NOT recognize a single placeholder with an
+# underscore inside — that is, neither __ROOT_DOMAIN__ nor __GH_OWNER__
+# nor __PLATFORM_REPO__, which are 83 of the seed's 130 appearances. The
+# guard in _render_tpl exists so that a template asking for something I
+# do not know how to derive stops here; with the old pattern it handed
+# over the app's repo with the literal inside.
 PLACEHOLDER = re.compile(r"__[A-Z0-9_]+__")
 
 
-def _valores_de(org):
-    """Los placeholders de la plantilla, TODOS derivables del nombre.
+def _values_for(org):
+    """The template's placeholders, ALL derivable from the name.
 
-    El usuario da UNA palabra (la organización) y el resto sale de la
-    instancia misma — segunda fuente de verdad, cero:
+    The user gives ONE word (the organization) and the rest comes out of
+    the instance itself — a second source of truth, zero:
 
-      __ORG__      la palabra
-      __DOMINIO__  <org>.<root_domain de edge.yaml> — la misma raíz de
-                   la que aegis-org deriva el CNAME del borde
-      __REPO__     git@github.com:<owner>/<org>-app.git — el owner sale
-                   de REPO_OPS del generador (el repo de ESTA instancia:
-                   las apps de la casa viven en la misma cuenta)
+      __ORG__      the word
+      __DOMINIO__  <org>.<root_domain from edge.yaml> — the same root
+                   aegis-org derives the edge's CNAME from
+      __REPO__     git@github.com:<owner>/<org>-app.git — the owner comes
+                   out of the generator's platform_repo() (THIS instance's repo:
+                   the house's apps live in the same account)
     """
-    gen = _generador()
-    owner, _ = _owner_repo(gen.REPO_OPS)
+    gen = _generator()
+    owner, _ = _owner_repo(gen.platform_repo())
     edge = yaml.safe_load(open(gen.EDGE, encoding="utf-8")) or {}
-    raiz = edge.get("root_domain")
-    if not raiz:
-        raise Error(f"{os.path.relpath(gen.EDGE, RAIZ)} no declara root_domain — "
-                    f"sin él no puedo derivar el `dominio:` del contrato")
-    return {"__ORG__": org, "__DOMINIO__": f"{org}.{raiz}",
+    root = edge.get("root_domain")
+    if not root:
+        raise Error(f"{os.path.relpath(gen.EDGE, PLATFORM_DIR)} does not declare root_domain — "
+                    f"without it I cannot derive the contract's `dominio:`")
+    return {"__ORG__": org, "__DOMINIO__": f"{org}.{root}",
             "__REPO__": f"git@github.com:{owner}/{org}-app.git"}
 
 
-def _render_tpl(texto, valores, donde):
-    for k, v in valores.items():
-        texto = texto.replace(k, v)
-    if (suelto := PLACEHOLDER.search(texto)) is not None:
-        # Una plantilla que pide algo que este comando no sabe derivar
-        # tiene que frenar acá, no entregar un contrato con __X__ adentro
-        # que el validador rechaza con un mensaje sobre otra cosa.
-        raise Error(f"{donde}: placeholder {suelto.group(0)} sin valor — "
-                    f"este comando deriva {', '.join(sorted(valores))} y nada más")
-    return texto
+def _render_tpl(text, values, where):
+    for k, v in values.items():
+        text = text.replace(k, v)
+    if (loose := PLACEHOLDER.search(text)) is not None:
+        # A template that asks for something this command does not know
+        # how to derive has to stop here, not hand over a contract with
+        # __X__ inside that the validator rejects with a message about
+        # something else.
+        raise Error(f"{where}: placeholder {loose.group(0)} without a value — "
+                    f"this command derives {', '.join(sorted(values))} and nothing else")
+    return text
 
 
-def _instanciar_contrato(org, dir_plantilla, valores, tot):
-    """Paso 2 de `nueva`: el contrato, desde la plantilla, VALIDADO antes
-    de tocar disco. Un contrato que el generador rechazaría no se
-    escribe: la plantilla está rota y el error es de la plantilla."""
-    destino = os.path.join(DIR_ORGS, f"{org}.yaml")
-    tpl = os.path.join(dir_plantilla, "contract.yaml.tpl")
+def _instantiate_contract(org, template_dir, values, tot):
+    """Step 2 of `new`: the contract, from the template, VALIDATED before
+    touching disk. A contract the generator would reject is not written:
+    the template is broken and the error belongs to the template."""
+    target = os.path.join(ORGS_DIR, f"{org}.yaml")
+    tpl = os.path.join(template_dir, "contract.yaml.tpl")
     if not os.path.exists(tpl):
-        raise Error(f"la plantilla no tiene contract.yaml.tpl ({tpl})")
-    texto = _render_tpl(open(tpl, encoding="utf-8").read(), valores,
-                        os.path.relpath(tpl, RAIZ))
-    gen = _generador()
-    planes = yaml.safe_load(open(gen.PLANES, encoding="utf-8"))
+        raise Error(f"the template has no contract.yaml.tpl ({tpl})")
+    text = _render_tpl(open(tpl, encoding="utf-8").read(), values,
+                       os.path.relpath(tpl, PLATFORM_DIR))
+    gen = _generator()
+    plans = yaml.safe_load(open(gen.PLANS, encoding="utf-8"))
     try:
-        gen.validar(yaml.safe_load(texto), planes)
-    except gen.Invalido as e:
-        raise Error(f"el contrato instanciado no valida — la plantilla está rota:\n  {e}")
-    os.makedirs(DIR_ORGS, exist_ok=True)
-    open(destino, "w", encoding="utf-8").write(texto)
-    marca(tot, "hecho", "contrato", os.path.relpath(destino, RAIZ))
-    return destino
+        gen.validate(yaml.safe_load(text), plans)
+    except gen.Invalid as e:
+        raise Error(f"the instantiated contract does not validate — the template is broken:\n  {e}")
+    os.makedirs(ORGS_DIR, exist_ok=True)
+    open(target, "w", encoding="utf-8").write(text)
+    mark(tot, "done", "contract", os.path.relpath(target, PLATFORM_DIR))
+    return target
 
 
-def _instanciar_esqueletos(org, dir_plantilla, valores, tot):
-    """Paso 3 de `nueva`: los esqueletos, al staging `.aegis-app/<org>/<svc>/`.
+def _instantiate_skeletons(org, template_dir, values, tot):
+    """Step 3 of `new`: the skeletons, into the `.aegis-app/<org>/<svc>/` staging area.
 
-    Convive con el Jenkinsfile que aegis-org deja en el MISMO directorio
-    (caminos §2b): esta función jamás escribe un archivo llamado
-    Jenkinsfile — ese lo instancia la derivación, desde el template
-    canónico, en el paso siguiente.
+    It coexists with the Jenkinsfile aegis-org leaves in the SAME
+    directory (journeys §2b): this function never writes a file called
+    Jenkinsfile — that one is instantiated by the derivation, from the
+    canonical template, in the next step.
 
-    Convergencia archivo por archivo: falta → se escribe; idéntico →
-    «ya estaba»; DISTINTO → se deja como está y se avisa. El staging es
-    la semilla de UN push inicial, pero si alguien lo retocó antes de
-    aplicar, pisárselo sería decidir por él.
+    Convergence file by file: missing → it is written; identical →
+    «already»; DIFFERENT → it is left as it is and a warning is given. The
+    staging area is the seed of ONE initial push, but if somebody touched
+    it up before applying, trampling it would be deciding for them.
     """
-    base = os.path.join(dir_plantilla, "repos")
+    base = os.path.join(template_dir, "repos")
     if not os.path.isdir(base) or not os.listdir(base):
-        raise Error(f"la plantilla no tiene esqueletos en {base}")
+        raise Error(f"the template has no skeletons in {base}")
     for svc in sorted(os.listdir(base)):
-        origen = os.path.join(base, svc)
-        if not os.path.isdir(origen):
+        source = os.path.join(base, svc)
+        if not os.path.isdir(source):
             continue
-        destino = os.path.join(DIR_STAGING, org, svc)
-        nuevos = iguales = distintos = 0
-        for d, _, archivos in os.walk(origen):
-            for a in sorted(archivos):
-                if a == "Jenkinsfile":   # de aegis-org, jamás de acá
+        target = os.path.join(STAGING_DIR, org, svc)
+        new_files = same = different = 0
+        for d, _, files in os.walk(source):
+            for a in sorted(files):
+                if a == "Jenkinsfile":   # aegis-org's, never from here
                     continue
-                rel = os.path.relpath(os.path.join(d, a), origen)
-                texto = _render_tpl(
+                rel = os.path.relpath(os.path.join(d, a), source)
+                text = _render_tpl(
                     open(os.path.join(d, a), encoding="utf-8").read(),
-                    valores, os.path.join(os.path.relpath(origen, RAIZ), rel))
-                camino = os.path.join(destino, rel)
+                    values, os.path.join(os.path.relpath(source, PLATFORM_DIR), rel))
+                dest_path = os.path.join(target, rel)
                 try:
-                    viejo = open(camino, encoding="utf-8").read()
+                    old = open(dest_path, encoding="utf-8").read()
                 except FileNotFoundError:
-                    viejo = None
-                if viejo == texto:
-                    iguales += 1
-                elif viejo is not None:
-                    distintos += 1
+                    old = None
+                if old == text:
+                    same += 1
+                elif old is not None:
+                    different += 1
                 else:
-                    os.makedirs(os.path.dirname(camino), exist_ok=True)
-                    open(camino, "w", encoding="utf-8").write(texto)
-                    nuevos += 1
-        rel_dest = os.path.relpath(destino, RAIZ)
-        if distintos:
-            marca(tot, "aviso", f"esqueleto {svc}",
-                  f"{distintos} archivo(s) de {rel_dest} difieren de la plantilla "
-                  f"y NO se pisan (revisalos vos)")
-        elif nuevos:
-            marca(tot, "hecho", f"esqueleto {svc}",
-                  f"{nuevos} archivo(s) en {rel_dest}"
-                  + (f" ({iguales} ya estaban)" if iguales else ""))
+                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                    open(dest_path, "w", encoding="utf-8").write(text)
+                    new_files += 1
+        rel_dest = os.path.relpath(target, PLATFORM_DIR)
+        if different:
+            mark(tot, "not_evaluable", f"skeleton {svc}",
+                 f"{different} file(s) of {rel_dest} differ from the template "
+                 f"and are NOT trampled (review them yourself)")
+        elif new_files:
+            mark(tot, "done", f"skeleton {svc}",
+                 f"{new_files} file(s) in {rel_dest}"
+                 + (f" ({same} were already there)" if same else ""))
         else:
-            marca(tot, "ya", f"esqueleto {svc}", rel_dest)
+            mark(tot, "already", f"skeleton {svc}", rel_dest)
 
 
-def _derivar(ruta, tot):
-    """Pasos 4 y 5 de `nueva`: aegis-org aplicar + aegis-secret --todos.
+def _derive(path, tot):
+    """Steps 4 and 5 of `new`: aegis org apply + aegis secret create.
 
-    Subprocesos con el MISMO python y la salida SIN capturar: los dos
-    reportan su propia convergencia línea a línea y ese reporte es para
-    el humano, no para parsearlo acá. Solo el rc vuelve, y un rc != 0
-    corta: derivar a medias y seguir sería imprimir un «siguiente paso»
-    sobre un estado que no existe.
+    Subprocesses with the SAME python and the output NOT captured: both
+    report their own convergence line by line and that report is for the
+    human, not to be parsed here. Only the rc comes back, and an rc != 0
+    stops it: deriving halfway and going on would be printing a «next
+    step» over a state that does not exist.
     """
-    for paso, cmd in (
-            ("derivaciones", [sys.executable, os.path.join(AQUI, "aegis-org"),
-                              "apply", ruta]),
-            ("secretos", [sys.executable, os.path.join(AQUI, "aegis-secret"),
-                          "create", ruta])):
-        print(f"\n{gris}── {paso}: {' '.join(os.path.relpath(x, RAIZ) if os.path.isabs(x) else x for x in cmd[1:])} ──{fin}")
+    for step, cmd in (
+            ("derivations", [sys.executable, os.path.join(HERE, "aegis-org"),
+                             "apply", path]),
+            ("secrets", [sys.executable, os.path.join(HERE, "aegis-secret"),
+                         "create", path])):
+        print(f"\n{gray}── {step}: {' '.join(os.path.relpath(x, PLATFORM_DIR) if os.path.isabs(x) else x for x in cmd[1:])} ──{reset}")
         sys.stdout.flush()
         rc = subprocess.run(cmd).returncode
         if rc != 0:
-            raise Error(f"{paso} terminaron con rc {rc} — resolvé eso y re-corré "
-                        f"`bin/aegis-app nueva ...`, que converge")
-        marca(tot, "hecho", paso, "detalle arriba")
+            raise Error(f"{step} ended with rc {rc} — sort that out and re-run "
+                        f"`bin/aegis-app new ...`, which converges")
+        mark(tot, "done", step, "detail above")
 
 
-def nueva(org, plantilla, tot):
-    gen = _generador()
-    if not gen.NOMBRE_VALIDO.match(org):
-        # El MISMO patrón que valida el contrato — no una copia local.
-        raise Error(f"{org!r} no es un nombre de organización válido "
-                    f"({gen.NOMBRE_VALIDO.pattern}); el namespace va a ser org-{org} "
-                    f"y el contrato lo rechazaría igual, mejor acá y ahora")
-    contrato = os.path.join(DIR_ORGS, f"{org}.yaml")
-    print(f"\n{org}  {gris}(nueva — solo archivos: nada de esto toca el mundo){fin}")
+def new(org, template, tot):
+    gen = _generator()
+    if not gen.VALID_NAME.match(org):
+        # The SAME pattern that validates the contract — not a local copy.
+        raise Error(f"{org!r} is not a valid organization name "
+                    f"({gen.VALID_NAME.pattern}); the namespace is going to be org-{org} "
+                    f"and the contract would reject it anyway, better here and now")
+    contract = os.path.join(ORGS_DIR, f"{org}.yaml")
+    print(f"\n{org}  {gray}(new — files only: none of this touches the world){reset}")
 
-    if plantilla:
-        # ── paso 1: un contrato vivo NO SE PISA ───────────────────
-        if os.path.exists(contrato):
+    if template:
+        # ── step 1: a live contract is NOT trampled ───────────────
+        if os.path.exists(contract):
             raise Error(
-                f"orgs/{org}.yaml YA EXISTE y un contrato vivo no se pisa: se\n"
-                f"  edita a mano (es la única verdad, caminos §0.1). Si lo que\n"
-                f"  querés es re-derivar lo que falte, corré esto mismo SIN\n"
-                f"  --plantilla: `bin/aegis-app nueva {org}`")
-        d = _plantilla(plantilla)
-        valores = _valores_de(org)
-        # ── pasos 2 y 3: contrato + esqueletos ────────────────────
-        _instanciar_contrato(org, d, valores, tot)
-        _instanciar_esqueletos(org, d, valores, tot)
+                f"orgs/{org}.yaml ALREADY EXISTS and a live contract is not trampled: it\n"
+                f"  is edited by hand (it is the only truth, journeys §0.1). If what\n"
+                f"  you want is to re-derive whatever is missing, run this very thing\n"
+                f"  WITHOUT --template: `bin/aegis-app new {org}`")
+        d = _template(template)
+        values = _values_for(org)
+        # ── steps 2 and 3: contract + skeletons ───────────────────
+        _instantiate_contract(org, d, values, tot)
+        _instantiate_skeletons(org, d, values, tot)
     else:
-        # Modo artesano / re-entrada: el contrato es de otro, acá solo
-        # se corre la maquinaria que deriva de él.
-        if not os.path.exists(contrato):
+        # Artisan / re-entry mode: the contract belongs to somebody else,
+        # here we only run the machinery that derives from it.
+        if not os.path.exists(contract):
             raise Error(
-                f"no existe orgs/{org}.yaml. Sin --plantilla este comando no\n"
-                f"  inventa contratos: escribilo a mano (camino artesano — mirá\n"
-                f"  orgs/ejemplo.yaml) o pedile uno a una plantilla:\n"
-                f"  `bin/aegis-app nueva {org} --plantilla base`")
-        marca(tot, "ya", "contrato", f"orgs/{org}.yaml es tuyo — no se toca")
+                f"orgs/{org}.yaml does not exist. Without --template this command does\n"
+                f"  not invent contracts: write it by hand (the artisan path — look at\n"
+                f"  orgs/ejemplo.yaml) or ask a template for one:\n"
+                f"  `bin/aegis-app new {org} --template base`")
+        mark(tot, "already", "contract", f"orgs/{org}.yaml is yours — it is not touched")
 
-    # ── pasos 4 y 5: derivar y cifrar ─────────────────────────────
-    _derivar(contrato, tot)
+    # ── steps 4 and 5: derive and encrypt ─────────────────────────
+    _derive(contract, tot)
 
-    # ── paso 6: el resumen y la pausa ─────────────────────────────
-    staging = os.path.join(DIR_STAGING, org)
-    print(f"\n{verde}listo{fin} — quedó escrito, nada tocó el mundo:")
-    print(f"  {gris}contrato:{fin}   orgs/{org}.yaml")
+    # ── step 6: the summary and the pause ─────────────────────────
+    staging = os.path.join(STAGING_DIR, org)
+    print(f"\n{green}ready{reset} — it has been written, nothing touched the world:")
+    print(f"  {gray}contract:{reset}  orgs/{org}.yaml")
     if os.path.isdir(staging):
         n = sum(len(fs) for _, _, fs in os.walk(staging))
-        print(f"  {gris}staging:{fin}    {os.path.relpath(staging, RAIZ)}/ "
-              f"({n} archivo(s), gitignorado — su destino es OTRO repo)")
-    print(f"  {gris}derivado:{fin}   k8s/organizations/org-{org}/ + jobs, borde, "
-          f"proyectos, credenciales (arriba)")
-    print(f"\nsiguientes pasos, EN ORDEN (la pausa del medio es el diseño):")
-    print(f"  1. revisá el diff: git status && git diff")
-    print(f"  2. {cli.cmd('app apply')} {org} --check   {gris}(y sin --check cuando te guste){fin}")
-    print(f"  3. commit+push de platform/  {gris}(acto de gobierno — humano a propósito){fin}")
-    print(f"  4. tofu apply del borde (#46)  {gris}(tofu/envs/cloudflare-tunnel){fin}")
+        print(f"  {gray}staging:{reset}   {os.path.relpath(staging, PLATFORM_DIR)}/ "
+              f"({n} file(s), gitignored — its destination is ANOTHER repo)")
+    print(f"  {gray}derived:{reset}   k8s/organizations/org-{org}/ + jobs, edge, "
+          f"projects, credentials (above)")
+    print(f"\nnext steps, IN ORDER (the pause in the middle is the design):")
+    print(f"  1. review the diff: git status && git diff")
+    print(f"  2. {cli.cmd('app apply')} {org} --check   {gray}(and without --check when you like it){reset}")
+    print(f"  3. commit+push of platform/  {gray}(an act of government — human on purpose){reset}")
+    print(f"  4. tofu apply of the edge (#46)  {gray}(tofu/envs/cloudflare-tunnel){reset}")
     return 0
 
 
-# ── el recorrido ──────────────────────────────────────────────────────
+# ── the walk ──────────────────────────────────────────────────────────
 
-def marca(tot, estado, paso, detalle=""):
-    tot[estado] += 1
-    simbolo, color = {"ya": ("=", gris), "hecho": ("+", verde),
-                      "haria": ("~", ama), "aviso": ("!", ama)}[estado]
-    texto = {"ya": "ya estaba", "hecho": "hecho", "haria": "haría",
-             "aviso": "NO SE PUDO EVALUAR"}[estado]
-    sufijo = f" — {detalle}" if detalle else ""
-    print(f"  {color}{simbolo}{fin} {paso}: {texto}{gris}{sufijo}{fin}")
+def mark(tot, state, step, detail=""):
+    tot[state] += 1
+    symbol, color = {"already": ("=", gray), "done": ("+", green),
+                     "would": ("~", yellow), "not_evaluable": ("!", yellow)}[state]
+    text = {"already": "already", "done": "done", "would": "would",
+            "not_evaluable": "COULD NOT EVALUATE"}[state]
+    suffix = f" — {detail}" if detail else ""
+    print(f"  {color}{symbol}{reset} {step}: {text}{gray}{suffix}{reset}")
 
 
-def aplicar_repo(c, url, nombre, escribir, tot):
+def apply_repo(c, url, name, write, tot):
     org = c["organizacion"]
-    print(f"\n{url}  {gris}(Application: {nombre}){fin}")
+    print(f"\n{url}  {gray}(Application: {name}){reset}")
     try:
         owner, repo = _owner_repo(url)
     except Error as e:
-        # Sin owner/repo no se puede evaluar NINGÚN paso de este repo.
-        marca(tot, "aviso", "repo GitHub", str(e))
+        # Without owner/repo NO step of this repo can be evaluated.
+        mark(tot, "not_evaluable", "GitHub repo", str(e))
         return
 
-    # ── paso 1: el repo ───────────────────────────────────────────
+    # ── step 1: the repo ──────────────────────────────────────────
     try:
-        existe = _repo_existe(owner, repo)
+        exists = _repo_exists(owner, repo)
     except Error as e:
-        marca(tot, "aviso", "repo GitHub", str(e))
-        # Los pasos siguientes dependen de poder mirar el repo: mejor
-        # tres avisos honestos que dos silencios.
-        marca(tot, "aviso", "esqueleto", "no pude mirar el repo")
-        marca(tot, "aviso", "deploy key", "no pude mirar el repo")
+        mark(tot, "not_evaluable", "GitHub repo", str(e))
+        # The following steps depend on being able to look at the repo:
+        # better three honest warnings than two silences.
+        mark(tot, "not_evaluable", "skeleton", "I could not look at the repo")
+        mark(tot, "not_evaluable", "deploy key", "I could not look at the repo")
         return
-    if existe:
-        marca(tot, "ya", "repo GitHub")
-    elif not escribir:
-        marca(tot, "haria", "repo GitHub", f"gh repo create privado + topic {TOPIC}")
+    if exists:
+        mark(tot, "already", "GitHub repo")
+    elif not write:
+        mark(tot, "would", "GitHub repo", f"gh repo create private + topic {TOPIC}")
     else:
         try:
-            _crear_repo(owner, repo, org)
-            marca(tot, "hecho", "repo GitHub", f"creado privado, topic {TOPIC}")
-            existe = True
+            _create_repo(owner, repo, org)
+            mark(tot, "done", "GitHub repo", f"created private, topic {TOPIC}")
+            exists = True
         except Error as e:
-            marca(tot, "aviso", "repo GitHub", str(e))
-            marca(tot, "aviso", "esqueleto", "el repo no llegó a existir")
-            marca(tot, "aviso", "deploy key", "el repo no llegó a existir")
+            mark(tot, "not_evaluable", "GitHub repo", str(e))
+            mark(tot, "not_evaluable", "skeleton", "the repo never came to exist")
+            mark(tot, "not_evaluable", "deploy key", "the repo never came to exist")
             return
 
-    # ── paso 2: el esqueleto (SOLO sobre un repo vacío) ───────────
+    # ── step 2: the skeleton (ONLY over an empty repo) ────────────
     try:
-        # Un repo recién creado está vacío por construcción; recién
-        # entonces vale preguntar por la historia del que ya estaba.
-        vacio = True if not existe else not _tiene_historia(owner, repo)
+        # A repo just created is empty by construction; only then is it
+        # worth asking about the history of one that was already there.
+        empty = True if not exists else not _has_history(owner, repo)
     except Error as e:
-        marca(tot, "aviso", "esqueleto", str(e))
-        vacio = None
-    if vacio is False:
-        marca(tot, "ya", "esqueleto", "el repo tiene historia — jamás se pisa")
-    elif vacio:
-        staging, motivo = _staging_de(c, url)
+        mark(tot, "not_evaluable", "skeleton", str(e))
+        empty = None
+    if empty is False:
+        mark(tot, "already", "skeleton", "the repo has history — it is never trampled")
+    elif empty:
+        staging, reason = _staging_for(c, url)
         if staging is None:
-            marca(tot, "aviso", "esqueleto", f"repo vacío y sin esqueleto: {motivo}")
+            mark(tot, "not_evaluable", "skeleton", f"empty repo and no skeleton: {reason}")
         elif not os.path.isdir(staging) or not os.listdir(staging):
-            marca(tot, "aviso", "esqueleto",
-                  f"repo vacío y no hay staging en "
-                  f"{os.path.relpath(staging, RAIZ)} — lo genera bin/aegis-org aplicar")
-        elif not escribir:
+            mark(tot, "not_evaluable", "skeleton",
+                 f"empty repo and there is no staging area in "
+                 f"{os.path.relpath(staging, PLATFORM_DIR)} — it is generated by aegis org apply")
+        elif not write:
             n = sum(len(fs) for _, _, fs in os.walk(staging))
-            marca(tot, "haria", "esqueleto",
-                  f"push de {os.path.relpath(staging, RAIZ)} ({n} archivo(s))")
+            mark(tot, "would", "skeleton",
+                 f"push of {os.path.relpath(staging, PLATFORM_DIR)} ({n} file(s))")
         else:
             try:
-                _sembrar(owner, repo, staging)
-                marca(tot, "hecho", "esqueleto",
-                      f"sembrado desde {os.path.relpath(staging, RAIZ)}")
+                _plant(owner, repo, staging)
+                mark(tot, "done", "skeleton",
+                     f"planted from {os.path.relpath(staging, PLATFORM_DIR)}")
             except Error as e:
-                marca(tot, "aviso", "esqueleto", str(e))
+                mark(tot, "not_evaluable", "skeleton", str(e))
 
-    # ── paso 3: la deploy key ─────────────────────────────────────
+    # ── step 3: the deploy key ────────────────────────────────────
     try:
-        publica = _publica_de(nombre)
-        registradas = _keys_de(owner, repo) if existe else []
+        public = _public_of(name)
+        registered = _keys_of(owner, repo) if exists else []
     except Error as e:
-        marca(tot, "aviso", "deploy key", str(e))
+        mark(tot, "not_evaluable", "deploy key", str(e))
         return
-    mia = next((k for k in registradas
-                if " ".join((k.get("key") or "").split()[:2]) == publica), None)
-    if mia and not mia.get("read_only", False):
-        # Existe pero CON escritura: convergió en presencia y violó la
-        # doctrina. No se «arregla» solo —borrar y recrear una key es
-        # un acto que corta el sync de ArgoCD un instante y merece un
-        # humano— pero tampoco se bendice.
-        marca(tot, "aviso", "deploy key",
-              f"registrada CON escritura ({mia.get('title')!r}) — debería ser "
-              f"solo lectura: revisala a mano en GitHub")
-    elif mia:
-        marca(tot, "ya", "deploy key", f"{mia.get('title')!r}, solo lectura")
-    elif not existe:
-        marca(tot, "haria", "deploy key", f"registrar {TITULO_KEY} (solo lectura)")
-    elif not escribir:
-        marca(tot, "haria", "deploy key", f"registrar {TITULO_KEY} (solo lectura)")
+    mine = next((k for k in registered
+                 if " ".join((k.get("key") or "").split()[:2]) == public), None)
+    if mine and not mine.get("read_only", False):
+        # It exists but WITH write access: it converged in presence and
+        # violated the doctrine. It is not «fixed» on its own —deleting
+        # and recreating a key is an act that cuts ArgoCD's sync for an
+        # instant and deserves a human— but neither is it blessed.
+        mark(tot, "not_evaluable", "deploy key",
+             f"registered WITH write access ({mine.get('title')!r}) — it should be "
+             f"read only: review it by hand in GitHub")
+    elif mine:
+        mark(tot, "already", "deploy key", f"{mine.get('title')!r}, read only")
+    elif not exists:
+        mark(tot, "would", "deploy key", f"register {KEY_TITLE} (read only)")
+    elif not write:
+        mark(tot, "would", "deploy key", f"register {KEY_TITLE} (read only)")
     else:
         try:
-            _registrar_key(owner, repo, publica)
-            marca(tot, "hecho", "deploy key", f"{TITULO_KEY}, solo lectura")
+            _register_key(owner, repo, public)
+            mark(tot, "done", "deploy key", f"{KEY_TITLE}, read only")
         except Error as e:
-            marca(tot, "aviso", "deploy key", str(e))
+            mark(tot, "not_evaluable", "deploy key", str(e))
 
 
-def aplicar_webhooks(escribir, tot):
-    """Delegado ENTERO en bin/aegis-webhook, que es el dueño del invariante.
+def apply_webhooks(write, tot):
+    """Delegated ENTIRELY to bin/aegis-webhook, which owns the invariant.
 
-    Su lista sale del values de Jenkins (todos los repos con job, no
-    solo los de estos contratos) y eso es correcto: el invariante es
-    «si Jenkins tiene un job, el push le llega», y se converge completo
-    o no se converge. Con --aplicar además RE-SINCRONIZA el HMAC de los
-    hooks existentes — GitHub no deja leer el secret de un hook, así
-    que «existe» no prueba «sincronizado»; el PATCH idempotente es su
-    manera de no adivinar.
+    Its list comes out of Jenkins's values (every repo with a job, not
+    only the ones of these contracts) and that is correct: the invariant
+    is «if Jenkins has a job, the push reaches it», and it converges whole
+    or it does not converge. With `apply` it also RE-SYNCS the HMAC of the
+    existing hooks — GitHub does not let you read a hook's secret, so
+    «it exists» does not prove «it is synced»; the idempotent PATCH is its
+    way of not guessing.
     """
-    print(f"\nwebhooks  {gris}(delegado en {cli.cmd('webhook')} — todos los repos con job){fin}")
-    # flush ANTES de ceder el stdout: con la salida entubada python
-    # bufferea y lo delegado aparecería arriba de su propio título.
+    print(f"\nwebhooks  {gray}(delegated to {cli.cmd('webhook')} — every repo with a job){reset}")
+    # flush BEFORE giving up stdout: with the output piped python buffers
+    # and what is delegated would appear above its own title.
     sys.stdout.flush()
-    # El rc no distingue «creó» de «solo re-sincronizó», y para la
-    # convergencia importa: un resync es mantenimiento del PATCH
-    # idempotente, no un cambio de estado.
+    # The rc does not tell «created» from «only re-synced», and for
+    # convergence that matters: a resync is maintenance of the idempotent
+    # PATCH, not a change of state.
     #
-    # Hasta el 2026-08-23 esa distinción se sacaba buscando la frase
-    # «webhook creado» en la salida del delegado (A3 del registro): una
-    # tilde de menos allá rompía la tabla de acá, y el síntoma aparecía
-    # en otro comando. Ahora se lee el CONTRATO: cada paso emite su
-    # estado y --json los devuelve como documento.
+    # Until 2026-08-23 that distinction was drawn by looking for the
+    # phrase «webhook creado» in the delegate's output (A3 of the
+    # register): one accent less over there broke the table over here, and
+    # the symptom appeared in another command. Now the CONTRACT is read:
+    # every step emits its state and --json returns them as a document.
     from aegis import cli
     try:
-        rc, doc = cli.run_json("webhook", *(["--aplicar"] if escribir else []))
+        rc, doc = cli.run_json("webhook", *(["apply"] if write else []))
     except cli.CouldNotEvaluate as e:
-        marca(tot, "aviso", "webhooks", str(e))
+        mark(tot, "not_evaluable", "webhooks", str(e))
         return
-    creo = any(pa["estado"] == "hecho" for pa in doc.get("pasos", []))
+    created = any(st["state"] == "done" for st in doc.get("steps", []))
     if rc == 0:
-        marca(tot, "hecho" if creo else "ya", "webhooks",
-              f"{len(doc.get('pasos', []))} repos")
+        mark(tot, "done" if created else "already", "webhooks",
+             f"{len(doc.get('steps', []))} repos")
     elif rc == 1:
-        faltan = [pa["paso"] for pa in doc.get("pasos", []) if pa["estado"] == "mal"]
-        marca(tot, "haria", "webhooks", f"{cli.cmd('webhook apply')} ({len(faltan)} sin webhook)")
+        missing = [st["step"] for st in doc.get("steps", []) if st["state"] == "wrong"]
+        mark(tot, "would", "webhooks", f"{cli.cmd('webhook apply')} ({len(missing)} without a webhook)")
     else:
-        marca(tot, "aviso", "webhooks", f"{cli.cmd('webhook')} no pudo evaluar (rc 2)")
+        mark(tot, "not_evaluable", "webhooks", f"{cli.cmd('webhook')} could not evaluate (rc 2)")
 
 
 def main():
     p = argparse.ArgumentParser(prog=cli.cmd("app"), description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
-    # Subcomandos y no flags: `nueva` (caminos §3, solo archivos) vive
-    # al lado de `aplicar` (solo mundo), y la frontera de la casa es
-    # precisamente esa línea — el orden del help la cuenta.
+    # Subcommands and not flags: `new` (journeys §3, files only) lives
+    # next to `apply` (the world only), and the house's border is
+    # precisely that line — the order of the help tells it.
     s = sub.add_parser("new",
-                       help="escribe TODO el alta en archivos: contrato desde "
-                            "plantilla, esqueleto, derivaciones, secretos. "
-                            "Jamás toca el mundo")
-    s.add_argument("organizacion", metavar="ORG",
-                   help="el nombre de la organización nueva")
-    s.add_argument("--template", metavar="P", dest="plantilla",
-                   help="instancia contrato y esqueletos desde "
-                        "seed/templates/<P>/. Sin esto, modo artesano: el "
-                        "contrato ya es tuyo y solo se re-deriva")
+                       help="writes the WHOLE sign-up into files: contract from a "
+                            "template, skeleton, derivations, secrets. "
+                            "It never touches the world")
+    s.add_argument("organization", metavar="ORG",
+                   help="the name of the new organization")
+    s.add_argument("--template", metavar="T", dest="template",
+                   help="instantiates the contract and the skeletons from "
+                        "seed/templates/<T>/. Without this, artisan mode: the "
+                        "contract is already yours and it only re-derives")
     s = sub.add_parser("apply",
-                       help="ejecuta los pasos de GitHub de cada contrato: "
-                            "repo, esqueleto, deploy key, webhook")
-    s.add_argument("contratos", nargs="+", metavar="CONTRATO",
-                   help="orgs/<n>.yaml o el nombre de la organización")
+                       help="executes the GitHub steps of each contract: "
+                            "repo, skeleton, deploy key, webhook")
+    s.add_argument("contracts", nargs="+", metavar="CONTRACT",
+                   help="orgs/<n>.yaml or the name of the organization")
     s.add_argument("--check", action="store_true",
-                   help="muestra qué haría, sin tocar nada (cultura run_cmd del init)")
+                   help="shows what it would do, without touching anything (the init's run_cmd culture)")
     a = p.parse_args()
 
     if a.cmd == "new":
-        # Sin chequeo de gh A PROPÓSITO: este lado de la frontera no
-        # habla con nadie, y exigir sesión para escribir archivos sería
-        # mentir sobre lo que hace.
-        tot = {"ya": 0, "hecho": 0, "haria": 0, "aviso": 0}
-        rc = nueva(a.organizacion, a.plantilla, tot)
-        if tot["aviso"]:
-            print(f"\n  {ama}hay archivos que difieren y no se pisaron{fin} "
-                  f"{gris}— revisalos antes de aplicar{fin}")
+        # Without a gh check ON PURPOSE: this side of the border talks to
+        # nobody, and demanding a session in order to write files would be
+        # lying about what it does.
+        tot = {"already": 0, "done": 0, "would": 0, "not_evaluable": 0}
+        rc = new(a.organization, a.template, tot)
+        if tot["not_evaluable"]:
+            print(f"\n  {yellow}there are files that differ and were not trampled{reset} "
+                  f"{gray}— review them before applying{reset}")
             return 2
         return rc
 
-    escribir = not a.check
+    write = not a.check
 
-    # Sin gh no se evalúa nada, y decirlo temprano es más honesto que
-    # tres avisos idénticos por repo.
+    # Without gh nothing is evaluated, and saying so early is more honest
+    # than three identical warnings per repo.
     r = _gh("auth", "status")
     if r.returncode != 0:
-        print(f"  {ama}!{fin} NO EVALUADO — gh sin sesión: {r.stderr.strip().splitlines()[-1]}")
-        print(f"    {gris}Esto NO es un visto bueno: es un chequeo que no corrió.{fin}")
+        print(f"  {yellow}!{reset} NOT EVALUATED — gh without a session: {r.stderr.strip().splitlines()[-1]}")
+        print(f"    {gray}This is NOT approval: it is a check that did not run.{reset}")
         return 2
 
-    tot = {"ya": 0, "hecho": 0, "haria": 0, "aviso": 0}
-    for arg in a.contratos:
+    tot = {"already": 0, "done": 0, "would": 0, "not_evaluable": 0}
+    for arg in a.contracts:
         try:
-            ruta, c = _contrato(arg)
+            path, c = _contract(arg)
         except Error as e:
-            print(f"{rojo}✗{fin} {e}", file=sys.stderr)
+            print(f"{red}✗{reset} {e}", file=sys.stderr)
             return 2
-        repos = _generador().repos_de(c)
-        print(f"\n{c['organizacion']}  {gris}({os.path.relpath(ruta, RAIZ)}){fin}")
+        repos = _generator().repos_of(c)
+        print(f"\n{c['organizacion']}  {gray}({os.path.relpath(path, PLATFORM_DIR)}){reset}")
         if not repos:
-            print(f"  {gris}={fin} sin repos declarados — nada que hacer en GitHub "
-                  f"{gris}(organización de pura infraestructura){fin}")
+            print(f"  {gray}={reset} no repos declared — nothing to do in GitHub "
+                  f"{gray}(pure-infrastructure organization){reset}")
             continue
-        for url, nombre in sorted(repos.items()):
-            aplicar_repo(c, url, nombre, escribir, tot)
+        for url, name in sorted(repos.items()):
+            apply_repo(c, url, name, write, tot)
 
-    aplicar_webhooks(escribir, tot)
+    apply_webhooks(write, tot)
 
-    print(f"\nresumen: {tot['ya']} ya estaba · {tot['hecho']} hecho · "
-          f"{tot['haria']} por hacer · {tot['aviso']} aviso(s)")
-    if tot["aviso"]:
-        print(f"  {ama}hay pasos SIN EVALUAR{fin} {gris}— un aviso no es un visto bueno: "
-              f"resolvé la causa y re-corré{fin}")
+    print(f"\nsummary: {tot['already']} already · {tot['done']} done · "
+          f"{tot['would']} to do · {tot['not_evaluable']} warning(s)")
+    if tot["not_evaluable"]:
+        print(f"  {yellow}there are steps NOT EVALUATED{reset} {gray}— a warning is not an approval: "
+              f"sort out the cause and re-run{reset}")
         return 2
-    if tot["haria"]:
-        print(f"  {gris}para hacerlos: {cli.cmd('app apply')} {' '.join(a.contratos)}{fin}")
+    if tot["would"]:
+        print(f"  {gray}to do them: {cli.cmd('app apply')} {' '.join(a.contracts)}{reset}")
         return 1
-    if escribir and tot["hecho"]:
-        # Lo que queda es humano A PROPÓSITO (caminos/design.md §3):
-        print(f"  {gris}queda humano: commit+push de platform/ si aegis-org/aegis-secret\n"
-              f"  dejaron diff (acto de gobierno), y `tofu apply` del borde (#46).{fin}")
+    if write and tot["done"]:
+        # What is left is human ON PURPOSE (journeys/design.md §3):
+        print(f"  {gray}left human: commit+push of platform/ if aegis-org/aegis-secret\n"
+              f"  left a diff (an act of government), and `tofu apply` of the edge (#46).{reset}")
     return 0
 
 
@@ -829,5 +832,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Error as e:
-        print(f"{rojo}✗{fin} {e}", file=sys.stderr)
+        print(f"{red}✗{reset} {e}", file=sys.stderr)
         sys.exit(2)

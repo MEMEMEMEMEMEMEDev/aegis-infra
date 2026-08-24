@@ -1,19 +1,20 @@
-"""aegis-org — el contrato de una organización, materializado.
+"""aegis-org — one organization's contract, made real.
 
-Implementa docs/protocols/organization.md. Lee un contrato de
-`orgs/<nombre>.yaml` y escribe los manifiestos en
-`k8s/organizations/org-<nombre>/`.
+Implements docs/protocols/organization.md. It reads a contract from
+`orgs/<name>.yaml` and writes the manifests into
+`k8s/organizations/org-<name>/`.
 
-NO HABLA CON EL CLUSTER. No importa kubernetes, no invoca kubectl, no
-lee un kubeconfig. Escribe archivos en el repo y termina; quien despliega
-es ArgoCD después de que un humano revise el diff y commitee. Eso no es
-purismo: es lo que hace que correr esto sea seguro en cualquier momento,
-porque lo peor que puede pasar es un diff feo que nadie commitea.
+IT DOES NOT TALK TO THE CLUSTER. It does not import kubernetes, does not
+invoke kubectl, does not read a kubeconfig. It writes files in the repo
+and it is done; the one who deploys is ArgoCD, after a human reviews the
+diff and commits. That is not purism: it is what makes running this safe
+at any moment, because the worst that can happen is an ugly diff nobody
+commits.
 
-Está en python3 y no en bash por una razón concreta: hay que validar un
-esquema y rendear determinísticamente. En bash eso termina siendo sed
-sobre YAML, que es la Enfermedad A del repo ("YAML como string").
-python3 y no yq por la regla C7.
+It is in python3 and not in bash for one concrete reason: a schema has
+to be validated and a render has to be deterministic. In bash that ends
+up being sed over YAML, which is the repo's Disease A ("YAML as a
+string"). python3 and not yq, by rule C7.
 """
 import argparse
 import difflib
@@ -26,404 +27,413 @@ import sys
 try:
     import yaml
 except ImportError:
-    sys.exit("falta pyyaml (python3-yaml)")
+    sys.exit("pyyaml is missing (python3-yaml)")
 
 from . import cli, markers, paths
 
-# ── Clase E: ningún nombre de comando escrito a mano ─────────────────
-# En v2 este archivo tenía 15 (y el árbol entero ~155). Cada uno es una
-# promesa que envejece: el día que el comando se llama distinto, los
-# mensajes —y peor, los COMENTARIOS de los manifiestos generados, que
-# el operador lee meses después— siguen diciendo el nombre viejo. No se
-# traducen uno por uno: se derivan de uno solo, que sale de argv[0].
+# ── Class E: not one command name written by hand ────────────────────
+# In v2 this file had 15 of them (and the whole tree ~155). Each one is
+# a promise that ages: the day the command is called something else, the
+# messages —and worse, the COMMENTS of the generated manifests, which
+# the operator reads months later— go on saying the old name. They are
+# not translated one by one: they are derived from a single one, which
+# comes from argv[0].
 CMD_ORG        = cli.cmd("org")
 CMD_ORG_APPLY  = cli.cmd("org apply")
 CMD_SECRET     = cli.cmd("secret create")
 CMD_CHECK      = cli.cmd("check")
 CMD_SYNC_ROOT  = cli.cmd("sync root")
 
-# RAIZ es la INSTANCIA, no el producto.
+# PLATFORM_ROOT is the INSTANCE, not the product.
 #
-# Hasta el 2026-08-23 esta línea decía `dirname(dirname(__file__))`, y
-# estaba bien mientras el comando vivía en <instancia>/platform/bin/:
-# dos niveles arriba daba <instancia>/platform. Al mudar el código al
-# producto (02 §1) la MISMA línea siguió compilando y pasó a apuntar a
-# <producto>, buscando orgs/ y k8s/ donde no están. Nada lo habría
-# avisado: es la «dependencia invisible a un grep» de C1/C2 del
-# registro, con fecha. Ahora lo decide un solo resolvedor, el mismo
-# que usa bash (lib/paths.sh).
-RAIZ = str(paths.platform_dir())
-DIR_ORGS = os.path.join(RAIZ, "orgs")
-DIR_K8S = os.path.join(RAIZ, "k8s", "organizations")
-PLANES = os.path.join(RAIZ, "plans.yaml")
-EDGE = os.path.join(RAIZ, "edge.yaml")
-SERVICIOS = os.path.join(RAIZ, "services.yaml")
-RUTEO = os.path.join(RAIZ, "ai", "routes.yaml")
-TAREAS_AI = os.path.join(RAIZ, "ai", "tasks.yaml")
-REGISTRO_AI = os.path.join(RAIZ, "k8s", "base", "ai-system", "registro.yaml")
-RUTEO_K8S = os.path.join(RAIZ, "k8s", "base", "ai-system", "routes.yaml")
-DIR_AI = os.path.join(RAIZ, "k8s", "base", "ai-system")
-TENANTS_K8S = os.path.join(RAIZ, "k8s", "argocd-apps", "tenants.yaml")
-APROVISIONAR_JS = os.path.join(RAIZ, "ai", "aprovisionar-bucket.mjs")
-DIR_GARAGE = os.path.join(RAIZ, "k8s", "base", "garage-system")
-APROVISIONAR_K8S = os.path.join(DIR_GARAGE, "aprovisionar.yaml")
-GARAGE_KUSTOMIZATION = os.path.join(DIR_GARAGE, "kustomization.yaml")
-GARAGE_SECRETGEN = os.path.join(DIR_GARAGE, "secret-generator.yaml")
-APPPROJECTS_K8S = os.path.join(RAIZ, "k8s", "bootstrap", "appprojects-tenants.yaml")
-ARGOCD_SECRETGEN = os.path.join(RAIZ, "k8s", "base", "platform", "argocd-secrets",
+# Until 2026-08-23 this line said `dirname(dirname(__file__))`, and it
+# was right while the command lived in <instance>/platform/bin/: two
+# levels up gave <instance>/platform. On moving the code to the product
+# (02 §1) the SAME line went on compiling and started pointing at
+# <product>, looking for orgs/ and k8s/ where they are not. Nothing
+# would have warned: it is the register's C1/C2 «dependency invisible to
+# a grep», with a date on it. Now a single resolver decides it, the same
+# one bash uses (lib/paths.sh).
+PLATFORM_ROOT = str(paths.platform_dir())
+ORGS_DIR = os.path.join(PLATFORM_ROOT, "orgs")
+K8S_DIR = os.path.join(PLATFORM_ROOT, "k8s", "organizations")
+PLANS = os.path.join(PLATFORM_ROOT, "plans.yaml")
+EDGE = os.path.join(PLATFORM_ROOT, "edge.yaml")
+SERVICES = os.path.join(PLATFORM_ROOT, "services.yaml")
+ROUTES = os.path.join(PLATFORM_ROOT, "ai", "routes.yaml")
+AI_TASKS = os.path.join(PLATFORM_ROOT, "ai", "tasks.yaml")
+AI_REGISTRY = os.path.join(PLATFORM_ROOT, "k8s", "base", "ai-system", "registro.yaml")
+ROUTES_K8S = os.path.join(PLATFORM_ROOT, "k8s", "base", "ai-system", "routes.yaml")
+AI_DIR = os.path.join(PLATFORM_ROOT, "k8s", "base", "ai-system")
+TENANTS_K8S = os.path.join(PLATFORM_ROOT, "k8s", "argocd-apps", "tenants.yaml")
+PROVISION_JS = os.path.join(PLATFORM_ROOT, "ai", "aprovisionar-bucket.mjs")
+GARAGE_DIR = os.path.join(PLATFORM_ROOT, "k8s", "base", "garage-system")
+PROVISION_K8S = os.path.join(GARAGE_DIR, "aprovisionar.yaml")
+GARAGE_KUSTOMIZATION = os.path.join(GARAGE_DIR, "kustomization.yaml")
+GARAGE_SECRETGEN = os.path.join(GARAGE_DIR, "secret-generator.yaml")
+APPPROJECTS_K8S = os.path.join(PLATFORM_ROOT, "k8s", "bootstrap", "appprojects-tenants.yaml")
+ARGOCD_SECRETGEN = os.path.join(PLATFORM_ROOT, "k8s", "base", "platform", "argocd-secrets",
                                 "secret-generator.yaml")
-def _repo_ops():
-    """La URL del repo de plataforma, leída del conf de la instancia.
+def platform_repo():
+    """The platform repo's URL, read from the instance's conf.
 
-    En v2 esto era un literal con placeholders —
-    `git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git`— porque
-    aegis-org viajaba DENTRO de la semilla y el init lo renderizaba
-    junto con los manifiestos: el programa era también artefacto. Con
-    el código en el producto eso deja de tener sentido (el producto no
-    se renderiza) y además sería justo lo que el check 86 prohíbe: una
-    instancia horneada en el código.
+    In v2 this was a literal with placeholders —
+    `git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git`— because
+    aegis-org travelled INSIDE the seed and init rendered it together
+    with the manifests: the program was an artifact too. With the code
+    in the product that stops making sense (the product is not
+    rendered) and it would besides be exactly what check 86 forbids: an
+    instance baked into the code.
     """
     c = paths.read_conf()
-    dueno, repo = c.get("GH_OWNER"), c.get("PLATFORM_REPO")
-    if not dueno or not repo:
+    owner, repo = c.get("GH_OWNER"), c.get("PLATFORM_REPO")
+    if not owner or not repo:
         raise SystemExit(
-            f"no puedo derivar el repo de plataforma: falta GH_OWNER/PLATFORM_REPO "
-            f"en {paths.conf()} (¿corriste el wizard?)")
-    return f"git@github.com:{dueno}/{repo}.git"
-MAIN_TF = os.path.join(RAIZ, "tofu", "envs", "cloudflare-tunnel", "main.tf")
-JENKINS_VALUES = os.path.join(RAIZ, "k8s", "base", "platform", "jenkins", "values.yaml")
-VMAGENT_VALUES = os.path.join(RAIZ, "k8s", "base", "observability", "vmagent", "values.yaml")
-JENKINSFILE_TPL = os.path.join(RAIZ, "docs", "protocols", "templates", "Jenkinsfile.app")
-DIR_STAGING = os.path.join(RAIZ, ".aegis-app")
+            f"I cannot derive the platform repo: GH_OWNER/PLATFORM_REPO is missing "
+            f"from {paths.conf()} (did you run the wizard?)")
+    return f"git@github.com:{owner}/{repo}.git"
+MAIN_TF = os.path.join(PLATFORM_ROOT, "tofu", "envs", "cloudflare-tunnel", "main.tf")
+JENKINS_VALUES = os.path.join(PLATFORM_ROOT, "k8s", "base", "platform", "jenkins", "values.yaml")
+VMAGENT_VALUES = os.path.join(PLATFORM_ROOT, "k8s", "base", "observability", "vmagent", "values.yaml")
+JENKINSFILE_TPL = os.path.join(PLATFORM_ROOT, "docs", "protocols", "templates", "Jenkinsfile.app")
+STAGING_DIR = os.path.join(PLATFORM_ROOT, ".aegis-app")
 
-VERSION_CONTRATO = 1
-NOMBRE_VALIDO = re.compile(r"^[a-z][a-z0-9-]{2,29}$")
-TIPOS = {"estatico", "http", "postgres", "worker"}
-# Los que salen de una imagen que alguien COMPILA Y FIRMA. El resto los
-# provee la plataforma (postgres sale de services.yaml), y esa
-# diferencia es la que decide si el contrato necesita un `repo`.
-TIPOS_CON_IMAGEN = {"estatico", "http", "worker"}
-# `internet` entró el 2026-08-21 con org-shop: su API habla con Webpay
-# (Transbank) y era la PRIMERA app de tenant que necesita salir al
-# mundo — el vocabulario no tenía cómo decirlo y el síntoma fue un
-# ECONNREFUSED del CNI a mitad de una compra. No exige bloque a nivel
-# de organización (a diferencia de bucket/ai/postgres): es una
-# capacidad del servicio, no un recurso que la plataforma provea.
-USOS = {"ai", "bucket", "postgres", "internet"}
+CONTRACT_VERSION = 1
+VALID_NAME = re.compile(r"^[a-z][a-z0-9-]{2,29}$")
+TYPES = {"estatico", "http", "postgres", "worker"}
+# The ones that come out of an image somebody COMPILES AND SIGNS. The
+# rest are provided by the platform (postgres comes from services.yaml),
+# and that difference is what decides whether the contract needs a
+# `repo`.
+TYPES_WITH_IMAGE = {"estatico", "http", "worker"}
+# `internet` came in on 2026-08-21 with org-shop: its API talks to
+# Webpay (Transbank) and it was the FIRST tenant app that needs to reach
+# the outside world — the vocabulary had no way of saying it and the
+# symptom was an ECONNREFUSED from the CNI halfway through a purchase.
+# It does not demand a block at the organization level (unlike
+# bucket/ai/postgres): it is a capability of the service, not a resource
+# the platform provides.
+USES = {"ai", "bucket", "postgres", "internet"}
 
-# Puerto en el que la plataforma ESPERA a cada tipo que no lo declara.
-# No es un default cómodo: es parte del contrato. Un front que escuche
-# en otro lado arranca bien y no recibe tráfico nunca — un fallo
-# silencioso, que es la peor clase.
-PUERTO_ESTATICO = 8080
+# The port on which the platform EXPECTS each type that does not declare
+# one. It is not a convenient default: it is part of the contract. A
+# front listening somewhere else starts up fine and never receives
+# traffic — a silent failure, which is the worst kind.
+STATIC_PORT = 8080
 
 
-def _coherencia_de_tipo(n, tipo, s):
-    """Un `tipo` que no restringe nada no es un tipo, es una etiqueta.
+def _type_coherence(n, kind, s):
+    """A `tipo` that restricts nothing is not a type, it is a label.
 
-    Hasta acá el campo se validaba contra una lista y después no lo
-    consumía nadie: se podía declarar un `worker` público en el puerto
-    443 y el generador decía que sí. Estas reglas son las que hacen que
-    el tipo signifique algo.
+    Up to here the field was validated against a list and afterwards
+    nobody consumed it: a public `worker` on port 443 could be declared
+    and the generator said yes. These rules are what make the type mean
+    something.
     """
-    tiene = lambda k: s.get(k) is not None
+    has = lambda k: s.get(k) is not None
 
-    if tipo == "estatico":
-        # SIN `usa`, y esta es la única regla de acá que es de
-        # SEGURIDAD y no de coherencia: un front estático no tiene lado
-        # servidor donde guardar una credencial. Todo lo que se le
-        # entregue queda publicado en el bundle que baja el navegador.
-        # Lo que necesite hablar con la AI o con el bucket va detrás de
-        # un `http`, que es exactamente el rol del BFF.
+    if kind == "estatico":
+        # NO `usa`, and this is the only rule here that is about
+        # SECURITY and not about coherence: a static front has no server
+        # side in which to keep a credential. Everything handed to it
+        # ends up published in the bundle the browser downloads.
+        # Whatever needs to talk to the AI or to the bucket goes behind
+        # an `http`, which is exactly the BFF's role.
         if s.get("usa"):
-            raise Invalido(
-                f"servicio {n!r} es estatico y declara usa: {s['usa']}.\n"
-                f"  Un front estático NO tiene dónde guardar una credencial: lo que\n"
-                f"  se le entregue viaja al navegador. Lo que necesite AI o bucket\n"
-                f"  va detrás de un servicio `http` (el patrón BFF).")
-        if tiene("puerto"):
-            raise Invalido(
-                f"servicio {n!r} es estatico y declara puerto {s['puerto']}.\n"
-                f"  Los estáticos los sirve la plataforma en el {PUERTO_ESTATICO}, que es el\n"
-                f"  único que la NetworkPolicy del borde deja entrar.")
-        if not tiene("publico"):
-            raise Invalido(
-                f"servicio {n!r} es estatico y no declara `publico`.\n"
-                f"  Un front que nadie puede visitar no es un front.")
+            raise Invalid(
+                f"service {n!r} is estatico and declares usa: {s['usa']}.\n"
+                f"  A static front has NOWHERE to keep a credential: whatever is\n"
+                f"  handed to it travels to the browser. Whatever needs AI or bucket\n"
+                f"  goes behind an `http` service (the BFF pattern).")
+        if has("puerto"):
+            raise Invalid(
+                f"service {n!r} is estatico and declares puerto {s['puerto']}.\n"
+                f"  Static ones are served by the platform on {STATIC_PORT}, which is the\n"
+                f"  only one the edge's NetworkPolicy lets in.")
+        if not has("publico"):
+            raise Invalid(
+                f"service {n!r} is estatico and does not declare `publico`.\n"
+                f"  A front nobody can visit is not a front.")
 
-    elif tipo == "http":
-        if not tiene("puerto"):
-            raise Invalido(
-                f"servicio {n!r} es http y no declara `puerto`.\n"
-                f"  El puerto es parte del contrato: sin él la plataforma no sabe\n"
-                f"  a dónde mandar el tráfico y el fallo sería silencioso.")
+    elif kind == "http":
+        if not has("puerto"):
+            raise Invalid(
+                f"service {n!r} is http and does not declare `puerto`.\n"
+                f"  The port is part of the contract: without it the platform does not\n"
+                f"  know where to send the traffic and the failure would be silent.")
 
-    elif tipo == "worker":
-        # Un worker no escucha. Si tuviera puerto o ruta pública sería
-        # otra cosa y habría que llamarla por su nombre.
-        for campo in ("puerto", "publico"):
-            if tiene(campo):
-                raise Invalido(
-                    f"servicio {n!r} es worker y declara `{campo}`.\n"
-                    f"  Un worker no escucha: procesa. Si necesita atender pedidos,\n"
-                    f"  el tipo es `http`.")
+    elif kind == "worker":
+        # A worker does not listen. If it had a port or a public path it
+        # would be something else and it would have to be called by its
+        # own name.
+        for field in ("puerto", "publico"):
+            if has(field):
+                raise Invalid(
+                    f"service {n!r} is worker and declares `{field}`.\n"
+                    f"  A worker does not listen: it processes. If it needs to serve\n"
+                    f"  requests, the type is `http`.")
 
-    elif tipo == "postgres":
-        # Lo provee la PLATAFORMA: imagen firmada, disco, credencial y
-        # políticas salen de services.yaml, no de un repo del tenant.
-        if tiene("repo"):
-            raise Invalido(
-                f"servicio {n!r} es postgres y declara `repo`.\n"
-                f"  Las bases las provee la plataforma (services.yaml): imagen\n"
-                f"  firmada, disco y credencial. Un repo acá significa que se quiso\n"
-                f"  otra cosa.")
-        for campo in ("puerto", "publico"):
-            if tiene(campo):
-                raise Invalido(
-                    f"servicio {n!r} es postgres y declara `{campo}`.\n"
-                    f"  El puerto lo fija la plataforma y una base NUNCA se publica:\n"
-                    f"  se alcanza desde dentro del namespace y de ningún otro lado.")
+    elif kind == "postgres":
+        # It is provided by the PLATFORM: signed image, disk, credential
+        # and policies come out of services.yaml, not out of a tenant's
+        # repo.
+        if has("repo"):
+            raise Invalid(
+                f"service {n!r} is postgres and declares `repo`.\n"
+                f"  Databases are provided by the platform (services.yaml): signed\n"
+                f"  image, disk and credential. A repo here means something else was\n"
+                f"  intended.")
+        for field in ("puerto", "publico"):
+            if has(field):
+                raise Invalid(
+                    f"service {n!r} is postgres and declares `{field}`.\n"
+                    f"  The port is fixed by the platform and a database is NEVER\n"
+                    f"  published: it is reached from inside the namespace and from\n"
+                    f"  nowhere else.")
         if s.get("usa"):
-            raise Invalido(
-                f"servicio {n!r} es postgres y declara usa: {s['usa']}.\n"
-                f"  Una base no consume servicios: los presta.")
+            raise Invalid(
+                f"service {n!r} is postgres and declares usa: {s['usa']}.\n"
+                f"  A database does not consume services: it lends them.")
 
 
-def capacidades():
-    """Las capacidades que se pueden pedir son las que ai/routes.yaml sabe
-    servir HOY, no una lista escrita acá.
+def capabilities():
+    """The capabilities that can be asked for are the ones ai/routes.yaml
+    knows how to serve TODAY, not a list written here.
 
-    La versión anterior tenía el conjunto a mano e incluía `embeddings` y
-    `transcripcion`, que todavía no tienen engine. Un contrato que las
-    pidiera pasaba esta validación y después impedía que el gateway
-    ARRANCARA — el generador daba el visto bueno a algo que la
-    plataforma no puede cumplir, que es la forma más cara de equivocarse:
-    el error aparece lejos de la causa."""
-    r = yaml.safe_load(open(RUTEO, encoding="utf-8")) or {}
+    The previous version had the set by hand and it included `embeddings`
+    and `transcripcion`, which still have no engine. A contract that
+    asked for them passed this validation and afterwards kept the gateway
+    from STARTING — the generator gave its blessing to something the
+    platform cannot deliver, which is the most expensive way of being
+    wrong: the error shows up far away from the cause."""
+    r = yaml.safe_load(open(ROUTES, encoding="utf-8")) or {}
     return set((r.get("capacidades") or {}).keys())
 
-rojo = "\033[31m"; verde = "\033[32m"; ama = "\033[33m"; gris = "\033[90m"; fin = "\033[0m"
+red = "\033[31m"; green = "\033[32m"; yellow = "\033[33m"; grey = "\033[90m"; off = "\033[0m"
 if not sys.stdout.isatty():
-    rojo = verde = ama = gris = fin = ""
+    red = green = yellow = grey = off = ""
 
 
-class Invalido(Exception):
-    """El contrato no sirve. Se aborta ANTES de escribir nada (regla I5)."""
+class Invalid(Exception):
+    """The contract is no good. It aborts BEFORE writing anything (rule I5)."""
 
 
 # ──────────────────────────────────────────────────────────────────
-# Validación
+# Validation
 #
-# Los campos desconocidos son ERROR, no se ignoran. Un typo en
-# `almacenamineto:` tiene que fallar ruidoso; ignorarlo desactivaría el
-# bucket sin que nadie se entere, que es la peor forma de fallar.
+# Unknown fields are an ERROR, they are not ignored. A typo in
+# `almacenamineto:` has to fail loudly; ignoring it would switch the
+# bucket off without anybody finding out, which is the worst way to
+# fail.
 # ──────────────────────────────────────────────────────────────────
 
-def _solo(d, permitidos, donde):
-    sobra = set(d) - permitidos
-    if sobra:
-        raise Invalido(f"{donde}: campo(s) desconocido(s): {', '.join(sorted(sobra))}")
+def _only(d, allowed, where):
+    extra = set(d) - allowed
+    if extra:
+        raise Invalid(f"{where}: unknown field(s): {', '.join(sorted(extra))}")
 
 
-def _exige(d, campo, donde):
-    if campo not in d:
-        raise Invalido(f"{donde}: falta el campo obligatorio '{campo}'")
-    return d[campo]
+def _require(d, field, where):
+    if field not in d:
+        raise Invalid(f"{where}: the mandatory field '{field}' is missing")
+    return d[field]
 
 
-def validar(c, planes):
+def validate(c, plans):
     if not isinstance(c, dict):
-        raise Invalido("el contrato no es un mapa YAML")
-    _solo(c, {"version", "organizacion", "dominio", "cuota", "repo",
-              "almacenamiento", "ai", "servicios"}, "contrato")
+        raise Invalid("the contract is not a YAML mapping")
+    _only(c, {"version", "organizacion", "dominio", "cuota", "repo",
+              "almacenamiento", "ai", "servicios"}, "contract")
 
-    # La versión es OBLIGATORIA y se rechaza lo desconocido. Un contrato
-    # sin versión NO es "v1 por defecto": es un error. Asumir la versión
-    # es cómo un contrato viejo termina renderizado con reglas nuevas.
-    v = _exige(c, "version", "contrato")
-    if v != VERSION_CONTRATO:
-        raise Invalido(f"version {v!r} desconocida (esta herramienta habla v{VERSION_CONTRATO})")
+    # The version is MANDATORY and the unknown is rejected. A contract
+    # with no version is NOT "v1 by default": it is an error. Assuming
+    # the version is how an old contract ends up rendered with new rules.
+    v = _require(c, "version", "contract")
+    if v != CONTRACT_VERSION:
+        raise Invalid(f"version {v!r} unknown (this tool speaks v{CONTRACT_VERSION})")
 
-    nombre = _exige(c, "organizacion", "contrato")
-    if not isinstance(nombre, str) or not NOMBRE_VALIDO.match(nombre):
-        raise Invalido(f"organizacion {nombre!r}: debe ser [a-z][a-z0-9-]{{2,29}}")
+    name = _require(c, "organizacion", "contract")
+    if not isinstance(name, str) or not VALID_NAME.match(name):
+        raise Invalid(f"organizacion {name!r}: it must be [a-z][a-z0-9-]{{2,29}}")
 
-    # `dominio` NO es obligatorio, y el chequeo de verdad está más abajo:
-    # hace falta si —y solo si— algún servicio es `publico`. Un hostname
-    # existe para servir algo; una organización que solo tiene una base y
-    # un bucket no tiene a quién exponer. Exigirlo igual obligaba a
-    # inventar un nombre, y un CNAME inventado es un CNAME que después
-    # nadie sabe por qué está.
+    # `dominio` is NOT mandatory, and the real check is further down: it
+    # is needed if —and only if— some service is `publico`. A hostname
+    # exists in order to serve something; an organization that only has
+    # a database and a bucket has nobody to expose. Demanding it anyway
+    # forced people to invent a name, and an invented CNAME is a CNAME
+    # nobody later knows why is there.
 
-    cuota = _exige(c, "cuota", "contrato")
-    if cuota not in planes["cuota"]:
-        raise Invalido(f"cuota {cuota!r} no existe. Hay: {', '.join(sorted(planes['cuota']))}\n"
-                       f"  Si hace falta una nueva, se AGREGA UN PLAN en plans.yaml.\n"
-                       f"  No se ponen números en el contrato (§3 del protocolo).")
+    quota = _require(c, "cuota", "contract")
+    if quota not in plans["cuota"]:
+        raise Invalid(f"cuota {quota!r} does not exist. There is: {', '.join(sorted(plans['cuota']))}\n"
+                      f"  If a new one is needed, A PLAN IS ADDED to plans.yaml.\n"
+                      f"  Numbers do not go in the contract (§3 of the protocol).")
 
-    alm = c.get("almacenamiento") or {}
-    _solo(alm, {"bucket"}, "almacenamiento")
-    # El VALOR, no solo la clave. Todo lo que no sea booleano se lee como
-    # falso más adelante (`alm.get("bucket")` por verdad), así que
-    # `bucket: {}` valida bien y significa "sin bucket" EN SILENCIO: ni
-    # Job, ni credencial, ni error. Me pasó a mí escribiendo la prueba
-    # del generador el 2026-08-04.
-    if "bucket" in alm and not isinstance(alm["bucket"], bool):
-        raise Invalido(
-            f"almacenamiento.bucket: se esperaba true o false, no {alm['bucket']!r}\n"
-            f"  El bucket no se configura desde el contrato: su nombre, su\n"
-            f"  endpoint y su clave los decide la plataforma. Acá solo se\n"
-            f"  dice si la organización quiere uno.")
+    storage = c.get("almacenamiento") or {}
+    _only(storage, {"bucket"}, "almacenamiento")
+    # The VALUE, not just the key. Anything that is not a boolean is
+    # read as false further on (`storage.get("bucket")` for truth), so
+    # `bucket: {}` validates fine and means "no bucket" IN SILENCE:
+    # no Job, no credential, no error. It happened to me while writing
+    # the generator's test on 2026-08-04.
+    if "bucket" in storage and not isinstance(storage["bucket"], bool):
+        raise Invalid(
+            f"almacenamiento.bucket: true or false was expected, not {storage['bucket']!r}\n"
+            f"  The bucket is not configured from the contract: its name, its\n"
+            f"  endpoint and its key are decided by the platform. Here all that is\n"
+            f"  said is whether the organization wants one.")
 
     ai = c.get("ai")
     if ai is not None:
-        _solo(ai, {"plan", "tareas"}, "ai")
-        plan = _exige(ai, "plan", "ai")
-        if plan not in planes["ai"]:
-            raise Invalido(f"ai.plan {plan!r} no existe. Hay: {', '.join(sorted(planes['ai']))}")
+        _only(ai, {"plan", "tareas"}, "ai")
+        plan = _require(ai, "plan", "ai")
+        if plan not in plans["ai"]:
+            raise Invalid(f"ai.plan {plan!r} does not exist. There is: {', '.join(sorted(plans['ai']))}")
         for t in ai.get("tareas") or []:
-            _solo(t, {"nombre", "capacidad", "prompt"}, "ai.tareas[]")
-            _exige(t, "nombre", "ai.tareas[]")
-            cap = _exige(t, "capacidad", "ai.tareas[]")
-            disponibles = capacidades()
-            if cap not in disponibles:
-                raise Invalido(
-                    f"capacidad {cap!r} no se sirve hoy. Hay: {', '.join(sorted(disponibles))}\n"
-                    f"  Una organización nombra CAPACIDADES, nunca modelos ni\n"
-                    f"  proveedores (§5 del protocolo). Si ve un nombre de modelo\n"
-                    f"  acá, el contrato está mal escrito.\n"
-                    f"  Si la capacidad es la correcta y falta el engine, se agrega\n"
-                    f"  en ai/routes.yaml DESPUÉS de implementarlo — no antes.")
+            _only(t, {"nombre", "capacidad", "prompt"}, "ai.tareas[]")
+            _require(t, "nombre", "ai.tareas[]")
+            cap = _require(t, "capacidad", "ai.tareas[]")
+            available = capabilities()
+            if cap not in available:
+                raise Invalid(
+                    f"capacidad {cap!r} is not served today. There is: {', '.join(sorted(available))}\n"
+                    f"  An organization names CAPABILITIES, never models nor\n"
+                    f"  providers (§5 of the protocol). If you see a model name\n"
+                    f"  here, the contract is badly written.\n"
+                    f"  If the capability is the right one and the engine is missing, it\n"
+                    f"  is added to ai/routes.yaml AFTER implementing it — not before.")
 
-    servicios = _exige(c, "servicios", "contrato")
-    if not servicios:
-        raise Invalido("contrato: 'servicios' vacío — una organización sin servicios no es nada")
-    vistos = set()
-    hay_postgres = any(s.get("tipo") == "postgres" for s in servicios)
-    for s in servicios:
-        # SIN `version`. Estaba permitido y no lo consumía nadie: un
-        # contrato podía declarar `version: "17"` en su base y el
-        # generador la ignoraba, dejando a quien lo escribió creyendo
-        # que había fijado algo. La versión de un servicio provisto por
-        # la plataforma la decide services.yaml, y para eso está.
-        _solo(s, {"nombre", "tipo", "repo", "puerto", "publico", "usa"}, "servicios[]")
-        n = _exige(s, "nombre", "servicios[]")
-        if n in vistos:
-            raise Invalido(f"servicio {n!r} declarado dos veces")
-        vistos.add(n)
-        tipo = _exige(s, "tipo", "servicios[]")
-        if tipo not in TIPOS:
-            raise Invalido(f"servicio {n!r}: tipo {tipo!r} desconocido. Hay: {', '.join(sorted(TIPOS))}")
-        _coherencia_de_tipo(n, tipo, s)
+    services = _require(c, "servicios", "contract")
+    if not services:
+        raise Invalid("contract: 'servicios' empty — an organization with no services is nothing")
+    seen = set()
+    has_postgres = any(s.get("tipo") == "postgres" for s in services)
+    for s in services:
+        # NO `version`. It was allowed and nobody consumed it: a
+        # contract could declare `version: "17"` on its database and the
+        # generator ignored it, leaving whoever wrote it believing they
+        # had pinned something. The version of a service provided by the
+        # platform is decided by services.yaml, and that is what it is
+        # for.
+        _only(s, {"nombre", "tipo", "repo", "puerto", "publico", "usa"}, "servicios[]")
+        n = _require(s, "nombre", "servicios[]")
+        if n in seen:
+            raise Invalid(f"service {n!r} declared twice")
+        seen.add(n)
+        kind = _require(s, "tipo", "servicios[]")
+        if kind not in TYPES:
+            raise Invalid(f"service {n!r}: tipo {kind!r} unknown. There is: {', '.join(sorted(TYPES))}")
+        _type_coherence(n, kind, s)
         for u in s.get("usa") or []:
-            if u not in USOS:
-                raise Invalido(f"servicio {n!r}: usa {u!r} desconocido ({' | '.join(sorted(USOS))})")
-            if u == "bucket" and not alm.get("bucket"):
-                raise Invalido(f"servicio {n!r} declara usa:[bucket] pero la organización "
-                               f"no pidió almacenamiento.bucket")
+            if u not in USES:
+                raise Invalid(f"service {n!r}: usa {u!r} unknown ({' | '.join(sorted(USES))})")
+            if u == "bucket" and not storage.get("bucket"):
+                raise Invalid(f"service {n!r} declares usa:[bucket] but the organization "
+                              f"did not ask for almacenamiento.bucket")
             if u == "ai" and ai is None:
-                raise Invalido(f"servicio {n!r} declara usa:[ai] pero la organización "
-                               f"no tiene sección ai")
-            if u == "postgres" and not hay_postgres:
-                raise Invalido(f"servicio {n!r} declara usa:[postgres] pero la organización "
-                               f"no declaró ningún servicio de tipo postgres")
+                raise Invalid(f"service {n!r} declares usa:[ai] but the organization "
+                              f"has no ai section")
+            if u == "postgres" and not has_postgres:
+                raise Invalid(f"service {n!r} declares usa:[postgres] but the organization "
+                              f"did not declare any service of type postgres")
 
-    # ── repo: solo si algún servicio SE CONSTRUYE ─────────────────
+    # ── repo: only if some service IS BUILT ───────────────────────
     #
-    # Decía "sin repo no hay nada que desplegar", y era cierto cuando
-    # todo servicio salía de un build. Desde #41 dejó de serlo: un
-    # `postgres` lo provee la plataforma desde services.yaml, y un
-    # bucket lo aprovisiona un Job. Un contrato de pura infraestructura
-    # se rechazaba con una razón que ya no era verdad.
+    # It used to say "with no repo there is nothing to deploy", and that
+    # was true when every service came out of a build. Since #41 it
+    # stopped being true: a `postgres` is provided by the platform from
+    # services.yaml, and a bucket is provisioned by a Job. A contract of
+    # pure infrastructure was rejected for a reason that was no longer
+    # true.
     #
-    # Y bloqueaba el orden natural, que es al revés del que pedía:
-    # primero la base y el bucket, después la app que los usa. Obligaba
-    # a inventar un repo vacío para poder empezar.
-    de_build = [s for s in servicios if s["tipo"] in TIPOS_CON_IMAGEN]
-    if de_build and not c.get("repo") and not any(s.get("repo") for s in de_build):
-        cuales = ", ".join(f"{s['nombre']} ({s['tipo']})" for s in de_build)
-        raise Invalido(
-            f"hace falta 'repo' —a nivel organización o en el servicio— porque "
-            f"estos servicios se CONSTRUYEN: {cuales}.\n"
-            f"  Los tipos {', '.join(sorted(TIPOS_CON_IMAGEN))} salen de una imagen que\n"
-            f"  alguien tiene que compilar y firmar. `postgres` no: lo provee la\n"
-            f"  plataforma desde services.yaml, y para eso no hace falta repo.")
+    # And it blocked the natural order, which is the reverse of the one
+    # it demanded: first the database and the bucket, then the app that
+    # uses them. It forced people to invent an empty repo just to be
+    # able to start.
+    built = [s for s in services if s["tipo"] in TYPES_WITH_IMAGE]
+    if built and not c.get("repo") and not any(s.get("repo") for s in built):
+        which = ", ".join(f"{s['nombre']} ({s['tipo']})" for s in built)
+        raise Invalid(
+            f"'repo' is required —at the organization level or in the service— because "
+            f"these services are BUILT: {which}.\n"
+            f"  The types {', '.join(sorted(TYPES_WITH_IMAGE))} come out of an image somebody\n"
+            f"  has to compile and sign. `postgres` does not: it is provided by the\n"
+            f"  platform from services.yaml, and for that no repo is needed.")
 
-    # ── dominio: solo si algo es PÚBLICO ──────────────────────────
-    publicos = [s["nombre"] for s in servicios if s.get("publico")]
-    if publicos and not c.get("dominio"):
-        raise Invalido(
-            f"hace falta 'dominio': {', '.join(publicos)} declara(n) `publico` y sin\n"
-            f"  hostname nadie puede llegar. El CNAME del borde se DERIVA de este\n"
-            f"  campo (§2 del protocolo del borde); sin él el servicio arranca\n"
-            f"  bien y no recibe tráfico nunca, que es la peor clase de fallo.")
-    if c.get("dominio") and not publicos:
-        raise Invalido(
-            f"el contrato declara dominio {c['dominio']!r} pero ningún servicio es\n"
-            f"  `publico`. Ese CNAME apuntaría a un sitio que no existe. Si la app\n"
-            f"  todavía no está, el dominio se agrega junto con ella.")
+    # ── dominio: only if something is PUBLIC ──────────────────────
+    public = [s["nombre"] for s in services if s.get("publico")]
+    if public and not c.get("dominio"):
+        raise Invalid(
+            f"'dominio' is required: {', '.join(public)} declare(s) `publico` and without a\n"
+            f"  hostname nobody can arrive. The edge's CNAME is DERIVED from this\n"
+            f"  field (§2 of the edge protocol); without it the service starts up\n"
+            f"  fine and never receives traffic, which is the worst kind of failure.")
+    if c.get("dominio") and not public:
+        raise Invalid(
+            f"the contract declares dominio {c['dominio']!r} but no service is\n"
+            f"  `publico`. That CNAME would point at a site that does not exist. If the\n"
+            f"  app is not there yet, the domain is added together with it.")
 
-    # ── dos servicios no pueden reclamar la misma ruta ────────────
-    # Desde que la IngressRoute se DERIVA de estos campos (#54), un
-    # `publico` repetido no es un descuido de documentación: son dos
-    # reglas de traefik con el mismo match. Traefik elige una y la otra
-    # no recibe tráfico jamás, sin error en ningún lado.
-    vistas = {}
-    for s in servicios:
+    # ── two services cannot claim the same path ───────────────────
+    # Ever since the IngressRoute is DERIVED from these fields (#54), a
+    # repeated `publico` is not a documentation slip: they are two
+    # traefik rules with the same match. Traefik picks one and the other
+    # never receives traffic, with no error anywhere.
+    claimed = {}
+    for s in services:
         if not s.get("publico"):
             continue
-        if (duenio := vistas.get(s["publico"])) is not None:
-            raise Invalido(
-                f"{duenio!r} y {s['nombre']!r} declaran el mismo `publico: "
+        if (owner := claimed.get(s["publico"])) is not None:
+            raise Invalid(
+                f"{owner!r} and {s['nombre']!r} declare the same `publico: "
                 f"{s['publico']}'.\n"
-                f"  De ahí sale UNA regla de ruteo por servicio: con la misma ruta,\n"
-                f"  traefik se queda con una y la otra no recibe tráfico nunca. No\n"
-                f"  hay error que lo delate — la app arranca sana y queda muda.")
-        vistas[s["publico"]] = s["nombre"]
+                f"  ONE routing rule per service comes out of that: with the same path,\n"
+                f"  traefik keeps one and the other never receives traffic. There is\n"
+                f"  no error to give it away — the app starts up healthy and stays mute.")
+        claimed[s["publico"]] = s["nombre"]
     return c
 
 
 # ──────────────────────────────────────────────────────────────────
 # Render
 #
-# Plantillas de texto y no yaml.dump() a propósito: los comentarios que
-# explican POR QUÉ cada cosa es como es valen tanto como el YAML, y
-# yaml.dump los borra. El costo es escribir las plantillas a mano; el
-# beneficio es que el archivo generado se puede LEER.
+# Text templates and not yaml.dump() on purpose: the comments that
+# explain WHY each thing is the way it is are worth as much as the YAML,
+# and yaml.dump erases them. The cost is writing the templates by hand;
+# the benefit is that the generated file can be READ.
 # ──────────────────────────────────────────────────────────────────
 
-# La cabecera de lo derivado y el resto de los centinelas viven en
-# lib/aegis/markers.py: el que los ESCRIBE y el que los RECONOCE tienen
-# que usar la misma cadena, y en v2 estaba copiada ocho veces (clase B
-# del registro, regla 5.6).
+# The header of what is derived and the rest of the sentinels live in
+# lib/aegis/markers.py: the one that WRITES them and the one that
+# RECOGNISES them have to use the same string, and in v2 it was copied
+# eight times (class B of the register, rule 5.6).
 HEADER = markers.HEADER
 
 
-def _hash(texto):
-    """Huella del contrato Y DEL GENERADOR que lo renderiza.
+def _hash(text):
+    """Fingerprint of the contract AND OF THE GENERATOR that renders it.
 
-    Incluir el generador no es exceso de celo: sin eso, cambiar una
-    plantilla acá deja el hash intacto mientras la salida cambia, y el
-    guard I3 lo lee como "alguien editó el archivo a mano" y se niega a
-    escribir. Pasó el 2026-08-03 al sacar el ignoreDifferences: el guard
-    bloqueó su propio cambio.
+    Including the generator is not over-caution: without it, changing a
+    template here leaves the hash intact while the output changes, and
+    guard I3 reads that as "somebody edited the file by hand" and
+    refuses to write. It happened on 2026-08-03 when the
+    ignoreDifferences was taken out: the guard blocked its own change.
 
-    Con el generador adentro, tocar una plantilla cambia el hash de
-    TODOS los archivos generados —que es la verdad: son distintos— y la
-    reescritura procede. Lo que I3 sigue cazando es lo que tiene que
-    cazar: mismo contrato y mismo generador, contenido distinto = mano
-    humana.
+    With the generator inside, touching a template changes the hash of
+    ALL the generated files —which is the truth: they are different— and
+    the rewrite proceeds. What I3 still catches is what it has to catch:
+    same contract and same generator, different content = a human hand.
     """
-    mio = open(os.path.abspath(__file__), "rb").read()
-    return hashlib.sha256(texto.encode() + b"\x00" + mio).hexdigest()[:16]
+    mine = open(os.path.abspath(__file__), "rb").read()
+    return hashlib.sha256(text.encode() + b"\x00" + mine).hexdigest()[:16]
 
 
-def render_bundle(c, planes, h):
+def render_bundle(c, plans, h):
     org = c["organizacion"]
     ns = f"org-{org}"
-    cuota = planes["cuota"][c["cuota"]]
-    lineas = [HEADER.format(org=org, hash=h)]
-    lineas.append(f"""\
+    quota = plans["cuota"][c["cuota"]]
+    lines = [HEADER.format(org=org, hash=h)]
+    lines.append(f"""\
 #
 # Namespace, cuota y la identidad con la que se pullea.
 ---
@@ -451,13 +461,13 @@ spec:
   hard:""")
     for k in ("requests.cpu", "requests.memory", "limits.cpu", "limits.memory",
               "pods", "persistentvolumeclaims", "requests.storage"):
-        # A mano y no con yaml.safe_dump: para un escalar suelto,
-        # safe_dump emite el marcador de fin de documento `...`, que
-        # partía el stream a la mitad de la ResourceQuota. Un cantidad de
-        # K8s va SIEMPRE entre comillas — `2` sin comillas es un entero y
-        # el apiserver rechaza el objeto.
-        lineas.append(f'    {k}: "{cuota[k]}"')
-    lineas.append(f"""\
+        # By hand and not with yaml.safe_dump: for a lone scalar,
+        # safe_dump emits the end-of-document marker `...`, which split
+        # the stream in the middle of the ResourceQuota. A K8s quantity
+        # ALWAYS goes in quotes — `2` unquoted is an integer and the
+        # apiserver rejects the object.
+        lines.append(f'    {k}: "{quota[k]}"')
+    lines.append(f"""\
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -473,27 +483,27 @@ imagePullSecrets:
   # credenciales de registry.
   - name: regcred-internal
 """)
-    return "\n".join(lineas)
+    return "\n".join(lines)
 
 
-def render_datos(c, h):
-    """Los servicios que provee la PLATAFORMA, no un repo del tenant.
+def render_data(c, h):
+    """The services the PLATFORM provides, not a tenant's repo.
 
-    Hoy solo postgres. Sale de services.yaml, que es la tabla de "con
-    qué se cumple cada tipo" — el mismo papel que ai/routes.yaml cumple
-    para las capacidades de AI.
+    Today only postgres. It comes out of services.yaml, which is the
+    table of "what each type is fulfilled with" — the same role
+    ai/routes.yaml plays for the AI capabilities.
     """
-    bases = [s for s in c["servicios"] if s["tipo"] == "postgres"]
-    if not bases:
+    dbs = [s for s in c["servicios"] if s["tipo"] == "postgres"]
+    if not dbs:
         return None
 
     org = c["organizacion"]
     ns = f"org-{org}"
-    cat = yaml.safe_load(open(SERVICIOS, encoding="utf-8"))
+    cat = yaml.safe_load(open(SERVICES, encoding="utf-8"))
     t = cat["tipos"]["postgres"]
-    imagen = f"{cat['registro']}/{t['imagen']}@{t['digest']}"
+    image = f"{cat['registro']}/{t['imagen']}@{t['digest']}"
 
-    partes = [HEADER.format(org=org, hash=h), f"""\
+    parts = [HEADER.format(org=org, hash=h), f"""\
 #
 # Bases de datos de esta organización.
 #
@@ -506,10 +516,10 @@ def render_datos(c, h):
 # salida obvia —ignoreDifferences sobre la imagen— APAGA el auto-sync.
 # Con el digest en git la mutación es un no-op. Es el hallazgo #36."""]
 
-    for s in sorted(bases, key=lambda x: x["nombre"]):
+    for s in sorted(dbs, key=lambda x: x["nombre"]):
         n = s["nombre"]
         app = f"{org}-{n}"
-        partes.append(f"""\
+        parts.append(f"""\
 ---
 # Headless: cada réplica tiene DNS propio. Con una sola réplica da
 # igual, pero un Service normal delante de un StatefulSet es la clase de
@@ -557,7 +567,7 @@ spec:
         seccompProfile: {{type: RuntimeDefault}}
       containers:
         - name: postgres
-          image: {imagen}
+          image: {image}
           ports:
             - {{name: postgres, containerPort: {t['puerto']}}}
           env:
@@ -624,22 +634,22 @@ spec:
         volumeMode: Filesystem
         resources:
           requests: {{storage: {t['disco']}}}""")
-    return "\n".join(partes) + "\n"
+    return "\n".join(parts) + "\n"
 
 
-def repos_de(c):
-    """Los repos de un contrato, mapeados al nombre de su Application.
+def repos_of(c):
+    """The repos of a contract, mapped to the name of their Application.
 
-    UNA sola fuente para las dos cosas que dependen de esta lista: las
-    Applications que se generan, y el `sourceRepos` del AppProject que
-    las acota. Calcularla dos veces es cómo se desincronizan — y la
-    forma de fallar sería fea: la App existe, el proyecto no la deja
-    leer su propio repo, y el error habla de permisos y no de que
-    faltó una línea.
+    ONE single source for the two things that depend on this list: the
+    Applications that get generated, and the `sourceRepos` of the
+    AppProject that fences them in. Computing it twice is how they drift
+    apart — and the way it would fail is ugly: the App exists, the
+    project does not let it read its own repo, and the error talks about
+    permissions and not about the line that was missing.
 
-    El repo puede estar en el contrato (uno para toda la organización)
-    o en un servicio (un repo propio). El validador acepta las dos, así
-    que las dos tienen que llegar al proyecto.
+    The repo can be in the contract (one for the whole organization) or
+    in a service (a repo of its own). The validator accepts both, so
+    both have to reach the project.
     """
     org = c["organizacion"]
     repos = {}
@@ -652,32 +662,33 @@ def repos_de(c):
 
 
 def render_apps(c, h):
-    """Una Application de ArgoCD por repo declarado.
+    """One ArgoCD Application per declared repo.
 
-    Servicios que comparten repo comparten Application: el repo trae su
-    propio overlay de kustomize con todos sus manifiestos. Dos
-    Applications sobre el mismo objeto se lo disputan y dejan la app
-    OutOfSync para siempre — un recurso, un dueño.
+    Services that share a repo share an Application: the repo brings its
+    own kustomize overlay with all its manifests. Two Applications over
+    the same object fight over it and leave the app OutOfSync forever —
+    one resource, one owner.
     """
     org = c["organizacion"]
     ns = f"org-{org}"
-    repos = repos_de(c)
+    repos = repos_of(c)
 
-    # Sin repos no hay Applications, y entonces no hay archivo. Devolver
-    # el encabezado solo produce un YAML sin objetos, que kustomize
-    # acepta y `kubectl apply` rechaza con "no objects passed to apply".
+    # With no repos there are no Applications, and then there is no
+    # file. Returning just the header produces a YAML with no objects,
+    # which kustomize accepts and `kubectl apply` rejects with "no
+    # objects passed to apply".
     if not repos:
         return None
 
-    partes = [HEADER.format(org=org, hash=h), """\
+    parts = [HEADER.format(org=org, hash=h), """\
 #
 # Las Applications de esta organización.
 #
 # Viven acá, CON su organización, y no en argocd-apps/. Declararlas en
 # los dos lados hace que dos Applications se disputen el mismo objeto y
 # la App root quede OutOfSync de forma permanente."""]
-    for repo, nombre in sorted(repos.items()):
-        partes.append(f"""\
+    for repo, name in sorted(repos.items()):
+        parts.append(f"""\
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -686,7 +697,7 @@ metadata:
   # namePattern del Image Updater; ese componente se retiró —el digest
   # lo escribe el propio pipeline desde #36/#37— así que el nombre ya
   # no acopla con nada de la plataforma.
-  name: {nombre}
+  name: {name}
   namespace: argocd
   labels: {{aegis.dev/part-of: aegis-tenants}}
 spec:
@@ -718,13 +729,13 @@ spec:
   # Si una organización vuelve a quedar OutOfSync por la imagen,
   # significa que su pipeline está escribiendo un TAG. El arreglo va
   # ahí, no acá.""")
-    return "\n".join(partes) + "\n"
+    return "\n".join(parts) + "\n"
 
 
 def render_netpol(c, h):
     org = c["organizacion"]
     ns = f"org-{org}"
-    partes = [HEADER.format(org=org, hash=h), f"""\
+    parts = [HEADER.format(org=org, hash=h), f"""\
 #
 # Aislamiento de red. TODO denegado salvo lo que el contrato concedió.
 #
@@ -794,10 +805,10 @@ spec:
         - {{protocol: TCP, port: 53}}"""]
 
     for s in sorted(c["servicios"], key=lambda x: x["nombre"]):
-        etiqueta = f"{org}-{s['nombre']}"
+        label = f"{org}-{s['nombre']}"
         for u in sorted(s.get("usa") or []):
             if u == "ai":
-                partes.append(f"""\
+                parts.append(f"""\
 ---
 # {s['nombre']} -> gateway de AI, PUERTA INTERNA (8081).
 #
@@ -812,7 +823,7 @@ metadata:
   namespace: {ns}
 spec:
   podSelector:
-    matchLabels: {{app: {etiqueta}}}
+    matchLabels: {{app: {label}}}
   policyTypes: [Egress]
   egress:
     - to:
@@ -823,12 +834,13 @@ spec:
       ports:
         - {{protocol: TCP, port: 8081}}""")
             elif u == "postgres":
-                # Egress explícito aunque `allow-intra-namespace` ya lo
-                # permitiría: esta política no AGREGA permiso, DOCUMENTA
-                # la dependencia. El día que el intra-namespace se
-                # cierre —que es hacia donde debería ir— lo declarado en
-                # el contrato es lo que va a seguir funcionando.
-                partes.append(f"""\
+                # Explicit egress even though `allow-intra-namespace`
+                # would already allow it: this policy does not ADD
+                # permission, it DOCUMENTS the dependency. The day
+                # intra-namespace gets closed —which is where it should
+                # be heading— what the contract declares is what will go
+                # on working.
+                parts.append(f"""\
 ---
 # {s['nombre']} -> la base de la organización.
 apiVersion: networking.k8s.io/v1
@@ -838,7 +850,7 @@ metadata:
   namespace: {ns}
 spec:
   podSelector:
-    matchLabels: {{app: {etiqueta}}}
+    matchLabels: {{app: {label}}}
   policyTypes: [Egress]
   egress:
     - to:
@@ -847,7 +859,7 @@ spec:
       ports:
         - {{protocol: TCP, port: 5432}}""")
             elif u == "bucket":
-                partes.append(f"""\
+                parts.append(f"""\
 ---
 # {s['nombre']} -> almacenamiento S3 compartido (Garage).
 apiVersion: networking.k8s.io/v1
@@ -857,7 +869,7 @@ metadata:
   namespace: {ns}
 spec:
   podSelector:
-    matchLabels: {{app: {etiqueta}}}
+    matchLabels: {{app: {label}}}
   policyTypes: [Egress]
   egress:
     - to:
@@ -866,7 +878,7 @@ spec:
       ports:
         - {{protocol: TCP, port: 3900}}""")
             elif u == "internet":
-                partes.append(f"""\
+                parts.append(f"""\
 ---
 # {s['nombre']} -> internet, SOLO 443 y SOLO fuera de lo privado.
 #
@@ -884,7 +896,7 @@ metadata:
   namespace: {ns}
 spec:
   podSelector:
-    matchLabels: {{app: {etiqueta}}}
+    matchLabels: {{app: {label}}}
   policyTypes: [Egress]
   egress:
     - to:
@@ -893,57 +905,59 @@ spec:
             except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
       ports:
         - {{protocol: TCP, port: 443}}""")
-    return "\n".join(partes) + "\n"
+    return "\n".join(parts) + "\n"
 
 
-def render_ruteo(c, h):
-    """La IngressRoute de la organización, derivada del contrato.
+def render_routes(c, h):
+    """The organization's IngressRoute, derived from the contract.
 
-    Hasta #54 esto lo escribía a mano el repo de cada app, repitiendo lo
-    que el contrato ya decía (`dominio` + `publico`). Dos motivos para
-    traerlo acá, y el segundo pesa más que el primero:
+    Until #54 each app's repo wrote this by hand, repeating what the
+    contract already said (`dominio` + `publico`). Two reasons for
+    bringing it here, and the second weighs more than the first:
 
-    1. Si las dos copias discrepan, el modo de fallo es el peor: el CNAME
-       existe, la red permite, el pod corre, y el visitante recibe un 404.
-       Nada está caído y ningún chequeo se pone rojo.
+    1. If the two copies disagree, the failure mode is the worst one:
+       the CNAME exists, the network allows it, the pod runs, and the
+       visitor receives a 404. Nothing is down and no check turns red.
 
-    2. AISLAMIENTO. Un AppProject solo puede filtrar por *kind*, nunca por
-       el valor de un campo, así que mientras el inquilino pueda crear
-       IngressRoutes puede reclamar el `Host` de otra organización.
-       MEDIDO el 2026-08-06: org-blog reclamó un hostname, org-ejemplo
-       reclamó EL MISMO, los dos fueron admitidos sin queja y traefik
-       terminó sirviendo el de org-ejemplo. El dueño legítimo no tiene
-       defensa. Con el ruteo acá, el kind entra al blacklist del proyecto
-       de inquilino y el robo deja de ser expresable.
+    2. ISOLATION. An AppProject can only filter by *kind*, never by the
+       value of a field, so as long as the tenant can create
+       IngressRoutes it can claim another organization's `Host`.
+       MEASURED on 2026-08-06: org-blog claimed a hostname, org-ejemplo
+       claimed THE SAME one, both were admitted without a complaint and
+       traefik ended up serving org-ejemplo's. The legitimate owner has
+       no defence. With the routing here, the kind goes into the tenant
+       project's blacklist and the theft stops being expressible.
 
-    A cambio, la plataforma IMPONE la convención de nombres: el Service
-    de un servicio `X` se llama `<org>-X` y escucha en 8080 — el mismo
-    8080 que abre allow-edge-ingress, para que haya UN número en todo el
-    sistema y no uno por capa.
+    In exchange, the platform IMPOSES the naming convention: the Service
+    of a service `X` is called `<org>-X` and listens on 8080 — the same
+    8080 that allow-edge-ingress opens, so that there is ONE number in
+    the whole system and not one per layer.
 
-    Desde #81/#90 emite además los TRES middlewares del borde y los
-    engancha a cada ruta. Van en el namespace de la organización y no en
-    infra-edge porque traefik corre SIN `allowCrossNamespace` (medido en
-    sus args el 2026-08-13): una referencia cruzada no falla ruidosa —
-    se ignora, y la ruta queda sin protección con todo en verde.
+    Since #81/#90 it also emits the edge's THREE middlewares and hooks
+    them onto every route. They go in the organization's namespace and
+    not in infra-edge because traefik runs WITHOUT `allowCrossNamespace`
+    (measured in its args on 2026-08-13): a cross-namespace reference
+    does not fail loudly — it is ignored, and the route is left with no
+    protection and everything green.
     """
     org = c["organizacion"]
     ns = f"org-{org}"
     if not c.get("dominio"):
         return None
-    # El validador ya garantiza que dominio y `publico` van juntos; esto
-    # es solo para no depender de ese orden desde acá.
-    publicos = [s for s in c["servicios"] if s.get("publico")]
-    if not publicos:
+    # The validator already guarantees that dominio and `publico` go
+    # together; this is only so as not to depend on that order from here.
+    public_svcs = [s for s in c["servicios"] if s.get("publico")]
+    if not public_svcs:
         return None
 
-    # Del MÁS específico al menos: traefik evalúa por orden, y una regla
-    # de Host suelta capturaría /api antes de que se la mire. Ordenar por
-    # largo descendente deja `/` al final por construcción, sin ningún
-    # caso especial que después alguien tenga que recordar.
-    publicos.sort(key=lambda s: (-len(s["publico"]), s["nombre"]))
+    # From the MOST specific to the least: traefik evaluates in order,
+    # and a bare Host rule would capture /api before anybody looked at
+    # it. Sorting by descending length leaves `/` at the end by
+    # construction, with no special case for somebody to have to
+    # remember later.
+    public_svcs.sort(key=lambda s: (-len(s["publico"]), s["nombre"]))
 
-    partes = [HEADER.format(org=org, hash=h), f"""\
+    parts = [HEADER.format(org=org, hash=h), f"""\
 #
 # El ruteo de esta organización — DERIVADO de `dominio` y de los
 # `publico:` del contrato. El repo de la app ya no lo escribe: no puede,
@@ -1048,20 +1062,21 @@ spec:
   # segundo lugar donde vencerse.
   entryPoints: [web]
   routes:"""]
-    for s in publicos:
-        # PathPrefix solo cuando la ruta no es la raíz: `PathPrefix(/)`
-        # matchea todo y convertiría la regla en un Host suelto escrito
-        # de forma más larga.
-        ruta = s["publico"]
+    for s in public_svcs:
+        # PathPrefix only when the path is not the root: `PathPrefix(/)`
+        # matches everything and would turn the rule into a bare Host
+        # written the long way.
+        path = s["publico"]
         match = f"Host(`{c['dominio']}`)"
-        if ruta != "/":
-            match += f" && PathPrefix(`{ruta}`)"
-        # Los middlewares van POR RUTA y no una vez por IngressRoute
-        # porque traefik no tiene «middlewares de la IngressRoute»: se
-        # declaran en cada regla. Repetirlos acá no es duplicación —
-        # una ruta sin la lista es una ruta sin protección.
-        partes.append(f"""\
-    # {s['nombre']} — `publico: {ruta}` en el contrato
+        if path != "/":
+            match += f" && PathPrefix(`{path}`)"
+        # The middlewares go PER ROUTE and not once per IngressRoute
+        # because traefik has no «middlewares of the IngressRoute»: they
+        # are declared on each rule. Repeating them here is not
+        # duplication — a route without the list is a route without
+        # protection.
+        parts.append(f"""\
+    # {s['nombre']} — `publico: {path}` en el contrato
     - kind: Rule
       match: {match}
       middlewares:
@@ -1070,36 +1085,37 @@ spec:
         - {{name: {org}-cuerpo}}
       services:
         - {{name: {org}-{s['nombre']}, port: 8080}}""")
-    return "\n".join(partes) + "\n"
+    return "\n".join(parts) + "\n"
 
 
-def render_kustomization(c, h, secretos):
+def render_kustomization(c, h, secrets):
     org = c["organizacion"]
-    partes = [HEADER.format(org=org, hash=h), """\
+    parts = [HEADER.format(org=org, hash=h), """\
 #
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - bundle.yaml
   - netpol.yaml"""]
-    # Condicionales por la misma razón que en garage-system: kustomize
-    # FALLA si un recurso listado no existe en disco. Listar apps.yaml
-    # cuando la organización todavía no tiene repo rompería el render
-    # entero, y el error apuntaría a kustomize y no al contrato.
+    # Conditional for the same reason as in garage-system: kustomize
+    # FAILS if a listed resource does not exist on disk. Listing
+    # apps.yaml when the organization has no repo yet would break the
+    # whole render, and the error would point at kustomize and not at
+    # the contract.
     if any(s.get("repo") for s in c["servicios"]) or c.get("repo"):
-        partes.append("  - apps.yaml")
+        parts.append("  - apps.yaml")
     if any(s["tipo"] == "postgres" for s in c["servicios"]):
-        partes.append("  - datos.yaml")
+        parts.append("  - datos.yaml")
     if c.get("dominio") and any(s.get("publico") for s in c["servicios"]):
-        partes.append("  - routes.yaml")
-    if secretos:
-        partes.append("generators:\n  - secret-generator.yaml")
-    return "\n".join(partes) + "\n"
+        parts.append("  - routes.yaml")
+    if secrets:
+        parts.append("generators:\n  - secret-generator.yaml")
+    return "\n".join(parts) + "\n"
 
 
-def render_secret_generator(c, h, secretos):
+def render_secret_generator(c, h, secrets):
     org = c["organizacion"]
-    partes = [HEADER.format(org=org, hash=h), f"""\
+    parts = [HEADER.format(org=org, hash=h), f"""\
 #
 apiVersion: viaduct.ai/v1
 kind: ksops
@@ -1111,537 +1127,547 @@ metadata:
 # LISTA EXPLÍCITA (A7): nada de globs. Un glob incorpora en silencio
 # cualquier .enc.yaml que caiga en el directorio.
 files:"""]
-    for s in secretos:
-        partes.append(f"  - {s}")
-    return "\n".join(partes) + "\n"
+    for s in secrets:
+        parts.append(f"  - {s}")
+    return "\n".join(parts) + "\n"
 
 
-def secretos_de(c):
-    """Qué secretos necesita esta organización, en orden estable."""
+def secrets_of(c):
+    """Which secrets this organization needs, in stable order."""
     s = ["secret-regcred-internal.enc.yaml"]
     if c.get("ai") is not None:
         s.append("secret-ai-gateway-key.enc.yaml")
     if (c.get("almacenamiento") or {}).get("bucket"):
         s.append("secret-garage.enc.yaml")
-    # Uno por base y no uno por organización: dos bases con la misma
-    # credencial son una sola base con dos nombres.
+    # One per database and not one per organization: two databases with
+    # the same credential are one database with two names.
     for b in sorted(x["nombre"] for x in c["servicios"] if x["tipo"] == "postgres"):
         s.append(f"secret-{b}-credenciales.enc.yaml")
     return s
 
 
-def renderizar(c, planes, crudo):
-    h = _hash(crudo)
-    secretos = secretos_de(c)
-    salida = {
-        "bundle.yaml": render_bundle(c, planes, h),
+def render(c, plans, raw):
+    h = _hash(raw)
+    secrets = secrets_of(c)
+    output = {
+        "bundle.yaml": render_bundle(c, plans, h),
         "netpol.yaml": render_netpol(c, h),
-        "kustomization.yaml": render_kustomization(c, h, secretos),
+        "kustomization.yaml": render_kustomization(c, h, secrets),
     }
-    # apps.yaml SOLO si hay algún repo. Sin repos el archivo salía con
-    # el encabezado y ni un objeto adentro: `kubectl apply` responde "no
-    # objects passed to apply". Un archivo generado que no produce nada
-    # es ruido que después alguien lee buscando por qué no se despliega.
+    # apps.yaml ONLY if there is some repo. With no repos the file came
+    # out with the header and not one object inside: `kubectl apply`
+    # answers "no objects passed to apply". A generated file that
+    # produces nothing is noise somebody later reads looking for why it
+    # is not deploying.
     if (apps := render_apps(c, h)) is not None:
-        salida["apps.yaml"] = apps
-    if (datos := render_datos(c, h)) is not None:
-        salida["datos.yaml"] = datos
-    if (ruteo := render_ruteo(c, h)) is not None:
-        salida["routes.yaml"] = ruteo
-    if secretos:
-        salida["secret-generator.yaml"] = render_secret_generator(c, h, secretos)
-    return salida, secretos
+        output["apps.yaml"] = apps
+    if (data := render_data(c, h)) is not None:
+        output["datos.yaml"] = data
+    if (routes := render_routes(c, h)) is not None:
+        output["routes.yaml"] = routes
+    if secrets:
+        output["secret-generator.yaml"] = render_secret_generator(c, h, secrets)
+    return output, secrets
 
 
 # ──────────────────────────────────────────────────────────────────
-# Aplicar
+# Apply
 # ──────────────────────────────────────────────────────────────────
 
 def _without_hash(t):
     return markers.without_hash(t)
 
 
-def aplicar(ruta, escribir):
-    crudo = open(ruta, encoding="utf-8").read()
-    planes = yaml.safe_load(open(PLANES, encoding="utf-8"))
-    c = validar(yaml.safe_load(crudo), planes)
+def apply_contract(path, write):
+    raw = open(path, encoding="utf-8").read()
+    plans = yaml.safe_load(open(PLANS, encoding="utf-8"))
+    c = validate(yaml.safe_load(raw), plans)
     org = c["organizacion"]
-    destino = os.path.join(DIR_K8S, f"org-{org}")
-    salida, secretos = renderizar(c, planes, crudo)
+    dest = os.path.join(K8S_DIR, f"org-{org}")
+    output, secrets = render(c, plans, raw)
 
-    print(f"\norganización {verde}{org}{fin}  ·  contrato v{c['version']}  ·  "
+    print(f"\norganization {green}{org}{off}  ·  contract v{c['version']}  ·  "
           f"cuota {c['cuota']}" + (f"  ·  ai {c['ai']['plan']}" if c.get("ai") else ""))
-    print(f"{gris}destino: k8s/organizations/org-{org}/{fin}\n")
+    print(f"{grey}destination: k8s/organizations/org-{org}/{off}\n")
 
-    cambios = 0
-    generados = set(salida)
-    for nombre in sorted(salida):
-        camino = os.path.join(destino, nombre)
-        nuevo = salida[nombre]
-        if not os.path.exists(camino):
-            print(f"  {verde}+{fin} {nombre}  {gris}(nuevo){fin}")
-            cambios += 1
-            if escribir:
-                os.makedirs(destino, exist_ok=True)
-                open(camino, "w", encoding="utf-8").write(nuevo)
+    changes = 0
+    generated = set(output)
+    for name in sorted(output):
+        file_path = os.path.join(dest, name)
+        new = output[name]
+        if not os.path.exists(file_path):
+            print(f"  {green}+{off} {name}  {grey}(new){off}")
+            changes += 1
+            if write:
+                os.makedirs(dest, exist_ok=True)
+                open(file_path, "w", encoding="utf-8").write(new)
             continue
-        viejo = open(camino, encoding="utf-8").read()
-        if viejo == nuevo:
-            print(f"  {gris}={fin} {nombre}")
+        old = open(file_path, encoding="utf-8").read()
+        if old == new:
+            print(f"  {grey}={off} {name}")
             continue
-        # I3: si el archivo fue editado a mano, negarse y mostrar qué
-        # cambió. La salida es el contrato, no el archivo — pero pisar
-        # el trabajo de alguien sin mostrarlo es peor que no generar.
-        if markers.is_generated(viejo) and _without_hash(viejo) != _without_hash(nuevo):
-            marca_vieja = [l for l in viejo.splitlines() if l.startswith("# hash:")]
-            marca_nueva = [l for l in nuevo.splitlines() if l.startswith("# hash:")]
-            if marca_vieja == marca_nueva:
-                print(f"  {rojo}!{fin} {nombre}  {rojo}EDITADO A MANO{fin} "
-                      f"{gris}(mismo contrato, contenido distinto){fin}")
+        # I3: if the file was edited by hand, refuse and show what
+        # changed. The truth is the contract, not the file — but
+        # overwriting somebody's work without showing it is worse than
+        # not generating.
+        if markers.is_generated(old) and _without_hash(old) != _without_hash(new):
+            old_mark = [l for l in old.splitlines() if l.startswith("# hash:")]
+            new_mark = [l for l in new.splitlines() if l.startswith("# hash:")]
+            if old_mark == new_mark:
+                print(f"  {red}!{off} {name}  {red}EDITED BY HAND{off} "
+                      f"{grey}(same contract, different content){off}")
                 for l in list(difflib.unified_diff(
-                        viejo.splitlines(), nuevo.splitlines(),
-                        "en disco", "generado", lineterm=""))[:40]:
-                    print(f"      {gris}{l}{fin}")
-                print(f"      {ama}no se pisó. Revisá si el cambio debe ir al contrato.{fin}")
-                cambios += 1
+                        old.splitlines(), new.splitlines(),
+                        "on disk", "generated", lineterm=""))[:40]:
+                    print(f"      {grey}{l}{off}")
+                print(f"      {yellow}not overwritten. Check whether the change belongs in the contract.{off}")
+                changes += 1
                 continue
-        print(f"  {ama}~{fin} {nombre}")
-        cambios += 1
-        if escribir:
-            open(camino, "w", encoding="utf-8").write(nuevo)
+        print(f"  {yellow}~{off} {name}")
+        changes += 1
+        if write:
+            open(file_path, "w", encoding="utf-8").write(new)
 
-    # I4: convergencia. Lo que el generador ya no produce, sobra.
-    if os.path.isdir(destino):
-        for nombre in sorted(os.listdir(destino)):
-            if nombre in generados or nombre.endswith(".enc.yaml"):
+    # I4: convergence. What the generator no longer produces is surplus.
+    if os.path.isdir(dest):
+        for name in sorted(os.listdir(dest)):
+            if name in generated or name.endswith(".enc.yaml"):
                 continue
-            print(f"  {rojo}-{fin} {nombre}  {gris}(ya no lo produce el contrato){fin}")
-            cambios += 1
-            if escribir:
-                os.remove(os.path.join(destino, nombre))
+            print(f"  {red}-{off} {name}  {grey}(the contract no longer produces it){off}")
+            changes += 1
+            if write:
+                os.remove(os.path.join(dest, name))
 
-    faltan = [s for s in secretos
-              if not os.path.exists(os.path.join(destino, s))]
-    if faltan:
-        print(f"\n  {ama}secretos que faltan{fin}")
-        for s in faltan:
+    missing = [s for s in secrets
+               if not os.path.exists(os.path.join(dest, s))]
+    if missing:
+        print(f"\n  {yellow}secrets that are missing{off}")
+        for s in missing:
             print(f"    · {s}")
-        # El comando exacto, no "creá los secretos". Este generador NO
-        # los crea a propósito: escribe manifiestos y no maneja material
-        # criptográfico, y separar las dos cosas es lo que permite
-        # correrlo sin pensarlo.
-        print(f"  {gris}se crean con:{fin}  {CMD_SECRET} {ruta}")
-        print(f"  {gris}se crean si faltan y NUNCA se regeneran: reaplicar no rota nada{fin}")
+        # The exact command, not "create the secrets". This generator
+        # deliberately does NOT create them: it writes manifests and
+        # does not handle cryptographic material, and separating the two
+        # is what makes it safe to run without thinking about it.
+        print(f"  {grey}they are created with:{off}  {CMD_SECRET} {path}")
+        print(f"  {grey}they are created if missing and NEVER regenerated: reapplying rotates nothing{off}")
 
-    if not cambios:
-        print(f"\n{verde}sin cambios{fin} — ya converge\n")
+    if not changes:
+        print(f"\n{green}no changes{off} — it already converges\n")
         return 0
-    if escribir:
-        print(f"\n{verde}{cambios} cambio(s) escritos.{fin} Revisá el diff y commiteá.\n")
+    if write:
+        print(f"\n{green}{changes} change(s) written.{off} Review the diff and commit.\n")
     else:
-        print(f"\n{ama}{cambios} cambio(s).{fin} Nada escrito (esto fue `plan`).\n")
+        print(f"\n{yellow}{changes} change(s).{off} Nothing written (this was `plan`).\n")
     return 0
 
 
 # ──────────────────────────────────────────────────────────────────
-# El borde
+# The edge
 #
-# `public_hostnames` de tofu se DERIVA: plataforma (edge.yaml) + los
-# `dominio:` de TODOS los contratos. Nadie edita esa lista a mano.
+# tofu's `public_hostnames` is DERIVED: platform (edge.yaml) + the
+# `dominio:` of ALL the contracts. Nobody edits that list by hand.
 #
-# El modo de fallo que esto elimina es el peor de todos: si un hostname
-# falta, simplemente NO EXISTE. Sin error, sin alarma, sin nada rojo —
-# el IngressRoute del cluster está perfecto y nadie llega. Ya pasó con
-# ai.__ROOT_DOMAIN__ (#35) y casi pasa con blog.
+# The failure mode this removes is the worst of all: if a hostname is
+# missing, it simply DOES NOT EXIST. No error, no alarm, nothing red —
+# the cluster's IngressRoute is perfect and nobody arrives. It already
+# happened with ai.__ROOT_DOMAIN__ (#35) and nearly happened with blog.
 #
-# Se lee TODO orgs/*.yaml y no solo el contrato que se está aplicando:
-# la lista es de la instancia entera, no de una organización. Aplicar
-# uno solo y reescribir la lista con él borraría a los demás.
+# ALL of orgs/*.yaml is read and not only the contract being applied:
+# the list belongs to the whole instance, not to one organization.
+# Applying a single one and rewriting the list with it would erase the
+# rest.
 # ──────────────────────────────────────────────────────────────────
 
-PATRON_HOSTNAMES = re.compile(r"^(\s*)public_hostnames\s*=\s*\[[^\]]*\]", re.M)
+HOSTNAMES_PATTERN = re.compile(r"^(\s*)public_hostnames\s*=\s*\[[^\]]*\]", re.M)
 
 
-def etiquetas_del_borde():
+def edge_labels():
     edge = yaml.safe_load(open(EDGE, encoding="utf-8"))
-    raiz = edge["root_domain"]
-    etiquetas = list(edge.get("platform") or [])
-    de_contratos = []
-    for nombre in sorted(os.listdir(DIR_ORGS)):
-        if not nombre.endswith((".yaml", ".yml")):
+    root = edge["root_domain"]
+    labels = list(edge.get("platform") or [])
+    from_contracts = []
+    for name in sorted(os.listdir(ORGS_DIR)):
+        if not name.endswith((".yaml", ".yml")):
             continue
-        c = yaml.safe_load(open(os.path.join(DIR_ORGS, nombre), encoding="utf-8"))
+        c = yaml.safe_load(open(os.path.join(ORGS_DIR, name), encoding="utf-8"))
         dom = (c or {}).get("dominio")
         if not dom:
             continue
-        if not dom.endswith("." + raiz):
-            raise Invalido(
-                f"{nombre}: dominio {dom!r} no está bajo {raiz!r}.\n"
-                f"  El borde solo puede crear CNAMEs dentro de su zona. Un dominio\n"
-                f"  de otra zona necesita otra decisión, no una entrada más.")
-        de_contratos.append(dom[: -(len(raiz) + 1)])
-    # Orden estable: plataforma primero (en el orden declarado), después
-    # los tenants alfabéticos. Sin esto el diff cambia según el sistema
-    # de archivos y rompe I1.
-    for e in sorted(de_contratos):
-        if e not in etiquetas:
-            etiquetas.append(e)
-    return etiquetas
+        if not dom.endswith("." + root):
+            raise Invalid(
+                f"{name}: dominio {dom!r} is not under {root!r}.\n"
+                f"  The edge can only create CNAMEs inside its own zone. A domain\n"
+                f"  from another zone needs another decision, not one more entry.")
+        from_contracts.append(dom[: -(len(root) + 1)])
+    # Stable order: platform first (in the declared order), then the
+    # tenants alphabetically. Without this the diff changes according to
+    # the filesystem and breaks I1.
+    for e in sorted(from_contracts):
+        if e not in labels:
+            labels.append(e)
+    return labels
 
 
-def aplicar_borde(escribir):
-    etiquetas = etiquetas_del_borde()
-    linea = 'public_hostnames = [' + ", ".join(f'"{e}"' for e in etiquetas) + "]"
+def apply_edge(write):
+    labels = edge_labels()
+    line = 'public_hostnames = [' + ", ".join(f'"{e}"' for e in labels) + "]"
     tf = open(MAIN_TF, encoding="utf-8").read()
-    m = PATRON_HOSTNAMES.search(tf)
+    m = HOSTNAMES_PATTERN.search(tf)
     if not m:
-        raise Invalido(f"no encontré `public_hostnames = [...]` en {MAIN_TF}")
-    nuevo = PATRON_HOSTNAMES.sub(lambda mm: mm.group(1) + linea, tf, count=1)
-    print(f"\nborde  {gris}(tofu/envs/cloudflare-tunnel/main.tf){fin}")
-    if nuevo == tf:
-        print(f"  {gris}={fin} public_hostnames  {gris}{len(etiquetas)} hostnames{fin}")
+        raise Invalid(f"I could not find `public_hostnames = [...]` in {MAIN_TF}")
+    new = HOSTNAMES_PATTERN.sub(lambda mm: mm.group(1) + line, tf, count=1)
+    print(f"\nedge  {grey}(tofu/envs/cloudflare-tunnel/main.tf){off}")
+    if new == tf:
+        print(f"  {grey}={off} public_hostnames  {grey}{len(labels)} hostnames{off}")
         return 0
-    print(f"  {ama}~{fin} public_hostnames -> {', '.join(etiquetas)}")
-    if escribir:
-        open(MAIN_TF, "w", encoding="utf-8").write(nuevo)
-        # NO dice "el job lo hace solo". Lo decía, y desde #46 es falso:
-        # el state va cifrado con la age key y la age key no entra a CI,
-        # así que CI no puede aplicar. Una instrucción que promete que
-        # algo pasa solo es peor que no tenerla — el hostname no existe
-        # y nadie lo espera.
-        print(f"  {ama}el CNAME no existe hasta que corras esto:{fin}")
-        print(f"  {gris}  SOPS_AGE_KEY_FILE=~/.config/sops/age/aegis.key \\{fin}")
-        print(f"  {gris}    tofu/tofu-apply.sh -chdir=envs/cloudflare-tunnel apply{fin}")
-        print(f"  {gris}  (después, commiteá el state recifrado){fin}")
+    print(f"  {yellow}~{off} public_hostnames -> {', '.join(labels)}")
+    if write:
+        open(MAIN_TF, "w", encoding="utf-8").write(new)
+        # It does NOT say "the job does it by itself". It used to, and
+        # since #46 that is false: the state travels encrypted with the
+        # age key and the age key does not enter CI, so CI cannot apply.
+        # An instruction that promises something happens by itself is
+        # worse than not having it — the hostname does not exist and
+        # nobody is waiting for it.
+        print(f"  {yellow}the CNAME does not exist until you run this:{off}")
+        print(f"  {grey}  SOPS_AGE_KEY_FILE=~/.config/sops/age/aegis.key \\{off}")
+        print(f"  {grey}    tofu/tofu-apply.sh -chdir=envs/cloudflare-tunnel apply{off}")
+        print(f"  {grey}  (afterwards, commit the re-encrypted state){off}")
     return 0
 
 
 # ──────────────────────────────────────────────────────────────────
-# Borrar
+# Delete
 #
-# El punto más débil del protocolo, y conviene decirlo antes que
-# descubrirlo: `prune` está OMITIDO en toda la plataforma (A19). Quitar
-# archivos de git NO quita nada del cluster. Un `borrar` que solo tocara
-# git dejaría el namespace, sus datos y su cuota corriendo, y la
-# organización parecería borrada.
+# The protocol's weakest point, and it is better said than discovered:
+# `prune` is OMITTED across the whole platform (A19). Taking files out
+# of git takes NOTHING out of the cluster. A `delete` that only touched
+# git would leave the namespace, its data and its quota running, and the
+# organization would look deleted.
 #
-# Por eso son dos pasos separados y en este orden:
+# That is why they are two separate steps, and in this order:
 #
-#   1. lo de GIT, que es reversible: se quitan los archivos generados y
-#      las derivaciones (borde, ruteo) dejan de nombrarla solas.
-#   2. lo del CLUSTER, que NO es reversible: se IMPRIMEN los comandos y
-#      no se ejecutan.
+#   1. the GIT part, which is reversible: the generated files are taken
+#      out and the derivations (edge, routes) stop naming it on their own.
+#   2. the CLUSTER part, which is NOT reversible: the commands are
+#      PRINTED and not executed.
 #
-# El paso 2 no se automatiza porque borrar un namespace se lleva puestos
-# los datos, y eso no puede pasar por un comando corrido con un nombre
-# mal tipeado. El día que haya prune con confirmación, puede cambiar.
+# Step 2 is not automated because deleting a namespace takes the data
+# with it, and that cannot happen through a command run with a
+# mistyped name. The day there is prune with confirmation, it may
+# change.
 # ──────────────────────────────────────────────────────────────────
 
 
-def borrar(nombre, escribir):
-    if not NOMBRE_VALIDO.match(nombre):
-        raise Invalido(f"{nombre!r} no es un nombre de organización válido")
+def delete_org(name, write):
+    if not VALID_NAME.match(name):
+        raise Invalid(f"{name!r} is not a valid organization name")
 
-    contrato = None
+    contract_path = None
     for ext in (".yaml", ".yml"):
-        p = os.path.join(DIR_ORGS, nombre + ext)
+        p = os.path.join(ORGS_DIR, name + ext)
         if os.path.exists(p):
-            contrato = p
+            contract_path = p
             break
-    destino = os.path.join(DIR_K8S, f"org-{nombre}")
-    if contrato is None and not os.path.isdir(destino):
-        raise Invalido(
-            f"no existe orgs/{nombre}.yaml ni k8s/organizations/org-{nombre}/.\n"
-            f"  Nada que borrar. Si la organización está viva en el cluster pero\n"
-            f"  no en git, es un huérfano: lo reporta `{CMD_CHECK}`.")
-    # El contrato se lee AHORA, antes de que el paso 1 lo borre del
-    # disco: el paso 2 lo necesita para nombrar las Applications.
-    contrato_dict = (yaml.safe_load(open(contrato, encoding="utf-8")) or {}) \
-        if contrato else None
+    dest = os.path.join(K8S_DIR, f"org-{name}")
+    if contract_path is None and not os.path.isdir(dest):
+        raise Invalid(
+            f"neither orgs/{name}.yaml nor k8s/organizations/org-{name}/ exists.\n"
+            f"  Nothing to delete. If the organization is alive in the cluster but\n"
+            f"  not in git, it is an orphan: `{CMD_CHECK}` reports it.")
+    # The contract is read NOW, before step 1 deletes it from disk: step
+    # 2 needs it in order to name the Applications.
+    contract = (yaml.safe_load(open(contract_path, encoding="utf-8")) or {}) \
+        if contract_path else None
 
-    ns = f"org-{nombre}"
-    print(f"\norganización {rojo}{nombre}{fin}  ·  {gris}borrar{fin}")
+    ns = f"org-{name}"
+    print(f"\norganization {red}{name}{off}  ·  {grey}delete{off}")
 
-    # ── paso 1: git ────────────────────────────────────────────────
-    print(f"\n{gris}1) en git (reversible){fin}")
-    quitar = []
-    if contrato:
-        quitar.append(contrato)
-    if os.path.isdir(destino):
-        for f in sorted(os.listdir(destino)):
-            quitar.append(os.path.join(destino, f))
+    # ── step 1: git ────────────────────────────────────────────────
+    print(f"\n{grey}1) in git (reversible){off}")
+    to_remove = []
+    if contract_path:
+        to_remove.append(contract_path)
+    if os.path.isdir(dest):
+        for f in sorted(os.listdir(dest)):
+            to_remove.append(os.path.join(dest, f))
 
-    cifrados = [q for q in quitar if q.endswith(".enc.yaml")]
-    for q in quitar:
-        rel = os.path.relpath(q, RAIZ)
-        marca = f"  {rojo}-{fin}"
-        extra = f"  {ama}(secreto cifrado){fin}" if q.endswith(".enc.yaml") else ""
-        print(f"{marca} {rel}{extra}")
+    encrypted = [q for q in to_remove if q.endswith(".enc.yaml")]
+    for q in to_remove:
+        rel = os.path.relpath(q, PLATFORM_ROOT)
+        mark = f"  {red}-{off}"
+        extra = f"  {yellow}(encrypted secret){off}" if q.endswith(".enc.yaml") else ""
+        print(f"{mark} {rel}{extra}")
 
-    if cifrados:
-        print(f"\n  {ama}OJO con los .enc.yaml.{fin} {gris}Borrarlos del repo NO revoca nada:\n"
-              f"  la credencial sigue siendo válida donde la acepten. Revocar es\n"
-              f"  el paso 2, y va ANTES de borrar el archivo si te importa poder\n"
-              f"  auditarla después.{fin}")
+    if encrypted:
+        print(f"\n  {yellow}MIND the .enc.yaml files.{off} {grey}Deleting them from the repo REVOKES NOTHING:\n"
+              f"  the credential goes on being valid wherever it is accepted. Revoking is\n"
+              f"  step 2, and it goes BEFORE deleting the file if you care about being\n"
+              f"  able to audit it afterwards.{off}")
 
-    if escribir:
-        for q in quitar:
+    if write:
+        for q in to_remove:
             os.remove(q)
-        if os.path.isdir(destino) and not os.listdir(destino):
-            os.rmdir(destino)
-        print(f"\n  {verde}quitado de git.{fin} {gris}El borde y el ruteo se rederivan abajo:\n"
-              f"  su hostname y su plan desaparecen solos porque salen de los\n"
-              f"  contratos, no de una lista aparte.{fin}")
+        if os.path.isdir(dest) and not os.listdir(dest):
+            os.rmdir(dest)
+        print(f"\n  {green}removed from git.{off} {grey}The edge and the routes are re-derived below:\n"
+              f"  its hostname and its plan disappear on their own because they come\n"
+              f"  out of the contracts, not out of a separate list.{off}")
     else:
-        print(f"\n  {ama}nada escrito{fin} {gris}(esto fue `plan-borrar`){fin}")
+        print(f"\n  {yellow}nothing written{off} {grey}(this was `plan-delete`){off}")
 
-    # ── paso 2: el cluster ─────────────────────────────────────────
-    print(f"\n{gris}2) en el cluster{fin} {rojo}— NO se ejecuta{fin}")
-    print(f"{gris}   Revisá cada línea. Se ordenan de menos a más destructivo, y la\n"
-          f"   del namespace va última porque se lleva los datos con ella.{fin}\n")
+    # ── step 2: the cluster ────────────────────────────────────────
+    print(f"\n{grey}2) in the cluster{off} {red}— NOT executed{off}")
+    print(f"{grey}   Review every line. They are ordered from least to most destructive, and\n"
+          f"   the namespace one goes last because it takes the data with it.{off}\n")
 
-    # Los nombres de las Applications salen del CONTRATO, con la misma
-    # regla que render_apps. Decir "revisá cuál" sería devolverle al
-    # operador un trabajo que el contrato ya tiene resuelto, y es
-    # justamente en ese paso donde un nombre a ojo borra la app de otra
-    # organización.
+    # The names of the Applications come out of the CONTRACT, by the
+    # same rule as render_apps. Saying "check which one" would be
+    # handing the operator back a job the contract has already solved,
+    # and it is precisely at that step where a name picked by eye
+    # deletes another organization's app.
     #
-    # OJO con el orden: si `escribir`, el paso 1 YA BORRÓ el archivo —
-    # se lee la copia que quedó en memoria, no el disco. Leído acá del
-    # disco reventaba con FileNotFoundError justo en la corrida real
-    # (con `plan-borrar` andaba, que es la peor forma de fallar).
+    # MIND the order: if `escribir`, step 1 HAS ALREADY DELETED the file
+    # — the copy left in memory is read, not the disk. Read from disk
+    # here it blew up with FileNotFoundError exactly on the real run
+    # (with `plan-delete` it worked, which is the worst way to fail).
     apps = []
-    if contrato and contrato_dict is not None:
-        c = contrato_dict
+    if contract_path and contract is not None:
+        c = contract
         if c.get("repo"):
-            apps.append(nombre)
+            apps.append(name)
         for s in c.get("servicios") or []:
             if s.get("repo"):
-                apps.append(f"{nombre}-{s['nombre']}")
-    cmd_apps = (" ".join(f"kubectl delete application -n argocd {a};" for a in sorted(set(apps)))
+                apps.append(f"{name}-{s['nombre']}")
+    apps_cmd = (" ".join(f"kubectl delete application -n argocd {a};" for a in sorted(set(apps)))
                 if apps else
-                "# el contrato ya no está: mirá cuáles quedaron con\n"
+                "# the contract is gone: look at which ones are left with\n"
                 "    #   kubectl get applications -n argocd -l aegis.dev/part-of=aegis-tenants")
 
-    pasos = [
-        ("las Applications, PRIMERO: mientras vivan, recrean lo que borres",
-         cmd_apps),
-        # El documento SÍ se quita solo desde #19: appprojects-tenants.yaml
-        # es derivado y esta misma corrida lo rederiva sin la
-        # organización. Lo que no se hace solo es sacarlo del CLUSTER:
-        # ArgoCD no gestiona los AppProjects a propósito (W-06 / R1-B),
-        # así que vale la regla A19 de siempre — quitarlo de git no lo
-        # quita de acá.
-        ("el AppProject de la organización (el documento ya lo quitó el generador)",
-         f"kubectl delete appproject aegis-tenant-{nombre} -n argocd"),
-        # El archivo cifrado lo quita esta misma corrida (es derivado),
-        # pero eso NO revoca nada: la deploy key sigue autorizada en
-        # GitHub hasta que se la borre allá. Es la misma distinción que
-        # con el bucket y con la clave de Garage — quitar la credencial
-        # del repo no es lo mismo que retirarle el permiso al tercero.
-        ("su deploy key en GitHub (el archivo ya lo quitó el generador)",
+    steps = [
+        ("the Applications, FIRST: while they live, they recreate whatever you delete",
+         apps_cmd),
+        # The document DOES get removed on its own since #19:
+        # appprojects-tenants.yaml is derived and this very run re-derives
+        # it without the organization. What does not happen on its own is
+        # taking it out of the CLUSTER: ArgoCD deliberately does not
+        # manage the AppProjects (W-06 / R1-B), so the usual rule A19
+        # holds — taking it out of git does not take it out of here.
+        ("the organization's AppProject (the generator already removed the document)",
+         f"kubectl delete appproject aegis-tenant-{name} -n argocd"),
+        # The encrypted file is removed by this very run (it is derived),
+        # but that REVOKES NOTHING: the deploy key stays authorized in
+        # GitHub until it is deleted over there. It is the same
+        # distinction as with the bucket and with the Garage key —
+        # taking the credential out of the repo is not the same as
+        # withdrawing the third party's permission.
+        ("its deploy key in GitHub (the generator already removed the file)",
          f"# gh repo deploy-key list -R <owner>/<repo>\n"
          f"    # gh repo deploy-key delete -R <owner>/<repo> <id>"),
-        ("sus tareas de AI y su clave (archivos compartidos, a mano)",
-         f"# k8s/base/ai-system/registro.yaml   -> quitar las tareas '{nombre}.*'\n"
-         f"    # k8s/base/ai-system/secret-ai-keys.enc.yaml -> quitar su entrada\n"
+        ("its AI tasks and its key (shared files, by hand)",
+         f"# k8s/base/ai-system/registro.yaml   -> remove the tasks '{name}.*'\n"
+         f"    # k8s/base/ai-system/secret-ai-keys.enc.yaml -> remove its entry\n"
          f"    #   (sops k8s/base/ai-system/secret-ai-keys.enc.yaml)"),
-        ("su bucket, SI tenía almacenamiento",
-         f"# el bucket vive en el Garage compartido: borrarlo es una decisión\n"
-         f"    # aparte y con backup previo"),
-        ("el namespace y TODO lo que contiene, incluidos los datos",
+        ("its bucket, IF it had storage",
+         f"# the bucket lives in the shared Garage: deleting it is a separate\n"
+         f"    # decision and with a backup taken first"),
+        ("the namespace and EVERYTHING it contains, the data included",
          f"kubectl delete namespace {ns}"),
     ]
-    for i, (que, cmd) in enumerate(pasos, 1):
-        print(f"  {i}. {que}")
-        print(f"    {gris}{cmd}{fin}\n")
+    for i, (what, cmd) in enumerate(steps, 1):
+        print(f"  {i}. {what}")
+        print(f"    {grey}{cmd}{off}\n")
 
-    print(f"{ama}Los PVC pueden sobrevivir al namespace{fin} {gris}según la reclaimPolicy.\n"
-          f"Comprobalo DESPUÉS, que es cuando se nota:{fin}")
-    print(f"  {gris}kubectl get pv | grep {ns}{fin}\n")
+    print(f"{yellow}The PVCs can outlive the namespace{off} {grey}depending on the reclaimPolicy.\n"
+          f"Check it AFTERWARDS, which is when it shows:{off}")
+    print(f"  {grey}kubectl get pv | grep {ns}{off}\n")
     return 0
 
 
 # ──────────────────────────────────────────────────────────────────
-# Migrar
+# Migrate
 #
-# HOY SOLO EXISTE v1, y este comando lo dice en vez de fingir.
+# TODAY ONLY v1 EXISTS, and this command says so instead of pretending.
 #
-# Existe igual, y no como un TODO, porque el `--a` obligatorio y el
-# rechazo explícito son lo que impide la alternativa mala: que alguien
-# suba `version: 2` a mano en un contrato y el generador lo renderice
-# con las reglas de v1 sin decir nada. `validar` ya rechaza una versión
-# desconocida; esto le da al operador el lugar correcto donde preguntar.
+# It exists all the same, and not as a TODO, because the mandatory
+# `--to` and the explicit rejection are what prevents the bad
+# alternative: that somebody bumps `version: 2` by hand in a contract
+# and the generator renders it with v1's rules without saying anything.
+# `validate` already rejects an unknown version; this gives the operator
+# the right place to ask.
 #
-# MIGRACIONES es el registro de traductores. Cuando exista v2, se agrega
-# una entrada (1, 2) -> función, y el resto de este código no cambia.
+# MIGRATIONS is the register of translators. When v2 exists, an entry
+# (1, 2) -> function is added, and the rest of this code does not
+# change.
 # ──────────────────────────────────────────────────────────────────
 
-MIGRACIONES = {}  # (desde, hasta) -> callable(contrato_dict) -> dict
+MIGRATIONS = {}  # (from, to) -> callable(contract_dict) -> dict
 
 
-def migrar(rutas, destino):
-    conocidas = sorted({VERSION_CONTRATO} | {v for _, v in MIGRACIONES})
-    if destino not in conocidas:
-        print(f"{rojo}✗{fin} no existe la versión {destino} del contrato.\n"
-              f"  Versiones que este generador sabe renderizar: "
-              f"{', '.join(str(v) for v in conocidas)}.\n"
+def migrate(contracts, dest):
+    known = sorted({CONTRACT_VERSION} | {v for _, v in MIGRATIONS})
+    if dest not in known:
+        print(f"{red}✗{off} version {dest} of the contract does not exist.\n"
+              f"  Versions this generator knows how to render: "
+              f"{', '.join(str(v) for v in known)}.\n"
               f"\n"
-              f"  Una versión nueva se justifica SOLO si cambia el contrato (§8).\n"
-              f"  Cambiar los números de un plan, agregar una capacidad al ruteo o\n"
-              f"  cambiar con qué se implementa un tipo NO son versión nueva: por\n"
-              f"  eso viven fuera del contrato, en plans.yaml, ai/routes.yaml y\n"
-              f"  services.yaml.", file=sys.stderr)
+              f"  A new version is justified ONLY if the contract changes (§8).\n"
+              f"  Changing a plan's numbers, adding a capability to the routes or\n"
+              f"  changing what a type is implemented with are NOT a new version: that\n"
+              f"  is why they live outside the contract, in plans.yaml, ai/routes.yaml\n"
+              f"  and services.yaml.", file=sys.stderr)
         return 1
 
     rc = 0
-    for ruta in rutas:
+    for path in contracts:
         try:
-            c = yaml.safe_load(open(ruta, encoding="utf-8"))
+            c = yaml.safe_load(open(path, encoding="utf-8"))
         except FileNotFoundError:
-            print(f"{rojo}✗{fin} no existe: {ruta}", file=sys.stderr)
+            print(f"{red}✗{off} does not exist: {path}", file=sys.stderr)
             rc = 1
             continue
-        actual = (c or {}).get("version")
-        if actual == destino:
-            print(f"{gris}={fin} {ruta}  {gris}ya está en v{destino}{fin}")
+        current = (c or {}).get("version")
+        if current == dest:
+            print(f"{grey}={off} {path}  {grey}already on v{dest}{off}")
             continue
-        paso = MIGRACIONES.get((actual, destino))
-        if paso is None:
-            print(f"{rojo}✗{fin} {ruta}: no hay traductor de v{actual} a v{destino}",
+        step = MIGRATIONS.get((current, dest))
+        if step is None:
+            print(f"{red}✗{off} {path}: there is no translator from v{current} to v{dest}",
                   file=sys.stderr)
             rc = 1
             continue
-        # Cuando exista: aplicar el traductor, MOSTRAR EL DIFF y escribir
-        # solo si el operador lo confirma. Nunca automático al aplicar.
-        raise Invalido("traductor registrado pero no implementado")
+        # When it exists: apply the translator, SHOW THE DIFF and write
+        # only if the operator confirms. Never automatic on apply.
+        raise Invalid("translator registered but not implemented")
     return rc
 
 
 # ──────────────────────────────────────────────────────────────────
-# El RUTEO que consume el gateway
+# The ROUTES the gateway consumes
 # ──────────────────────────────────────────────────────────────────
 #
-# Tres fuentes, un archivo:
+# Three sources, one file:
 #
-#   ai/routes.yaml   -> capacidades (con qué se sirve cada promesa)
-#   plans.yaml     -> planes (los techos, con nombre)
-#   orgs/*.yaml     -> tenants (qué plan tiene cada organización)
+#   ai/routes.yaml   -> capabilities (what each promise is served with)
+#   plans.yaml     -> plans (the ceilings, with a name)
+#   orgs/*.yaml     -> tenants (which plan each organization has)
 #
-# El mapa tenant->plan se DERIVA de los contratos y no se escribe a
-# mano en ningún lado. Escribirlo dos veces es garantizar que un día
-# digan cosas distintas, y el síntoma sería una organización con el
-# presupuesto de otra sin que nadie haya decidido eso.
+# The tenant->plan map is DERIVED from the contracts and is not written
+# by hand anywhere. Writing it twice is a guarantee that one day they
+# will say different things, and the symptom would be one organization
+# with another's budget without anybody having decided that.
 
 
-def ruteo_json():
-    ruteo = yaml.safe_load(open(RUTEO, encoding="utf-8")) or {}
-    planes = yaml.safe_load(open(PLANES, encoding="utf-8"))
+def routes_json():
+    routes = yaml.safe_load(open(ROUTES, encoding="utf-8")) or {}
+    plans = yaml.safe_load(open(PLANS, encoding="utf-8"))
 
-    caps = ruteo.get("capacidades") or {}
+    caps = routes.get("capacidades") or {}
     if not caps:
-        raise Invalido(f"{RUTEO}: sin capacidades — ninguna tarea podría servirse")
+        raise Invalid(f"{ROUTES}: no capabilities — no task could be served")
 
     tenants = {}
-    for nombre in sorted(os.listdir(DIR_ORGS)):
-        if not nombre.endswith((".yaml", ".yml")):
+    for name in sorted(os.listdir(ORGS_DIR)):
+        if not name.endswith((".yaml", ".yml")):
             continue
-        c = yaml.safe_load(open(os.path.join(DIR_ORGS, nombre), encoding="utf-8")) or {}
+        c = yaml.safe_load(open(os.path.join(ORGS_DIR, name), encoding="utf-8")) or {}
         ai = c.get("ai")
         if not ai:
-            continue  # una organización sin AI no aparece en el ruteo
-        # La clave es el NAMESPACE, no el nombre corto del contrato: el
-        # gateway identifica al tenant por lo que trae la API key, y eso
-        # es `org-<nombre>`. Usar el nombre corto acá dejaría a toda
-        # organización sin plan reconocido — y sin plan reconocido se
-        # cae al más chico, en silencio.
+            continue  # an organization with no AI does not appear in the routes
+        # The key is the NAMESPACE, not the contract's short name: the
+        # gateway identifies the tenant by what the API key carries, and
+        # that is `org-<name>`. Using the short name here would leave
+        # every organization without a recognised plan — and with no
+        # recognised plan it falls back to the smallest one, in silence.
         tenants[f"org-{c['organizacion']}"] = ai["plan"]
 
     doc = {
         "version": 1,
-        # sort_keys en json.dumps no alcanza: los dicts anidados se
-        # arman acá y el orden de inserción sería el del filesystem.
+        # sort_keys in json.dumps is not enough: the nested dicts are
+        # built here and the insertion order would be the filesystem's.
         "capacidades": {k: caps[k] for k in sorted(caps)},
-        "planes": {k: planes["ai"][k] for k in sorted(planes["ai"])},
+        "planes": {k: plans["ai"][k] for k in sorted(plans["ai"])},
         "tenants": {k: tenants[k] for k in sorted(tenants)},
     }
     return json.dumps(doc, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
 
 
-def registro_ai_json():
-    """El registro de tareas de AI, derivado de los contratos.
+def ai_registry_json():
+    """The register of AI tasks, derived from the contracts.
 
-    QUÉ SALE DE DÓNDE, que es la división que importa:
+    WHAT COMES FROM WHERE, which is the division that matters:
 
-      del contrato   el nombre de la tarea, su capacidad, su prompt y
-                     —lo que de verdad había que derivar— el TENANT
-      de ai/tasks.yaml   la clase y los topes numéricos
+      from the contract   the task's name, its capability, its prompt
+                          and —what really had to be derived— the TENANT
+      from ai/tasks.yaml  the class and the numeric ceilings
 
-    El tenant era el acoplamiento peligroso. Hasta #60 había que
-    acordarse de escribirlo a mano en registro.yaml, y si faltaba el
-    gateway respondía 403 `tarea_prohibida` con la organización teniendo
-    clave, red y plan en orden: nada del lado del contrato se ponía rojo.
-    Es la misma forma que la IngressRoute de #54, un nivel más arriba.
+    The tenant was the dangerous coupling. Until #60 you had to remember
+    to write it by hand in registro.yaml, and if it was missing the
+    gateway answered 403 `tarea_prohibida` with the organization having
+    key, network and plan in order: nothing on the contract's side
+    turned red. It is the same shape as #54's IngressRoute, one level up.
 
-    Los números NO se derivan y es deliberado: son ajuste fino por tarea
-    y el contrato no tiene forma honesta de expresarlos sin volverse un
-    archivo de configuración. Mismo criterio que plans.yaml.
+    The numbers are NOT derived and that is deliberate: they are
+    per-task fine tuning and the contract has no honest way of
+    expressing them without becoming a configuration file. Same
+    criterion as plans.yaml.
     """
-    cfg = yaml.safe_load(open(TAREAS_AI, encoding="utf-8"))
-    clases = cfg.get("clases") or {}
-    ajustes = cfg.get("tareas") or {}
-    rut = yaml.safe_load(open(RUTEO, encoding="utf-8"))
-    caps = rut.get("capacidades") or {}
+    cfg = yaml.safe_load(open(AI_TASKS, encoding="utf-8"))
+    classes = cfg.get("clases") or {}
+    overrides = cfg.get("tareas") or {}
+    rt = yaml.safe_load(open(ROUTES, encoding="utf-8"))
+    caps = rt.get("capacidades") or {}
 
-    tareas = {}
-    for nombre_arch in sorted(os.listdir(DIR_ORGS)):
-        if not nombre_arch.endswith((".yaml", ".yml")):
+    tasks = {}
+    for fname in sorted(os.listdir(ORGS_DIR)):
+        if not fname.endswith((".yaml", ".yml")):
             continue
-        c = yaml.safe_load(open(os.path.join(DIR_ORGS, nombre_arch),
+        c = yaml.safe_load(open(os.path.join(ORGS_DIR, fname),
                                 encoding="utf-8")) or {}
         ai = c.get("ai")
         if not ai:
             continue
         org = c["organizacion"]
-        for tarea in (ai.get("tareas") or []):
-            clave = f"{org}.{tarea['nombre']}"
-            ajuste = ajustes.get(clave) or {}
-            clase = ajuste.get("clase", "interactive")
-            if clase not in clases:
-                raise Invalido(
-                    f"la tarea {clave!r} usa la clase {clase!r}, que no está en\n"
-                    f"  ai/tasks.yaml. Las que hay: {', '.join(sorted(clases))}")
-            cap = tarea["capacidad"]
+        for task in (ai.get("tareas") or []):
+            key = f"{org}.{task['nombre']}"
+            override = overrides.get(key) or {}
+            cls = override.get("clase", "interactive")
+            if cls not in classes:
+                raise Invalid(
+                    f"the task {key!r} uses the class {cls!r}, which is not in\n"
+                    f"  ai/tasks.yaml. The ones there are: {', '.join(sorted(classes))}")
+            cap = task["capacidad"]
             if cap not in caps:
-                raise Invalido(
-                    f"la tarea {clave!r} pide la capacidad {cap!r}, que no está en\n"
-                    f"  ai/routes.yaml. Las que hay: {', '.join(sorted(caps))}")
-            # Una tarea del carril CPU (clase `cpu`, #26) NO lleva
-            # prompt: no genera texto. Se exige la coherencia en los dos
-            # sentidos — un prompt en una tarea de embeddings es alguien
-            # confundido, y una tarea de texto sin prompt es un registro
-            # que el gateway va a rechazar al cargar. Mejor acá, donde
-            # el que se entera es quien edita el contrato.
-            if clase == "cpu":
-                if tarea.get("prompt"):
-                    raise Invalido(
-                        f"la tarea {clave!r} es de clase cpu y declara un prompt.\n"
-                        f"  Las tareas del carril CPU no generan texto: sin prompt.")
-            elif not tarea.get("prompt"):
-                raise Invalido(
-                    f"la tarea {clave!r} no declara prompt, y su clase ({clase})\n"
-                    f"  genera texto: el prompt es obligatorio.")
-            e = dict(clases[clase])
-            e.update({k: v for k, v in ajuste.items() if k != "clase"})
-            tareas[clave] = {
-                "clase": clase,
+                raise Invalid(
+                    f"the task {key!r} asks for the capability {cap!r}, which is not in\n"
+                    f"  ai/routes.yaml. The ones there are: {', '.join(sorted(caps))}")
+            # A task on the CPU lane (class `cpu`, #26) carries NO
+            # prompt: it does not generate text. Coherence is demanded
+            # in both directions — a prompt on an embeddings task is
+            # somebody confused, and a text task with no prompt is a
+            # register the gateway will reject on load. Better here,
+            # where the one who finds out is the one editing the
+            # contract.
+            if cls == "cpu":
+                if task.get("prompt"):
+                    raise Invalid(
+                        f"the task {key!r} is of class cpu and declares a prompt.\n"
+                        f"  Tasks on the CPU lane do not generate text: no prompt.")
+            elif not task.get("prompt"):
+                raise Invalid(
+                    f"the task {key!r} declares no prompt, and its class ({cls})\n"
+                    f"  generates text: the prompt is mandatory.")
+            e = dict(classes[cls])
+            e.update({k: v for k, v in override.items() if k != "clase"})
+            tasks[key] = {
+                "clase": cls,
                 "capacidad": cap,
                 "engine": caps[cap]["engine"],
-                # DERIVADO: una tarea la puede invocar SOLO la
-                # organización cuyo contrato la declara. Antes era una
-                # lista escrita a mano.
+                # DERIVED: a task can be invoked ONLY by the
+                # organization whose contract declares it. It used to be
+                # a hand-written list.
                 "tenants": [f"org-{org}"],
-                "prompt": tarea.get("prompt", ""),
+                "prompt": task.get("prompt", ""),
                 "max_output_tokens": e["max_output_tokens"],
                 "max_context_tokens": e["max_context_tokens"],
                 "max_input_chars": e["max_input_chars"],
@@ -1649,15 +1675,15 @@ def registro_ai_json():
                 "stop": e.get("stop", []),
                 "peso": e["peso"],
             }
-    return json.dumps({"version": 1, "tareas": tareas},
+    return json.dumps({"version": 1, "tareas": tasks},
                       indent=2, ensure_ascii=False) + "\n"
 
 
-def render_registro_ai():
-    cuerpo = registro_ai_json()
-    h = hashlib.sha256(cuerpo.encode()).hexdigest()[:16]
-    sangrado = "\n".join("    " + l if l.strip() else ""
-                         for l in cuerpo.rstrip("\n").split("\n"))
+def render_ai_registry():
+    body = ai_registry_json()
+    h = hashlib.sha256(body.encode()).hexdigest()[:16]
+    indented = "\n".join("    " + l if l.strip() else ""
+                         for l in body.rstrip("\n").split("\n"))
     return f"""# GENERADO por {CMD_ORG} — no editar a mano.
 # hash: {h}
 #
@@ -1679,33 +1705,33 @@ metadata:
     aegis.dev/component: ai
 data:
   registro.json: |
-{sangrado}
+{indented}
 """
 
 
-def aplicar_registro_ai(escribir):
-    rc = _sin_subsistema_ai("registro de AI")
+def apply_ai_registry(write):
+    rc = _without_ai_subsystem("AI registry")
     if rc is not None:
         return rc
-    nuevo = render_registro_ai()
-    print(f"\nregistro de AI  {gris}(k8s/base/ai-system/registro.yaml){fin}")
+    new = render_ai_registry()
+    print(f"\nAI registry  {grey}(k8s/base/ai-system/registro.yaml){off}")
     try:
-        viejo = open(REGISTRO_AI, encoding="utf-8").read()
+        old = open(AI_REGISTRY, encoding="utf-8").read()
     except FileNotFoundError:
-        viejo = None
-    if viejo == nuevo:
-        print(f"  {gris}={fin} tareas de AI")
+        old = None
+    if old == new:
+        print(f"  {grey}={off} AI tasks")
         return 0
-    print(f"  {ama}~{fin} tareas de AI" if viejo else f"  {verde}+{fin} tareas de AI")
-    if escribir:
-        open(REGISTRO_AI, "w", encoding="utf-8").write(nuevo)
+    print(f"  {yellow}~{off} AI tasks" if old else f"  {green}+{off} AI tasks")
+    if write:
+        open(AI_REGISTRY, "w", encoding="utf-8").write(new)
     return 0
 
 
-def render_ruteo_k8s():
-    cuerpo = ruteo_json()
-    h = hashlib.sha256(cuerpo.encode()).hexdigest()[:16]
-    sangrado = "\n".join("    " + l if l.strip() else "" for l in cuerpo.rstrip("\n").split("\n"))
+def render_routes_k8s():
+    body = routes_json()
+    h = hashlib.sha256(body.encode()).hexdigest()[:16]
+    indented = "\n".join("    " + l if l.strip() else "" for l in body.rstrip("\n").split("\n"))
     return f"""# GENERADO por {CMD_ORG} — no editar a mano.
 # hash: {h}
 #
@@ -1724,35 +1750,35 @@ metadata:
     aegis.dev/component: ai-ruteo
 data:
   ruteo.json: |
-{sangrado}
+{indented}
 """
 
 
 def render_tenants():
-    """La Application que despliega la INFRAESTRUCTURA de cada
-    organización, derivada de los contratos.
+    """The Application that deploys each organization's INFRASTRUCTURE,
+    derived from the contracts.
 
-    Antes era un archivo a mano, y por eso dar de alta una organización
-    seguía teniendo un paso manual: escribir el contrato, correr el
-    generador... y acordarse de agregar veinte líneas acá. El síntoma de
-    olvidarlo es el peor posible: todo generado, todo commiteado, y
-    NADA desplegado, sin un solo error.
+    It used to be a hand-written file, and that is why registering an
+    organization still had a manual step: write the contract, run the
+    generator... and remember to add twenty lines here. The symptom of
+    forgetting is the worst possible one: everything generated,
+    everything committed, and NOTHING deployed, without a single error.
 
-    Ojo con qué despliega esta Application y qué no. Acá va la
-    infraestructura (namespace, cuota, netpols, secretos), con el
-    proyecto `aegis-platform`. Las APPS de la organización vienen de sus
-    propios repos y usan su `aegis-tenant-*`, que solo puede escribir en
-    su namespace: esa separación es la frontera de permisos y no se
-    mezcla.
+    Mind what this Application deploys and what it does not. What goes
+    here is the infrastructure (namespace, quota, netpols, secrets),
+    with the `aegis-platform` project. The organization's APPS come from
+    their own repos and use its `aegis-tenant-*`, which can only write
+    in its namespace: that separation is the permission boundary and it
+    is not mixed.
     """
     orgs = []
-    for nombre in sorted(os.listdir(DIR_ORGS)):
-        if not nombre.endswith((".yaml", ".yml")):
+    for name in sorted(os.listdir(ORGS_DIR)):
+        if not name.endswith((".yaml", ".yml")):
             continue
-        c = yaml.safe_load(open(os.path.join(DIR_ORGS, nombre), encoding="utf-8")) or {}
+        c = yaml.safe_load(open(os.path.join(ORGS_DIR, name), encoding="utf-8")) or {}
         orgs.append(c["organizacion"])
 
-    partes = [markers.BANNER + f"""
+    parts = [markers.BANNER + f"""
 # Una Application por CONTRATO en orgs/. Se rederiva en cada
 # `{CMD_ORG_APPLY}`, así que agregar una organización es escribir
 # su contrato y nada más.
@@ -1769,7 +1795,7 @@ def render_tenants():
 # no la crea sola — hay que sincronizar root:  {CMD_SYNC_ROOT}"""]
 
     for org in orgs:
-        partes.append(f"""\
+        parts.append(f"""\
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -1785,7 +1811,7 @@ spec:
   # que en aegis-platform no pasaba (#47).
   project: aegis-organizaciones
   source:
-    repoURL: {_repo_ops()}
+    repoURL: {platform_repo()}
     targetRevision: main
     path: k8s/organizations/org-{org}
   destination: {{server: https://kubernetes.default.svc, namespace: org-{org}}}
@@ -1810,63 +1836,64 @@ spec:
       kind: StatefulSet
       jqPathExpressions:
         - '.spec.volumeClaimTemplates[]?.status'""")
-    return "\n".join(partes) + "\n"
+    return "\n".join(parts) + "\n"
 
 
-# ── los AppProjects de tenant, derivados ──────────────────────────────
+# ── the tenant AppProjects, derived ───────────────────────────────────
 #
-# El AppProject ES la frontera de permisos de una organización: dice de
-# qué repo puede leer, en qué namespace puede escribir, y que no puede
-# tocar nada cluster-scoped. Estaba escrito a mano, y el modo de fallo
-# es de los feos: si falta, la Application arranca y ArgoCD dice
-# "project not found" — ruidoso, sí, pero recién al desplegar, cuando ya
-# se hicieron el contrato, el repo, el pipeline y el push.
+# The AppProject IS an organization's permission boundary: it says which
+# repo it can read from, which namespace it can write in, and that it
+# cannot touch anything cluster-scoped. It was written by hand, and the
+# failure mode is one of the ugly ones: if it is missing, the
+# Application starts and ArgoCD says "project not found" — loud, yes,
+# but only at deploy time, when the contract, the repo, the pipeline and
+# the push have already been done.
 #
-# Y hay un modo peor, que es el que motiva esto de verdad: repetir el
-# bloque a mano DERIVA. Se comprobó el 2026-08-05 en el cluster —
-# `aegis-tenant-canary` era el único de los cuatro sin
-# `orphanedResources`, así que la app del canary nunca se evaluaba y
-# `{CMD_CHECK}` la contaba como "nada huérfano". Un bloque copiado
-# tres veces se actualiza dos.
+# And there is a worse mode, which is the one that really motivates
+# this: repeating the block by hand DRIFTS. It was verified on
+# 2026-08-05 in the cluster — `aegis-tenant-canary` was the only one of
+# the four without `orphanedResources`, so the canary's app was never
+# evaluated and `{CMD_CHECK}` counted it as "nothing orphaned". A block
+# copied three times gets updated twice.
 #
-# Derivarlo cierra las dos cosas de una: el proyecto existe cuando
-# existe el contrato, y los cuatro bloques son idénticos por
-# construcción y no por disciplina.
+# Deriving it closes both things at once: the project exists when the
+# contract exists, and the four blocks are identical by construction and
+# not by discipline.
 #
-# QUÉ NO SE DERIVA, y por qué se queda a mano:
-#   aegis-bootstrap, aegis-platform  — son del sustrato, no de ninguna
-#     organización. No salen de ningún contrato porque no hay contrato
-#     del que salgan.
-#   aegis-tenant-canary              — el canary es de la PLATAFORMA.
-#     Vive en org-canary pero no tiene contrato: es la prueba de que el
-#     camino del tenant funciona, así que no puede depender de él.
-#   aegis-tenant-ecommerce           — heredado, anterior al generador.
-#     Mismo criterio que tenants-heredados.yaml: mezclarlo acá haría que
-#     la próxima corrida lo borrara en silencio.
+# WHAT IS NOT DERIVED, and why it stays by hand:
+#   aegis-bootstrap, aegis-platform  — they belong to the substrate, not
+#     to any organization. They do not come out of any contract because
+#     there is no contract they could come out of.
+#   aegis-tenant-canary              — the canary belongs to the
+#     PLATFORM. It lives in org-canary but has no contract: it is the
+#     proof that the tenant's path works, so it cannot depend on it.
+#   aegis-tenant-ecommerce           — inherited, older than the
+#     generator. Same criterion as tenants-heredados.yaml: mixing it in
+#     here would make the next run delete it in silence.
 
 def render_appprojects():
-    """Un AppProject por organización QUE TIENE REPO.
+    """One AppProject per organization THAT HAS A REPO.
 
-    La condición no es "por cada contrato": es por cada contrato cuyas
-    apps vengan de un repo propio. Una organización de pura
-    infraestructura —una base y un bucket, como org-ejemplo en su etapa
-    1— no tiene ninguna Application externa, y un proyecto sin
-    `sourceRepos` no acota nada: es un objeto que no se usa, que es
-    exactamente lo que I4 manda barrer.
+    The condition is not "one per contract": it is one per contract
+    whose apps come from a repo of their own. An organization of pure
+    infrastructure —a database and a bucket, like org-ejemplo in its
+    stage 1— has no external Application, and a project with no
+    `sourceRepos` fences nothing in: it is an object that is not used,
+    which is exactly what I4 orders swept away.
 
-    El día que esa organización declare `repo:`, el proyecto aparece en
-    la misma corrida que su Application. Ese acoplamiento es el punto.
+    The day that organization declares `repo:`, the project appears in
+    the same run as its Application. That coupling is the point.
     """
-    proyectos = []
-    for nombre in sorted(os.listdir(DIR_ORGS)):
-        if not nombre.endswith((".yaml", ".yml")):
+    projects = []
+    for name in sorted(os.listdir(ORGS_DIR)):
+        if not name.endswith((".yaml", ".yml")):
             continue
-        c = yaml.safe_load(open(os.path.join(DIR_ORGS, nombre), encoding="utf-8")) or {}
-        repos = sorted(repos_de(c))
+        c = yaml.safe_load(open(os.path.join(ORGS_DIR, name), encoding="utf-8")) or {}
+        repos = sorted(repos_of(c))
         if repos:
-            proyectos.append((c["organizacion"], repos))
+            projects.append((c["organizacion"], repos))
 
-    partes = [markers.BANNER + f"""
+    parts = [markers.BANNER + f"""
 # Un AppProject por CONTRATO que declara repo. Se rederiva en cada
 # `{CMD_ORG_APPLY}`.
 #
@@ -1888,13 +1915,13 @@ def render_appprojects():
 # vector de escalar privilegios por una App que edite proyectos. Por eso
 # viven fuera de k8s/argocd-apps/, que es el path del App-of-Apps."""]
 
-    if not proyectos:
-        partes.append("#\n# (ningún contrato declara repo todavía)")
-        return "\n".join(partes) + "\n"
+    if not projects:
+        parts.append("#\n# (ningún contrato declara repo todavía)")
+        return "\n".join(parts) + "\n"
 
-    for org, repos in proyectos:
-        lista = "\n".join(f"    - {r}" for r in repos)
-        partes.append(f"""\
+    for org, repos in projects:
+        listing = "\n".join(f"    - {r}" for r in repos)
+        parts.append(f"""\
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
@@ -1907,7 +1934,7 @@ spec:
   # Los repos que declara el contrato: el de la organización y los que
   # cada servicio haya declarado por su cuenta. Enumerados, nunca '*'.
   sourceRepos:
-{lista}
+{listing}
   destinations:
     - {{server: https://kubernetes.default.svc, namespace: org-{org}}}
   # EL fix de R1-B: deny-all cluster-scoped. Escribir en el repo de una
@@ -1969,71 +1996,72 @@ spec:
       - group: ""
         kind: ConfigMap
         name: kube-root-ca.crt""")
-    return "\n".join(partes) + "\n"
+    return "\n".join(parts) + "\n"
 
 
-def aplicar_appprojects(escribir):
-    nuevo = render_appprojects()
-    print(f"\nproyectos  {gris}(k8s/bootstrap/appprojects-tenants.yaml){fin}")
+def apply_appprojects(write):
+    new = render_appprojects()
+    print(f"\nprojects  {grey}(k8s/bootstrap/appprojects-tenants.yaml){off}")
     try:
-        viejo = open(APPPROJECTS_K8S, encoding="utf-8").read()
+        old = open(APPPROJECTS_K8S, encoding="utf-8").read()
     except FileNotFoundError:
-        viejo = None
-    if viejo == nuevo:
-        print(f"  {gris}={fin} AppProjects de organización")
+        old = None
+    if old == new:
+        print(f"  {grey}={off} organization AppProjects")
         return 0
-    print(f"  {ama}~{fin} AppProjects de organización" if viejo
-          else f"  {verde}+{fin} AppProjects de organización")
-    if escribir:
+    print(f"  {yellow}~{off} organization AppProjects" if old
+          else f"  {green}+{off} organization AppProjects")
+    if write:
         os.makedirs(os.path.dirname(APPPROJECTS_K8S), exist_ok=True)
-        open(APPPROJECTS_K8S, "w", encoding="utf-8").write(nuevo)
-        # No los gestiona ArgoCD (ver el encabezado del archivo), así que
-        # nadie los va a aplicar solo. Decirlo acá y no en la
-        # documentación: el paso que hay que acordarse es el paso que se
-        # olvida, y el borde ya se pagó dos veces por eso.
-        print(f"  {ama}!{fin} el proyecto no existe en el cluster hasta que corras esto:")
-        print(f"    {gris}kubectl apply -f k8s/bootstrap/appprojects-tenants.yaml{fin}")
-        print(f"    {gris}(va ANTES de {CMD_SYNC_ROOT}: una Application cuyo{fin}")
-        print(f"    {gris} proyecto no existe queda en 'project not found'){fin}")
+        open(APPPROJECTS_K8S, "w", encoding="utf-8").write(new)
+        # ArgoCD does not manage them (see the file's header), so nobody
+        # is going to apply them on their own. Saying it here and not in
+        # the documentation: the step you have to remember is the step
+        # that gets forgotten, and the edge has already been paid for
+        # twice on that account.
+        print(f"  {yellow}!{off} the project does not exist in the cluster until you run this:")
+        print(f"    {grey}kubectl apply -f k8s/bootstrap/appprojects-tenants.yaml{off}")
+        print(f"    {grey}(it goes BEFORE {CMD_SYNC_ROOT}: an Application whose{off}")
+        print(f"    {grey} project does not exist stays in 'project not found'){off}")
     return 0
 
 
-# ── el generator de argocd-secrets, derivado ──────────────────────────
+# ── the argocd-secrets generator, derived ─────────────────────────────
 #
-# Mismo problema que garage-system, y descubierto igual: un archivo
-# COMPARTIDO en el que había que acordarse de agregar una línea por
-# organización. Las dos que estaban —portafolio y blog— se habían
-# escrito a mano, y el modo de fallo fue peor que el de garage: no solo
-# nadie las listaba automáticamente, sino que NADIE LAS CREABA. En una
-# instancia nueva la age key es otra, todo lo que el init produce se
-# recifra, y estas dos quedaban cifradas con una llave que ya no
-# existe (#48).
+# The same problem as garage-system, and discovered the same way: a
+# SHARED file in which one had to remember to add a line per
+# organization. The two that were there —portafolio and blog— had been
+# written by hand, and the failure mode was worse than garage's: not
+# only did nobody list them automatically, but NOBODY WAS CREATING THEM.
+# On a new instance the age key is a different one, everything init
+# produces is re-encrypted, and those two were left encrypted with a key
+# that no longer exists (#48).
 #
-# La credencial de repositorio es de la ORGANIZACIÓN aunque viva en el
-# namespace de ArgoCD: sale de su `repo:` y desaparece con ella. Que
-# estuviera en un archivo de plataforma es lo que hacía que `borrar`
-# no la alcanzara.
+# The repository credential belongs to the ORGANIZATION even though it
+# lives in ArgoCD's namespace: it comes out of its `repo:` and it
+# disappears with it. Being in a platform file is what kept `delete`
+# from reaching it.
 
 def render_argocd_secretgen():
-    # Los de PLATAFORMA, que no salen de ningún contrato. El comentario
-    # de cada uno dice qué fase lo produce, porque esa es la información
-    # que hace falta cuando algo no aparece.
-    fijos = [
+    # The PLATFORM ones, which do not come out of any contract. Each
+    # one's comment says which phase produces it, because that is the
+    # information needed when something does not show up.
+    fixed = [
         ("secret-ops-stack-repo.enc.yaml",
          "fase 15 (tmb aplicado por pipe en fase 30 — KSOPS lo ADOPTA después)"),
         ("secret-github-webhook.enc.yaml", "fase 15 (HMAC — A27)"),
-        # La deploy key del canario. Era la ÚLTIMA con permiso de
-        # ESCRITURA, y lo tenía sólo para que el Image Updater pudiera
-        # empujar su write-back. Retirado el componente (#59), pasa a
-        # SOLO LECTURA, igual que las del blog y el portafolio (#49).
+        # The canary's deploy key. It was the LAST one with WRITE
+        # permission, and it had it only so that the Image Updater could
+        # push its write-back. With that component withdrawn (#59), it
+        # becomes READ ONLY, like the blog's and the portfolio's (#49).
         ("secret-hello-aegis-repo.enc.yaml", "fase 15 (deploy key de LECTURA)"),
     ]
-    # ACÁ ESTABA secret-regcred-image-updater.enc.yaml, retirado en #59
-    # junto con el componente. Era la credencial con la que el updater
-    # leía el registry para descubrir tags nuevos; sin updater, no hay
-    # quién la use, y un secreto que nadie consume es superficie sin
-    # contrapartida (I4).
-    lineas = [
+    # secret-regcred-image-updater.enc.yaml WAS HERE, withdrawn in #59
+    # along with the component. It was the credential the updater used
+    # to read the registry and discover new tags; with no updater there
+    # is nobody to use it, and a secret nobody consumes is surface with
+    # nothing in return (I4).
+    lines = [
         *markers.FRAME,
         "# REGLA TEMPORAL (corrida #4, bug que frenó la fase 35): esta App",
         "# sincroniza en fase 35 — un entry cuyo .enc.yaml se genera en una fase",
@@ -2050,115 +2078,115 @@ def render_argocd_secretgen():
         "# esta lista la deriva el generador, no una persona.",
         "files:",
     ]
-    for archivo, porque in fijos:
-        lineas.append(f"  # {porque}")
-        lineas.append(f"  - {archivo}")
+    for filename, why in fixed:
+        lines.append(f"  # {why}")
+        lines.append(f"  - {filename}")
 
-    # Y una credencial de repositorio por cada repo de cada contrato.
+    # And one repository credential per repo of each contract.
     repos = []
-    for nombre in sorted(os.listdir(DIR_ORGS)):
-        if not nombre.endswith((".yaml", ".yml")):
+    for name in sorted(os.listdir(ORGS_DIR)):
+        if not name.endswith((".yaml", ".yml")):
             continue
-        c = yaml.safe_load(open(os.path.join(DIR_ORGS, nombre), encoding="utf-8")) or {}
-        repos += [f"secret-{n}-repo.enc.yaml" for n in repos_de(c).values()]
+        c = yaml.safe_load(open(os.path.join(ORGS_DIR, name), encoding="utf-8")) or {}
+        repos += [f"secret-{n}-repo.enc.yaml" for n in repos_of(c).values()]
     if repos:
-        lineas.append(
+        lines.append(
             "  # La deploy key con la que ArgoCD LEE el repo de cada organización.\n"
             f"  # Sale de su `repo:` y se crea con `{CMD_SECRET}`, que\n"
             "  # además imprime la mitad pública para registrarla en GitHub. Sin\n"
             "  # registrarla, la App queda en 'repository not accessible'.")
-        lineas += [f"  - {r}" for r in sorted(repos)]
-    return "\n".join(lineas) + "\n"
+        lines += [f"  - {r}" for r in sorted(repos)]
+    return "\n".join(lines) + "\n"
 
 
-def aplicar_argocd(escribir):
-    nuevo = render_argocd_secretgen()
-    print(f"\ncredenciales  {gris}(k8s/base/platform/argocd-secrets/secret-generator.yaml){fin}")
+def apply_argocd(write):
+    new = render_argocd_secretgen()
+    print(f"\ncredentials  {grey}(k8s/base/platform/argocd-secrets/secret-generator.yaml){off}")
     try:
-        viejo = open(ARGOCD_SECRETGEN, encoding="utf-8").read()
+        old = open(ARGOCD_SECRETGEN, encoding="utf-8").read()
     except FileNotFoundError:
-        viejo = None
-    if viejo == nuevo:
-        print(f"  {gris}={fin} deploy keys de repositorio")
+        old = None
+    if old == new:
+        print(f"  {grey}={off} repository deploy keys")
         return 0
-    print(f"  {ama}~{fin} deploy keys de repositorio" if viejo
-          else f"  {verde}+{fin} deploy keys de repositorio")
-    if escribir:
-        open(ARGOCD_SECRETGEN, "w", encoding="utf-8").write(nuevo)
+    print(f"  {yellow}~{off} repository deploy keys" if old
+          else f"  {green}+{off} repository deploy keys")
+    if write:
+        open(ARGOCD_SECRETGEN, "w", encoding="utf-8").write(new)
 
-    # I4: la credencial de una organización que ya no está SOBRA. No se
-    # borra sola y se dice por qué: quitarla del repo NO revoca la deploy
-    # key en GitHub, que es donde de verdad da acceso.
-    esperados = set()
-    for nombre in sorted(os.listdir(DIR_ORGS)):
-        if not nombre.endswith((".yaml", ".yml")):
+    # I4: the credential of an organization that is no longer there is
+    # SURPLUS. It is not deleted on its own and the reason is said out
+    # loud: taking it out of the repo does NOT revoke the deploy key in
+    # GitHub, which is where it really grants access.
+    expected = set()
+    for name in sorted(os.listdir(ORGS_DIR)):
+        if not name.endswith((".yaml", ".yml")):
             continue
-        c = yaml.safe_load(open(os.path.join(DIR_ORGS, nombre), encoding="utf-8")) or {}
-        esperados |= {f"secret-{n}-repo.enc.yaml" for n in repos_de(c).values()}
-    fijos_repo = {"secret-ops-stack-repo.enc.yaml", "secret-hello-aegis-repo.enc.yaml"}
+        c = yaml.safe_load(open(os.path.join(ORGS_DIR, name), encoding="utf-8")) or {}
+        expected |= {f"secret-{n}-repo.enc.yaml" for n in repos_of(c).values()}
+    fixed_repos = {"secret-ops-stack-repo.enc.yaml", "secret-hello-aegis-repo.enc.yaml"}
     d = os.path.dirname(ARGOCD_SECRETGEN)
     for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
         if not (f.startswith("secret-") and f.endswith("-repo.enc.yaml")):
             continue
-        if f in fijos_repo or f in esperados:
+        if f in fixed_repos or f in expected:
             continue
-        print(f"  {rojo}-{fin} {f}  {ama}(credencial de una organización que ya no está){fin}")
-        print(f"    {gris}Borrarla del repo NO revoca la deploy key: eso es\n"
-              f"    `gh repo deploy-key delete` contra GitHub.{fin}")
-        if escribir:
+        print(f"  {red}-{off} {f}  {yellow}(credential of an organization that is no longer there){off}")
+        print(f"    {grey}Deleting it from the repo does NOT revoke the deploy key: that is\n"
+              f"    `gh repo deploy-key delete` against GitHub.{off}")
+        if write:
             os.remove(os.path.join(d, f))
     return 0
 
 
-def orgs_con_bucket():
-    """Las organizaciones que declararon `almacenamiento.bucket`, ordenadas.
+def orgs_with_bucket():
+    """The organizations that declared `almacenamiento.bucket`, sorted.
 
-    Una sola fuente para las TRES cosas que dependen de esa lista: los
-    Jobs de aprovisionamiento, los espejos de credencial que el
-    secret-generator tiene que listar, y si el kustomization incorpora
-    o no aprovisionar.yaml. Calcularla tres veces es cómo se
-    desincronizan.
+    One single source for the THREE things that depend on that list: the
+    provisioning Jobs, the credential mirrors the secret-generator has
+    to list, and whether or not the kustomization brings in
+    aprovisionar.yaml. Computing it three times is how they drift apart.
     """
     orgs = []
-    for nombre in sorted(os.listdir(DIR_ORGS)):
-        if not nombre.endswith((".yaml", ".yml")):
+    for name in sorted(os.listdir(ORGS_DIR)):
+        if not name.endswith((".yaml", ".yml")):
             continue
-        c = yaml.safe_load(open(os.path.join(DIR_ORGS, nombre), encoding="utf-8")) or {}
+        c = yaml.safe_load(open(os.path.join(ORGS_DIR, name), encoding="utf-8")) or {}
         if (c.get("almacenamiento") or {}).get("bucket"):
             orgs.append(c["organizacion"])
     return sorted(orgs)
 
 
-# ── el CABLEADO de garage-system, derivado ────────────────────────────
+# ── garage-system's WIRING, derived ───────────────────────────────────
 #
-# kustomization.yaml y secret-generator.yaml de garage-system estaban
-# escritos a mano, y el generador escribía archivos DENTRO de ese
-# directorio que ninguno de los dos referenciaba:
+# garage-system's kustomization.yaml and secret-generator.yaml were
+# written by hand, and the generator wrote files INSIDE that directory
+# that neither of the two referenced:
 #
-#   aprovisionar.yaml              -> no estaba en `resources`
-#   secret-garage-<org>.enc.yaml   -> no estaba en `files`
+#   aprovisionar.yaml              -> was not in `resources`
+#   secret-garage-<org>.enc.yaml   -> was not in `files`
 #
-# El síntoma de las dos era el peor posible: `aegis org aplicar` decía
-# que todo salió bien, los archivos quedaban en git, y en el cluster no
-# pasaba nada. Ningún error, en ningún lado. Es la Enfermedad E — una
-# señal que no distingue "funcionó" de "no se evaluó".
+# The symptom of both was the worst possible one: `aegis org apply` said
+# everything had gone well, the files stayed in git, and nothing
+# happened in the cluster. No error, anywhere. It is Disease E — a
+# signal that does not tell "it worked" from "it was not evaluated".
 #
-# La cura no es acordarse de editar dos archivos más: es que el
-# cableado SALGA de los contratos, como el borde y el ruteo. Un archivo
-# generado que nadie lista es un archivo que no existe.
+# The cure is not remembering to edit two more files: it is that the
+# wiring COMES OUT of the contracts, like the edge and the routes. A
+# generated file nobody lists is a file that does not exist.
 #
-# Se mantiene la LISTA EXPLÍCITA (A7): sigue sin haber globs, solo que
-# ahora la lista la escribe el generador en vez de una persona.
+# The EXPLICIT LIST (A7) is kept: there are still no globs, only that
+# now the list is written by the generator instead of by a person.
 
 def render_garage_kustomization():
-    hay_buckets = bool(orgs_con_bucket())
-    recursos = ["bundle.yaml", "netpol.yaml"]
-    if hay_buckets:
-        # Condicional a propósito: kustomize FALLA si un `resources`
-        # apunta a un archivo que no existe, y aprovisionar.yaml solo
-        # existe cuando alguna organización pidió bucket.
-        recursos.append("aprovisionar.yaml")
-    lineas = [
+    any_buckets = bool(orgs_with_bucket())
+    resources = ["bundle.yaml", "netpol.yaml"]
+    if any_buckets:
+        # Conditional on purpose: kustomize FAILS if a `resources` entry
+        # points at a file that does not exist, and aprovisionar.yaml
+        # only exists when some organization asked for a bucket.
+        resources.append("aprovisionar.yaml")
+    lines = [
         *markers.FRAME,
         "# Sale del conjunto de contratos: `aprovisionar.yaml` se lista solo",
         "# cuando alguna organización declaró `almacenamiento.bucket`, porque",
@@ -2167,13 +2195,13 @@ def render_garage_kustomization():
         "kind: Kustomization",
         "resources:",
     ]
-    lineas += [f"  - {r}" for r in recursos]
-    lineas += ["generators:", "  - secret-generator.yaml"]
-    return "\n".join(lineas) + "\n"
+    lines += [f"  - {r}" for r in resources]
+    lines += ["generators:", "  - secret-generator.yaml"]
+    return "\n".join(lines) + "\n"
 
 
 def render_garage_secretgen():
-    fijos = [
+    fixed = [
         ("secret-garage-credentials.enc.yaml",
          "rpc_secret y admin_token del Garage compartido. Los crea\n"
          f"  # `{CMD_SECRET}` si faltan, y NUNCA los regenera: rotarlos con\n"
@@ -2181,7 +2209,7 @@ def render_garage_secretgen():
         ("secret-regcred-internal.enc.yaml",
          "Credencial de lectura del registry interno, para pullear la imagen."),
     ]
-    lineas = [
+    lines = [
         *markers.FRAME,
         "apiVersion: viaduct.ai/v1",
         "kind: ksops",
@@ -2195,81 +2223,82 @@ def render_garage_secretgen():
         "# antes es que esta lista la deriva el generador, no una persona.",
         "files:",
     ]
-    for archivo, porque in fijos:
-        lineas.append(f"  # {porque}")
-        lineas.append(f"  - {archivo}")
-    orgs = orgs_con_bucket()
+    for filename, why in fixed:
+        lines.append(f"  # {why}")
+        lines.append(f"  - {filename}")
+    orgs = orgs_with_bucket()
     if orgs:
-        lineas.append(
+        lines.append(
             "  # Espejo de la clave S3 de cada organización. El MISMO material\n"
             "  # que en su namespace: la app la consume allá, y el Job de\n"
             "  # aprovisionamiento la IMPORTA desde acá. Al revés —que el Job\n"
             "  # la generara— cada corrida daría una credencial distinta.")
         for org in orgs:
-            lineas.append(f"  - secret-garage-{org}.enc.yaml")
-    return "\n".join(lineas) + "\n"
+            lines.append(f"  - secret-garage-{org}.enc.yaml")
+    return "\n".join(lines) + "\n"
 
 
-def aplicar_garage(escribir):
-    """El cableado de garage-system, derivado del conjunto de contratos."""
+def apply_garage(write):
+    """garage-system's wiring, derived from the set of contracts."""
     rc = 0
-    print(f"\ngarage   {gris}(k8s/base/garage-system/){fin}")
-    for ruta, nuevo, que in (
+    print(f"\ngarage   {grey}(k8s/base/garage-system/){off}")
+    for path, new, what in (
             (GARAGE_KUSTOMIZATION, render_garage_kustomization(), "kustomization.yaml"),
             (GARAGE_SECRETGEN, render_garage_secretgen(), "secret-generator.yaml")):
         try:
-            viejo = open(ruta, encoding="utf-8").read()
+            old = open(path, encoding="utf-8").read()
         except FileNotFoundError:
-            viejo = None
-        if viejo == nuevo:
-            print(f"  {gris}={fin} {que}")
+            old = None
+        if old == new:
+            print(f"  {grey}={off} {what}")
             continue
-        print(f"  {ama}~{fin} {que}" if viejo else f"  {verde}+{fin} {que}")
-        if escribir:
-            os.makedirs(DIR_GARAGE, exist_ok=True)
-            open(ruta, "w", encoding="utf-8").write(nuevo)
+        print(f"  {yellow}~{off} {what}" if old else f"  {green}+{off} {what}")
+        if write:
+            os.makedirs(GARAGE_DIR, exist_ok=True)
+            open(path, "w", encoding="utf-8").write(new)
 
-    # I4: el espejo de una organización que ya no existe SOBRA. Sin esto
-    # queda una credencial S3 viva en git para una organización borrada
-    # — pasó con `conbucket`, un contrato de prueba del 2026-08-04 cuyo
-    # espejo sobrevivió al borrado y terminó commiteado.
-    esperados = {f"secret-garage-{o}.enc.yaml" for o in orgs_con_bucket()}
-    if os.path.isdir(DIR_GARAGE):
-        for f in sorted(os.listdir(DIR_GARAGE)):
+    # I4: the mirror of an organization that no longer exists is
+    # SURPLUS. Without this an S3 credential is left alive in git for a
+    # deleted organization — it happened with `conbucket`, a test
+    # contract from 2026-08-04 whose mirror outlived the deletion and
+    # ended up committed.
+    expected = {f"secret-garage-{o}.enc.yaml" for o in orgs_with_bucket()}
+    if os.path.isdir(GARAGE_DIR):
+        for f in sorted(os.listdir(GARAGE_DIR)):
             if not (f.startswith("secret-garage-") and f.endswith(".enc.yaml")):
                 continue
-            if f == "secret-garage-credentials.enc.yaml" or f in esperados:
+            if f == "secret-garage-credentials.enc.yaml" or f in expected:
                 continue
-            print(f"  {rojo}-{fin} {f}  {ama}(espejo de una organización que ya no está){fin}")
-            print(f"    {gris}Borrarlo del repo NO revoca la clave en Garage: eso es\n"
-                  f"    `garage key delete` contra el almacén.{fin}")
-            if escribir:
-                os.remove(os.path.join(DIR_GARAGE, f))
+            print(f"  {red}-{off} {f}  {yellow}(mirror of an organization that is no longer there){off}")
+            print(f"    {grey}Deleting it from the repo does NOT revoke the key in Garage: that is\n"
+                  f"    `garage key delete` against the store.{off}")
+            if write:
+                os.remove(os.path.join(GARAGE_DIR, f))
     return rc
 
 
-def render_aprovisionar():
-    """Los Jobs que le dan a cada organización su bucket y su permiso.
+def render_provisioning():
+    """The Jobs that give each organization its bucket and its permission.
 
-    Corren en garage-system y no en el namespace de la organización
-    porque necesitan el ADMIN TOKEN del almacenamiento: quien lo tenga
-    puede darse acceso al bucket de cualquiera, así que no baja a un
-    namespace de tenant. La clave de la organización sí está en los dos
-    lados —la escribe `aegis-secret` con el mismo material— porque su
-    app la consume y este Job la importa.
+    They run in garage-system and not in the organization's namespace
+    because they need the storage's ADMIN TOKEN: whoever holds it can
+    grant themselves access to anybody's bucket, so it does not come
+    down into a tenant namespace. The organization's key IS on both
+    sides —`aegis-secret` writes it with the same material— because its
+    app consumes it and this Job imports it.
     """
-    cat = yaml.safe_load(open(SERVICIOS, encoding="utf-8"))
+    cat = yaml.safe_load(open(SERVICES, encoding="utf-8"))
     b = cat["bucket"]
-    imagen = f"{cat['registro']}/{b['aprovisionador']['imagen']}@{b['aprovisionador']['digest']}"
+    image = f"{cat['registro']}/{b['aprovisionador']['imagen']}@{b['aprovisionador']['digest']}"
 
-    conBucket = orgs_con_bucket()
-    if not conBucket:
+    with_bucket = orgs_with_bucket()
+    if not with_bucket:
         return None
 
-    script = open(APROVISIONAR_JS, encoding="utf-8").read()
-    sangrado = "\n".join("    " + l if l.strip() else "" for l in script.rstrip("\n").split("\n"))
+    script = open(PROVISION_JS, encoding="utf-8").read()
+    indented = "\n".join("    " + l if l.strip() else "" for l in script.rstrip("\n").split("\n"))
 
-    partes = [markers.BANNER + f"""
+    parts = [markers.BANNER + f"""
 # Un Job por organización que declaró `almacenamiento.bucket`.
 #
 # El script es ai/aprovisionar-bucket.mjs, que vive como ARCHIVO y no
@@ -2289,10 +2318,10 @@ metadata:
   labels: {{aegis.dev/component: garage}}
 data:
   aprovisionar.mjs: |
-{sangrado}"""]
+{indented}"""]
 
-    for org in conBucket:
-        partes.append(f"""\
+    for org in with_bucket:
+        parts.append(f"""\
 ---
 apiVersion: batch/v1
 kind: Job
@@ -2330,7 +2359,7 @@ spec:
           # para hablar con una API sería un eslabón más en la cadena de
           # suministro a cambio de nada. Y sin shell, que es exactamente
           # lo que se quiere en un pod que maneja el admin token.
-          image: {imagen}
+          image: {image}
           args: ["/app/aprovisionar.mjs"]
           env:
             - {{name: GARAGE_ADMIN, value: "{b['admin']}"}}
@@ -2361,106 +2390,106 @@ spec:
       volumes:
         - name: script
           configMap: {{name: aprovisionar-bucket}}""")
-    return "\n".join(partes) + "\n"
+    return "\n".join(parts) + "\n"
 
 
-def aplicar_aprovisionar(escribir):
-    nuevo = render_aprovisionar()
-    print(f"\nbuckets  {gris}(k8s/base/garage-system/aprovisionar.yaml){fin}")
+def apply_provisioning(write):
+    new = render_provisioning()
+    print(f"\nbuckets  {grey}(k8s/base/garage-system/aprovisionar.yaml){off}")
     try:
-        viejo = open(APROVISIONAR_K8S, encoding="utf-8").read()
+        old = open(PROVISION_K8S, encoding="utf-8").read()
     except FileNotFoundError:
-        viejo = None
-    if nuevo is None:
-        if viejo is None:
-            print(f"  {gris}={fin} ninguna organización pidió bucket")
+        old = None
+    if new is None:
+        if old is None:
+            print(f"  {grey}={off} no organization asked for a bucket")
             return 0
-        # I4: lo que el conjunto de contratos ya no produce, sobra.
-        print(f"  {rojo}-{fin} aprovisionar.yaml  {gris}(ya nadie pide bucket){fin}")
-        if escribir:
-            os.remove(APROVISIONAR_K8S)
+        # I4: what the set of contracts no longer produces is surplus.
+        print(f"  {red}-{off} aprovisionar.yaml  {grey}(nobody asks for a bucket any more){off}")
+        if write:
+            os.remove(PROVISION_K8S)
         return 0
-    if viejo == nuevo:
-        print(f"  {gris}={fin} Jobs de aprovisionamiento")
+    if old == new:
+        print(f"  {grey}={off} provisioning Jobs")
         return 0
-    print(f"  {ama}~{fin} Jobs de aprovisionamiento" if viejo
-          else f"  {verde}+{fin} Jobs de aprovisionamiento")
-    if escribir:
-        os.makedirs(os.path.dirname(APROVISIONAR_K8S), exist_ok=True)
-        open(APROVISIONAR_K8S, "w", encoding="utf-8").write(nuevo)
+    print(f"  {yellow}~{off} provisioning Jobs" if old
+          else f"  {green}+{off} provisioning Jobs")
+    if write:
+        os.makedirs(os.path.dirname(PROVISION_K8S), exist_ok=True)
+        open(PROVISION_K8S, "w", encoding="utf-8").write(new)
     return 0
 
 
-# ── los jobs de Jenkins, derivados ────────────────────────────────────
+# ── the Jenkins jobs, derived ─────────────────────────────────────────
 #
-# El hueco #2 del mapa de onboarding (caminos/design.md §2a): cada app
-# nueva pedía copiar ~20 líneas de job-dsl a mano en el values de JCasC.
-# El modo de fallo del olvido es el de siempre: el contrato está, el
-# repo está, y ningún build corre jamás — sin nada rojo, porque un job
-# que no existe no puede fallar.
+# Hole #2 of the onboarding map (caminos/design.md §2a): each new app
+# demanded copying ~20 lines of job-dsl by hand into the JCasC values.
+# The failure mode of forgetting is the usual one: the contract is
+# there, the repo is there, and no build ever runs — with nothing red,
+# because a job that does not exist cannot fail.
 #
-# El bloque va DENTRO de values.yaml, entre marcas, y no en un
-# configScript propio: JCasC corre con ErrorOnConflict (A30) y dos
-# sources que declaren la key `jobs:` abortan el boot entero. Fuera de
-# las marcas lo escrito a mano sobrevive: hello-aegis-mb es del canary
-# (org-canary NO tiene contrato — es la prueba de que el camino del
-# tenant funciona, así que no puede depender de él) y ai-gateway-mb es
-# de la PLATAFORMA. Migran al bloque el día que su org tenga contrato,
-# no antes (deuda anotada en el diseño §2a). Los tres que SÍ tenían
-# contrato —portafolio, blog, ejemplo— migraron acá el 2026-08-19,
-# verificando primero que el texto derivado reproducía el manual
-# carácter por carácter.
+# The block goes INSIDE values.yaml, between markers, and not in a
+# configScript of its own: JCasC runs with ErrorOnConflict (A30) and two
+# sources declaring the `jobs:` key abort the whole boot. Outside the
+# markers, what is written by hand survives: hello-aegis-mb belongs to
+# the canary (org-canary has NO contract — it is the proof that the
+# tenant's path works, so it cannot depend on it) and ai-gateway-mb
+# belongs to the PLATFORM. They migrate into the block the day their org
+# has a contract, not before (debt noted in design §2a). The three that
+# DID have a contract —portafolio, blog, ejemplo— migrated here on
+# 2026-08-19, after verifying first that the derived text reproduced the
+# manual one character by character.
 
 JOBS_BLOCK_START = markers.JOBS_BLOCK_START
 JOBS_BLOCK_END = markers.JOBS_BLOCK_END
-# Sin re.S: `(?:.*\n)*?` come líneas enteras y no puede pasarse de la
-# marca de cierre aunque el bloque esté vacío.
+# Without re.S: `(?:.*\n)*?` eats whole lines and cannot run past the
+# closing marker even if the block is empty.
 JOBS_BLOCK_PATTERN = markers.JOBS_BLOCK_PATTERN
-# El plugin multibranch no habla URLs: habla owner/repository. Se
-# aceptan las dos formas que puede traer un `repo:` (ssh y https) y se
-# rechaza lo demás — un repo fuera de GitHub necesita otro branchSource,
-# que es otra decisión, no una entrada más.
-PATRON_REPO_GITHUB = re.compile(
+# The multibranch plugin does not speak URLs: it speaks
+# owner/repository. The two forms a `repo:` can bring are accepted (ssh
+# and https) and the rest is rejected — a repo outside GitHub needs
+# another branchSource, which is another decision, not one more entry.
+GITHUB_REPO_PATTERN = re.compile(
     r"^(?:git@github\.com:|https://github\.com/)([^/]+)/([^/]+?)(?:\.git)?$")
 
 
-def trabajos_de_jenkins():
-    """(nombre, owner, repositorio) por cada repo de cada contrato.
+def jenkins_jobs():
+    """(name, owner, repository) for each repo of each contract.
 
-    El nombre del job es el de su Application (repos_de): un repo, un
-    job, una App — la MISMA clave en Jenkins y en ArgoCD, para que el
-    log de un build y el estado de un despliegue se encuentren sin
-    tabla de traducción. Orden alfabético estable: el diff de
-    values.yaml no depende del filesystem (I1).
+    The job's name is that of its Application (repos_of): one repo, one
+    job, one App — the SAME key in Jenkins and in ArgoCD, so that a
+    build's log and a deployment's state can be matched without a
+    translation table. Stable alphabetical order: values.yaml's diff
+    does not depend on the filesystem (I1).
     """
-    trabajos = []
-    for nombre in sorted(os.listdir(DIR_ORGS)):
-        if not nombre.endswith((".yaml", ".yml")):
+    jobs = []
+    for name in sorted(os.listdir(ORGS_DIR)):
+        if not name.endswith((".yaml", ".yml")):
             continue
-        c = yaml.safe_load(open(os.path.join(DIR_ORGS, nombre), encoding="utf-8")) or {}
-        for repo, nombre_app in repos_de(c).items():
-            m = PATRON_REPO_GITHUB.match(repo)
+        c = yaml.safe_load(open(os.path.join(ORGS_DIR, name), encoding="utf-8")) or {}
+        for repo, app_name in repos_of(c).items():
+            m = GITHUB_REPO_PATTERN.match(repo)
             if not m:
-                raise Invalido(
-                    f"{nombre}: repo {repo!r} no es de GitHub.\n"
-                    f"  El job multibranch se declara con owner/repository del plugin\n"
-                    f"  github-branch-source; un repo de otro host necesita otro\n"
-                    f"  branchSource — es otra decisión, no una entrada más acá.")
-            trabajos.append((nombre_app, m.group(1), m.group(2)))
-    return sorted(trabajos)
+                raise Invalid(
+                    f"{name}: repo {repo!r} is not on GitHub.\n"
+                    f"  The multibranch job is declared with the owner/repository of the\n"
+                    f"  github-branch-source plugin; a repo on another host needs another\n"
+                    f"  branchSource — that is another decision, not one more entry here.")
+            jobs.append((app_name, m.group(1), m.group(2)))
+    return sorted(jobs)
 
 
-def render_bloque_jobs():
-    lineas = [JOBS_BLOCK_START]
-    lineas.append(f"""\
+def render_jobs_block():
+    lines = [JOBS_BLOCK_START]
+    lines.append(f"""\
           # Un job multibranch por repo declarado en un contrato de
           # orgs/. El nombre del job es el de su Application: un repo,
           # un job, una App — la misma clave en Jenkins y en ArgoCD.
           # Este bloque se rederiva ENTERO en cada corrida de
           # {CMD_ORG}: lo que se edite entre las marcas no
           # sobrevive a la próxima.""")
-    for n, owner, repo in trabajos_de_jenkins():
-        lineas.append(f"""\
+    for n, owner, repo in jenkins_jobs():
+        lines.append(f"""\
           - script: >
               multibranchPipelineJob('{n}-mb') {{
                 displayName('{n} (multibranch)')
@@ -2482,72 +2511,73 @@ def render_bloque_jobs():
                   }}
                 }}
               }}""")
-    lineas.append(JOBS_BLOCK_END)
-    return "\n".join(lineas)
+    lines.append(JOBS_BLOCK_END)
+    return "\n".join(lines)
 
 
-# ── la vigilancia de cada organización, derivada ──────────────────────
+# ── each organization's watch, derived ────────────────────────────────
 #
-# Hasta el 2026-08-22 una organización nacía AISLADA y CIEGA: el
-# contrato derivaba namespace, cuota, ruteo, netpols, secretos, jobs y
-# firma — y ni un solo objetivo de vigilancia. Medido ese día: shop
-# llevaba un día vivo y si su API hubiera empezado a devolver 500 a cada
-# cliente, no se habría disparado nada. Ninguna alerta de la plataforma
-# nombraba a una aplicación de inquilino.
+# Until 2026-08-22 an organization was born ISOLATED and BLIND: the
+# contract derived namespace, quota, routes, netpols, secrets, jobs and
+# signature — and not one watch target. Measured that day: shop had been
+# alive for a day and if its API had started returning 500 to every
+# customer, nothing would have fired. Not one platform alert named a
+# tenant application.
 #
-# La causa es de fondo y está anotada en RUTA: TODO el vocabulario de
-# los protocolos habla de TRANSICIONES (hecho/ya-estaba/no-evaluable, la
-# frontera, plan/apply, los gates de cada fase). Nada hablaba de estado
-# permanente. Se verificaba que algo se hubiera montado bien, jamás que
-# siguiera funcionando.
+# The cause runs deep and is noted in RUTA: ALL of the protocols'
+# vocabulary talks about TRANSITIONS (done/already/not-evaluable, the
+# boundary, plan/apply, each phase's gates). Nothing talked about
+# permanent state. It was verified that something had been set up
+# correctly, never that it was still working.
 #
-# Esto deriva el objetivo; las REGLAS que lo consumen son genéricas y
-# viven en rules/vmalert-rules.yaml (una regla para todos los
-# inquilinos, no N copias). Por eso agregar una organización no agrega
-# alertas: agrega un target, y las alertas que ya existen lo cubren.
+# This derives the target; the RULES that consume it are generic and
+# live in rules/vmalert-rules.yaml (one rule for all tenants, not N
+# copies). That is why adding an organization does not add alerts: it
+# adds a target, and the alerts that already exist cover it.
 #
-# Se sondea el `dominio:` y NO los hostnames de plataforma: esos van
-# detrás de Cloudflare Access y su 302 al login contaría como éxito —
-# el error que el check 90 del init existe para prohibir.
+# The `dominio:` is probed and NOT the platform hostnames: those sit
+# behind Cloudflare Access and their 302 to the login would count as a
+# success — the error init's check 90 exists to forbid.
 PROBES_BLOCK_START = markers.PROBES_BLOCK_START
 PROBES_BLOCK_END = markers.PROBES_BLOCK_END
 PROBES_BLOCK_PATTERN = markers.PROBES_BLOCK_PATTERN
 
 
-def sondas_de_inquilinos():
-    """Un (organizacion, dominio) por contrato que declare algo público.
+def tenant_probes():
+    """One (organizacion, dominio) per contract that declares something public.
 
-    Sin `dominio:` no hay nada que sondear desde afuera. Orden
-    alfabético estable: el diff del values no depende del filesystem.
+    Without `dominio:` there is nothing to probe from outside. Stable
+    alphabetical order: the values' diff does not depend on the
+    filesystem.
     """
-    sondas = []
-    for nombre in sorted(os.listdir(DIR_ORGS)):
-        if not nombre.endswith((".yaml", ".yml")):
+    probes = []
+    for name in sorted(os.listdir(ORGS_DIR)):
+        if not name.endswith((".yaml", ".yml")):
             continue
-        c = yaml.safe_load(open(os.path.join(DIR_ORGS, nombre), encoding="utf-8")) or {}
+        c = yaml.safe_load(open(os.path.join(ORGS_DIR, name), encoding="utf-8")) or {}
         dom, org = c.get("dominio"), c.get("organizacion")
         if not dom or not org:
             continue
-        # Sin ningún servicio `publico:` no hay camino que un cliente
-        # pueda recorrer, y sondearlo daría 404 para siempre.
+        # With no `publico:` service there is no path a customer could
+        # walk, and probing it would give a 404 forever.
         if not any(s.get("publico") for s in (c.get("servicios") or [])):
             continue
-        sondas.append((org, dom))
-    return sorted(sondas)
+        probes.append((org, dom))
+    return sorted(probes)
 
 
-def render_bloque_sondas():
-    lineas = [PROBES_BLOCK_START]
-    lineas.append(f"""\
+def render_probes_block():
+    lines = [PROBES_BLOCK_START]
+    lines.append(f"""\
     # Un probe por organización con dominio y ruta pública. Mide el
     # camino COMPLETO que recorre un cliente: DNS, borde, túnel,
     # traefik, middlewares y la app. Todo lo demás mide piezas.
     # Este bloque se rederiva ENTERO en cada {CMD_ORG_APPLY}.""")
-    sondas = sondas_de_inquilinos()
-    if not sondas:
-        lineas.append("    # (ninguna organización declara dominio con ruta pública)")
-    for org, dom in sondas:
-        lineas.append(f"""\
+    probes = tenant_probes()
+    if not probes:
+        lines.append("    # (ninguna organización declara dominio con ruta pública)")
+    for org, dom in probes:
+        lines.append(f"""\
     - job_name: sitio-{org}
       metrics_path: /probe
       params: {{module: [sitio_publico]}}
@@ -2563,380 +2593,384 @@ def render_bloque_sondas():
           replacement: "$1"
         - target_label: __address__
           replacement: blackbox.observability.svc:9115""")
-    lineas.append(PROBES_BLOCK_END)
-    return "\n".join(lineas)
+    lines.append(PROBES_BLOCK_END)
+    return "\n".join(lines)
 
 
-def aplicar_sondas(escribir):
-    texto = open(VMAGENT_VALUES, encoding="utf-8").read()
-    if not PROBES_BLOCK_PATTERN.search(texto):
-        raise Invalido(
-            f"no encontré las marcas del bloque derivado en {VMAGENT_VALUES}.\n"
-            f"  Tienen que existir estas dos líneas (con su sangría de 4\n"
-            f"  espacios, dentro de scrape_configs):\n"
+def apply_probes(write):
+    text = open(VMAGENT_VALUES, encoding="utf-8").read()
+    if not PROBES_BLOCK_PATTERN.search(text):
+        raise Invalid(
+            f"I could not find the derived block's markers in {VMAGENT_VALUES}.\n"
+            f"  These two lines have to exist (with their indentation of 4\n"
+            f"  spaces, inside scrape_configs):\n"
             f"{PROBES_BLOCK_START}\n"
             f"{PROBES_BLOCK_END}\n"
-            f"  Sin ellas no hay forma de saber qué es derivado y qué es de una\n"
-            f"  persona, y pisar a ciegas es peor que no generar.")
-    sondas = sondas_de_inquilinos()
-    nuevo = PROBES_BLOCK_PATTERN.sub(lambda _: render_bloque_sondas(), texto, count=1)
-    print(f"\nsondas  {gris}(k8s/base/observability/vmagent/values.yaml){fin}")
-    if nuevo == texto:
-        print(f"  {gris}={fin} sondas de tenant  {gris}{len(sondas)} sonda(s){fin}")
+            f"  Without them there is no way of knowing what is derived and what is a\n"
+            f"  person's, and overwriting blind is worse than not generating.")
+    probes = tenant_probes()
+    new = PROBES_BLOCK_PATTERN.sub(lambda _: render_probes_block(), text, count=1)
+    print(f"\nprobes  {grey}(k8s/base/observability/vmagent/values.yaml){off}")
+    if new == text:
+        print(f"  {grey}={off} tenant probes  {grey}{len(probes)} probe(s){off}")
         return 0
-    print(f"  {ama}~{fin} sondas de tenant -> "
-          f"{', '.join(o for o, _ in sondas) or '(ninguna)'}")
-    if escribir:
-        open(VMAGENT_VALUES, "w", encoding="utf-8").write(nuevo)
-        # El mismo aviso que el borde y que jenkins, por la misma razón:
-        # el paso que hay que acordarse es el que se olvida.
-        print(f"  {gris}la sonda no existe hasta commitear + sincronizar:\n"
-              f"  vmagent recarga su config cuando el values llega al cluster{fin}")
+    print(f"  {yellow}~{off} tenant probes -> "
+          f"{', '.join(o for o, _ in probes) or '(none)'}")
+    if write:
+        open(VMAGENT_VALUES, "w", encoding="utf-8").write(new)
+        # The same warning as the edge's and jenkins', for the same
+        # reason: the step you have to remember is the one that gets
+        # forgotten.
+        print(f"  {grey}the probe does not exist until you commit + sync:\n"
+              f"  vmagent reloads its config when the values reaches the cluster{off}")
     return 0
 
 
-def aplicar_jenkins(escribir):
-    texto = open(JENKINS_VALUES, encoding="utf-8").read()
-    if not JOBS_BLOCK_PATTERN.search(texto):
-        raise Invalido(
-            f"no encontré las marcas del bloque derivado en {JENKINS_VALUES}.\n"
-            f"  Tienen que existir estas dos líneas (con su sangría de 10\n"
-            f"  espacios, dentro del configScript aegis-jobs):\n"
+def apply_jenkins(write):
+    text = open(JENKINS_VALUES, encoding="utf-8").read()
+    if not JOBS_BLOCK_PATTERN.search(text):
+        raise Invalid(
+            f"I could not find the derived block's markers in {JENKINS_VALUES}.\n"
+            f"  These two lines have to exist (with their indentation of 10\n"
+            f"  spaces, inside the aegis-jobs configScript):\n"
             f"{JOBS_BLOCK_START}\n"
             f"{JOBS_BLOCK_END}\n"
-            f"  Sin ellas no hay forma de saber qué es derivado y qué es de una\n"
-            f"  persona, y pisar a ciegas es peor que no generar.")
-    nombres = [n for n, _, _ in trabajos_de_jenkins()]
-    nuevo = JOBS_BLOCK_PATTERN.sub(lambda _: render_bloque_jobs(), texto, count=1)
-    print(f"\njenkins  {gris}(k8s/base/platform/jenkins/values.yaml){fin}")
-    if nuevo == texto:
-        print(f"  {gris}={fin} jobs de tenant  {gris}{len(nombres)} job(s){fin}")
+            f"  Without them there is no way of knowing what is derived and what is a\n"
+            f"  person's, and overwriting blind is worse than not generating.")
+    names = [n for n, _, _ in jenkins_jobs()]
+    new = JOBS_BLOCK_PATTERN.sub(lambda _: render_jobs_block(), text, count=1)
+    print(f"\njenkins  {grey}(k8s/base/platform/jenkins/values.yaml){off}")
+    if new == text:
+        print(f"  {grey}={off} tenant jobs  {grey}{len(names)} job(s){off}")
         return 0
-    print(f"  {ama}~{fin} jobs de tenant -> {', '.join(f'{n}-mb' for n in nombres) or '(ninguno)'}")
-    if escribir:
-        open(JENKINS_VALUES, "w", encoding="utf-8").write(nuevo)
-        # El values es un artefacto GitOps: el job no existe en Jenkins
-        # hasta que este cambio llegue al cluster y el sidecar de JCasC
-        # recargue el seed. Decirlo acá y no en la documentación, por la
-        # misma razón que el borde: el paso que hay que acordarse es el
-        # que se olvida.
-        print(f"  {gris}el job no existe en Jenkins hasta commitear + sincronizar:\n"
-              f"  JCasC recarga el seed solo cuando el values llega al cluster{fin}")
+    print(f"  {yellow}~{off} tenant jobs -> {', '.join(f'{n}-mb' for n in names) or '(none)'}")
+    if write:
+        open(JENKINS_VALUES, "w", encoding="utf-8").write(new)
+        # The values is a GitOps artifact: the job does not exist in
+        # Jenkins until this change reaches the cluster and JCasC's
+        # sidecar reloads the seed. Saying it here and not in the
+        # documentation, for the same reason as the edge: the step you
+        # have to remember is the one that gets forgotten.
+        print(f"  {grey}the job does not exist in Jenkins until you commit + sync:\n"
+              f"  JCasC reloads the seed only when the values reaches the cluster{off}")
     return 0
 
 
-# ── el Jenkinsfile de cada servicio, instanciado ──────────────────────
+# ── each service's Jenkinsfile, instantiated ──────────────────────────
 #
-# El template canónico (docs/protocols/templates/Jenkinsfile.app) tiene
-# UN solo CHANGEME en 452 líneas: el nombre de la imagen. Hacer que una
-# persona copie el archivo entero para editar esa línea invita al error
-# contrario — editar lo que NO es suyo: los pins, los limits y los
-# secretos son contrato con la plataforma (lo dice su propia cabecera).
+# The canonical template (docs/protocols/templates/Jenkinsfile.app) has
+# ONE single CHANGEME in 452 lines: the image's name. Making a person
+# copy the whole file in order to edit that line invites the opposite
+# error — editing what is NOT theirs: the pins, the limits and the
+# secrets are a contract with the platform (its own header says so).
 #
-# Se instancia al staging .aegis-app/<org>/<svc>/ y NO a un directorio
-# versionado: el destino de este archivo es el repo DE LA APP (caminos
-# §3 — `aegis-app aplicar` lo empuja solo a un repo vacío), y versionar
-# acá una copia de lo que vive allá sería repetir el error histórico de
-# platform/: dos copias, y la que nadie mira se pudre. Por eso
-# .aegis-app/ está en el .gitignore.
+# It is instantiated into the staging area .aegis-app/<org>/<svc>/ and
+# NOT into a versioned directory: this file's destination is THE APP's
+# repo (caminos §3 — `aegis-app aplicar` pushes it only into an empty
+# repo), and versioning here a copy of what lives over there would
+# repeat platform/'s historical mistake: two copies, and the one nobody
+# looks at rots. That is why .aegis-app/ is in the .gitignore.
 #
-# SIN guard I3 acá, a propósito: una vez pusheado, la verdad del
-# Jenkinsfile vive en el repo de la app; el staging es material
-# regenerable y rederivar lo pisa sin preguntar.
+# NO I3 guard here, on purpose: once pushed, the Jenkinsfile's truth
+# lives in the app's repo; the staging area is regenerable material and
+# re-deriving overwrites it without asking.
 
-def servicios_a_instanciar():
-    """(org, servicio) por cada servicio que se CONSTRUYE desde un repo.
+def services_to_instantiate():
+    """(org, service) for each service that is BUILT from a repo.
 
-    Un `postgres` no aparece: lo provee la plataforma y no tiene
-    pipeline. La condición es tener imagen que compilar Y un repo de
-    dónde sacarla — el propio o el de la organización.
+    A `postgres` does not appear: it is provided by the platform and has
+    no pipeline. The condition is having an image to compile AND a repo
+    to take it from — its own or the organization's.
     """
     out = []
-    for nombre in sorted(os.listdir(DIR_ORGS)):
-        if not nombre.endswith((".yaml", ".yml")):
+    for name in sorted(os.listdir(ORGS_DIR)):
+        if not name.endswith((".yaml", ".yml")):
             continue
-        c = yaml.safe_load(open(os.path.join(DIR_ORGS, nombre), encoding="utf-8")) or {}
+        c = yaml.safe_load(open(os.path.join(ORGS_DIR, name), encoding="utf-8")) or {}
         for s in c.get("servicios") or []:
-            if s.get("tipo") in TIPOS_CON_IMAGEN and (s.get("repo") or c.get("repo")):
+            if s.get("tipo") in TYPES_WITH_IMAGE and (s.get("repo") or c.get("repo")):
                 out.append((c["organizacion"], s["nombre"]))
     return sorted(out)
 
 
-def aplicar_jenkinsfiles(escribir):
+def apply_jenkinsfiles(write):
     tpl = open(JENKINSFILE_TPL, encoding="utf-8").read()
-    # Si el template pierde su CHANGEME —o le crece otro— este replace
-    # dejaría de instanciar lo que se cree que instancia. Mejor gritar
-    # acá que descubrirlo en el primer build con la imagen equivocada.
-    marcadores = tpl.count("'CHANGEME-app'")
-    if marcadores != 1:
-        raise Invalido(
-            f"{JENKINSFILE_TPL}: esperaba exactamente UN 'CHANGEME-app' y hay "
-            f"{marcadores}.\n"
-            f"  Esta derivación instancia ese único marcador; si el template\n"
-            f"  cambió de forma, hay que actualizar las dos cosas juntas.")
-    print(f"\njenkinsfiles  {gris}(.aegis-app/ — staging, gitignorado){fin}")
+    # If the template loses its CHANGEME —or grows another one— this
+    # replace would stop instantiating what it is believed to
+    # instantiate. Better to shout here than to discover it on the first
+    # build with the wrong image.
+    found = tpl.count("'CHANGEME-app'")
+    if found != 1:
+        raise Invalid(
+            f"{JENKINSFILE_TPL}: I expected exactly ONE 'CHANGEME-app' and there are "
+            f"{found}.\n"
+            f"  This derivation instantiates that single marker; if the template\n"
+            f"  changed shape, both things have to be updated together.")
+    print(f"\njenkinsfiles  {grey}(.aegis-app/ — staging, gitignored){off}")
 
-    esperados = {}
-    for org, svc in servicios_a_instanciar():
-        # IMAGE = '<org>-<svc>' (caminos §2b): la convención de la
-        # referencia viva (ejemplo-front, ejemplo-api). El blog y el
-        # portafolio son anteriores y publican 'blog'/'portafolio' para
-        # su front; sus repos no se tocan desde acá — el staging jamás
-        # se empuja sobre historia ajena.
-        esperados[os.path.join(org, svc, "Jenkinsfile")] = \
+    expected = {}
+    for org, svc in services_to_instantiate():
+        # IMAGE = '<org>-<svc>' (caminos §2b): the convention of the
+        # live reference (ejemplo-front, ejemplo-api). The blog and the
+        # portfolio are older and publish 'blog'/'portafolio' for their
+        # front; their repos are not touched from here — the staging
+        # area is never pushed over somebody else's history.
+        expected[os.path.join(org, svc, "Jenkinsfile")] = \
             tpl.replace("'CHANGEME-app'", f"'{org}-{svc}'")
 
-    for rel in sorted(esperados):
-        camino = os.path.join(DIR_STAGING, rel)
-        nuevo = esperados[rel]
+    for rel in sorted(expected):
+        file_path = os.path.join(STAGING_DIR, rel)
+        new = expected[rel]
         try:
-            viejo = open(camino, encoding="utf-8").read()
+            old = open(file_path, encoding="utf-8").read()
         except FileNotFoundError:
-            viejo = None
-        if viejo == nuevo:
-            print(f"  {gris}={fin} {rel}")
+            old = None
+        if old == new:
+            print(f"  {grey}={off} {rel}")
             continue
-        print(f"  {ama}~{fin} {rel}" if viejo is not None else f"  {verde}+{fin} {rel}")
-        if escribir:
-            os.makedirs(os.path.dirname(camino), exist_ok=True)
-            open(camino, "w", encoding="utf-8").write(nuevo)
+        print(f"  {yellow}~{off} {rel}" if old is not None else f"  {green}+{off} {rel}")
+        if write:
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            open(file_path, "w", encoding="utf-8").write(new)
 
-    # I4: el staging de un servicio que ya no deriva de ningún contrato
-    # SOBRA. Se quita SOLO el Jenkinsfile —que es lo que esta derivación
-    # produce— y los directorios que queden vacíos: el día que el
-    # staging tenga también esqueletos de `aegis-app nueva`, esos no son
-    # nuestros para borrar.
-    if os.path.isdir(DIR_STAGING):
-        for org in sorted(os.listdir(DIR_STAGING)):
-            d_org = os.path.join(DIR_STAGING, org)
-            if not os.path.isdir(d_org):
+    # I4: the staging area of a service that no longer derives from any
+    # contract is SURPLUS. ONLY the Jenkinsfile is removed —which is
+    # what this derivation produces— and the directories left empty: the
+    # day the staging area also holds skeletons from `aegis-app nueva`,
+    # those are not ours to delete.
+    if os.path.isdir(STAGING_DIR):
+        for org in sorted(os.listdir(STAGING_DIR)):
+            org_dir = os.path.join(STAGING_DIR, org)
+            if not os.path.isdir(org_dir):
                 continue
-            for svc in sorted(os.listdir(d_org)):
-                jf = os.path.join(d_org, svc, "Jenkinsfile")
+            for svc in sorted(os.listdir(org_dir)):
+                jf = os.path.join(org_dir, svc, "Jenkinsfile")
                 rel = os.path.join(org, svc, "Jenkinsfile")
-                if not os.path.exists(jf) or rel in esperados:
+                if not os.path.exists(jf) or rel in expected:
                     continue
-                print(f"  {rojo}-{fin} {rel}  {gris}(ya no lo produce ningún contrato){fin}")
-                if escribir:
+                print(f"  {red}-{off} {rel}  {grey}(no contract produces it any more){off}")
+                if write:
                     os.remove(jf)
-                    for d in (os.path.join(d_org, svc), d_org):
+                    for d in (os.path.join(org_dir, svc), org_dir):
                         if os.path.isdir(d) and not os.listdir(d):
                             os.rmdir(d)
     return 0
 
 
-def aplicar_tenants(escribir):
-    nuevo = render_tenants()
-    print(f"\ntenants  {gris}(k8s/argocd-apps/tenants.yaml){fin}")
+def apply_tenants(write):
+    new = render_tenants()
+    print(f"\ntenants  {grey}(k8s/argocd-apps/tenants.yaml){off}")
     try:
-        viejo = open(TENANTS_K8S, encoding="utf-8").read()
+        old = open(TENANTS_K8S, encoding="utf-8").read()
     except FileNotFoundError:
-        viejo = None
-    if viejo == nuevo:
-        print(f"  {gris}={fin} Applications de organización")
+        old = None
+    if old == new:
+        print(f"  {grey}={off} organization Applications")
         return 0
-    print(f"  {ama}~{fin} Applications de organización" if viejo
-          else f"  {verde}+{fin} Applications de organización")
-    if escribir:
-        open(TENANTS_K8S, "w", encoding="utf-8").write(nuevo)
-        print(f"  {gris}root no tiene automated: para que exista, "
-              f"{CMD_SYNC_ROOT}{fin}")
+    print(f"  {yellow}~{off} organization Applications" if old
+          else f"  {green}+{off} organization Applications")
+    if write:
+        open(TENANTS_K8S, "w", encoding="utf-8").write(new)
+        print(f"  {grey}root has no automated: for it to exist, "
+              f"{CMD_SYNC_ROOT}{off}")
     return 0
 
 
-def orgs_con_ai():
-    """Las organizaciones cuyo contrato declara `ai:`, ordenadas.
+def orgs_with_ai():
+    """The organizations whose contract declares `ai:`, sorted.
 
-    Se le pregunta al CONTRATO y no al árbol: el contrato es el que
-    PROMETE, y una promesa que la instancia no puede cumplir es
-    justamente lo que hay que ver.
+    The CONTRACT is asked and not the tree: the contract is the one that
+    PROMISES, and a promise the instance cannot keep is precisely what
+    has to be seen.
     """
     orgs = []
-    for nombre in sorted(os.listdir(DIR_ORGS)):
-        if not nombre.endswith((".yaml", ".yml")):
+    for name in sorted(os.listdir(ORGS_DIR)):
+        if not name.endswith((".yaml", ".yml")):
             continue
-        c = yaml.safe_load(open(os.path.join(DIR_ORGS, nombre), encoding="utf-8")) or {}
+        c = yaml.safe_load(open(os.path.join(ORGS_DIR, name), encoding="utf-8")) or {}
         if c.get("ai"):
             orgs.append(c["organizacion"])
     return sorted(orgs)
 
 
-def _sin_subsistema_ai(que):
-    """Los TRES desenlaces del subsistema AI, dichos en voz alta.
+def _without_ai_subsystem(what):
+    """The THREE outcomes of the AI subsystem, said out loud.
 
-    Reproducido el 2026-08-24 sobre la semilla de v3: un contrato
-    perfectamente válido SIN bloque `ai:` hacía morir a `aegis org
-    apply` con un traceback —
+    Reproduced on 2026-08-24 against v3's seed: a perfectly valid
+    contract WITHOUT an `ai:` block made `aegis org apply` die with a
+    traceback —
 
         FileNotFoundError: .../k8s/base/ai-system/routes.yaml
 
-    — y no al principio, sino DESPUÉS de haber escrito los seis
-    manifiestos de la organización. O sea que dejaba el árbol a medias
-    y la culpa parecía del contrato.
+    — and not at the start, but AFTER having written the organization's
+    six manifests. Which is to say it left the tree half done and the
+    blame looked like the contract's.
 
-    La causa era que las dos etapas de AI corrían SIEMPRE, sin
-    preguntar si el subsistema estaba. Con la decisión de que AI no
-    viaja en la semilla (solo sus documentos y su protocolo), «no
-    está» dejó de ser una anomalía y pasó a ser la forma NORMAL de un
-    árbol recién clonado.
+    The cause was that the two AI stages ran ALWAYS, without asking
+    whether the subsystem was there. With the decision that AI does not
+    travel in the seed (only its documents and its protocol), «it is not
+    there» stopped being an anomaly and became the NORMAL shape of a
+    freshly-cloned tree.
 
-    Pero no se puede saltar en silencio, y acá está la única línea que
-    importa: una ausencia no es un caso legítimo hasta que se
-    distingue de un error (regla 3 del diseño de la CLI).
+    But it cannot be skipped in silence, and here is the only line that
+    matters: an absence is not a legitimate case until it is told apart
+    from an error (rule 3 of the CLI's design).
 
-      · sin subsistema y sin contratos que lo pidan  -> NO APLICA (0)
-      · sin subsistema y CON contratos que lo piden  -> FALLA (1)
-      · con subsistema                               -> seguir (None)
+      · no subsystem and no contracts asking for it  -> DOES NOT APPLY (0)
+      · no subsystem and WITH contracts asking       -> FAILS (1)
+      · with subsystem                               -> carry on (None)
 
-    El segundo caso es el que vale el helper: un contrato que declara
-    `ai:` en una instancia sin AI no es un detalle de generación, es
-    una promesa que nadie va a poder cumplir, y el momento de verla es
-    ahora y no cuando el front pida una traducción.
+    The second case is what makes the helper worth it: a contract that
+    declares `ai:` on an instance with no AI is not a generation detail,
+    it is a promise nobody will be able to keep, and the moment to see
+    it is now and not when the front asks for a translation.
     """
-    if os.path.isdir(DIR_AI):
+    if os.path.isdir(AI_DIR):
         return None
-    print(f"\n{que}  {gris}(k8s/base/ai-system/){fin}")
-    piden = orgs_con_ai()
-    if piden:
-        print(f"  {rojo}\u2717{fin} {len(piden)} contrato(s) declaran `ai:` "
-              f"({', '.join(piden)}) y este \u00e1rbol no tiene el subsistema AI")
-        print(f"  {gris}el contrato promete algo que la instancia no puede dar: "
-              f"o se trae el subsistema, o sale `ai:` del contrato{fin}")
+    print(f"\n{what}  {grey}(k8s/base/ai-system/){off}")
+    asking = orgs_with_ai()
+    if asking:
+        print(f"  {red}\u2717{off} {len(asking)} contract(s) declare `ai:` "
+              f"({', '.join(asking)}) and this tree does not have the AI subsystem")
+        print(f"  {grey}the contract promises something the instance cannot give: "
+              f"either the subsystem is brought in, or `ai:` leaves the contract{off}")
         return 1
-    print(f"  {gris}\u25cb NO APLICA: el subsistema AI no est\u00e1 en este "
-          f"\u00e1rbol y ning\u00fan contrato lo pide{fin}")
+    print(f"  {grey}\u25cb DOES NOT APPLY: the AI subsystem is not in this "
+          f"tree and no contract asks for it{off}")
     return 0
 
 
-def aplicar_ruteo(escribir):
-    rc = _sin_subsistema_ai("ruteo")
+def apply_routes(write):
+    rc = _without_ai_subsystem("routes")
     if rc is not None:
         return rc
-    nuevo = render_ruteo_k8s()
-    print(f"\nruteo  {gris}(k8s/base/ai-system/routes.yaml){fin}")
+    new = render_routes_k8s()
+    print(f"\nroutes  {grey}(k8s/base/ai-system/routes.yaml){off}")
     try:
-        viejo = open(RUTEO_K8S, encoding="utf-8").read()
+        old = open(ROUTES_K8S, encoding="utf-8").read()
     except FileNotFoundError:
-        viejo = None
-    if viejo == nuevo:
-        print(f"  {gris}={fin} ai-ruteo")
+        old = None
+    if old == new:
+        print(f"  {grey}={off} ai-ruteo")
         return 0
-    print(f"  {ama}~{fin} ai-ruteo" if viejo else f"  {verde}+{fin} ai-ruteo")
-    if escribir:
-        open(RUTEO_K8S, "w", encoding="utf-8").write(nuevo)
+    print(f"  {yellow}~{off} ai-ruteo" if old else f"  {green}+{off} ai-ruteo")
+    if write:
+        open(ROUTES_K8S, "w", encoding="utf-8").write(new)
     return 0
 
 
 def main():
     p = argparse.ArgumentParser(prog=cli.cmd("org"), description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
-    for nombre, ayuda in (("plan", "muestra qué cambiaría, sin escribir"),
-                          ("apply", "escribe los manifiestos"),
-                          ("validate", "solo valida el contrato")):
-        s = sub.add_parser(nombre, help=ayuda)
-        s.add_argument("contratos", nargs="+")
-    sub.add_parser("edge", help="deriva public_hostnames de todos los contratos")
-    sub.add_parser("routes", help="deriva el ConfigMap ai-ruteo de todos los contratos")
-    # `plan-borrar` primero, y con ese nombre: el orden del help importa
-    # cuando el comando de al lado destruye cosas.
-    for nombre, ayuda in (("plan-delete", "muestra qué borraría, sin tocar nada"),
-                          ("delete", "quita de git y DICE qué retirar del cluster")):
-        s = sub.add_parser(nombre, help=ayuda)
-        s.add_argument("organizaciones", nargs="+", metavar="ORGANIZACION")
-    m = sub.add_parser("migrate", help="lleva un contrato a una versión nueva")
-    m.add_argument("contratos", nargs="+")
-    # `--to` y no `--a`: la fricción 2 de A5 en su forma más chica —
-    # una preposición suelta no dice a qué se refiere.
+    for name, help_text in (("plan", "show what would change, without writing"),
+                            ("apply", "write the manifests"),
+                            ("validate", "only validate the contract")):
+        s = sub.add_parser(name, help=help_text)
+        s.add_argument("contracts", nargs="+")
+    sub.add_parser("edge", help="derive public_hostnames from every contract")
+    sub.add_parser("routes", help="derive the ai-ruteo ConfigMap from every contract")
+    # `plan-delete` first, and with that name: the order of the help
+    # matters when the command next to it destroys things.
+    for name, help_text in (("plan-delete", "show what it would delete, without touching anything"),
+                            ("delete", "remove from git and SAY what to withdraw from the cluster")):
+        s = sub.add_parser(name, help=help_text)
+        s.add_argument("orgs", nargs="+", metavar="ORGANIZATION")
+    m = sub.add_parser("migrate", help="take a contract to a new version")
+    m.add_argument("contracts", nargs="+")
+    # `--to` and not `--a`: A5's friction 2 in its smallest form — a
+    # loose preposition does not say what it refers to.
     m.add_argument("--to", type=int, required=True, metavar="VERSION",
-                   dest="version_destino")
+                   dest="target_version")
     a = p.parse_args()
 
     if a.cmd == "edge":
         try:
-            return aplicar_borde(escribir=True)
-        except Invalido as e:
-            print(f"{rojo}✗{fin} {e}", file=sys.stderr)
+            return apply_edge(write=True)
+        except Invalid as e:
+            print(f"{red}✗{off} {e}", file=sys.stderr)
             return 1
 
     if a.cmd == "routes":
         try:
-            return aplicar_ruteo(escribir=True)
-        except Invalido as e:
-            print(f"{rojo}✗{fin} {e}", file=sys.stderr)
+            return apply_routes(write=True)
+        except Invalid as e:
+            print(f"{red}✗{off} {e}", file=sys.stderr)
             return 1
 
     if a.cmd == "migrate":
-        return migrar(a.contratos, a.version_destino)
+        return migrate(a.contracts, a.target_version)
 
     if a.cmd in ("delete", "plan-delete"):
         rc = 0
-        for nombre in a.organizaciones:
+        for name in a.orgs:
             try:
-                rc |= borrar(nombre, escribir=(a.cmd == "delete"))
-            except Invalido as e:
-                print(f"{rojo}✗ {nombre}{fin}\n  {e}", file=sys.stderr)
+                rc |= delete_org(name, write=(a.cmd == "delete"))
+            except Invalid as e:
+                print(f"{red}✗ {name}{off}\n  {e}", file=sys.stderr)
                 rc = 1
-        # Rederivar SIEMPRE, también al borrar: el hostname y el plan de
-        # la organización que se fue tienen que desaparecer en la misma
-        # corrida. Si quedaran, el borde seguiría creando su CNAME y el
-        # gateway seguiría conociendo un tenant que ya no existe.
+        # Re-derive ALWAYS, on delete too: the hostname and the plan of
+        # the organization that left have to disappear in the same run.
+        # If they stayed, the edge would go on creating its CNAME and the
+        # gateway would go on knowing a tenant that no longer exists.
         if rc == 0:
-            for etapa, fn in (("borde", aplicar_borde), ("ruteo", aplicar_ruteo),
-         ("registro-ai", aplicar_registro_ai),
-                              ("proyectos", aplicar_appprojects),
-                              ("credenciales", aplicar_argocd),
-                              ("tenants", aplicar_tenants),
-                              ("buckets", aplicar_aprovisionar),
-                              ("garage", aplicar_garage),
-                              ("jenkins", aplicar_jenkins),
-                              ("sondas", aplicar_sondas),
-                              ("jenkinsfiles", aplicar_jenkinsfiles)):
+            for stage, fn in (("edge", apply_edge),
+                              ("routes", apply_routes),
+                              ("ai-registry", apply_ai_registry),
+                              ("projects", apply_appprojects),
+                              ("credentials", apply_argocd),
+                              ("tenants", apply_tenants),
+                              ("buckets", apply_provisioning),
+                              ("garage", apply_garage),
+                              ("jenkins", apply_jenkins),
+                              ("probes", apply_probes),
+                              ("jenkinsfiles", apply_jenkinsfiles)):
                 try:
-                    rc |= fn(escribir=(a.cmd == "delete"))
-                except Invalido as e:
-                    print(f"{rojo}✗ {etapa}{fin}\n  {e}", file=sys.stderr)
+                    rc |= fn(write=(a.cmd == "delete"))
+                except Invalid as e:
+                    print(f"{red}✗ {stage}{off}\n  {e}", file=sys.stderr)
                     rc = 1
         return rc
 
     rc = 0
-    for ruta in a.contratos:
+    for path in a.contracts:
         try:
             if a.cmd == "validate":
-                planes = yaml.safe_load(open(PLANES, encoding="utf-8"))
-                validar(yaml.safe_load(open(ruta, encoding="utf-8")), planes)
-                print(f"{verde}✓{fin} {ruta}")
+                plans = yaml.safe_load(open(PLANS, encoding="utf-8"))
+                validate(yaml.safe_load(open(path, encoding="utf-8")), plans)
+                print(f"{green}✓{off} {path}")
             else:
-                rc |= aplicar(ruta, escribir=(a.cmd == "apply"))
-        except Invalido as e:
-            print(f"{rojo}✗ {ruta}{fin}\n  {e}", file=sys.stderr)
+                rc |= apply_contract(path, write=(a.cmd == "apply"))
+        except Invalid as e:
+            print(f"{red}✗ {path}{off}\n  {e}", file=sys.stderr)
             rc = 1
         except FileNotFoundError as e:
-            print(f"{rojo}✗{fin} no existe: {e.filename}", file=sys.stderr)
+            print(f"{red}✗{off} does not exist: {e.filename}", file=sys.stderr)
             rc = 1
 
-    # El borde y el ruteo SIEMPRE, después de las organizaciones. Van acá
-    # y no como comandos aparte que hay que acordarse de correr:
-    # acordarse es exactamente lo que falló las dos veces anteriores.
+    # The edge and the routes ALWAYS, after the organizations. They go
+    # here and not as separate commands somebody has to remember to run:
+    # remembering is exactly what failed the two previous times.
     #
-    # Los dos derivan de TODOS los contratos, no del que se acaba de
-    # tocar: dar de alta una organización cambia el mapa tenant->plan
-    # entero, y ese archivo tiene que quedar consistente en la misma
-    # corrida o el gateway arranca con una organización que no conoce.
+    # Both derive from ALL the contracts, not from the one just touched:
+    # registering an organization changes the whole tenant->plan map, and
+    # that file has to be left consistent in the same run or the gateway
+    # starts up with an organization it does not know.
     if a.cmd in ("plan", "apply") and rc == 0:
-        for etapa, fn in (("borde", aplicar_borde), ("ruteo", aplicar_ruteo),
-         ("registro-ai", aplicar_registro_ai),
-                          ("proyectos", aplicar_appprojects),
-                          ("credenciales", aplicar_argocd),
-                          ("tenants", aplicar_tenants),
-                          ("buckets", aplicar_aprovisionar),
-                          ("garage", aplicar_garage),
-                          ("jenkins", aplicar_jenkins),
-                          ("sondas", aplicar_sondas),
-                          ("jenkinsfiles", aplicar_jenkinsfiles)):
+        for stage, fn in (("edge", apply_edge),
+                          ("routes", apply_routes),
+                          ("ai-registry", apply_ai_registry),
+                          ("projects", apply_appprojects),
+                          ("credentials", apply_argocd),
+                          ("tenants", apply_tenants),
+                          ("buckets", apply_provisioning),
+                          ("garage", apply_garage),
+                          ("jenkins", apply_jenkins),
+                          ("probes", apply_probes),
+                          ("jenkinsfiles", apply_jenkinsfiles)):
             try:
-                rc |= fn(escribir=(a.cmd == "apply"))
-            except Invalido as e:
-                print(f"{rojo}✗ {etapa}{fin}\n  {e}", file=sys.stderr)
+                rc |= fn(write=(a.cmd == "apply"))
+            except Invalid as e:
+                print(f"{red}✗ {stage}{off}\n  {e}", file=sys.stderr)
                 rc = 1
     return rc
 

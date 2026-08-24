@@ -1,48 +1,51 @@
 #!/usr/bin/env python3
-# aegis-summary: Que un push llegue a Jenkins, en todos los repos
+# aegis-summary: That a push reaches Jenkins, in every repo
 # aegis-group:   infra
 # aegis-subcommands: check apply
-"""aegis-webhook — que un push llegue a Jenkins, en todos los repos.
+"""aegis-webhook — that a push reaches Jenkins, in every repo.
 
-EL PROBLEMA QUE RESUELVE
-────────────────────────
-El init crea el webhook de GitHub para los DOS repos del bootstrap
-(`make_repo_webhook` en la fase 15, invocado con $PLATFORM_REPO y
-$APP_REPO). Todo repo que se sumó después quedó sin webhook.
+THE PROBLEM IT SOLVES
+─────────────────────
+The init creates the GitHub webhook for the TWO repos of the bootstrap
+(`make_repo_webhook` in phase 15, invoked with $PLATFORM_REPO and
+$APP_REPO). Every repo added afterwards was left without a webhook.
 
-Medido el 2026-08-05: de los cuatro repos con job multibranch en
-Jenkins, DOS no tenían webhook —`ai-gateway` y `blog-aegis`— así que
-solo construían cuando corría el escaneo periódico. Nadie se enteraba:
-la build eventualmente pasaba, tarde y sin relación visible con el push.
-Es el mismo modo de fallo del borde (#35): no hay error, hay ausencia.
+Measured on 2026-08-05: of the four repos with a multibranch job in
+Jenkins, TWO had no webhook —`ai-gateway` and `blog-aegis`— so they
+only built when the periodic scan ran. Nobody found out: the build
+eventually passed, late and with no visible relation to the push. It is
+the same failure mode as the edge (#35): there is no error, there is an
+absence.
 
-LA LISTA SALE DE JENKINS, NO DE ACÁ
-───────────────────────────────────
-Los repos se derivan de los jobs declarados en el values.yaml de
-Jenkins. Esa es la definición honesta del invariante:
+THE LIST COMES FROM JENKINS, NOT FROM HERE
+──────────────────────────────────────────
+The repos are derived from the jobs declared in Jenkins' values.yaml.
+That is the honest definition of the invariant:
 
-    si Jenkins tiene un job para un repo, un push a ese repo tiene
-    que llegarle.
+    if Jenkins has a job for a repo, a push to that repo has to
+    reach it.
 
-Escribir la lista acá sería un segundo lugar donde acordarse, que es
-exactamente lo que este proyecto viene sacando de encima.
+Writing the list here would be a second place to remember, which is
+exactly what this project has been getting rid of.
 
-EL HMAC SALE DEL CLUSTER
-────────────────────────
-Y no del archivo cifrado, a propósito: el que importa es el que Jenkins
-VALIDA, no el que git dice que debería validar. Si difirieran, leer el
-archivo daría verde mientras GitHub firma con uno y Jenkins espera otro
-— un 400 permanente en cada entrega. Leyéndolo del Secret vivo, eso no
-puede pasar.
+THE HMAC COMES FROM THE CLUSTER
+───────────────────────────────
+And not from the encrypted file, on purpose: the one that matters is
+the one Jenkins VALIDATES, not the one git says it ought to validate.
+If they differed, reading the file would come out green while GitHub
+signs with one and Jenkins expects another — a permanent 400 on every
+delivery. Reading it from the live Secret, that cannot happen.
 
-El valor no se imprime nunca, no pasa por argv y no se escribe a disco:
-va de kubectl a memoria y de ahí al cuerpo JSON que consume `gh`.
+The value is never printed, never travels through argv and is never
+written to disk: it goes from kubectl to memory and from there into the
+JSON body that `gh` consumes.
 
-    bin/aegis-webhook                # dice qué falta, no toca nada
-    bin/aegis-webhook --aplicar      # crea o re-sincroniza los webhooks
+    aegis webhook check      # says what is missing, touches nothing
+    aegis webhook apply      # creates or re-syncs the webhooks
 
-Devuelve 0 si están todos, 1 si falta alguno, 2 si NO SE PUDO EVALUAR.
-Ese tercer código es deliberado: no poder mirar no es un visto bueno.
+Returns 0 if they are all there, 1 if some are missing, 2 if it COULD
+NOT EVALUATE. That third code is deliberate: not being able to look is
+not approval.
 """
 import argparse
 import base64
@@ -52,53 +55,55 @@ import re
 import subprocess
 import sys
 
-# ── preámbulo canónico de python (V-102) ─────────────────────────────
-# El producto sale de la variable (bin/aegis la exporta) o de este
-# archivo; la INSTANCIA la decide lib/aegis/paths.py y nadie más.
+# ── canonical python preamble (V-102) ────────────────────────────────
+# The product comes from the variable (bin/aegis exports it) or from
+# this file; the INSTANCE is decided by lib/aegis/paths.py and nobody
+# else.
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
 from aegis import cli, outcomes, paths  # noqa: E402
 
-# RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
-# En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
-# el comando vivía DENTRO de la instancia. Al mudar el código al
-# producto la misma línea siguió compilando y pasó a apuntar al lugar
-# equivocado — la «dependencia invisible a un grep» de C1/C2.
-RAIZ = str(paths.platform_dir())
-AQUI = os.path.join(_AEGIS_ROOT, "libexec")
-JENKINS_VALUES = os.path.join(RAIZ, "k8s", "base", "platform", "jenkins", "values.yaml")
-EDGE = os.path.join(RAIZ, "edge.yaml")
+# PLATFORM is the INSTANCE (the live checkout of the platform), not the
+# product. In v2 this line was `dirname(dirname(__file__))` and it
+# worked because the command lived INSIDE the instance. When the code
+# moved to the product the same line kept compiling and started
+# pointing at the wrong place — C1/C2's «dependency invisible to a
+# grep».
+PLATFORM = str(paths.platform_dir())
+HERE = os.path.join(_AEGIS_ROOT, "libexec")
+JENKINS_VALUES = os.path.join(PLATFORM, "k8s", "base", "platform", "jenkins", "values.yaml")
+EDGE = os.path.join(PLATFORM, "edge.yaml")
 
-rojo = "\033[31m"; verde = "\033[32m"; ama = "\033[33m"; gris = "\033[90m"; fin = "\033[0m"
+red = "\033[31m"; green = "\033[32m"; yellow = "\033[33m"; gray = "\033[90m"; reset = "\033[0m"
 if not sys.stdout.isatty():
-    rojo = verde = ama = gris = fin = ""
+    red = green = yellow = gray = reset = ""
 
 
 class Error(Exception):
     pass
 
 
-def repos_con_job():
-    """(owner, repo) de cada job multibranch declarado en Jenkins.
+def repos_with_job():
+    """(owner, repo) of every multibranch job declared in Jenkins.
 
-    Se lee con regex y no parseando el YAML porque el valor es un
-    bloque de Job DSL (Groovy) embebido como string: para el YAML es
-    texto plano. Lo que se busca son los dos campos que identifican el
-    repo, que en Job DSL son literales.
+    It is read with a regex and not by parsing the YAML because the
+    value is a block of Job DSL (Groovy) embedded as a string: to the
+    YAML it is plain text. What is looked for are the two fields that
+    identify the repo, which in Job DSL are literals.
     """
     try:
-        texto = open(JENKINS_VALUES, encoding="utf-8").read()
+        text = open(JENKINS_VALUES, encoding="utf-8").read()
     except FileNotFoundError:
-        raise Error(f"no está {os.path.relpath(JENKINS_VALUES, RAIZ)}")
-    # Cada `github { ... }` de un branchSource trae owner y repository.
-    bloques = re.findall(
-        r"repoOwner\('([^']+)'\)\s*\n\s*repository\('([^']+)'\)", texto)
-    if not bloques:
-        raise Error("ningún job multibranch en el values.yaml de Jenkins — "
-                    "¿cambió la forma del Job DSL?")
-    # Orden estable y sin repetidos.
-    return sorted(set(bloques))
+        raise Error(f"{os.path.relpath(JENKINS_VALUES, PLATFORM)} is not there")
+    # Every `github { ... }` of a branchSource carries owner and repository.
+    blocks = re.findall(
+        r"repoOwner\('([^']+)'\)\s*\n\s*repository\('([^']+)'\)", text)
+    if not blocks:
+        raise Error("no multibranch job in Jenkins' values.yaml — "
+                    "did the shape of the Job DSL change?")
+    # Stable order and no duplicates.
+    return sorted(set(blocks))
 
 
 def root_domain():
@@ -106,137 +111,139 @@ def root_domain():
         import yaml
         return (yaml.safe_load(open(EDGE, encoding="utf-8")) or {})["root_domain"]
     except Exception as e:
-        raise Error(f"no pude leer root_domain de edge.yaml: {e}")
+        raise Error(f"could not read root_domain out of edge.yaml: {e}")
 
 
-def hmac_del_cluster():
-    """El HMAC que Jenkins valida, leído del Secret vivo. Nunca se imprime."""
+def hmac_from_cluster():
+    """The HMAC Jenkins validates, read from the live Secret. Never printed."""
     r = subprocess.run(
         ["kubectl", "get", "secret", "github-webhook-hmac", "-n", "jenkins-system",
          "-o", "jsonpath={.data.text}"],
         capture_output=True, text=True)
     if r.returncode != 0 or not r.stdout.strip():
-        raise Error("no pude leer el Secret jenkins-system/github-webhook-hmac "
-                    "(¿kubectl configurado? ¿la App jenkins-secrets sincronizó?)")
-    valor = base64.b64decode(r.stdout.strip()).decode()
-    if valor != valor.strip():
-        # El init ya cazó esto una vez: un \n final hace que GitHub firme
-        # sobre un cuerpo y Jenkins valide sobre otro, y el 400 no dice
-        # por qué. Se rechaza en vez de "arreglarlo" en silencio.
-        raise Error("el HMAC del cluster tiene espacios o \\n al borde — "
-                    "GitHub y Jenkins firmarían distinto (ver assert_no_newline)")
-    return valor
+        raise Error("could not read the Secret jenkins-system/github-webhook-hmac "
+                    "(is kubectl configured? did the jenkins-secrets App sync?)")
+    value = base64.b64decode(r.stdout.strip()).decode()
+    if value != value.strip():
+        # The init already caught this once: a trailing \n makes GitHub
+        # sign over one body and Jenkins validate over another, and the
+        # 400 does not say why. It is rejected instead of being "fixed"
+        # in silence.
+        raise Error("the cluster's HMAC has whitespace or \\n at the edge — "
+                    "GitHub and Jenkins would sign differently (see assert_no_newline)")
+    return value
 
 
-def hooks_de(owner, repo):
+def hooks_of(owner, repo):
     r = subprocess.run(["gh", "api", f"repos/{owner}/{repo}/hooks"],
                        capture_output=True, text=True)
     if r.returncode != 0:
-        raise Error(f"no pude listar los hooks de {owner}/{repo}: {r.stderr.strip()}")
+        raise Error(f"could not list the hooks of {owner}/{repo}: {r.stderr.strip()}")
     return json.loads(r.stdout)
 
 
-def asegurar(owner, repo, url, hmac, escribir):
-    """Crea o RE-SINCRONIZA el webhook. Devuelve 'ok' | 'falta' | 'creado' | 'resync'."""
-    existente = next((h for h in hooks_de(owner, repo)
-                      if (h.get("config") or {}).get("url") == url), None)
-    if not escribir:
-        return "ok" if existente else "falta"
+def ensure(owner, repo, url, hmac, write):
+    """Creates or RE-SYNCS the webhook. Returns 'ok' | 'missing' | 'created' | 'resync'."""
+    existing = next((h for h in hooks_of(owner, repo)
+                     if (h.get("config") or {}).get("url") == url), None)
+    if not write:
+        return "ok" if existing else "missing"
 
-    # SIEMPRE se reescribe el secret, exista o no el hook. GitHub nunca
-    # devuelve `config.secret` de un hook existente, así que "ya existe"
-    # NO implica "está sincronizado": un hook sobreviviente puede estar
-    # firmando con un HMAC viejo mientras Jenkins valida con el nuevo, y
-    # el síntoma es un 400 permanente que no dice por qué. Misma razón y
-    # mismo remedio que `make_repo_webhook` de la fase 15.
-    cuerpo = {"active": True, "events": ["push"],
-              "config": {"url": url, "content_type": "json",
-                         "secret": hmac, "insecure_ssl": "0"}}
-    if existente:
-        ruta = f"repos/{owner}/{repo}/hooks/{existente['id']}"
-        metodo = "PATCH"
+    # The secret is ALWAYS rewritten, whether the hook exists or not.
+    # GitHub never returns `config.secret` of an existing hook, so
+    # "it already exists" does NOT imply "it is in sync": a surviving
+    # hook may be signing with an old HMAC while Jenkins validates with
+    # the new one, and the symptom is a permanent 400 that does not say
+    # why. Same reason and same remedy as `make_repo_webhook` of phase
+    # 15.
+    body = {"active": True, "events": ["push"],
+            "config": {"url": url, "content_type": "json",
+                       "secret": hmac, "insecure_ssl": "0"}}
+    if existing:
+        path = f"repos/{owner}/{repo}/hooks/{existing['id']}"
+        method = "PATCH"
     else:
-        cuerpo["name"] = "web"      # POST lo exige; PATCH lo rechaza
-        ruta = f"repos/{owner}/{repo}/hooks"
-        metodo = "POST"
-    # El cuerpo entra por STDIN: el HMAC no pasa por argv, donde
-    # cualquiera con /proc lo vería.
-    r = subprocess.run(["gh", "api", "-X", metodo, ruta, "--input", "-"],
-                       input=json.dumps(cuerpo), capture_output=True, text=True)
+        body["name"] = "web"        # POST demands it; PATCH rejects it
+        path = f"repos/{owner}/{repo}/hooks"
+        method = "POST"
+    # The body goes in through STDIN: the HMAC does not travel through
+    # argv, where anybody with /proc would see it.
+    r = subprocess.run(["gh", "api", "-X", method, path, "--input", "-"],
+                       input=json.dumps(body), capture_output=True, text=True)
     if r.returncode != 0:
-        raise Error(f"{metodo} del webhook de {owner}/{repo} falló: {r.stderr.strip()}")
-    return "resync" if existente else "creado"
+        raise Error(f"the {method} of the webhook of {owner}/{repo} failed: {r.stderr.strip()}")
+    return "resync" if existing else "created"
 
 
 def main():
     p = argparse.ArgumentParser(prog=cli.cmd("webhook"), description=__doc__.split("\n")[0])
-    # Regla 2 del diseño: un solo modo «mirar sin tocar», y es un
-    # VERBO. `check` mide; `apply` crea los que falten y re-sincroniza
-    # el HMAC de los que están. Sin argumentos = check, que es lo que
-    # invoca la ronda.
-    sub = p.add_subparsers(dest="verbo")
-    sub.add_parser("check", help="mide: ¿todos los repos con job tienen webhook?")
-    sub.add_parser("apply", help="crea los que falten y re-sincroniza el HMAC")
-    # El CONTRATO de salida (03 §3). Hasta hoy, quien quería saber si
-    # este comando había CREADO algo —y no solo re-sincronizado— tenía
-    # que leer la frase «webhook creado» en la narración: aegis-app:722
-    # hacía exactamente eso, y un cambio de redacción acá rompía la
-    # tabla de allá (A3 del registro). Ahora el estado se emite; la
-    # prosa queda para las personas.
+    # Rule 2 of the design: a single «look without touching» mode, and
+    # it is a VERB. `check` measures; `apply` creates the missing ones
+    # and re-syncs the HMAC of the ones that are there. No arguments =
+    # check, which is what the round invokes.
+    sub = p.add_subparsers(dest="verb")
+    sub.add_parser("check", help="measures: do all the repos with a job have a webhook?")
+    sub.add_parser("apply", help="creates the missing ones and re-syncs the HMAC")
+    # The exit CONTRACT (03 §3). Until today, whoever wanted to know
+    # whether this command had CREATED something —and not merely
+    # re-synced— had to read the sentence «webhook creado» in the
+    # narration: aegis-app:722 did exactly that, and a change of
+    # wording here broke the table over there (A3 of the register). Now
+    # the state is emitted; the prose is left for people.
     p.add_argument("--json", action="store_true", dest="json_mode",
-                   help="reemplaza la narración por el documento de estados")
+                   help="replaces the narration with the document of states")
     a = p.parse_args()
-    a.aplicar = (a.verbo == "apply")
+    a.do_apply = (a.verb == "apply")
     steps = outcomes.Steps(json_mode=a.json_mode)
-    narrar = not a.json_mode
+    narrate = not a.json_mode
 
     try:
-        repos = repos_con_job()
+        repos = repos_with_job()
         url = f"https://jenkins.{root_domain()}/github-webhook/"
-        hmac = hmac_del_cluster() if a.aplicar else None
+        hmac = hmac_from_cluster() if a.do_apply else None
     except Error as e:
-        if narrar:
-            print(f"  {ama}!{fin} webhooks NO EVALUADOS — {e}")
-            print(f"    {gris}Esto NO es un visto bueno: es un chequeo que no corrió.{fin}")
+        if narrate:
+            print(f"  {yellow}!{reset} webhooks NOT EVALUATED — {e}")
+            print(f"    {gray}This is NOT approval: it is a check that did not run.{reset}")
         steps.not_evaluable("webhooks", reason=str(e).replace(" ", "_"))
         steps.finish()
 
-    faltan = 0
+    missing = 0
     for owner, repo in repos:
-        nombre = f"webhook:{owner}/{repo}"
+        name = f"webhook:{owner}/{repo}"
         try:
-            estado = asegurar(owner, repo, url, hmac, a.aplicar)
+            state = ensure(owner, repo, url, hmac, a.do_apply)
         except Error as e:
-            if narrar:
-                print(f"  {ama}!{fin} {owner}/{repo}: {e}")
-            steps.not_evaluable(nombre, reason=str(e).replace(" ", "_"))
+            if narrate:
+                print(f"  {yellow}!{reset} {owner}/{repo}: {e}")
+            steps.not_evaluable(name, reason=str(e).replace(" ", "_"))
             steps.finish()
-        if estado == "falta":
-            if narrar:
-                print(f"  {rojo}✗{fin} {owner}/{repo} {gris}sin webhook — solo construye "
-                      f"cuando corre el escaneo periódico{fin}")
-            steps.wrong(nombre)
-            faltan += 1
-        elif estado == "creado":
-            if narrar:
-                print(f"  {verde}+{fin} {owner}/{repo} {gris}webhook creado{fin}")
-            steps.done(nombre)
-        elif estado == "resync":
-            if narrar:
-                print(f"  {gris}~{fin} {owner}/{repo} {gris}HMAC re-sincronizado{fin}")
-            # re-sincronizar el HMAC es mantenimiento del PATCH
-            # idempotente, no un cambio de estado: «ya estaba».
-            steps.already(nombre, hmac="resincronizado")
+        if state == "missing":
+            if narrate:
+                print(f"  {red}✗{reset} {owner}/{repo} {gray}no webhook — it only builds "
+                      f"when the periodic scan runs{reset}")
+            steps.wrong(name)
+            missing += 1
+        elif state == "created":
+            if narrate:
+                print(f"  {green}+{reset} {owner}/{repo} {gray}webhook created{reset}")
+            steps.done(name)
+        elif state == "resync":
+            if narrate:
+                print(f"  {gray}~{reset} {owner}/{repo} {gray}HMAC re-synced{reset}")
+            # re-syncing the HMAC is maintenance of the idempotent
+            # PATCH, not a change of state: «already».
+            steps.already(name, hmac="resynced")
         else:
-            if narrar:
-                print(f"  {verde}✓{fin} {owner}/{repo}")
-            steps.already(nombre)
+            if narrate:
+                print(f"  {green}✓{reset} {owner}/{repo}")
+            steps.already(name)
 
-    if narrar:
-        if faltan:
-            print(f"\n  {gris}para crearlos:  {cli.cmd('webhook apply')}{fin}")
-        elif not a.aplicar:
-            print(f"  {verde}✓{fin} los {len(repos)} repos con job en Jenkins tienen webhook")
+    if narrate:
+        if missing:
+            print(f"\n  {gray}to create them:  {cli.cmd('webhook apply')}{reset}")
+        elif not a.do_apply:
+            print(f"  {green}✓{reset} the {len(repos)} repos with a job in Jenkins have a webhook")
     steps.finish()
 
 
@@ -244,5 +251,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Error as e:
-        print(f"{rojo}✗{fin} {e}", file=sys.stderr)
+        print(f"{red}✗{reset} {e}", file=sys.stderr)
         sys.exit(2)

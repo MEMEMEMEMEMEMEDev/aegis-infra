@@ -1,29 +1,28 @@
 #!/usr/bin/env bash
-# aegis-summary: Corre el init dejando expediente de la corrida entera
+# aegis-summary: Runs the init leaving a dossier of the whole run
 # aegis-group:   setup
 #
-# La etapa C mínima: NINGUNA corrida del init sin expediente. Hoy el
-# stderr del init se pierde con la terminal, y un fallo a las tres
-# horas no deja nada que leer. Este wrapper envuelve al init con
-# script(1): conserva el TTY (el wizard sigue preguntando) y captura
-# stdout+stderr — el rc real del init pasa (-e), no el de script.
+# Minimal stage C: NO run of the init without a dossier. Today the
+# init's stderr is lost with the terminal, and a failure three hours in
+# leaves nothing to read. This wrapper wraps the init with script(1):
+# it keeps the TTY (the wizard goes on asking) and captures
+# stdout+stderr — the init's real rc gets through (-e), not script's.
 #
-# En v3 esto termina DENTRO del orquestador (plan/04 §5: run-id,
-# meta.json, `aegis runs pack`). Este archivo es el puente hasta
-# entonces.
+# In v3 this ends up INSIDE the orchestrator (plan/04 §5: run-id,
+# meta.json, `aegis runs pack`). This file is the bridge until then.
 #
-# DÓNDE queda el expediente: en la INSTANCIA, no en el producto. En v2
-# caía en init/.init-logs/ del propio repo, y hacía falta una línea de
-# .gitignore para que un `git add` distraído no versionara la corrida
-# entera con el stderr del host adentro. Ahora vive bajo
-# $AEGIS_HOME/.init-state/runs/, que es estado de esta máquina por
-# definición: no hay nada que excluir porque no está en el árbol del
-# producto.
+# WHERE the dossier ends up: in the INSTANCE, not in the product. In v2
+# it landed in init/.init-logs/ of the repo itself, and a .gitignore
+# line was needed so that a distracted `git add` would not version the
+# whole run with the host's stderr inside. Now it lives under
+# $AEGIS_HOME/.init-state/runs/, which is this machine's state by
+# definition: there is nothing to exclude because it is not in the
+# product's tree.
 set -euo pipefail
 
-# ── preámbulo canónico (V-102) ───────────────────────────────────────
+# ── canonical preamble (V-102) ───────────────────────────────────────
 if [[ -z "${AEGIS_ROOT:-}" ]]; then
-    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} init-log: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} init-log: readlink is missing — I cannot guess where the product lives" >&2; exit 2; }
     AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 fi
 export AEGIS_ROOT
@@ -33,8 +32,8 @@ source "$AEGIS_ROOT/lib/paths.sh"
 RUNS="$AEGIS_STATE_DIR/runs"
 mkdir -p "$RUNS"
 
-# el perfil solo para nombrar el archivo; si no viene, se nota.
-PROFILE="sin-perfil"
+# the profile only to name the file; if it does not come, it shows.
+PROFILE="no-profile"
 prev=""
 for a in "$@"; do
     [[ "$prev" == "--profile" ]] && PROFILE="$a"
@@ -42,19 +41,20 @@ for a in "$@"; do
 done
 
 LOG="$RUNS/$(date -u +%Y%m%dT%H%M%SZ)-$PROFILE.log"
-# ANTES de correr: si la corrida se cuelga o muere de la peor manera,
-# el operador ya sabe dónde leer. Imprimirla al final es imprimirla
-# solo cuando no hace falta.
-printf 'expediente: %s\n' "$LOG"
+# BEFORE running: if the run hangs or dies in the worst possible way,
+# the operator already knows where to read. Printing it at the end is
+# printing it only when it is not needed.
+printf 'dossier: %s\n' "$LOG"
 
-# script -qefc: -q sin banners, -e devuelve el rc del comando, -f
-# flush por línea (un kill -9 no se lleva el buffer), -c el comando.
-# printf %q arma el comando a prueba de espacios en los args.
+# script -qefc: -q no banners, -e returns the command's rc, -f flush
+# per line (a kill -9 does not take the buffer with it), -c the
+# command. printf %q builds the command proof against spaces in the
+# args.
 CMD="$(printf '%q ' "$AEGIS_ROOT/libexec/aegis-init" "$@")"
 if script -qefc "$CMD" "$LOG"; then
-    printf 'expediente: %s (rc 0)\n' "$LOG"
+    printf 'dossier: %s (rc 0)\n' "$LOG"
 else
     rc=$?
-    printf 'FALLÓ (rc %s) — el expediente completo, stderr incluido: %s\n' "$rc" "$LOG" >&2
+    printf 'FAILED (rc %s) — the complete dossier, stderr included: %s\n' "$rc" "$LOG" >&2
     exit "$rc"
 fi

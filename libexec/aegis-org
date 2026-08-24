@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
-# aegis-summary: Deriva del contrato todo lo que la organización necesita
+# aegis-summary: Derives from the contract everything the organization needs
 # aegis-group:   apps
 # aegis-subcommands: plan apply validate edge routes plan-delete delete migrate
-"""aegis org — la línea de comandos sobre lib/aegis/org.py.
+"""aegis org — the command line on top of lib/aegis/org.py.
 
-El cuerpo (validación del contrato y las once derivaciones) vive en el
-PAQUETE, no acá. En v2 vivía en este archivo y los consumidores
-—aegis-app, aegis-secret, aegis dev test-org, aegis dev test-types— lo
-cargaban con SourceFileLoader, es decir, importaban un EJECUTABLE por
-su ruta. Eso costaba tres cosas (docs/cli/inconsistencias.md C1):
+The body (the contract's validation and the eleven derivations) lives in
+the PACKAGE, not here. In v2 it lived in this file and the consumers
+—aegis-app, aegis-secret, aegis dev test-org, aegis dev test-types—
+loaded it with SourceFileLoader, that is, they imported an EXECUTABLE by
+its path. That cost three things (docs/cli/inconsistencias.md C1):
 
-  · el `except ImportError` de alrededor trataba «el archivo no está»
-    como «esta comprobación no aplica» — el caso A2 del registro: el
-    check 4 pasaba idéntico con aegis-org ausente;
-  · un grep no encuentra esa dependencia, así que mover el archivo no
-    rompía nada visible hasta que algo se usaba de verdad;
-  · y al cargarlo, el preámbulo del ejecutable corría entero.
+  · the surrounding `except ImportError` treated «the file is not there»
+    as «this check does not apply» — case A2 of the register: check 4
+    passed identically with aegis-org absent;
+  · a grep does not find that dependency, so moving the file broke
+    nothing visible until something was really used;
+  · and on loading it, the executable's whole preamble ran.
 
-Ahora es `from aegis import org`: si el paquete falta, el import falla
-y quien lo necesitaba se pone rojo, que es lo correcto.
+Now it is `from aegis import org`: if the package is missing, the import
+fails and whoever needed it turns red, which is the correct outcome.
 """
 import os
 import sys
 
-# ── preámbulo canónico de python (V-102) ─────────────────────────────
+# ── canonical python preamble (V-102) ────────────────────────────────
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))

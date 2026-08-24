@@ -40,16 +40,24 @@ else
             # lines that curl THAT hostname without going through the helper:
             BAD="$(printf '%s\n' "$BODY" \
                      | grep -E "curl[^|]*https://$H\.\\\$(\{)?ROOT_DOMAIN" \
-                     | grep -v 'edge_origen_responde' || true)"
+                     | grep -v 'edge_origin_responds' || true)"
+            # CORRECTED on 2026-08-24. This `grep -v` is the anchor that
+            # EXCLUDES the phases that already comply, so when the helper
+            # was renamed edge_origin_responds -> edge_origin_responds it
+            # did not go blind: it went FALSE RED, reporting perfectly
+            # correct phases. A check that breaks toward red costs more
+            # than one that breaks toward green — it sends someone to fix
+            # something that is not broken, and the next time it cries
+            # nobody comes. Check 111's ratchet caught it.
             [[ -z "$BAD" ]] \
-                || D90="$D90 $(basename "$PHASE") curls $H.\$ROOT_DOMAIN without edge_origen_responde (under Access that measures CF's edge);"
+                || D90="$D90 $(basename "$PHASE") curls $H.\$ROOT_DOMAIN without edge_origin_responds (under Access that measures CF's edge);"
         done
     done
     # and the helper has to really tell them apart: if it does not look
     # at where it redirects to, it is a curl by another name.
     grep -q 'cloudflareaccess\.com' "$LIBS/access.sh" 2>/dev/null \
-        || D90="$D90 edge_origen_responde does not distinguish the redirect to cloudflareaccess.com — it does not separate «Access intercepted» from «the origin answered»;"
+        || D90="$D90 edge_origin_responds does not distinguish the redirect to cloudflareaccess.com — it does not separate «Access intercepted» from «the origin answered»;"
 fi
 if [[ -n "$D90" ]]; then fail "probes under Access:$D90"
-else pass "init's probes against the $(printf '%s' "$PROTECTED" | wc -w) hostnames behind Access go through edge_origen_responde, which separates origin from edge"; fi
+else pass "init's probes against the $(printf '%s' "$PROTECTED" | wc -w) hostnames behind Access go through edge_origin_responds, which separates origin from edge"; fi
 }

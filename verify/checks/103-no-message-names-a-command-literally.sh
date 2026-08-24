@@ -29,7 +29,7 @@ PAT="$(printf '%s|' "${CMDS[@]}" | sed 's/|$//')"
 HITS="$(grep -rnE "(^|[[:space:]\"'\`(=])(bin/)?($PAT)([[:space:]\"'\`,;:)]|\\\\n|$)" \
         "$AEGIS_ROOT/libexec" "$LIBS" "$AEGIS_ROOT/init" "$AEGIS_ROOT/bin" 2>/dev/null \
     | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' \
-    | grep -E '(printf|echo |print\(|log_(info|ok|warn|error)|die |morir\(|say )' \
+    | grep -E '(printf|echo |print\(|log_(info|ok|warn|error)|die |die\(|morir\(|say )' \
     | grep -vE 'AEGIS_CMD|cli\.cmd|CMD_[A-Z]|clase-E-ok:' \
     | grep -vE '\$AEGIS_ROOT/libexec/|\$LIBEXEC/|libexec/state/|libexec/dev/' \
     || true)"
