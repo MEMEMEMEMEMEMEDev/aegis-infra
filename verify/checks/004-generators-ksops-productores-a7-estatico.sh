@@ -23,7 +23,7 @@ check() {
 # instancia nueva queda cifrado con una age key que ya no existe, KSOPS
 # no lo puede descifrar y su App no sincroniza jamás.
 if python3 - "$AEGIS_ROOT" <<'EOF'
-import importlib.machinery, importlib.util, re, sys, pathlib, yaml
+import os, re, sys, pathlib, yaml
 root = pathlib.Path(sys.argv[1]); P = root/"seed"/"platform"
 # entries declaradas en los generators:
 entries = {}   # basename -> dir del generator
@@ -61,21 +61,43 @@ for ph in sorted(phases.glob("*.sh")):
 # desincronizaría en cuanto alguien agregue un tipo de secreto — y
 # fallaría del lado que no avisa: dando por bueno lo que no existe.
 por_contrato = {}   # basename -> por qué
-# El generador puede NO ESTAR, y no es un error: la semilla nace sin
-# organizaciones. Un clone virgen de aegis-v2 no tiene platform/bin/ ni
-# platform/orgs/ hasta que la instancia crezca. Tratar su ausencia como
-# fallo haría que este check muriera justo en el artefacto que le toca
-# verificar.
-hay_generador = (P/"bin"/"aegis-org").is_file()
-if not hay_generador:
-    print("  (semilla sin organizaciones: no hay camino de contratos que consultar)")
+# DÓNDE VIVE EL GENERADOR — corregido el 2026-08-24.
+#
+# Este bloque buscaba `bin/aegis-org` DENTRO de la semilla y, si no
+# estaba, se saltaba entero con un mensaje tranquilizador («semilla sin
+# organizaciones»). En v2 tenía sentido: el código viajaba en el
+# artefacto. En v3 el código vive en el PRODUCTO (02 §1) y la semilla
+# no lleva ni un ejecutable —el check 134 lo exige—, así que la
+# condición era imposible de cumplir y la SEGUNDA CATEGORÍA DE
+# PRODUCTOR estaba muerta desde la mudanza. Todo secreto derivado de
+# contratos habría salido «sin productor», y todo secreto que de verdad
+# no tuviera productor se habría perdido en ese ruido.
+#
+# Es la clase que ordenó v3 entera —un check midiendo el árbol
+# equivocado— escondida en el `if` que hacía que el error se viera como
+# una ausencia legítima. Ahora se le pregunta al generador donde
+# efectivamente está, apuntándolo a la semilla como si fuera su
+# instancia: PLATFORM_DIR se fija ANTES del import porque `org.py`
+# resuelve su raíz al cargarse.
+gen = None
 try:
-    if not hay_generador:
+    # Un instrumento no deja huella en el sujeto. Importar el generador
+    # escribe __pycache__/ dentro del árbol que este mismo verificador
+    # está midiendo, y el 2026-08-24 eso puso ROJO al check 105: veía
+    # el banner «GENERADO POR aegis org» dentro de un .pyc y lo
+    # denunciaba como copia escrita a mano. El runner limpia los
+    # __pycache__ al ARRANCAR, no entre checks — así que el que crea
+    # uno a mitad de la corrida se lo deja puesto al siguiente.
+    sys.dont_write_bytecode = True
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+    os.environ["PLATFORM_DIR"] = str(P)
+    sys.path.insert(0, str(root/"lib"))
+    from aegis import org as gen
+except Exception as e:
+    print(f"  (no pude cargar el generador del producto: {e})")
+try:
+    if gen is None:
         raise StopIteration
-    spec = importlib.util.spec_from_loader(
-        "aegis_org", importlib.machinery.SourceFileLoader(
-            "aegis_org", str(P/"bin"/"aegis-org")))
-    gen = importlib.util.module_from_spec(spec); spec.loader.exec_module(gen)
     for c_ruta in sorted((P/"orgs").glob("*.y*ml")):
         c = yaml.safe_load(c_ruta.open()) or {}
         for s in gen.secretos_de(c):

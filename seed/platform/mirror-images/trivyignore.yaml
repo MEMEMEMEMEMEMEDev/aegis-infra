@@ -1,0 +1,128 @@
+# Excepciones del scan para imagenes ESPEJADAS de terceros.
+# Se pasa a trivy con --ignorefile desde mirror-images/Jenkinsfile.
+# NO lo usa Jenkinsfile.app: el codigo propio no tiene excepciones.
+#
+# ============================================================
+# gosu en las imagenes oficiales de postgres — 15 CVEs de la
+# stdlib de Go que NO ESTAN en el binario
+# ============================================================
+#
+# QUE ES gosu
+# Un binario Go de 1,7 MB que la imagen oficial de postgres trae para
+# bajar privilegios de root al usuario postgres en el arranque: lee
+# argv, hace setuid/setgid, exec, y muere. No es un paquete apk (no
+# figura en /lib/apk/db/installed) — el Dockerfile de postgres lo baja
+# de GitHub releases y lo copia. Ningun apk upgrade lo alcanza.
+#
+# POR QUE TRIVY REPORTA 15 CVEs
+# Para binarios Go, trivy matchea contra la VERSION DEL COMPILADOR
+# embebida (aca go1.24.6), no contra los paquetes efectivamente
+# enlazados. Si esa version de Go tiene CVEs en la stdlib, los lista
+# todos — aunque el linker haya eliminado ese codigo por no usarse.
+#
+# LA MEDICION (2026-07-26, sobre postgres:17.10-alpine)
+# Se extrajo el binario y se buscaron simbolos de funcion reales:
+#
+#   crypto/tls.*   -> 0     syscall.Setuid -> 2
+#   crypto/x509.*  -> 0     syscall.Setgid -> 2
+#   net/http.*     -> 0     syscall.Exec   -> 2
+#   net/mail.*     -> 0     os/exec.*      -> 11
+#   net/url.*      -> 0
+#   mime.*         -> 0
+#   os.OpenRoot    -> 0
+#   net.Dial       -> 0
+#
+# Cero funciones de TODOS los paquetes acusados. No es que sean
+# inalcanzables: no estan compiladas dentro. Lo unico que aparecia en
+# una primera pasada por substring eran fragmentos del blob de cadenas
+# del runtime ("...crypto/rsacrypto/tlswinsymlinkx509..."), strings
+# cortas empaquetadas pegadas — no simbolos. Un paquete realmente
+# enlazado se ve como os/exec.LookPath, os/exec.Error, etc.
+#
+# POR QUE NO SE ARREGLA "ACTUALIZANDO"
+# La columna Fixed Version (1.24.13, 1.25.7, ...) son versiones del
+# COMPILADOR. El arreglo es recompilar gosu, cosa que hace quien
+# construye la imagen. Construir una imagen derivada propia solo para
+# esto no mejoraria la seguridad en nada —el codigo vulnerable no esta
+# presente de todas formas— y agregaria el mantenimiento de una imagen
+# de base de datos propia. Cuando upstream rebuildee con un Go nuevo,
+# estas entradas quedan inertes solas.
+#
+# POR QUE UNA POR UNA Y NO UN WILDCARD
+# Es lo que hace que la excepcion no crezca sola. Si aparece un CVE 16
+# en gosu, el build ROMPE y alguien tiene que repetir la medicion. Un
+# comodin por ruta silenciaria para siempre todo lo que caiga ahi,
+# incluido algo que si importe.
+#
+# VENCIMIENTO: 2027-01-31. El analisis vale para ESTE binario compilado
+# ASI. Si algun dia gosu se rebuildea enlazando red, deja de valer.
+# Al vencer, trivy vuelve a reportar y hay que rehacer la medicion.
+#
+# Alternativas evaluadas y descartadas el 2026-07-26:
+#   postgres:18.2-alpine  -> mismo gosu + 20 CVEs de la base
+#   postgres:18.2 debian  -> mismo gosu + 32 CVEs de la base
+#   cloudnative-pg:17.10  -> sin gosu, pero 4 CVEs en urllib3, que SI
+#                            se ejecuta si se usa barman-cloud. Menos
+#                            hallazgos, mas riesgo residual.
+
+vulnerabilities:
+  - id: CVE-2025-68121   # CRITICAL — crypto/tls: validacion de certificado en resumption
+    paths: ["usr/local/bin/gosu"]
+    statement: "crypto/tls no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    expired_at: 2027-01-31
+  - id: CVE-2025-61726   # net/url: agotamiento de memoria parseando query params
+    paths: ["usr/local/bin/gosu"]
+    statement: "net/url no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    expired_at: 2027-01-31
+  - id: CVE-2025-61729   # crypto/x509: DoS por consumo excesivo de recursos
+    paths: ["usr/local/bin/gosu"]
+    statement: "crypto/x509 no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    expired_at: 2027-01-31
+  - id: CVE-2026-25679   # net/url: parseo incorrecto de literales IPv6
+    paths: ["usr/local/bin/gosu"]
+    statement: "net/url no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    expired_at: 2027-01-31
+  - id: CVE-2026-27145   # crypto/x509: DoS procesando nombres DNS
+    paths: ["usr/local/bin/gosu"]
+    statement: "crypto/x509 no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    expired_at: 2027-01-31
+  - id: CVE-2026-32280   # crypto/x509: DoS construyendo cadena de certificados
+    paths: ["usr/local/bin/gosu"]
+    statement: "crypto/x509 no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    expired_at: 2027-01-31
+  - id: CVE-2026-32281   # crypto/x509: DoS validando cadena de certificados
+    paths: ["usr/local/bin/gosu"]
+    statement: "crypto/x509 no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    expired_at: 2027-01-31
+  - id: CVE-2026-32283   # crypto/tls: DoS con multiples claves TLS 1.3
+    paths: ["usr/local/bin/gosu"]
+    statement: "crypto/tls no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    expired_at: 2027-01-31
+  - id: CVE-2026-33811   # net: DoS por respuesta CNAME larga
+    paths: ["usr/local/bin/gosu"]
+    statement: "net.Dial no esta enlazado; el binario no abre sockets. Medido 2026-07-26."
+    expired_at: 2027-01-31
+  - id: CVE-2026-33814   # net/http2: DoS por frame SETTINGS malformado
+    paths: ["usr/local/bin/gosu"]
+    statement: "net/http no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    expired_at: 2027-01-31
+  - id: CVE-2026-39820   # net/mail: DoS con entradas de email preparadas
+    paths: ["usr/local/bin/gosu"]
+    statement: "net/mail no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    expired_at: 2027-01-31
+  - id: CVE-2026-39822   # os.Root: traversal por seguimiento de symlinks
+    paths: ["usr/local/bin/gosu"]
+    statement: "os.OpenRoot no esta presente (0 ocurrencias); gosu no usa la API os.Root. El unico no-red de la lista, verificado aparte. Medido 2026-07-26."
+    expired_at: 2027-01-31
+  - id: CVE-2026-39836   # actualizacion agregada de seguridad de golang
+    paths: ["usr/local/bin/gosu"]
+    statement: "Agregado de CVEs de stdlib ya cubiertos individualmente; ninguno de los paquetes afectados esta enlazado. Medido 2026-07-26."
+    expired_at: 2027-01-31
+  - id: CVE-2026-42499   # net/mail: DoS parseando direcciones patologicas
+    paths: ["usr/local/bin/gosu"]
+    statement: "net/mail no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    expired_at: 2027-01-31
+  - id: CVE-2026-42504   # mime: DoS por cabecera MIME maliciosa
+    paths: ["usr/local/bin/gosu"]
+    statement: "mime no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    expired_at: 2027-01-31

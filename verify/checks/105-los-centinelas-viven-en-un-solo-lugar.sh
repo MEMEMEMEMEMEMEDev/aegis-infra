@@ -15,7 +15,9 @@ M="$LIBS/aegis/markers.py"
 [[ -f "$M" ]] || { fail "no existe lib/aegis/markers.py — los centinelas no tienen dueño"; return; }
 # Nadie más puede escribir estas cadenas a mano.
 for centinela in 'GENERADO POR `aegis org`' '--- DERIVADO por aegis-org' '# hash: sha256:'; do
-    COPIAS="$(grep -rlF "$centinela" "$LIBS" "$LIBEXEC" 2>/dev/null | grep -v '/markers.py$' || true)"
+    # -I: un centinela es TEXTO. Sin esto el barrido matchea dentro de
+    # un .pyc y denuncia una «copia a mano» que nadie escribió.
+    COPIAS="$(grep -rlIF "$centinela" "$LIBS" "$LIBEXEC" 2>/dev/null | grep -v '/markers.py$' || true)"
     [[ -z "$COPIAS" ]] \
         || D105="$D105 '$centinela' escrito a mano fuera de markers.py: $(echo "$COPIAS" | tr '\n' ' ');"
 done

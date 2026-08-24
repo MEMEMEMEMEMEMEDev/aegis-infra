@@ -1,0 +1,134 @@
+# Aislamiento de red del almacenamiento compartido.
+#
+# LA REGLA QUE IMPORTA: Garage no habla con nadie hacia AFUERA. Es un
+# almacén; que un almacén inicie conexiones a internet no tiene ningún
+# caso de uso legítimo y sí un montón de ilegítimos. El egress se limita
+# a DNS y nada más.
+#
+# Y la entrada: SOLO al puerto S3 (3900), y solo desde namespaces de
+# organización. La API de ADMIN (3903) es la que crea buckets y claves;
+# quien la alcance puede darse permiso sobre el bucket de cualquiera.
+# Por eso su ingress se concede aparte y por etiqueta de pod, no por
+# namespace.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: garage-system
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# S3 desde las organizaciones. El permiso FINO —qué bucket puede tocar
+# cada una— lo aplica Garage por clave; esto solo dice quién puede
+# llegar a hablarle.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-tenants-a-s3
+  namespace: garage-system
+spec:
+  podSelector:
+    matchLabels: {app: garage}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            # Por ETIQUETA y no enumerando namespaces. Enumerar es cómo
+            # una organización nueva queda sin acceso y el síntoma es
+            # "el bucket no responde" — un fallo de aislamiento
+            # disfrazado de estado normal. Ya pasó el 2026-08-03 con el
+            # gateway de AI y el blog.
+            matchLabels: {aegis.dev/part-of: aegis-tenants}
+      ports:
+        - {protocol: TCP, port: 3900}
+---
+# La API de ADMIN, SOLO para los Jobs de aprovisionamiento.
+#
+# Con la de admin se pueden crear claves y darse acceso al bucket de
+# CUALQUIER organización, así que esta regla es la más sensible del
+# archivo.
+#
+# EL NAMESPACE ES LA CONDICIÓN QUE ACOTA, y la etiqueta de pod es la
+# segunda. Corregido el 2026-08-08 después de mirarlo con ojos de "y si
+# hay un inquilino comprometido".
+#
+# Antes decía `namespaceSelector: aegis.dev/part-of: aegis-tenants` +
+# la etiqueta de pod, y el comentario explicaba que se concedía por POD
+# porque "dentro de un namespace de organización conviven la app y su
+# Job". Esa topología YA NO ES la real: el Job de aprovisionamiento lo
+# genera bin/aegis-org en GARAGE-SYSTEM (k8s/base/garage-system/
+# aprovisionar.yaml, namespace: garage-system), no en el namespace de
+# la organización.
+#
+# Con la regla vieja, la condición de namespace la cumplía CUALQUIER
+# org-* —todas llevan esa etiqueta— y la de pod es una etiqueta que el
+# inquilino escribe en SU PROPIO manifiesto: su AppProject le prohíbe
+# ResourceQuota, LimitRange, Role, RoleBinding e IngressRoute, pero no
+# crear Pods. O sea que un inquilino comprometido se ponía la etiqueta
+# y llegaba por red al 3903.
+#
+# NO ERA UNA BRECHA —el admin_token vive sólo en garage-system y un
+# namespace no lee los Secrets de otro— pero era defensa en profundidad
+# erosionada: quedaba UNA sola cosa entre un inquilino y el control
+# total del almacenamiento compartido. Ahora quedan dos, y la de afuera
+# no la puede escribir él.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-aprovisionamiento-a-admin
+  namespace: garage-system
+spec:
+  podSelector:
+    matchLabels: {app: garage}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: garage-system}
+          podSelector:
+            matchLabels: {aegis.dev/rol: aprovisionar-bucket}
+      ports:
+        - {protocol: TCP, port: 3903}
+---
+# El Job de aprovisionamiento necesita SALIR hacia el propio Garage.
+#
+# No es obvio y por eso está separado: `default-deny` cubre a TODOS los
+# pods del namespace, incluidos los Jobs, y el egress hacia un pod
+# vecino también es egress. Sin esta regla el Job se queda esperando y
+# el síntoma —un timeout -- no se parece a "falta una NetworkPolicy".
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-aprovisionamiento-egress
+  namespace: garage-system
+spec:
+  podSelector:
+    matchLabels: {aegis.dev/rol: aprovisionar-bucket}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app: garage}
+      ports:
+        - {protocol: TCP, port: 3903}
+---
+# DNS y NADA MÁS. Sin esto no resuelve y el síntoma no se parece a la
+# causa; con algo más, un almacén de datos de terceros tendría salida a
+# internet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: garage-system
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}

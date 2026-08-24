@@ -1,0 +1,13 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  GENERADO POR `aegis org` — NO EDITAR A MANO                     ║
+# ╚══════════════════════════════════════════════════════════════════╝
+# Sale del conjunto de contratos: `aprovisionar.yaml` se lista solo
+# cuando alguna organización declaró `almacenamiento.bucket`, porque
+# kustomize falla si un recurso listado no existe.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - bundle.yaml
+  - netpol.yaml
+generators:
+  - secret-generator.yaml

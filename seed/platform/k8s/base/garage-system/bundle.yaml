@@ -1,0 +1,245 @@
+# garage-system — el almacenamiento S3 COMPARTIDO de la plataforma.
+#
+# QUÉ ES Y POR QUÉ ES COMPARTIDO. Un Garage para todas las
+# organizaciones, con un bucket y un par de claves por cada una. La
+# alternativa —un Garage por organización, que es lo que tiene
+# org-ecommerce— gasta 256 MiB y un PVC por tenant para servir unos
+# pocos objetos, y multiplica por N el trabajo de mantener, actualizar y
+# resguardar. Con un solo nodo real de hardware, esa cuenta no cierra.
+#
+# El aislamiento NO se pierde: en Garage los permisos son por
+# CLAVE-y-BUCKET. La clave de una organización solo puede leer y
+# escribir en su bucket, y no puede listar los demás. Es menos poder que
+# un IAM completo, y menos con qué equivocarse.
+#
+# LO QUE GARAGE NO TIENE, y condiciona cómo se usa:
+#   - SIN versionado de objetos ni object-lock: lo que se borra, se fue.
+#     Un backup inmutable NO se puede apoyar acá.
+#   - SIN cifrado del lado del servidor: los objetos quedan en texto
+#     plano sobre un disco que además no está cifrado.
+# Las dos limitaciones importan más ahora que el disco es compartido.
+#
+# EL ENCIERRO, que es la razón por la que Garage ganó sobre MinIO:
+# la imagen es UN binario estático y nada más — sin shell, sin gestor de
+# paquetes, sin libc, sin utilidades. Si alguien encontrara una RCE, no
+# hay `sh`, ni `curl`, ni `apk` con qué encadenar nada.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: garage-system
+  labels:
+    # ZONA DE ENFORCE de Kyverno, no propiedad. Los namespaces de
+    # plataforma se excluyen para que un crash duro de Kyverno no
+    # bloquee la RECUPERACIÓN del cluster (argocd, kyverno, registry,
+    # jenkins, cert-manager). Garage no es necesario para recuperar el
+    # cluster y guarda datos de terceros: acá fail-closed es el
+    # requisito, no un riesgo. Mismo razonamiento que ai-system.
+    aegis.dev/part-of: aegis-tenants
+    aegis.dev/component: garage
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: garage-system
+# Garage no habla con la API de Kubernetes. Ni token montado.
+automountServiceAccountToken: false
+imagePullSecrets:
+  # Patrón A: la plataforma provee el CÓMO pullear.
+  - name: regcred-internal
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: garage-config
+  namespace: garage-system
+  labels: {aegis.dev/component: garage}
+data:
+  garage.toml: |
+    metadata_dir = "/var/lib/garage/meta"
+    data_dir     = "/var/lib/garage/data"
+    db_engine    = "lmdb"
+
+    # Un solo nodo: no hay a quién replicar. Subir esto sin agregar
+    # nodos deja a Garage esperando pares que no existen.
+    replication_factor = 1
+
+    rpc_bind_addr   = "[::]:3901"
+    # Un solo nodo nunca habla RPC por la red; localhost alcanza y evita
+    # depender de que el DNS del pod resuelva al arrancar.
+    rpc_public_addr = "127.0.0.1:3901"
+
+    # rpc_secret y admin_token NO van acá: llegan por GARAGE_RPC_SECRET
+    # y GARAGE_ADMIN_TOKEN desde secretKeyRef. Este ConfigMap es legible
+    # por cualquiera con acceso al namespace.
+
+    [s3_api]
+    s3_region     = "garage"
+    api_bind_addr = "[::]:3900"
+    root_domain   = ".s3.garage"
+
+    [admin]
+    api_bind_addr = "[::]:3903"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: garage
+  namespace: garage-system
+  labels: {app: garage, aegis.dev/component: garage}
+spec:
+  # Headless: la StatefulSet necesita identidad estable de red y no hace
+  # falta balancear nada con una sola réplica.
+  clusterIP: None
+  selector: {app: garage}
+  ports:
+    - {name: s3, port: 3900, targetPort: 3900}
+    - {name: rpc, port: 3901, targetPort: 3901}
+    - {name: admin, port: 3903, targetPort: 3903}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: garage
+  namespace: garage-system
+  labels: {app: garage, aegis.dev/component: garage}
+spec:
+  serviceName: garage
+  # Los tres campos que siguen son DEFAULTS de Kubernetes, declarados a
+  # propósito. El apiserver los rellena y ArgoCD compara lo declarado
+  # contra lo vivo: omitirlos deja la App OutOfSync para siempre por
+  # campos que nadie cambió. Se obtuvieron del diff real de la API de
+  # ArgoCD, no de suponer cuáles serían.
+  podManagementPolicy: OrderedReady
+  revisionHistoryLimit: 10
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate: {partition: 0}
+  # UNA réplica, y no es negociable con esta configuración:
+  # replication_factor=1 y --single-node describen un cluster de un
+  # nodo. Subir replicas crea pods que Garage rechaza ("the cluster
+  # already has other nodes").
+  replicas: 1
+  selector:
+    matchLabels: {app: garage}
+  template:
+    metadata:
+      labels: {app: garage, aegis.dev/component: garage}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        # Sin esto el usuario no-root no puede escribir en el PVC.
+        fsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: garage
+          # POR DIGEST. Kyverno reescribe imagen:tag agregándole el
+          # digest al admitir, y con un tag en git desired != live PARA
+          # SIEMPRE; la salida obvia —ignoreDifferences sobre la
+          # imagen— APAGA el auto-sync (#36). Con el digest, la mutación
+          # es un no-op. Es la diferencia con el garage de
+          # org-ecommerce, que sigue en el modelo viejo.
+          image: registry.registry-system.svc.cluster.local:5000/garage@sha256:dac0c92add4f1a0b41035e94b41036a270ffbe88a37c7ac9c3f19e6dc5bdccf2
+          # command Y args, no solo args. La imagen de Garage NO declara
+          # ENTRYPOINT: trae únicamente CMD ["/garage","server"]. En
+          # Kubernetes `args` reemplaza al CMD y `command` al
+          # ENTRYPOINT, así que poner solo args deja al pod intentando
+          # ejecutar un binario llamado "server" — que no existe. El
+          # síntoma es StartError con "executable file not found in
+          # $PATH", y cuesta leerlo porque el manifiesto se ve bien.
+          command: ["/garage"]
+          # SIN --default-bucket, que es la diferencia con el modelo por
+          # organización. Acá los buckets y las claves los crea el Job
+          # de aprovisionamiento de cada organización contra la API de
+          # admin, con el material que ya vive cifrado en su repo.
+          args: ["server", "--single-node"]
+          env:
+            - name: GARAGE_CONFIG_FILE
+              value: /etc/garage/garage.toml
+            # POR VARIABLE DE ENTORNO Y NO POR ARCHIVO, a pesar de que
+            # Garage soporta rpc_secret_file/admin_token_file y de que
+            # un archivo suele ser preferible.
+            #
+            # El motivo es un choque real entre dos requisitos de este
+            # mismo pod: fsGroup (necesario para que el usuario no-root
+            # escriba en el PVC) hace que Kubernetes agregue el bit de
+            # lectura de grupo a TODOS los volúmenes, dejando el Secret
+            # en 0440. Garage exige exactamente 0600 y se niega a
+            # arrancar. Con fsGroup puesto no hay forma de conseguir
+            # 0600 en un volumen de Secret.
+            #
+            # La otra salida era GARAGE_ALLOW_WORLD_READABLE_SECRETS,
+            # y se descartó: apaga la verificación PARA SIEMPRE,
+            # incluida la vez que el archivo quede realmente 0644.
+            # Cambiar el mecanismo es mejor que desactivar el control.
+            - name: GARAGE_RPC_SECRET
+              valueFrom:
+                secretKeyRef: {name: garage-credentials, key: rpc_secret}
+            - name: GARAGE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef: {name: garage-credentials, key: admin_token}
+          ports:
+            - {name: s3, containerPort: 3900}
+            - {name: rpc, containerPort: 3901}
+            - {name: admin, containerPort: 3903}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+            readOnlyRootFilesystem: true
+          # Sondas TCP a propósito: una sonda HTTP obligaría a asumir
+          # qué endpoint de salud existe y si pide token. El puerto S3
+          # aceptando conexiones es señal suficiente y no asume nada.
+          readinessProbe:
+            tcpSocket: {port: 3900}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: 3900}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 200m, memory: 256Mi}
+            limits: {cpu: "1", memory: 2Gi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/garage/garage.toml, subPath: garage.toml, readOnly: true}
+            # subPath de un mismo PVC: garantiza que meta/ y data/
+            # existan (los crea Kubernetes) sin depender de que Garage
+            # lo haga.
+            - {name: data, mountPath: /var/lib/garage/meta, subPath: meta}
+            - {name: data, mountPath: /var/lib/garage/data, subPath: data}
+            # Con readOnlyRootFilesystem, /tmp viene de afuera.
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: garage-config}
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    # apiVersion, kind y volumeMode los rellena el apiserver por default.
+    # Van DECLARADOS y no ignorados: sin ellos desired != live para
+    # siempre, y la salida obvia —ampliar `ignoreDifferences` a todo el
+    # volumeClaimTemplate— apagaría el auto-sync y taparía un cambio real
+    # de tamaño o de accessMode. Declarar el default es gratis; ignorarlo
+    # cuesta el auto-sync (#36).
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        volumeMode: Filesystem
+        resources:
+          # Compartido entre todas las organizaciones. El techo por
+          # organización lo pone su cuota, no este número.
+          #
+          # OJO: local-path hace bind de un directorio del host y NO
+          # impone cuota de disco. Esto limita el tamaño DECLARADO, no
+          # el USADO: un tenant puede escribir más que su bucket hasta
+          # llenar /. Es limitación del provisioner y está anotada
+          # también en planes.yaml.
+          requests: {storage: 20Gi}

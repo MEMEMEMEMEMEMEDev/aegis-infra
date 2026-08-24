@@ -141,11 +141,21 @@ EXCLUSIONES = [
      "las organizaciones ANTERIORES al generador, a mano y a propósito. Es "
      "deuda de esta instancia (org-ecommerce sin contrato): una instancia "
      "nueva no hereda nada."),
-    ("aegis dev test-org",
-     "compara la salida del generador contra los manifiestos escritos A MANO "
-     "de org-portafolio, que son de ESTA instancia. En la semilla no tiene "
-     "sujeto: se ejecutaría sobre nada y pasaría por vacío. La prueba que sí "
-     "viaja es aegis dev test-types, que es autocontenida."),
+    # RETIRADA el 2026-08-24: `aegis dev test-org`.
+    #
+    # Excluía la prueba de aceptación que compara la salida del
+    # generador contra los manifiestos escritos A MANO de
+    # org-portafolio —de ESTA instancia—, porque en la semilla no
+    # tendría sujeto y pasaría por vacío. El motivo era bueno y sigue
+    # siendo cierto; lo que cambió es que dejó de hacer falta: en v3
+    # el código vive en el PRODUCTO y no en la semilla (02 §1), así
+    # que esta herramienta ya no compara `bin/` y no hay ningún
+    # archivo que la regla pueda matchear.
+    #
+    # Y por eso frenó la corrida en vez de no hacer nada, que es
+    # exactamente lo que se le pidió: una regla podada por el tiempo
+    # deja de proteger sin avisar. Queda escrita acá, sin patrón, para
+    # que el razonamiento no se pierda con ella.
 ]
 
 

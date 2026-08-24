@@ -1,0 +1,323 @@
+// mirror-images — trae imágenes de TERCEROS al registry interno,
+// las escanea y las FIRMA con la llave de aegis.
+//
+// EL PROBLEMA QUE RESUELVE
+// require-aegis-signature exige firma propia para todo Pod de un
+// namespace de tenant. Una imagen pública (redis, postgres, lo que sea)
+// no puede correr ahí. Sin este job, la única salida era debilitar la
+// política — o sea, romper la propiedad central de la plataforma para
+// poder usar una base de datos. Este job es la salida correcta: la
+// imagen de terceros pasa por el MISMO control que el código propio
+// (scan bloqueante + firma), y recién entonces entra.
+//
+// LO QUE ESTE JOB NO HACE: desplegar. Espejar una imagen no la pone en
+// producción; eso es un bump explícito en el manifiesto que la consume.
+// Son dos decisiones distintas y se toman por separado.
+//
+// La lista vive en mirror-images/images.txt, pinneada POR DIGEST.
+//
+// SIN kaniko: acá no se buildea nada. crane trae el tar, trivy lo mira,
+// crane lo empuja, cosign lo firma. El orden importa: se escanea ANTES
+// de pushear, igual que en Jenkinsfile.app — una imagen que no pasó el
+// scan no llega a existir en el registry.
+pipeline {
+  agent {
+    kubernetes {
+      // RQ estricta de jenkins-system: TODO container declara limits
+      // (incluido jnlp — nunca `yaml ''`, pisa el default).
+      yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  imagePullSecrets:
+  - name: regcred-internal
+  containers:
+  - name: jnlp
+    image: jenkins/inbound-agent:3355.v388858a_47b_33-23
+    resources:
+      requests: { cpu: 500m, memory: 512Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+  # crane: habla con los registries PÚBLICOS (pull) y con el interno
+  # (push). SSL_CERT_FILE apunta al CA de aegis y eso NO rompe el TLS
+  # público: Go carga ese archivo ADEMÁS de los directorios de
+  # certificados del sistema (/etc/ssl/certs), no en su lugar — es
+  # aditivo. Verificado contra este mismo binario antes de escribir el
+  # job. Por eso alcanza UN solo container para ambos lados.
+  - name: crane
+    image: registry.registry-system.svc.cluster.local:5000/aegis-ci-crane:v0.20.3
+    command: ['sleep', 'infinity']
+    env:
+    - name: DOCKER_CONFIG
+      value: /crane/docker
+    - name: SSL_CERT_FILE
+      value: /crane/ca/ca.crt
+    volumeMounts:
+    - name: regcred
+      mountPath: /crane/docker/config.json
+      subPath: .dockerconfigjson
+      readOnly: true
+    - name: ca-trust
+      mountPath: /crane/ca/ca.crt
+      subPath: ca.crt
+      readOnly: true
+    resources:
+      requests: { cpu: 250m, memory: 256Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+  # trivy: cliente THIN — el server (trivy-system) tiene la DB.
+  - name: trivy
+    image: ghcr.io/aquasecurity/trivy:0.72.0
+    command: ['sleep', 'infinity']
+    resources:
+      requests: { cpu: 250m, memory: 256Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+  # cosign: imagen custom aegis-ci-cosign (el binario oficial es
+  # distroless y container(){sh} necesita shell). Password por
+  # secretKeyRef, NUNCA argv. Acá NO va optional: este job no corre
+  # durante el bootstrap, así que la ausencia de la llave es un error
+  # real y debe romper, no saltarse.
+  - name: cosign
+    image: registry.registry-system.svc.cluster.local:5000/aegis-ci-cosign:v2.6.3
+    command: ['sleep', 'infinity']
+    env:
+    - name: COSIGN_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: cosign-signing-key
+          key: cosign.password
+    - name: DOCKER_CONFIG
+      value: /cosign/docker
+    volumeMounts:
+    - name: cosign-key
+      mountPath: /cosign/keys/cosign.key
+      subPath: cosign.key
+      readOnly: true
+    - name: regcred
+      mountPath: /cosign/docker/config.json
+      subPath: .dockerconfigjson
+      readOnly: true
+    - name: ca-trust
+      mountPath: /cosign/ca/ca.crt
+      subPath: ca.crt
+      readOnly: true
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits:   { cpu: 500m, memory: 256Mi }
+  volumes:
+  - name: regcred
+    secret:
+      secretName: regcred-internal
+      items: [{ key: .dockerconfigjson, path: .dockerconfigjson }]
+  - name: ca-trust
+    secret:
+      secretName: aegis-ca-trust
+      items: [{ key: ca.crt, path: ca.crt }]
+  - name: cosign-key
+    secret:
+      secretName: cosign-signing-key
+      items: [{ key: cosign.key, path: cosign.key }]
+'''
+      defaultContainer 'jnlp'
+    }
+  }
+  options {
+    timeout(time: 45, unit: 'MINUTES')
+  }
+  environment {
+    REGISTRY     = 'registry.registry-system.svc.cluster.local:5000'
+    TRIVY_SERVER = 'http://trivy.trivy-system.svc.cluster.local:4954'
+  }
+  stages {
+    stage('preflight') {
+      // Falla TEMPRANO y con un mensaje que dice qué hacer. Sin esto,
+      // la ausencia de la llave se manifiesta recién en la última
+      // etapa de la última imagen, después de bajar y escanear todo.
+      steps {
+        container('cosign') {
+          sh '''
+            test -f /cosign/keys/cosign.key || {
+              echo "ERROR: falta el Secret cosign-signing-key en jenkins-system."
+              echo "       Sin llave no se puede firmar y una imagen sin firma"
+              echo "       no corre en un tenant. Ver fase 80-supply-chain."
+              exit 1
+            }
+          '''
+        }
+        container('trivy') {
+          sh '''
+            wget -q -T 10 -O /dev/null "${TRIVY_SERVER}/healthz" || {
+              echo "ERROR: trivy-server no responde en ${TRIVY_SERVER}."
+              echo "       Espejar sin escanear no es una opción: se estaría"
+              echo "       firmando con la llave de aegis algo que nadie miró."
+              exit 1
+            }
+          '''
+        }
+      }
+    }
+
+    stage('parse list') {
+      steps {
+        script {
+          def entries = []
+          readFile('mirror-images/images.txt').split('\n').each { line ->
+            def l = line.trim()
+            if (!l || l.startsWith('#')) { return }
+            def parts = l.split(/\s+/)
+            if (parts.size() != 2) {
+              error "images.txt: línea con formato inválido (se esperan 2 campos): ${l}"
+            }
+            if (!parts[0].contains('@sha256:')) {
+              // El pin por digest no es opcional: un tag es un puntero
+              // mutable y espejarlo firma con NUESTRA llave lo que sea
+              // que el origen esté sirviendo hoy.
+              error "images.txt: el origen debe estar pinneado por digest: ${parts[0]}"
+            }
+            entries << [src: parts[0], dst: parts[1]]
+          }
+          if (entries.isEmpty()) { error 'images.txt no tiene ninguna entrada' }
+          echo "${entries.size()} imagen(es) para espejar:"
+          entries.each { echo "  ${it.src}  ->  ${env.REGISTRY}/${it.dst}" }
+          MIRROR_ENTRIES = entries
+        }
+      }
+    }
+
+    stage('mirror') {
+      steps {
+        script {
+          def failed = []
+          MIRROR_ENTRIES.each { e ->
+            // Por env, no por interpolación Groovy: lo que va a argv del
+            // shell sale del entorno del proceso.
+            env.SRC = e.src
+            env.DST = e.dst
+            echo "================ ${e.dst} ================"
+            try {
+              container('crane') {
+                // REINTENTO en el pull, y SOLO en el pull. Es el único
+                // paso que depende de un servicio de terceros: el build 3
+                // murió con "TOOMANYREQUESTS: Rate exceeded" de
+                // public.ecr.aws, que no es un problema de la imagen ni de
+                // la plataforma. Distinguir "la red falló" de "la imagen
+                // no sirve" importa: lo primero se reintenta, lo segundo
+                // NUNCA. Por eso el scan y la firma no llevan retry —
+                // reintentar un scan que encontró un CVE sería absurdo.
+                sh '''
+                  rm -f mirror.tar mirror-digest
+                  echo "-- pull $SRC"
+                  n=0
+                  until crane pull "$SRC" mirror.tar; do
+                    n=$((n+1))
+                    if [ "$n" -ge 3 ]; then
+                      echo "   pull falló 3 veces — se abandona esta imagen"
+                      exit 1
+                    fi
+                    echo "   fallo transitorio; reintento $n/3 en $((n*20))s"
+                    sleep $((n*20))
+                  done
+                '''
+              }
+              container('trivy') {
+                // Bloqueante, igual que para el código propio. Una
+                // imagen de terceros que no pasa el scan NO se espeja:
+                // la respuesta correcta es elegir un tag más nuevo, no
+                // bajar la vara.
+                //
+                // --ignorefile: excepciones ACOTADAS POR RUTA y con
+                // vencimiento, cada una con su medición escrita al lado
+                // (ver trivyignore.yaml). No baja la severidad ni usa
+                // comodines: verificado que con el archivo puesto, una
+                // imagen con CVEs en otra ruta sigue rompiendo el build.
+                // Este archivo NO lo usa Jenkinsfile.app — el código
+                // propio no tiene excepciones.
+                sh '''
+                  echo "-- scan $DST"
+                  trivy image --server "$TRIVY_SERVER" --input mirror.tar \
+                    --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed \
+                    --scanners vuln --no-progress \
+                    --ignorefile "${WORKSPACE}/mirror-images/trivyignore.yaml"
+                '''
+              }
+              container('crane') {
+                sh '''
+                  echo "-- push ${REGISTRY}/${DST}"
+                  crane push mirror.tar "${REGISTRY}/${DST}"
+                  crane digest "${REGISTRY}/${DST}" > mirror-digest
+                  echo "   digest: $(cat mirror-digest)"
+                '''
+              }
+              container('cosign') {
+                // Firma por DIGEST (inmutable) contra el registry
+                // interno. --tlog-upload=false: nada del registry
+                // privado sale al Rekor público.
+                sh '''
+                  echo "-- sign ${DST}"
+                  DIGEST="$(cat mirror-digest)"
+                  cosign sign --yes \
+                    --key /cosign/keys/cosign.key \
+                    --tlog-upload=false \
+                    --registry-cacert /cosign/ca/ca.crt \
+                    "${REGISTRY}/${DST%%:*}@${DIGEST}"
+                '''
+              }
+              // HOOK de observabilidad (observability/design.md §2): un
+              // JSON-line por imagen, clave natural = digest. Mismo
+              // formato y mismo transporte que el evento supply-chain de
+              // Jenkinsfile.app — y por la misma razón: imprimirlo NO
+              // alcanza. La salida de un `sh` no va al stdout del
+              // contenedor sino al canal de remoting, y Vector, que lee
+              // /var/log/pods, nunca la ve. Este printf llevaba desde
+              // que nació escribiendo a nadie.
+              //
+              // `source` es "jenkins-mirror" y no la imagen de origen:
+              // es el _stream_field, o sea la identidad del PRODUCTOR
+              // del evento, no de su contenido. El origen pasa a
+              // `origen`, que es lo que siempre fue.
+              //
+              // Y las métricas: acá scan y firma son BLOQUEANTES (una
+              // imagen de terceros que no pasa el scan no se espeja),
+              // así que llegar hasta esta línea prueba que las dos
+              // corrieron. Se pushea el cero explícito igual, porque una
+              // serie ausente no dice «se escaneó»: no dice nada, y las
+              // imágenes espejadas también corren en los namespaces de
+              // las organizaciones. Sin esto, postgres y garage
+              // quedaban «sin medida» para siempre en la ronda.
+              sh '''
+                EVENTO=$(printf \
+                  '{"source":"jenkins-mirror","event":"mirror","origen":"%s","image":"%s","digest":"%s","scan_skipped":false,"sign_skipped":false,"build":"%s","ts":"%s"}' \
+                  "${SRC}" "${DST}" "$(cat mirror-digest)" "${BUILD_NUMBER}" \
+                  "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+                printf 'AEGIS_EVENT %s\\n' "$EVENTO"
+                printf '%s\\n' "$EVENTO" \
+                  | curl -fsS --max-time 15 \
+                      -H 'Content-Type: application/stream+json' --data-binary @- \
+                      'http://vlogs-eventos.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \
+                  || echo 'AVISO: el evento no se pudo registrar en vlogs-eventos (el espejo NO falla por esto)'
+                IMG="${DST%%:*}"
+                {
+                  printf 'aegis_build_scan_skipped{image="%s"} 0\\n' "$IMG"
+                  printf 'aegis_build_sign_skipped{image="%s"} 0\\n' "$IMG"
+                  printf 'aegis_build_timestamp_seconds{image="%s"} %s\\n' "$IMG" "$(date -u +%s)"
+                } | curl -fsS --max-time 15 --data-binary @- \
+                      'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' \
+                  || echo 'AVISO: las métricas del espejo no llegaron a vmsingle (el espejo NO falla por esto)'
+              '''
+            } catch (err) {
+              // Una imagen rota no debe impedir espejar las demás: se
+              // anota y se sigue. El build falla igual al final — pero
+              // con el cuadro completo en vez de con el primer error.
+              echo "FALLÓ ${e.dst}: ${err.getMessage()}"
+              failed << e.dst
+            } finally {
+              sh 'rm -f mirror.tar mirror-digest || true'
+            }
+          }
+          if (failed) {
+            error "imágenes que fallaron (${failed.size()}): ${failed.join(', ')}"
+          }
+          echo "todas las imágenes espejadas y firmadas."
+        }
+      }
+    }
+  }
+}

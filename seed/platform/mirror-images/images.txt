@@ -1,0 +1,214 @@
+# mirror-images — imágenes de TERCEROS que la plataforma espeja al
+# registry interno y firma con la llave de aegis.
+#
+# POR QUÉ EXISTE ESTE ARCHIVO
+# La ClusterPolicy require-aegis-signature exige firma propia para todo
+# Pod de un namespace de tenant (imageReferences '*'). Una imagen
+# pública NO puede correr ahí: no está firmada con nuestra llave y no
+# vamos a debilitar la política por comodidad. La salida correcta es
+# traerla, ESCANEARLA y firmarla nosotros — que es exactamente lo que
+# hace el job mirror-images. El resultado es que todo lo que corre en un
+# tenant pasó por el mismo control, sea código nuestro o de terceros.
+#
+# FORMATO
+#   <origen>@<digest>   <destino>:<tag>
+#
+# El origen se pinnea POR DIGEST, no por tag. Un tag es un puntero
+# mutable: quien controla el registry de origen puede reapuntarlo a otro
+# contenido sin que nos enteremos. El digest es el contenido. El tag se
+# deja en el comentario para que un humano sepa qué está leyendo.
+#
+# CÓMO ACTUALIZAR UNA IMAGEN
+#   1. crane digest <origen>:<tag-nuevo>
+#   2. editar la línea acá (digest Y tag del destino)
+#   3. commit + push  →  correr el job mirror-images
+#   4. bumpear la referencia en el manifiesto que la consume
+# El paso 4 es aparte a propósito: espejar no despliega. Traer una
+# imagen nueva y ponerla en producción son dos decisiones distintas.
+#
+# Líneas vacías y las que empiezan con # se ignoran.
+
+# --- almacenamiento -------------------------------------------------
+# Garage v2.3.0 — S3 self-hosted (Deuxfleurs, cooperativa francesa con
+# financiamiento NGI; releases cada 3-4 meses y dos ramas en paralelo).
+#
+# Elegido sobre MinIO, que NO publica un release desde 2025-09-07: un
+# servidor de almacenamiento sin parches durante 10 meses no es una
+# opcion para datos de terceros. Tambien sobre SeaweedFS, que es el mas
+# activo pero son master+volume+filer+gateway: mucha mas maquinaria de la
+# que hacen falta para unas pocas apps.
+#
+# EL FILESYSTEM DE ESTA IMAGEN SON DOS ENTRADAS: el directorio raiz y un
+# binario estatico de 71 MB. No hay shell, ni gestor de paquetes, ni
+# libc, ni utilidades. Si alguien encuentra una RCE no tiene con que
+# encadenar nada: no hay sh, ni curl, ni apk. Y como el binario es
+# r-xr-xr-x, corre con cualquier UID => runAsNonRoot aunque la imagen
+# declare root.
+#
+# LIMITACIONES CONOCIDAS, que condicionan como se usa:
+#   - SIN versionado de objetos ni object-lock. Lo que se borra o se
+#     sobrescribe, se fue. Un backup inmutable NO se puede apoyar aca.
+#   - SIN cifrado del lado del servidor. Los objetos quedan en texto
+#     plano sobre el disco, que ademas no esta cifrado (pendiente #1 de
+#     la instancia). Para datos de clientes hay que resolverlo antes.
+#   - Permisos por clave-y-bucket en vez de IAM. Menos poder y menos con
+#     que equivocarse.
+docker.io/dxflrs/garage@sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690	garage:v2.3.0
+
+# --- datos ----------------------------------------------------------
+# redis:8.6.4-alpine
+public.ecr.aws/docker/library/redis@sha256:2cc044fc5a07c9b701f8f1255a309ae9ad7856e694ac03513bf3648c01e40763	redis:8.6.4-alpine
+
+# postgres:17.10-alpine — mayor 17 a propósito (más tiempo de campo que
+# la 18; soporte upstream hasta noviembre de 2029).
+public.ecr.aws/docker/library/postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193	postgres:17.10-alpine
+
+# --- toolchains de CI -----------------------------------------------
+# golang:1.26.5-alpine — compila el ai-gateway en el pipeline.
+#
+# POR QUÉ ACÁ Y NO UNA aegis-ci-go EN ci-images/. Las imágenes aegis-ci-*
+# existen cuando hay que AGREGARLE algo a la oficial: aegis-ci-node lleva
+# git porque el portafolio consume una dependencia de repo privado; las
+# de cosign y crane existen porque las oficiales son distroless y el
+# `container(){ sh }` de Jenkins necesita shell. Para Go no hace falta
+# nada: el módulo del gateway no tiene una sola dependencia externa
+# (`GOPROXY=off` en el pipeline lo hace cumplir), así que ni siquiera
+# necesita red ni git. Una imagen derivada que no agrega nada sería un
+# eslabón más en la cadena de suministro a cambio de cero beneficio.
+#
+# ACOPLE DECLARADO: el tag de destino DEBE coincidir con el `image` del
+# container `go` en ai-gateway/Jenkinsfile. Es inter-repo y no derivable
+# en runtime; si divergen, el síntoma es ImagePullBackOff — visible, no
+# silencioso.
+#
+# La versión sigue a la del toolchain de la máquina del operador,
+# para que "compila en mi máquina" y "compila en CI" no puedan
+# significar cosas distintas.
+#
+# 1.26.5 -> 1.26.6 el 2026-08-17, y no por gusto: el build 12 del
+# gateway BLOQUEÓ en el scan con 8 HIGH de la stdlib de 1.26.5
+# (CVE-2026-33818 y compañía: asn1, net/http HTTP/2, html/template,
+# encoding/xml, net/url, crypto/tls — todos corregidos en 1.26.6).
+# Trivy lee el buildinfo del ELF, así que el parche es del COMPILADOR:
+# no hay línea de código del gateway que pueda arreglar esto.
+public.ecr.aws/docker/library/golang@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83	golang:1.26.6-alpine
+
+# --- runtimes de aplicación ------------------------------------------
+# python:3.12-slim — base del engine-cpu (#26), build Y runtime.
+#
+# POR QUÉ 3.12 Y NO LA ÚLTIMA: onnxruntime y ctranslate2 publican
+# ruedas hasta 3.13; con más nuevo, pip compila desde fuente o falla
+# con un error que no se parece en nada a "esa versión es muy nueva".
+# Es el MISMO pin que el requires-python del pyproject del módulo —
+# si divergen, el build del Containerfile falla fuerte en el kaniko.
+#
+# POR QUÉ slim Y NO distroless, que es el criterio del BFF: acá el
+# Containerfile tiene un RUN (pip install de ruedas nativas) y el
+# runtime necesita la libstdc++/libgomp que esas ruedas enlazan. Una
+# distroless obligaría a un multi-stage copiando site-packages y sus
+# .so a mano — más superficie de equivocarse que la que se saca. Lo
+# que el pod no necesita lo quita el Deployment: sin root, sin
+# escalada, filesystem raíz de solo lectura.
+#
+# El digest de origen es el MISMO en public.ecr.aws que en Docker Hub;
+# medido con las dos APIs el 2026-08-17 antes de elegir, como con
+# nginx-unprivileged.
+public.ecr.aws/docker/library/python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a	python:3.12-slim
+# nodejs22 distroless — runtime del BFF del portafolio.
+#
+# POR QUÉ DISTROLESS Y NO node:22-alpine. Se intentó con la oficial el
+# 2026-08-02 y Trivy la BLOQUEÓ, con razón: node:22.23.1-alpine trae npm
+# instalado, y las dependencias empaquetadas DE NPM traían un CRITICAL
+# (CVE-2026-59873, gzip bomb en node-tar) más varios HIGH (sigstore,
+# picomatch, brace-expansion). Ninguna de esas se ejecuta jamás en
+# producción: el BFF corre `node src/server.js` y sus dependencias se
+# instalan en CI con `npm ci`, no en el pod.
+#
+# O sea: el scan bloqueó por un gestor de paquetes que el runtime no
+# usa. La salida NO es una excepción de Trivy — es sacar el gestor de
+# paquetes. Mismo criterio que con /usr/bin/pebble en la imagen del
+# engine: extirpar antes que excepcionar. Y el mismo criterio con el
+# que se eligió garage, que se elogia en este archivo justamente por no
+# tener shell ni gestor de paquetes.
+#
+# Esta imagen es node y nada más: sin npm, sin shell, sin apt, sin
+# coreutils. ENTRYPOINT ya es /nodejs/bin/node y el usuario es 65532,
+# así que el Containerfile del BFF solo pone WORKDIR, COPY y el CMD con
+# la ruta del script.
+#
+# POR QUÉ debian13 Y NO debian12. El primer intento con distroless fue
+# sobre debian12 y Trivy TAMBIÉN lo bloqueó — pero esta vez con razón y
+# sobre algo que node SÍ usa: libssl3 3.0.18 con un CRITICAL
+# (CVE-2026-31789, heap overflow en OpenSSL) y cinco HIGH, todos con
+# parche disponible en 3.0.19. Debian tenía el arreglo; distroless
+# todavía no había reconstruido esa base.
+#
+# La diferencia entre los dos bloqueos importa y conviene no
+# confundirla: el de node-alpine era ruido (CVEs de un gestor de
+# paquetes que el runtime no ejecuta) y se resolvió sacando el gestor;
+# el de debian12 era una vulnerabilidad real en la biblioteca de TLS
+# del proceso, y se resolvió moviéndose a una base parcheada. Mismo
+# veredicto del scanner, dos causas distintas.
+#
+# debian13 (trixie) escaneó con CERO hallazgos. Se verificó ANTES de
+# volver a correr este job, con un Job de trivy de un solo uso contra
+# el mismo servidor: dos corridas fallidas seguidas por una conexión
+# lenta son caras.
+#
+# OJO CON LA CONFUSIÓN FÁCIL: aegis-ci-node (ci-images/) NO sirve para
+# esto y esta NO sirve para aquello. La de CI necesita npm y git para
+# construir, y el job ci-images no escanea ni firma; org-portafolio está
+# en la zona de enforce de Kyverno y exige firma. Son dos imágenes
+# distintas para dos trabajos distintos: una construye, la otra ejecuta.
+gcr.io/distroless/nodejs22-debian13@sha256:a2723a2817c5b01b8e7b98d567bc8b5a6b0e713e25bfb0a82b6ade4b9db06f50	nodejs-distroless:22
+
+# nginx-unprivileged 1.31.3-alpine — base de los TRES fronts estáticos:
+# portafolio, blog y ejemplo.
+#
+# POR QUÉ LA VARIANTE unprivileged Y NO nginx A SECAS. Dos razones, y las
+# dos son obligatorias en esta plataforma:
+#
+#   1. Escucha en 8080. La NetworkPolicy de un inquilino sólo permite
+#      entrada del borde al 8080; con el nginx normal (puerto 80) el pod
+#      arranca bien y NO recibe tráfico nunca. Es la peor clase de fallo:
+#      silencioso.
+#   2. Corre como UID 101, no root. Los namespaces de inquilino están en
+#      Pod Security Standards `restricted`: un contenedor que pida root
+#      es RECHAZADO en admisión y el pod no llega a existir.
+#
+# POR QUÉ SE ESPEJA RECIÉN AHORA, que es lo que de verdad hay que contar.
+#
+# No estaba acá. Los tres fronts la traían de Docker Hub EN CADA BUILD.
+# Se descubrió el 2026-08-09 porque la build 38 del portafolio murió así:
+#
+#   Retrieving image nginxinc/nginx-unprivileged from index.docker.io
+#   error building image: Get "https://index.docker.io/v2/": ...
+#
+# Y el fallo del build es la consecuencia menor. La mayor es que
+# firmábamos con cosign el artefacto RESULTANTE mientras la base sobre la
+# que se construyó no la había verificado nadie, y encima por TAG. La
+# política de firma hacía exactamente lo que promete —verificar lo que
+# nosotros firmamos— y aun así había terreno sin verificar debajo. Es
+# justo el agujero que este archivo existe para cerrar.
+#
+# El digest de origen es el MISMO en public.ecr.aws que en Docker Hub;
+# se midió con `crane digest` contra los dos antes de elegir. Así que
+# usar ECR no cuesta nada y esquiva los límites de tasa del Hub.
+public.ecr.aws/nginx/nginx-unprivileged@sha256:334d92979f15aaecd5dd50af5105e1230e2bb70765d45b1e2f964e7c5eda81c3	nginx-unprivileged:1.31.3-alpine
+
+# alpine 3.21 — runtime del canario hello-aegis.
+#
+# Misma historia que la de arriba y encontrada en la misma revisión: el
+# canario tiraba `docker.io/library/alpine:3.21` y
+# `docker.io/library/golang:1.26-alpine` directo de internet.
+#
+# EL golang NO SE AGREGA ACÁ, y es deliberado: la plataforma YA espeja
+# `golang:1.26.5-alpine` para compilar el ai-gateway. Sumar un segundo
+# golang sería duplicar una cadena de herramientas y, sobre todo,
+# duplicar el lugar donde hay que acordarse de parchear. El canario pasa
+# a usar el que ya existe.
+#
+# Que el canario sea el ÚLTIMO en salir de internet tiene su ironía:
+# existe para ejercitar el camino que los demás recorren, así que era
+# también el último lugar donde el agujero podía esconderse.
+public.ecr.aws/docker/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d	alpine:3.21
