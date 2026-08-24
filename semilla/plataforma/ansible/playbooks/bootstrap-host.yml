@@ -48,6 +48,29 @@
         - net.bridge.bridge-nf-call-ip6tables
         - net.ipv4.ip_forward
 
+    # ── inotify: el techo del host, no del cluster (2026-08-24) ─────
+    # El nvidia-device-plugin abre un FS watcher sobre
+    # /var/lib/kubelet/device-plugins/ y con el default de Ubuntu
+    # (fs.inotify.max_user_instances=128) muere al arrancar con "too
+    # many open files" — que NO es fd agotados, son INSTANCIAS de
+    # inotify de root. Medido el 2026-08-24: 424 reinicios en 6 días,
+    # el nodo anunciando nvidia.com/gpu: 0, y con eso los engines de AI
+    # imposibles de programar. El síntoma aparece lejos de la causa: la
+    # App gpu queda Progressing con sus tres recursos Synced.
+    #
+    # Cada controlador, operador y kubelet del cluster abre lo suyo;
+    # 128 es un techo de escritorio, no de nodo. Los valores son los que
+    # recomienda k3s para nodos con muchos pods.
+    - name: Techo de inotify para un nodo de k3s (persistido)
+      ansible.posix.sysctl:
+        name: "{{ item.clave }}"
+        value: "{{ item.valor }}"
+        sysctl_file: /etc/sysctl.d/99-aegis-k3s.conf
+        reload: true
+      loop:
+        - {clave: fs.inotify.max_user_instances, valor: "1024"}
+        - {clave: fs.inotify.max_user_watches, valor: "524288"}
+
     # ── user namespaces sin privilegios (corrida #8, bug D) ─────────
     # Ubuntu >= 23.10 trae kernel.apparmor_restrict_unprivileged_userns=1
     # por DEFAULT: bloquea el user namespace rootless que buildah usa
