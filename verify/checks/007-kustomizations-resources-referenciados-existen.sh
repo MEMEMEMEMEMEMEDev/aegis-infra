@@ -3,7 +3,7 @@
 check() {
 if python3 - "$AEGIS_ROOT" <<'EOF'
 import sys, yaml, pathlib
-root = pathlib.Path(sys.argv[1]); P = root/"semilla"/"plataforma"; ok = True; n = 0
+root = pathlib.Path(sys.argv[1]); P = root/"seed"/"platform"; ok = True; n = 0
 for k in P.rglob("kustomization.yaml"):
     doc = yaml.safe_load(k.open()) or {}
     for r in (doc.get("resources") or []) + (doc.get("generators") or []):

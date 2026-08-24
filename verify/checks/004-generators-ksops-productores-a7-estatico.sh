@@ -24,7 +24,7 @@ check() {
 # no lo puede descifrar y su App no sincroniza jamás.
 if python3 - "$AEGIS_ROOT" <<'EOF'
 import importlib.machinery, importlib.util, re, sys, pathlib, yaml
-root = pathlib.Path(sys.argv[1]); P = root/"semilla"/"plataforma"
+root = pathlib.Path(sys.argv[1]); P = root/"seed"/"platform"
 # entries declaradas en los generators:
 entries = {}   # basename -> dir del generator
 dup_falla = False

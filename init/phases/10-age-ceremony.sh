@@ -72,7 +72,7 @@ if [[ -d "$WORKSPACE" ]]; then
     fi
 fi
 
-# ── SEMBRAR platform/ DESDE LA SEMILLA ─────────────────────────────
+# ── SEMBRAR platform/ DESDE LA SEED ─────────────────────────────
 #
 # Hasta el 2026-08-05 no hacía falta: `platform/` era a la vez la
 # semilla (trackeada por el repo del producto) y el directorio de
@@ -85,7 +85,7 @@ fi
 #   - Trabajar la semilla era peligroso: un `git checkout -- platform/`
 #     distraído pisaba los archivos de la instancia CORRIENDO.
 #
-# Ahora la semilla vive en semilla/plataforma/ (sin renderizar) y se
+# Ahora la semilla vive en seed/platform/ (sin renderizar) y se
 # COPIA acá. El render de abajo sigue operando sobre platform/, o sea
 # sobre la copia, y la semilla nunca queda con valores de una
 # instancia adentro.
@@ -93,8 +93,8 @@ fi
 # LA GUARDA ES LO IMPORTANTE: si platform/ ya tiene .git, esto NO es
 # un arranque virgen — es una instancia con historia propia, y su
 # working tree es la verdad. Copiar la semilla encima la destruiría.
-SEMILLA_PLATAFORMA="$AEGIS_ROOT/semilla/plataforma"
-[[ -d "$SEMILLA_PLATAFORMA" ]] || die "falta semilla/plataforma/ — el artefacto está incompleto"
+SEMILLA_PLATAFORMA="$AEGIS_ROOT/seed/platform"
+[[ -d "$SEMILLA_PLATAFORMA" ]] || die "falta seed/platform/ — el artefacto está incompleto"
 if [[ -d "$PLATFORM_DIR/.git" ]]; then
     log_info "platform/ ya es una instancia (tiene .git): NO se siembra desde la semilla"
 else
@@ -102,12 +102,12 @@ else
     # -a preserva modos (bin/ tiene ejecutables); el `.` copia también
     # los ocultos, que incluyen .sops.yaml.tpl y .gitignore.
     run_cmd cp -a "$SEMILLA_PLATAFORMA/." "$PLATFORM_DIR/"
-    log_ok "platform/ sembrado desde semilla/plataforma/ ($(find "$SEMILLA_PLATAFORMA" -type f | wc -l) archivos)"
+    log_ok "platform/ sembrado desde seed/platform/ ($(find "$SEMILLA_PLATAFORMA" -type f | wc -l) archivos)"
 fi
 
 # ── .sops.yaml del repo de plataforma: recipient = la pública ──────
 # (en greenfield el repo v2 se inicializa con ESTA pública; el
-#  placeholder se reemplaza acá — ver semilla/plataforma/.sops.yaml.tpl)
+#  placeholder se reemplaza acá — ver seed/platform/.sops.yaml.tpl)
 SOPS_TPL="$PLATFORM_DIR/.sops.yaml.tpl"
 if [[ -f "$SOPS_TPL" ]]; then
     run_cmd bash -c "sed 's/__AGE_PUBLIC__/$AGE_PUBLIC/' '$SOPS_TPL' \

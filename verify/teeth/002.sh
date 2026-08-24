@@ -11,7 +11,7 @@
 
 # un flujo abierto: [uno, dos  sin cerrar el corchete
 rojo_1() {
-    printf '\nclave_rota: [uno, dos\n' >> "$AEGIS_ROOT/semilla/plataforma/edge.yaml"
+    printf '\nclave_rota: [uno, dos\n' >> "$AEGIS_ROOT/seed/platform/edge.yaml"
 }
 
 # un alias a un ancla que no existe, en el SEGUNDO documento: prueba
@@ -21,8 +21,8 @@ rojo_1() {
 # (El rojo anterior era una clave duplicada: PyYAML la acepta y pisa el
 # valor. Otro diente que no mordía por culpa del diente.)
 rojo_2() {
-    printf '\n---\nreferencia: *ancla_que_no_existe\n' >> "$AEGIS_ROOT/semilla/plataforma/servicios.yaml"
+    printf '\n---\nreferencia: *ancla_que_no_existe\n' >> "$AEGIS_ROOT/seed/platform/services.yaml"
 }
 
 # control: un comentario en un YAML sigue siendo YAML válido
-control_1() { printf '\n# comentario legitimo\n' >> "$AEGIS_ROOT/semilla/plataforma/edge.yaml"; }
+control_1() { printf '\n# comentario legitimo\n' >> "$AEGIS_ROOT/seed/platform/edge.yaml"; }

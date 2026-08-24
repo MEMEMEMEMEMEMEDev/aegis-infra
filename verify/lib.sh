@@ -63,12 +63,12 @@ body_nc() { body_of "$1" "$2" | grep -vE '^[[:space:]]*#'; }
 # Un check NO recalcula rutas: las recibe. (El mismo principio que
 # lib/paths.sh para el producto.)
 : "${AEGIS_ROOT:?verify/lib.sh requiere AEGIS_ROOT}"
-P="$AEGIS_ROOT/semilla/plataforma"   # la SEMILLA — el artefacto que se verifica
+P="$AEGIS_ROOT/seed/platform"   # la SEED — el artefacto que se verifica
 FASES="$AEGIS_ROOT/init/phases"
 LIBS="$AEGIS_ROOT/lib"
 LIBEXEC="$AEGIS_ROOT/libexec"
-SEMILLA="$AEGIS_ROOT/semilla"
-export P FASES LIBS LIBEXEC SEMILLA
+SEED="$AEGIS_ROOT/seed"
+export P FASES LIBS LIBEXEC SEED
 
 # ── perfil ───────────────────────────────────────────────────────────
 # AEGIS_VERIFY_PROFILE lo fija el runner (cloudflare|local). Un check

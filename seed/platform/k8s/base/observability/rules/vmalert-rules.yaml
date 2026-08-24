@@ -1,0 +1,271 @@
+# Reglas de vmalert — las 5 familias de fase-85 §1 (deadman, b11,
+# kyverno, trivy-db, cloudflared), cada una como archivo propio
+# DENTRO de un único ConfigMap: el chart victoria-metrics-alert
+# 0.47.0 monta UN solo `server.configMap` en /config (verificado
+# 2026-08-19 contra alert-server.yaml del chart), y el flag -rule
+# del vmalert acepta glob (/config/*.yaml — vmalert/values.yaml).
+# Regla nueva = key nueva acá, no magia (A7-espíritu).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vmalert-reglas
+  namespace: observability
+  labels: {aegis.dev/part-of: aegis-platform}
+data:
+  # DEADMAN (design.md §4.2a): SIEMPRE firing; su valor es su
+  # AUSENCIA — si el heartbeat deja de llegar al teléfono, la cadena
+  # regla→Alertmanager→puente→ntfy→app está rota en algún eslabón.
+  # La cadencia del reenvío vive en Alertmanager (repeat_interval
+  # por perfil), no acá.
+  deadman.yaml: |
+    groups:
+      - name: deadman
+        interval: 1m
+        rules:
+          - alert: DeadmanAegis
+            expr: vector(1)
+            labels: {severity: heartbeat}
+            annotations:
+              summary: "latido de la plataforma aegis"
+              description: "Si este latido DEJA de llegar, la cadena de alertas está rota en algún eslabón: vmalert, Alertmanager, el puente o ntfy."
+  # B11 DE VERDAD (design.md §4.2b): la alerta sale del handshake TLS
+  # real (blackbox contra el CA), no de la métrica de cert-manager —
+  # esa mide el Secret (la declaración), no lo servido; se conserva
+  # como contexto en los dashboards.
+  b11.yaml: |
+    groups:
+      - name: b11-cert-servido
+        rules:
+          - alert: RegistryCertServidoPorExpirar
+            expr: (probe_ssl_earliest_cert_expiry{job="blackbox-registry"} - time()) < 30 * 24 * 3600
+            for: 30m
+            labels: {severity: critical}
+            annotations:
+              summary: "el cert que el registry SIRVE expira en menos de 30d"
+              description: "cert-manager renueva el Secret a los 60d pero el pod NO reinicia solo (deuda B11): reiniciar el pod del registry para que sirva el cert renovado."
+          - alert: RegistryProbeFalla
+            expr: probe_success{job="blackbox-registry"} == 0
+            for: 15m
+            labels: {severity: critical}
+            annotations:
+              summary: "el handshake TLS contra el registry falla"
+              description: "blackbox no logra validar la cadena contra el CA de aegis (o el registry no responde). Un cert equivocado también cae acá — es el punto."
+          - alert: TrivyHealthzFalla
+            expr: probe_success{job="blackbox-trivy"} == 0
+            for: 15m
+            labels: {severity: warning}
+            annotations:
+              summary: "el /healthz del trivy-server no responde"
+          # Las tres de arriba comparan contra un valor. Si la SERIE
+          # desaparece —muere el pod de blackbox, se edita el job de
+          # vmagent, un netpol se cierra— la comparación no da falso:
+          # da VACÍO, y una alerta vacía no dispara. Dos de esas tres
+          # son critical, y una es LA alerta B11.
+          # cloudflared y trivy-db ya tenían su compañera absent()
+          # desde el diseño; blackbox no. Esa asimetría era el agujero
+          # (barrido del 2026-08-22).
+          - alert: BlackboxSinMedida
+            expr: absent(probe_success{job="blackbox-registry"}) or absent(probe_success{job="blackbox-trivy"})
+            for: 20m
+            labels: {severity: critical}
+            annotations:
+              summary: "las sondas de blackbox dejaron de reportar"
+              description: "Sin estas series, RegistryCertServidoPorExpirar, RegistryProbeFalla y TrivyHealthzFalla no pueden disparar: quedan mudas, no en verde. Revisar el pod blackbox, el job de vmagent y los netpol de registry-system y trivy-system."
+  # Kyverno (design.md §4.2c): umbral 0 A PROPÓSITO — en operación
+  # sana este número ES cero; cada rechazo en un tenant es un ataque
+  # o un pipeline roto, ambas urgentes. Métrica y label verificadas
+  # 2026-08-19 contra kyverno.io/docs/reference/metrics, y el label
+  # request_allowed RE-verificado contra el cluster el 2026-08-22.
+  #
+  # EL ALCANCE: el enforce de Kyverno se define POR ETIQUETA
+  # (kyverno/values.yaml: aegis.dev/part-of In [aegis-tenants]), no
+  # por prefijo de nombre. Esta regla filtraba `org-.*` y por eso era
+  # ciega a ai-system y garage-system, que llevan la etiqueta —
+  # y ai-system la lleva A PROPÓSITO por ser alcanzable desde
+  # internet, o sea el namespace donde un rechazo importa MÁS.
+  # Es el mismo bug de clase que el values de Kyverno documenta haber
+  # sufrido por enumerar en vez de etiquetar, repetido del lado de la
+  # alerta (barrido del 2026-08-22).
+  kyverno.yaml: |
+    groups:
+      - name: kyverno-tenants
+        rules:
+          - alert: KyvernoAdmisionRechazadaEnTenant
+            expr: sum(increase(kyverno_admission_requests_total{request_allowed="false", resource_namespace=~"org-.*|ai-system|garage-system"}[10m])) > 0
+            labels: {severity: critical}
+            annotations:
+              summary: "admisión RECHAZADA en un namespace bajo enforce"
+              description: "O un ataque o un pipeline roto — ambas urgentes. Ver qué policy rechazó y en qué namespace."
+  # Edad de la DB de Trivy (design.md §4.2d): la métrica la deriva el
+  # CronJob trivy-db-age. Y la ausencia de la métrica TAMBIÉN alerta:
+  # un vigía del vigía que deja de medir es un gate verde apagado
+  # (Enfermedad E).
+  #
+  # last_over_time([2h]) Y NO la métrica pelada: el CronJob empuja UNA
+  # VEZ POR HORA y una consulta instantánea solo mira 5 minutos atrás.
+  # Sin la ventana, la métrica está «ausente» ~55 minutos de cada hora:
+  # TrivyDBVieja no puede evaluarse y TrivyDBSinMedida dispara todos
+  # los días. Una alerta que grita a diario deja de leerse, y cuando
+  # por fin diga la verdad ya nadie la mira — es la Enfermedad E por el
+  # otro extremo, el del falso positivo crónico.
+  # Medido el 2026-08-22, después de arreglar el CronJob: la alerta
+  # volvió a firing con el CronJob YA sano.
+  trivy-db.yaml: |
+    groups:
+      - name: trivy-db
+        rules:
+          - alert: TrivyDBVieja
+            expr: (time() - max(last_over_time(aegis_trivy_db_updated_timestamp_seconds[2h]))) > 48 * 3600
+            for: 1h
+            labels: {severity: critical}
+            annotations:
+              summary: "la DB de vulnerabilidades de Trivy tiene más de 48h"
+              description: "Cada scan «verde» está mintiendo en silencio: el pin A42 pasó a ser fe. Revisar el trivy-server y su salida a la fuente de la DB."
+          - alert: TrivyDBSinMedida
+            expr: absent(last_over_time(aegis_trivy_db_updated_timestamp_seconds[2h]))
+            for: 3h
+            labels: {severity: warning}
+            annotations:
+              summary: "el CronJob trivy-db-age dejó de pushear"
+              description: "Sin medida no hay vigía: revisar el CronJob en trivy-system y el endpoint de import de vmsingle."
+  # cloudflared (design.md §4.2e): la señal NO es «hubo restart»
+  # (reconexión sana en dev, red intermitente POR DISEÑO) sino
+  # «conexiones activas == 0 SOSTENIDO». Umbral por perfil: dev 30m,
+  # hetzner 5m. Métrica verificada 2026-08-19 contra
+  # developers.cloudflare.com (metrics de cloudflared:
+  # cloudflared_tunnel_ha_connections).
+  cloudflared.yaml: |
+    groups:
+      - name: cloudflared
+        rules:
+          - alert: TunelSinConexion
+            expr: max(cloudflared_tunnel_ha_connections) == 0
+            for: 30m
+            labels: {severity: critical}
+            annotations:
+              summary: "cloudflared sin NINGUNA conexión al edge, sostenido"
+              description: "No es un hueco de scrape ni un restart: el túnel no logró reconectar en la ventana del perfil. Nada público está llegando al cluster."
+          - alert: TunelSinScrape
+            expr: absent(cloudflared_tunnel_ha_connections)
+            for: 30m
+            labels: {severity: warning}
+            annotations:
+              summary: "vmagent no ve las métricas de cloudflared"
+              description: "Distinto de «túnel caído»: acá el que no responde es el endpoint de métricas (netpol, puerto, pod). Sin dato no hay vigía del túnel."
+  # Scrape (barrido del 2026-08-22): existía el PANEL «Targets de
+  # scrape caídos» y no la alerta. Un panel se mira cuando alguien lo
+  # abre; una alerta te busca. Después del encendido nada vigilaba que
+  # vmagent siguiera raspando: el único que lo mide es el gate
+  # obs-metricas-fluyen de la fase 85, que corre UNA vez en la vida.
+  #
+  # Las dos caras, y son distintas a propósito:
+  #  · un target que responde mal se ve como `up == 0`.
+  #  · un target que DEJA DE SER DESCUBIERTO —le renombran la etiqueta
+  #    en un bump de chart— no produce `up == 0`: no produce NADA. Por
+  #    eso la segunda regla cuenta jobs contra el número esperado en
+  #    vez de mirar valores.
+  scrape.yaml: |
+    groups:
+      - name: scrape
+        rules:
+          - alert: TargetDeScrapeCaido
+            expr: up == 0
+            for: 15m
+            labels: {severity: warning}
+            annotations:
+              summary: "un objetivo de scrape lleva 15m sin responder"
+              description: "El job {{ $labels.job }} no responde en {{ $labels.instance }}. Todo panel y toda alerta que dependan de esas métricas están mudos, no en verde."
+          - alert: JobDeScrapeDesaparecido
+            expr: count(count by (job) (up)) < 12
+            for: 20m
+            labels: {severity: critical}
+            annotations:
+              summary: "vmagent descubre menos jobs de los que declara"
+              description: "Un job sin targets descubiertos NO genera up==0: no genera nada, y su silencio se lee igual que la salud. Comparar `count by (job) (up)` contra los job_name de vmagent/values.yaml — lo más probable es una etiqueta renombrada por un bump de chart."
+  # Inquilinos (2026-08-22). Hasta hoy ninguna alerta de la plataforma
+  # nombraba a una aplicación de organización: shop llevaba un día vivo
+  # y si su API hubiera devuelto 500 a cada cliente, no se disparaba
+  # nada. El contrato derivaba aislamiento y ruteo; nunca tuvo forma de
+  # decir «y vigilalo».
+  #
+  # Las reglas son GENÉRICAS a propósito: el objetivo lo deriva
+  # aegis-org (un job sitio-<org> por contrato con dominio y ruta
+  # pública), y estas tres lo cubren sin importar cuántas
+  # organizaciones haya. Agregar una organización agrega un target, no
+  # tres alertas más — si no, cada alta implicaría editar esto y nadie
+  # lo haría.
+  tenants.yaml: |
+    groups:
+      - name: inquilinos
+        rules:
+          - alert: SitioDeInquilinoCaido
+            expr: probe_success{job=~"sitio-.*"} == 0
+            for: 10m
+            labels: {severity: critical}
+            annotations:
+              summary: "{{ $labels.organizacion }}: el sitio no responde a un cliente"
+              description: "La sonda recorre el camino completo (DNS, borde, túnel, traefik, middlewares, app) contra {{ $labels.instance }} y no obtiene 200. Si TODAS las organizaciones caen a la vez, mirar primero TunelSinConexion: es el eslabón común."
+          - alert: SitioDeInquilinoSinSonda
+            expr: absent(probe_success{job=~"sitio-.*"})
+            for: 20m
+            labels: {severity: warning}
+            annotations:
+              summary: "ninguna sonda de inquilino reporta"
+              description: "SitioDeInquilinoCaido compara contra un valor: sin la serie no da falso, da vacío, y una alerta vacía no dispara. Revisar el pod de blackbox y el bloque derivado de vmagent/values.yaml."
+          # Memoria contra el TECHO DECLARADO, no contra la máquina: un
+          # pod que toca su límite lo mata el kernel, aunque al nodo le
+          # sobre RAM. La medida ya existía (cAdvisor); faltaba mirarla.
+          - alert: InquilinoAlLimiteDeMemoria
+            expr: |
+              100 * sum by (namespace) (container_memory_working_set_bytes{namespace=~"org-.*",container!=""})
+                  / sum by (namespace) (container_spec_memory_limit_bytes{namespace=~"org-.*",container!=""}) > 90
+            for: 15m
+            labels: {severity: warning}
+            annotations:
+              summary: "{{ $labels.namespace }} usa más del 90% de la memoria que declaró"
+              description: "El siguiente paso es que el kernel mate un pod por OOM, y eso NO es visible como caída del sitio hasta que pasa. O sube la cuota, o la app está perdiendo memoria."
+  # Suministro (2026-08-22). Los stages `scan` y `sign` de la plantilla
+  # tienen una TOLERANCIA DE BOOTSTRAP deliberada: durante las fases
+  # 50-70 no existen ni el trivy-server ni la clave de cosign, y romper
+  # el build ahí sería impedir el arranque. La tolerancia está bien.
+  #
+  # Lo que estaba mal es que fuera INVISIBLE con la plataforma ya de
+  # pie. `scan_skipped:true` viajaba en el evento, se guardaba un año en
+  # vlogs-events, y el build terminaba en VERDE. Una imagen que nadie
+  # escaneó, corriendo, indistinguible de una sana. Es la misma
+  # enfermedad de siempre por el lado del registro: el dato existía y
+  # ningún instrumento lo leía.
+  #
+  # Las dos caras NO son simétricas y por eso van separadas:
+  #  · sin firma, Kyverno rechaza la admisión y el despliegue falla a
+  #    gritos. La alerta es un aviso, no un descubrimiento.
+  #  · sin escaneo no pasa absolutamente nada. Ésa es la crítica.
+  #
+  # Ventana de 30d y no de 2h: esto no lo pushea un cron sino un BUILD,
+  # y un repo puede pasar semanas sin uno. La serie dice «el último
+  # build de esta imagen», y mientras no haya otro esa sigue siendo la
+  # verdad sobre lo que está corriendo. Cuando ni siquiera hay eso —una
+  # imagen desplegada sin ningún build medido— no es trabajo de una
+  # alerta: es NO SE PUDO EVALUAR, y lo reporta la ronda de
+  # aegis check. Una alerta que dispara el día uno, cuando no hay
+  # builds porque la plataforma acaba de nacer, es el falso rojo
+  # crónico: grita, se ignora, y deja de servir para cuando importe.
+  suministro.yaml: |
+    groups:
+      - name: suministro
+        rules:
+          - alert: ImagenSinEscaneo
+            expr: last_over_time(aegis_build_scan_skipped[30d]) == 1
+            for: 15m
+            labels: {severity: critical}
+            annotations:
+              summary: "{{ $labels.image }} se publicó sin pasar por Trivy"
+              description: "El último build saltó el escaneo (trivy-server no respondía) y la imagen se pusheó, se firmó y se desplegó igual. Nada la distingue de una escaneada: hay que rebuildear con el server vivo. Si esto es un arranque en curso, se cierra solo en la fase 80."
+          - alert: ImagenSinFirma
+            expr: last_over_time(aegis_build_sign_skipped[30d]) == 1
+            for: 15m
+            labels: {severity: warning}
+            annotations:
+              summary: "{{ $labels.image }} se publicó sin firmar"
+              description: "El último build no encontró la clave de cosign. A diferencia del escaneo, esto NO es silencioso: Kyverno rechaza la admisión y el despliegue falla. La alerta existe para nombrar la causa antes de que alguien depure el rechazo desde cero."

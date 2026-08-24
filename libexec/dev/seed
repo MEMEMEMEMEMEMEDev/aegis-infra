@@ -2,13 +2,13 @@
 # aegis-summary: Compara y trae cambios de la instancia a la semilla
 # aegis-group:   dev
 # aegis-hidden:  true
-"""aegis dev seed — comparar y traer cambios de la INSTANCIA a la SEMILLA.
+"""aegis dev seed — comparar y traer cambios de la INSTANCIA a la SEED.
 
 Esta herramienta es para quien MANTIENE el producto, no para quien opera
 una instancia. Vive en la raíz del repo aegis-v2 y trabaja sobre dos
 árboles que están uno al lado del otro:
 
-    semilla/plataforma/   el ARTEFACTO   (lo que se entrega, con placeholders)
+    seed/platform/   el ARTEFACTO   (lo que se entrega, con placeholders)
     platform/             la INSTANCIA   (lo que corre, con los valores puestos)
 
 POR QUÉ EXISTE
@@ -23,7 +23,7 @@ desincronizar solo. `semilla/PENDIENTE.md` §3.4 pide exactamente esto.
 El problema no es copiar archivos, es que copiar SIN des-renderizar
 hornea una instancia adentro del producto:
 
-    SEMILLA:   repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    SEED:   repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
     INSTANCIA: repoURL: git@github.com:ejemplo-org/ops-stack-v2.git
 
 y el fallo no aparece acá: aparece en el arranque siguiente, en otra
@@ -69,7 +69,7 @@ from pathlib import Path
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
-from aegis import rutas                  # noqa: E402
+from aegis import paths                  # noqa: E402
 
 # Esta herramienta es la ÚNICA que necesita los dos lados a la vez: el
 # artefacto (en el producto) y el árbol vivo (en la instancia). Que
@@ -80,10 +80,10 @@ from aegis import rutas                  # noqa: E402
 # Y ya no compara bin/: el código dejó de tener copia (02 §1). Sigue
 # cuidando k8s/, tofu/ y docs/, que es donde la instancia sí aprende
 # cosas que la semilla tiene que heredar.
-RAIZ = rutas.aegis_root()
-SEMILLA = RAIZ / "semilla" / "plataforma"
-VIVO = rutas.platform_dir()
-CONF = rutas.conf()
+RAIZ = paths.aegis_root()
+SEED = RAIZ / "seed" / "platform"
+VIVO = paths.platform_dir()
+CONF = paths.conf()
 
 ROJO, VERDE, AMARILLO, AZUL, GRIS, FIN = (
     "\033[1;31m", "\033[1;32m", "\033[1;33m", "\033[1;34m", "\033[0;90m", "\033[0m"
@@ -210,7 +210,7 @@ DELIBERADAS = [
      "la instancia puede tener acá organizaciones ANTERIORES al generador "
      "(sin contrato del que derivarlas). Eso es deuda de esa instancia: la "
      "semilla lleva solo el sustrato y el canary."),
-    ("ai/tareas.yaml",
+    ("ai/tasks.yaml",
      "las CLASES viajan, las TAREAS no: una tarea existe porque alguna "
      "organización la declaró en su contrato, y la semilla no tiene "
      "contratos."),
@@ -317,7 +317,7 @@ def leer_config() -> dict[str, str]:
             vals[m.group(1)] = m.group(2)
     faltan = [k for k in CLAVES_CONFIG if not vals.get(k)]
     if faltan:
-        morir(f"{rutas.conf()} no define: {', '.join(faltan)}")
+        morir(f"{paths.conf()} no define: {', '.join(faltan)}")
     return vals
 
 
@@ -364,8 +364,8 @@ def clasificar(vivos: list[str]) -> tuple[list[str], dict[str, str]]:
 
 
 def comparar(vals: dict[str, str]):
-    semilla = [f[len("semilla/plataforma/"):]
-               for f in trackeados(RAIZ) if f.startswith("semilla/plataforma/")]
+    semilla = [f[len("seed/platform/"):]
+               for f in trackeados(RAIZ) if f.startswith("seed/platform/")]
     vivos_todos = trackeados(VIVO)
     vivos, excluidos = clasificar(vivos_todos)
 
@@ -375,10 +375,10 @@ def comparar(vals: dict[str, str]):
     difiere = []
     for f in sorted(set_s & set_v):
         try:
-            a = (SEMILLA / f).read_text()
+            a = (SEED / f).read_text()
             b = desderivar(f, desrenderizar((VIVO / f).read_text(), vals))
         except UnicodeDecodeError:
-            a = (SEMILLA / f).read_bytes().decode("utf-8", "replace")
+            a = (SEED / f).read_bytes().decode("utf-8", "replace")
             b = (VIVO / f).read_bytes().decode("utf-8", "replace")
         if a != b:
             difiere.append(f)
@@ -389,7 +389,7 @@ def cmd_diff(argv: list[str]) -> int:
     vals = leer_config()
     if argv:
         ruta = argv[0]
-        a_p, b_p = SEMILLA / ruta, VIVO / ruta
+        a_p, b_p = SEED / ruta, VIVO / ruta
         if not b_p.exists():
             morir(f"{ruta} no existe en el árbol vivo")
         a = a_p.read_text().splitlines(keepends=True) if a_p.exists() else []
@@ -451,7 +451,7 @@ def cmd_traer(argv: list[str]) -> int:
     vals = leer_config()
     _, excluidos = clasificar(trackeados(VIVO))
     for ruta in argv:
-        origen, destino = VIVO / ruta, SEMILLA / ruta
+        origen, destino = VIVO / ruta, SEED / ruta
         if not origen.exists():
             morir(f"{ruta} no existe en el árbol vivo")
         if origen.is_dir():
@@ -479,7 +479,7 @@ def cmd_traer(argv: list[str]) -> int:
         destino.write_text(texto)
         shutil.copymode(origen, destino)
         print(f"  {VERDE}{'nuevo' if nuevo else 'actualizado'}{FIN}  {ruta}")
-    print(f"\n{AMARILLO}acordate:{FIN} verify-static verifica LA SEMILLA. "
+    print(f"\n{AMARILLO}acordate:{FIN} verify-static verifica LA SEED. "
           "Corrélo antes de commitear.")
     return 0
 
@@ -498,8 +498,8 @@ def cmd_excluidos(_argv: list[str]) -> int:
 
 
 def main() -> int:
-    if not SEMILLA.is_dir():
-        morir(f"no existe {SEMILLA}")
+    if not SEED.is_dir():
+        morir(f"no existe {SEED}")
     if not VIVO.is_dir():
         morir(f"no existe {VIVO}: esta herramienta compara contra la "
               "instancia viva, y en esta máquina no hay ninguna")

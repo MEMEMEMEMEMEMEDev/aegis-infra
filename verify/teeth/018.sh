@@ -13,7 +13,7 @@
 # eso el primer intento de este diente no mordía.
 rojo_1() {
     sed -i 's|^  - secret-github-webhook.enc.yaml.*|  - secret-tardio.enc.yaml\n&|' \
-        "$AEGIS_ROOT/semilla/plataforma/k8s/base/platform/argocd-secrets/secret-generator.yaml"
+        "$AEGIS_ROOT/seed/platform/k8s/base/platform/argocd-secrets/secret-generator.yaml"
     printf '\nmake_enc_secret "$PLATFORM_DIR/k8s/base/platform/argocd-secrets/secret-tardio.enc.yaml"\n' \
         >> "$AEGIS_ROOT/init/phases/80-supply-chain.sh"
 }

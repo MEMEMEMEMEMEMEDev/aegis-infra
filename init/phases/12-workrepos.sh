@@ -128,7 +128,7 @@ gate "platform-repo-sembrado" retry_net 3 bash -c \
 # explícito = re-seed deliberado, documentado acá):
 {
     SEED_TMP="$(mktemp -d)"
-    run_cmd cp -r "$AEGIS_ROOT/semilla/canario/." "$SEED_TMP/"
+    run_cmd cp -r "$AEGIS_ROOT/seed/canary/." "$SEED_TMP/"
     # el Jenkinsfile del canary se INSTANCIA del template de
     # plataforma (fuente única — no hay segunda copia que driftee).
     # IMAGE queda 'hello-aegis' fijo: es la identidad del canary

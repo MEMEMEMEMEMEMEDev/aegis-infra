@@ -1,0 +1,47 @@
+# NetworkPolicy de observability — ESCRITA pero NO LISTADA en el
+# kustomization hasta Cilium (ADR-0014: kube-router no enforce —
+# validar enforcement POSITIVO antes de activarla). Mismo trato que
+# registry-system. INGRESS-ONLY como toda la iter2 (flannel no hace
+# FQDN egress).
+#
+# Clientes legítimos cuando se active:
+#  - infra-edge (traefik): grafana :3000 y ntfy :8080 (las dos
+#    IngressRoutes de routes.yaml).
+#  - trivy-system: el CronJob trivy-db-age pushea a vmsingle :8428.
+#  - jenkins-system: el stage `report` de todo build pushea el evento
+#    supply-chain a vlogs-events :9428 y sus tres métricas a vmsingle
+#    :8428. Faltaba en esta lista y en la regla: el POST del evento
+#    existe desde la fase 85 y el de las métricas desde hoy, así que
+#    activar esta netpol tal como estaba habría cortado los dos. No se
+#    notaba porque el archivo no está listado en el kustomization —
+#    justamente el tipo de deuda que se cobra el día que sí lo esté.
+#  - el propio namespace: vmagent scrapea a todos, vmalert habla con
+#    vmsingle y alertmanager, alertmanager con el puente, el puente
+#    con ntfy, grafana con los tres stores, vector con los dos vlogs.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: observability
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-edge-trivy-and-intra
+  namespace: observability
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: infra-edge}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: trivy-system}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: jenkins-system}
+        - podSelector: {}          # intra-ns: toda la cañería interna

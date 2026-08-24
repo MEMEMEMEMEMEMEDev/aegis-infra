@@ -1,0 +1,83 @@
+# values vector 0.57.0 — el colector (design.md §4.1): DaemonSet (en
+# el nodo único, un pod) que lee stdout de pods → vlogs, y RUTEA las
+# líneas `AEGIS_EVENT ` de los builds ADEMÁS a vlogs-events
+# (jsonline, retención 1y) — CERO líneas tocadas en el Jenkinsfile:
+# el log estructurado del stage report ya era el contrato.
+#
+# Vector no trae sink nativo de VictoriaLogs en 0.57.0 (verificado
+# 2026-08-19 contra src/sinks del tag v0.57.0): logs por el endpoint
+# elasticsearch-compatible de vlogs (el camino que documenta
+# VictoriaMetrics), eventos por /insert/jsonline (el mismo endpoint
+# que usa la fase 85 para ingestar gates.jsonl).
+role: Agent
+fullnameOverride: vector
+
+customConfig:
+  data_dir: /vector-data-dir
+  api:
+    enabled: false
+  sources:
+    k8s_logs:
+      type: kubernetes_logs
+    metricas_propias:
+      type: internal_metrics
+  transforms:
+    # contrato del reloj (design.md §3.2, WSL2 post-suspend): el
+    # colector estampa SU timestamp además del emisor — ante
+    # conflicto, el del colector ordena y el del emisor informa:
+    marca_tiempo:
+      type: remap
+      inputs: [k8s_logs]
+      source: |
+        .ts_colector = now()
+    eventos:
+      type: filter
+      inputs: [marca_tiempo]
+      condition:
+        type: vrl
+        source: contains(string!(.message), "AEGIS_EVENT ")
+    eventos_json:
+      type: remap
+      inputs: [eventos]
+      source: |
+        payload, err = parse_json(replace(string!(.message), r'^(.*?)AEGIS_EVENT ', ""))
+        if err == null && is_object(payload) {
+          . = merge!(., object!(payload))
+        }
+        # mismo campo de stream que usa la fase 85 al ingestar el
+        # gates.jsonl (source=aegis-init): una sola convención por
+        # instancia para poder filtrar por origen:
+        .source = "jenkins-build"
+  sinks:
+    # TODOS los logs de pods → vlogs (retención corta por perfil):
+    vlogs:
+      type: elasticsearch
+      inputs: [marca_tiempo]
+      endpoints: ["http://vlogs.observability.svc:9428/insert/elasticsearch/"]
+      mode: bulk
+      api_version: v8
+      healthcheck: {enabled: false}
+      compression: gzip
+      query:
+        _msg_field: message
+        _time_field: timestamp
+        _stream_fields: kubernetes.pod_namespace,kubernetes.container_name
+    # SOLO los AEGIS_EVENT → vlogs-events (1y, auditoría):
+    vlogs_eventos:
+      type: http
+      inputs: [eventos_json]
+      uri: "http://vlogs-events.observability.svc:9428/insert/jsonline?_stream_fields=source&_time_field=ts_colector&_msg_field=message"
+      method: post
+      encoding: {codec: json}
+      framing: {method: newline_delimited}
+    # las métricas propias del colector, scrapeables por vmagent
+    # (job observability-stack — el Service del chart deriva el
+    # puerto 9598 de esta address):
+    metricas:
+      type: prometheus_exporter
+      inputs: [metricas_propias]
+      address: 0.0.0.0:9598
+
+resources:                      # fase-85 §10
+  requests: {cpu: 100m, memory: 128Mi}
+  limits: {cpu: 500m, memory: 512Mi}

@@ -3,5 +3,5 @@
 # PREGUNTE por stdin — y en una corrida desatendida eso es un cuelgue.
 rojo_1() {
     printf '\nvariable "variable_huerfana" {\n  type = string\n}\n' \
-        >> "$AEGIS_ROOT/semilla/plataforma/tofu/envs/cloudflare-tunnel/variables.tf"
+        >> "$AEGIS_ROOT/seed/platform/tofu/envs/cloudflare-tunnel/variables.tf"
 }

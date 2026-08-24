@@ -10,7 +10,7 @@ if python3 - "$AEGIS_ROOT" <<'EOF'
 import sys, yaml, pathlib
 root = pathlib.Path(sys.argv[1])
 ok = True; n = 0
-for f in (root/"semilla"/"canario"/"k8s").rglob("*.yaml"):
+for f in (root/"seed"/"canary"/"k8s").rglob("*.yaml"):
     for d in yaml.safe_load_all(f.open()):
         if not d or d.get("kind") != "Deployment": continue
         n += 1
@@ -26,7 +26,7 @@ for f in (root/"semilla"/"canario"/"k8s").rglob("*.yaml"):
                 print(f"FAIL {f.name}/{c['name']}: sin allowPrivilegeEscalation:false"); ok = False
             if "ALL" not in ((csc.get("capabilities") or {}).get("drop") or []):
                 print(f"FAIL {f.name}/{c['name']}: sin capabilities.drop [ALL]"); ok = False
-cf = (root/"semilla"/"canario"/"Containerfile").read_text()
+cf = (root/"seed"/"canary"/"Containerfile").read_text()
 import re
 if not re.search(r'^USER\s+\d+', cf, re.M):
     print("FAIL Containerfile sin USER numérico (runAsNonRoot fallaría en runtime)"); ok = False

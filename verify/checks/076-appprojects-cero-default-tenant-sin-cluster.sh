@@ -71,7 +71,7 @@ fi
 #    que no recorrió nada no es un veredicto.
 python3 - "$AEGIS_ROOT" <<'PY' || D76="$D76 hay Applications que referencian un AppProject que nadie define;"
 import os, re, sys
-raiz = os.path.join(sys.argv[1], "semilla", "plataforma", "k8s")
+raiz = os.path.join(sys.argv[1], "seed", "platform", "k8s")
 if not os.path.isdir(raiz):
     print(f"    no existe {raiz}: el check no puede opinar", file=sys.stderr)
     sys.exit(1)

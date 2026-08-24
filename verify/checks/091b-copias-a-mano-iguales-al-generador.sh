@@ -4,7 +4,7 @@ check() {
 # El canario no tiene contrato (es lo que prueba que el camino del
 # inquilino funciona, así que no puede depender de ese camino), pero
 # necesita los tres middlewares igual. Están escritos A MANO en su
-# ruteo.yaml, y tienen que ser byte a byte los que `aegis org` genera
+# routes.yaml, y tienen que ser byte a byte los que `aegis org` genera
 # para cualquier organización con contrato: si alguien toca el
 # generador y se olvida de la copia, el canario queda con la
 # protección vieja y nadie se entera.

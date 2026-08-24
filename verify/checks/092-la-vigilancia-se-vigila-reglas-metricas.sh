@@ -46,7 +46,7 @@ import json, re, sys, pathlib, yaml
 
 P = pathlib.Path(sys.argv[1])
 OBS = P / "k8s/base/observability"
-# En v2 el generador vivía DENTRO del artefacto (semilla/plataforma/
+# En v2 el generador vivía DENTRO del artefacto (seed/platform/
 # bin/). En v3 el código vive en el producto y la semilla es artefacto
 # puro (02 §1, V-134): el generador de sondas se busca en libexec/.
 GENERADOR = pathlib.Path(sys.argv[2])
@@ -152,7 +152,7 @@ for jf in sorted((P / "docs/protocols/templates").glob("Jenkinsfile*")):
         productores.setdefault(met, (str(jf.relative_to(P)), "cada build", PISO_BUILD))
 
 # ── 3. las reglas ───────────────────────────────────────────────────
-cm = yaml.safe_load((OBS / "reglas/vmalert-reglas.yaml").read_text())
+cm = yaml.safe_load((OBS / "rules/vmalert-rules.yaml").read_text())
 alertas = [(key, r["alert"], r["expr"])
            for key, cuerpo in cm["data"].items()
            for g in yaml.safe_load(cuerpo)["groups"]

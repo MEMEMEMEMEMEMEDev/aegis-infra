@@ -24,7 +24,7 @@ export AEGIS_ROOT
 # shellcheck source=../lib/paths.sh
 source "$AEGIS_ROOT/lib/paths.sh"
 
-uso() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/codigos-de-salida.txt"; }
+uso() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
 
 case "${1:-}" in
     seed|test-org|test-types) VERBO="$1"; shift ;;

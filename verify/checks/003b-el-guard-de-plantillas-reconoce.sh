@@ -1,7 +1,7 @@
 # titulo: el guard de plantillas reconoce todo placeholder que la semilla usa
 # origen: nuevo en v3 — el defecto del 2026-08-24
 check() {
-# `aegis app` rinde las plantillas de semilla/plantillas/ y después
+# `aegis app` rinde las plantillas de seed/templates/ y después
 # revisa que no quede ningún __X__ suelto: una plantilla que pide algo
 # que el comando no sabe derivar tiene que FRENAR ahí, no entregarle al
 # operador el repo de su app con el literal adentro.
@@ -21,8 +21,8 @@ check() {
 # artefacto.
 APP="$AEGIS_ROOT/libexec/aegis-app"
 [[ -r "$APP" ]] || { skip "no puedo ejercer el guard: falta libexec/aegis-app"; return; }
-[[ -d "$SEMILLA" ]] || { skip "no puedo ejercer el guard: no hay semilla/"; return; }
-CIEGOS="$(APP="$APP" VOCABULARIO="$SEMILLA" python3 - <<'PY' 2>/dev/null
+[[ -d "$SEED" ]] || { skip "no puedo ejercer el guard: no hay semilla/"; return; }
+CIEGOS="$(APP="$APP" VOCABULARIO="$SEED" python3 - <<'PY' 2>/dev/null
 import ast, os, re, sys, pathlib
 
 fuente = pathlib.Path(os.environ["APP"]).read_text(encoding="utf-8")

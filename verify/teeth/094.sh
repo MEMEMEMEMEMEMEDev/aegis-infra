@@ -3,9 +3,9 @@
 
 # saca del artefacto justo lo que el check dice medir
 rojo_1() {
-    grep -vE 'providers *= *{ *cloudflare *= *cloudflare\.access *}' "$AEGIS_ROOT/semilla/plataforma/tofu/envs/vps-lab/main.tf" > "$AEGIS_ROOT/semilla/plataforma/tofu/envs/vps-lab/main.tf.diente" \
-        && mv "$AEGIS_ROOT/semilla/plataforma/tofu/envs/vps-lab/main.tf.diente" "$AEGIS_ROOT/semilla/plataforma/tofu/envs/vps-lab/main.tf"
+    grep -vE 'providers *= *{ *cloudflare *= *cloudflare\.access *}' "$AEGIS_ROOT/seed/platform/tofu/envs/vps-lab/main.tf" > "$AEGIS_ROOT/seed/platform/tofu/envs/vps-lab/main.tf.diente" \
+        && mv "$AEGIS_ROOT/seed/platform/tofu/envs/vps-lab/main.tf.diente" "$AEGIS_ROOT/seed/platform/tofu/envs/vps-lab/main.tf"
 }
 
 # control: un cambio LEGÍTIMO no puede ponerlo rojo
-control_1() { printf '# comentario legitimo\n' >> "$AEGIS_ROOT/semilla/plataforma/tofu/envs/vps-lab/main.tf"; }
+control_1() { printf '# comentario legitimo\n' >> "$AEGIS_ROOT/seed/platform/tofu/envs/vps-lab/main.tf"; }

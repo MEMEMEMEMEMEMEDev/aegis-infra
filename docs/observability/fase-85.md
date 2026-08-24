@@ -1,6 +1,6 @@
 # Fase 85 — observabilidad (diseño fino; B2/B3/B4 implementan ESTO)
 
-Contrato: `init/phases/85-observabilidad.sh`, después de
+Contrato: `init/phases/85-observability.sh`, después de
 80-supply-chain. POR QUÉ 85: cuando corre, ya existe TODO lo que va
 a observar (registry con TLS, Jenkins con builds, Kyverno en
 Enforce, el túnel vivo) — una fase de observabilidad antes de sus
@@ -13,7 +13,7 @@ idempotente para `--only 85` sobre instancia viva.
 ## 1. Layout en la semilla
 
 ```
-semilla/plataforma/k8s/base/observability/
+seed/platform/k8s/base/observability/
   namespace.yaml            # ns `observability` EXPLÍCITO y PRIMERO
                             # (corrida #7 bug A: CreateNamespace no es
                             # confiable en apps kustomize — patrón
@@ -23,7 +23,7 @@ semilla/plataforma/k8s/base/observability/
                             # ntfy-puente-token.enc.yaml (los cifra la 85)
   ntfy.yaml                 # Deployment+Service+PVC 1Gi+ConfigMap (crudo)
   alertmanager.yaml         # Deployment+Service+ConfigMap (crudo)
-  ntfy-puente.yaml          # Deployment+Service del ntfy-alertmanager (crudo)
+  ntfy-bridge.yaml          # Deployment+Service del ntfy-alertmanager (crudo)
   blackbox.yaml             # Deployment+Service+ConfigMap módulos (crudo)
   configmap-aegis-ca.yaml   # PEM del CA para blackbox (placeholder
                             # __OBS_CA_PEM__, clase-GENERADO, dueño: fase 85)
@@ -37,9 +37,9 @@ semilla/plataforma/k8s/base/observability/
                             # target nuevo = entry nueva, no magia)
   vmalert/values.yaml       # notifier → alertmanager
   vlogs/values.yaml         # -retentionPeriod=__OBS_RETENCION_LOGS__
-  vlogs-eventos/values.yaml # -retentionPeriod=1y (fijo ambos perfiles)
+  vlogs-events/values.yaml # -retentionPeriod=1y (fijo ambos perfiles)
   vector/values.yaml        # kubernetes_logs → vlogs; route AEGIS_EVENT
-                            # → vlogs-eventos (jsonline)
+                            # → vlogs-events (jsonline)
   grafana/values.yaml       # persistence OFF (design.md §4.1: sin PVC no
                             # hay dónde acumular estado-a-click),
                             # datasources provisionados, sidecar ON,
@@ -64,7 +64,7 @@ OMITIDO, labels aegis.dev/*, placeholders __GH_OWNER__/…):
 | vmagent | chart victoria-metrics-agent + $values | observability |
 | vmalert | chart victoria-metrics-alert + $values | observability |
 | vlogs | chart victoria-logs-single + $values | observability |
-| vlogs-eventos | chart victoria-logs-single + $values (release aparte) | observability |
+| vlogs-events | chart victoria-logs-single + $values (release aparte) | observability |
 | vector | chart vector + $values | observability |
 | grafana | chart grafana + $values | observability |
 
@@ -224,7 +224,7 @@ Enfermedad E por el camino largo.
 ## 6. Orden de ejecución de la fase (y sus porqués)
 
 1. `platform_repo_sync` (CR-6: el clone puede estar detrás).
-2. TRAER DE LA SEMILLA lo que la instancia no tenga — la regla de
+2. TRAER DE LA SEED lo que la instancia no tenga — la regla de
    RUTA.md («entra por semilla/+init/ o no entró») aplicada al
    caso instancia-viva, donde la fase 10 NO re-siembra (platform/
    con .git es la verdad):
@@ -257,7 +257,7 @@ Enfermedad E por el camino largo.
    crudos: sin ns no hay dónde, sin Secret grafana no arranca) —
    con `argo_secrets_gate observability-base <timeout> <sha>` (F-B:
    Synced a la revisión RECIÉN pusheada, no a una vieja), luego los
-   stores (`vmsingle`, `vlogs`, `vlogs-eventos`), luego colectores
+   stores (`vmsingle`, `vlogs`, `vlogs-events`), luego colectores
    (`vmagent`, `vector`), luego `vmalert`, último `grafana` —
    productores antes que consumidores, el mismo orden-como-mecanismo
    de D5. `argo_sync` canónico de common.sh, jamás uno local.
@@ -268,7 +268,7 @@ Enfermedad E por el camino largo.
     re-corre, pero `wait_rollout jenkins-system` sí (convergencia
     antes de medir, la familia nº1).
 11. Ingesta del histórico: `curl -T $AEGIS_STATE_DIR/gates.jsonl`
-    al endpoint jsonline de vlogs-eventos (con _stream
+    al endpoint jsonline de vlogs-events (con _stream
     source=aegis-init). Best-effort NO: acá el endpoint DEBE
     existir — si falla, falla la fase (a diferencia del push por
     gate futuro de hooks.md, que es best-effort porque corre antes
@@ -277,7 +277,7 @@ Enfermedad E por el camino largo.
 
 ## 7. Los enchufes que esta fase aplica (hooks.md, ejecutado)
 
-En la SEMILLA los enchufes quedan puestos de fábrica (B2 edita esos
+En la SEED los enchufes quedan puestos de fábrica (B2 edita esos
 archivos); en instancia viva la fase los agrega con guard
 estructural — en fresh son no-op. Presupuesto por archivo:
 
@@ -303,11 +303,11 @@ estructural — en fresh son no-op. Presupuesto por archivo:
 |---|---|---|
 | obs-metricas-fluyen | query PromQL a vmsingle: `count(up==1)` ≥ N targets esperados | que vmagent scrapea DE VERDAD; gate_diag: lista de `up==0` con labels — el target caído por netpol se ve acá y no 3 días después |
 | obs-logs-fluyen | query a vlogs: líneas con ts reciente > 0 | Vector → vlogs de punta a punta |
-| obs-eventos-ingestados | count en vlogs-eventos ≥ nº de líneas de gates.jsonl | la ingesta del paso 11 aterrizó (Synced no prueba datos — misma lección que F-B) |
+| obs-eventos-ingestados | count en vlogs-events ≥ nº de líneas de gates.jsonl | la ingesta del paso 11 aterrizó (Synced no prueba datos — misma lección que F-B) |
 | obs-cert-servido-medido | `probe_ssl_earliest_cert_expiry{instance=~"registry.*"} > 0` | B11: el blackbox mide lo SERVIDO; >0 = handshake real contra el CA |
 | obs-deadman-firing | API de vmalert: alerta Deadman en estado firing | la regla evalúa |
 | obs-cadena-alerta-canal | poll al topic de ntfy (`/aegis-alertas/json?poll=1`, con la credencial del operador): el heartbeat LLEGÓ | EL gate de la fase: cadena regla→Alertmanager→puente→ntfy completa. Vigilar al vigía se MIDE en el nacimiento, no se declara (Enfermedad E) |
-| obs-grafana-provisionado | /api/health + count de datasources ≥ 3 (vmsingle, vlogs, vlogs-eventos), in-cluster vía Service | el provisioning desde git aterrizó; 0 datasources con pod Healthy es exactamente el fallo que «Healthy» no ve |
+| obs-grafana-provisionado | /api/health + count de datasources ≥ 3 (vmsingle, vlogs, vlogs-events), in-cluster vía Service | el provisioning desde git aterrizó; 0 datasources con pod Healthy es exactamente el fallo que «Healthy» no ve |
 | obs-grafana-tras-access | `edge_origen_responde` (lib/access.sh) contra grafana.«dom» | distingue «origen contestó» de «Access interceptó» — jamás un curl desnudo contra hostname protegido (check 90) |
 | obs-ntfy-publico-responde | curl anónimo a ntfy.«dom»: alcanzable, y PUBLICAR sin token → 403 | el canal llega al teléfono Y el deny-all está activo (un ntfy abierto sería spam-relay con nuestro dominio) |
 
@@ -319,12 +319,12 @@ estructural — en fresh son no-op. Presupuesto por archivo:
 - --only 85 re-corrido: gen_or_restore reusa credenciales, las
   copias/entries tienen guard, el render es no-op, argo_sync es
   idempotente, la ingesta del histórico re-sube el gates.jsonl
-  (duplicados en vlogs-eventos: aceptado y documentado — es
+  (duplicados en vlogs-events: aceptado y documentado — es
   historia de bootstraps, se deduplica en query por ts+gate; la
   alternativa, estado de «ya ingesté hasta acá», es más mecanismo
   que el problema).
 - `--reset-state` borra gates.jsonl (deuda conocida de etapa C):
-  la ingesta previa en vlogs-eventos SOBREVIVE — la fase convirtió
+  la ingesta previa en vlogs-events SOBREVIVE — la fase convirtió
   el estado local frágil en historia remota, de paso.
 - Instancia viva cuyo appprojects.yaml divergió a mano: la entry
   guardada agrega, nunca reescribe; si el archivo no parsea, el
@@ -343,7 +343,7 @@ targets, un puñado de builds/día) — no los limits, que no reservan:
 | vmagent | 60–100 Mi | 64Mi / 256Mi |
 | vmalert | 30–50 Mi | 32Mi / 128Mi |
 | vlogs | 60–120 Mi | 64Mi / 256Mi |
-| vlogs-eventos | 30–60 Mi | 32Mi / 128Mi |
+| vlogs-events | 30–60 Mi | 32Mi / 128Mi |
 | vector | 100–200 Mi | 128Mi / 512Mi |
 | grafana | 150–250 Mi | 128Mi / 512Mi |
 | alertmanager | 30–50 Mi | 32Mi / 128Mi |
@@ -351,7 +351,7 @@ targets, un puñado de builds/día) — no los limits, que no reservan:
 | blackbox | 20–30 Mi | 16Mi / 64Mi |
 | **total** | **~0.7–1.2 Gi** | requests ~0.7Gi / limits ~2.6Gi |
 
-Disco: vmsingle 5Gi, vlogs 5Gi, vlogs-eventos 1Gi, ntfy 1Gi (~12Gi
+Disco: vmsingle 5Gi, vlogs 5Gi, vlogs-events 1Gi, ntfy 1Gi (~12Gi
 PVC). Es el costo real de dejar de operar ciego en dev y el
 operador lo aceptó con el número delante (design.md §4.1). Si el
 notebook lo desmiente en la práctica, el recorte es por PERFIL
@@ -375,7 +375,7 @@ solo después — entra la nota B5→futuro (aegis-chequeo como métrica).
 
 - La semilla NO tiene module.access: init/phases/25 exige los
   outputs access_service_token_* que solo el tofu de la INSTANCIA
-  produce (#76/#87 no volvieron a semilla/plataforma/tofu/). El
+  produce (#76/#87 no volvieron a seed/platform/tofu/). El
   grafana.tf de §5 referencia políticas de un módulo que en la
   semilla no existe. Saldar ese retorno es prerequisito de B4 (y
   hermano del «aegis-org atrasado» que RUTA A7 ya anota).

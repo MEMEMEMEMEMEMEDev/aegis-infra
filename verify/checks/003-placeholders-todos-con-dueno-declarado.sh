@@ -16,7 +16,7 @@ check() {
 # una cosa nueva el check mentiría en la dirección cómoda.
 #
 # El barrido es de TODO semilla/ y por CONTENIDO, no por extensión: el
-# 2026-08-24 este check barría solo semilla/plataforma/ y solo
+# 2026-08-24 este check barría solo seed/platform/ y solo
 # yaml/yml/tf/tpl, así que las plantillas (de las que nace el repo de
 # cada app: go.mod, main.go, Containerfile, README.md) no las miraba
 # nadie. Es la misma ceguera por extensión del check 1.
@@ -34,7 +34,7 @@ if [[ -z "$PLANTILLA" ]]; then
     return
 fi
 CLASE_PLANTILLA="$(printf '%s\n' $PLANTILLA | sed -e 's/^__//' -e 's/__$//' | paste -sd'|')"
-ORPHANS="$(grep -rhoI '__[A-Z0-9_]\+__' "$SEMILLA" 2>/dev/null \
+ORPHANS="$(grep -rhoI '__[A-Z0-9_]\+__' "$SEED" 2>/dev/null \
   | sort -u \
   | grep -v -E "^__($CLASE_PLANTILLA)__\$" \
   | grep -v -E '^__(GH_OWNER|PLATFORM_REPO|APP_REPO|ROOT_DOMAIN|REGISTRY_CLUSTER_IP|ACME_EMAIL|AEGIS_PROFILE|OBS_RETENCION_METRICAS|OBS_RETENCION_LOGS|OBS_CF_CAIDO_FOR|OBS_DEADMAN_REPEAT|AGE_PUBLIC|COSIGN_PUB|AEGIS_CA_PEM|OBS_CA_PEM|OBS_NTFY_OPERADOR_HASH|OBS_NTFY_PUENTE_HASH|CF_TUNNEL_TOKEN|SSH_PUBKEY_RSA|SSH_PUBKEY_ED25519)__$' \

@@ -118,9 +118,9 @@ redis_auth|normal|30-argocd|-|ver_redis|-|ArgoCD deja de responder
 cf_api_token|normal|15-terceros|jenkins-secrets|ver_cf_api|Cloudflare|tofu no puede aplicar el borde
 cf_dns_token|normal|15-terceros|cert-manager-issuers|ver_cf_dns|Cloudflare|cert-manager no renueva certificados
 cf_access_token|normal|15-terceros|-|ver_cf_access|Cloudflare|tofu no puede gestionar Access: el plano de operador queda como esté
-grafana_admin_pass|normal|85-observabilidad|observability-base|ver_grafana_admin|-|no se entra a Grafana con su login propio (Access sigue delante)
-ntfy_puente_token|normal|85-observabilidad|observability-base|ver_ntfy_puente|-|las alertas dejan de llegar: el puente no puede publicar en ntfy
-ntfy_operador_pass|normal|85-observabilidad|observability-base|ver_ntfy_operador|teléfono|la app del teléfono deja de leer las alertas hasta recargar la credencial nueva
+grafana_admin_pass|normal|85-observability|observability-base|ver_grafana_admin|-|no se entra a Grafana con su login propio (Access sigue delante)
+ntfy_puente_token|normal|85-observability|observability-base|ver_ntfy_puente|-|las alertas dejan de llegar: el puente no puede publicar en ntfy
+ntfy_operador_pass|normal|85-observability|observability-base|ver_ntfy_operador|teléfono|la app del teléfono deja de leer las alertas hasta recargar la credencial nueva
 registry_pass|delegada|-|-|ver_registry|-|ningún pod puede tirar imágenes
 cosign_key|irreducible|-|-|-|-|invalida TODAS las firmas ya emitidas
 cosign_pass|irreducible|-|-|-|-|invalida TODAS las firmas ya emitidas
@@ -547,7 +547,7 @@ ver_access_st() {
 # tabla, y el despacho por NOMBRE (no por clase) es el precedente que
 # cerró el service token de Access — un genérico "rota lo de la 85"
 # haría que la credencial nueva de mañana rotara la equivocada en
-# silencio. Rotarlas re-corre `--only 85-observabilidad`, que converge
+# silencio. Rotarlas re-corre `--only 85-observability`, que converge
 # sobre instancia viva (los hashes de ntfy se re-derivan y REEMPLAZAN
 # cuando el password del store ya no verifica — sin eso la rotación
 # sería un no-op silencioso).
@@ -601,7 +601,7 @@ ver_ntfy_puente() {
         -o jsonpath='{.data.config}' 2>/dev/null | base64 -d \
         | awk '$1 == "password" {print $2; exit}' | tr -d '\n' > "$p" \
         || { rm -f "$p"; return 2; }
-    [[ -s "$p" ]] || { rm -f "$p"; log_warn "ntfy-puente-token sin línea 'password' en el scfg — ¿cambió el contrato de ntfy-puente.yaml?"; return 3; }
+    [[ -s "$p" ]] || { rm -f "$p"; log_warn "ntfy-puente-token sin línea 'password' en el scfg — ¿cambió el contrato de ntfy-bridge.yaml?"; return 3; }
     printf 'machine ntfy.%s login puente password %s\n' \
         "$ROOT_DOMAIN" "$(cat "$p")" > "$p.netrc"
     chmod 600 "$p.netrc"

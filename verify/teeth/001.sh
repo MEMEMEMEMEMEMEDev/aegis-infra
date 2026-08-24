@@ -22,3 +22,12 @@ rojo_3() {
 
 # control: un comentario nuevo no es un error de sintaxis
 control_1() { printf '\n# comentario legitimo\n' >> "$AEGIS_ROOT/init/phases/20-k3s.sh"; }
+
+# un módulo de librería —sin shebang, porque no es un comando— con la
+# sintaxis rota. Hasta el 2026-08-24 este diente NO habría mordido: el
+# lenguaje salía solo del shebang, y los seis módulos de lib/aegis/ se
+# chequeaban por casualidad, según si su docstring mencionaba la
+# palabra «python». 5.800 renglones cubiertos por azar.
+rojo_4() {
+    printf '\ndef roto(:\n' >> "$AEGIS_ROOT/lib/aegis/markers.py"
+}

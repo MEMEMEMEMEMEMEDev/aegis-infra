@@ -1,6 +1,6 @@
 """aegis-org — el contrato de una organización, materializado.
 
-Implementa docs/protocols/organizacion.md. Lee un contrato de
+Implementa docs/protocols/organization.md. Lee un contrato de
 `orgs/<nombre>.yaml` y escribe los manifiestos en
 `k8s/organizations/org-<nombre>/`.
 
@@ -28,7 +28,7 @@ try:
 except ImportError:
     sys.exit("falta pyyaml (python3-yaml)")
 
-from . import cli, marcas, rutas
+from . import cli, markers, paths
 
 # ── Clase E: ningún nombre de comando escrito a mano ─────────────────
 # En v2 este archivo tenía 15 (y el árbol entero ~155). Cada uno es una
@@ -52,16 +52,17 @@ CMD_SYNC_ROOT  = cli.cmd("sync root")
 # avisado: es la «dependencia invisible a un grep» de C1/C2 del
 # registro, con fecha. Ahora lo decide un solo resolvedor, el mismo
 # que usa bash (lib/paths.sh).
-RAIZ = str(rutas.platform_dir())
+RAIZ = str(paths.platform_dir())
 DIR_ORGS = os.path.join(RAIZ, "orgs")
 DIR_K8S = os.path.join(RAIZ, "k8s", "organizations")
-PLANES = os.path.join(RAIZ, "planes.yaml")
+PLANES = os.path.join(RAIZ, "plans.yaml")
 EDGE = os.path.join(RAIZ, "edge.yaml")
-SERVICIOS = os.path.join(RAIZ, "servicios.yaml")
-RUTEO = os.path.join(RAIZ, "ai", "ruteo.yaml")
-TAREAS_AI = os.path.join(RAIZ, "ai", "tareas.yaml")
+SERVICIOS = os.path.join(RAIZ, "services.yaml")
+RUTEO = os.path.join(RAIZ, "ai", "routes.yaml")
+TAREAS_AI = os.path.join(RAIZ, "ai", "tasks.yaml")
 REGISTRO_AI = os.path.join(RAIZ, "k8s", "base", "ai-system", "registro.yaml")
-RUTEO_K8S = os.path.join(RAIZ, "k8s", "base", "ai-system", "ruteo.yaml")
+RUTEO_K8S = os.path.join(RAIZ, "k8s", "base", "ai-system", "routes.yaml")
+DIR_AI = os.path.join(RAIZ, "k8s", "base", "ai-system")
 TENANTS_K8S = os.path.join(RAIZ, "k8s", "argocd-apps", "tenants.yaml")
 APROVISIONAR_JS = os.path.join(RAIZ, "ai", "aprovisionar-bucket.mjs")
 DIR_GARAGE = os.path.join(RAIZ, "k8s", "base", "garage-system")
@@ -82,12 +83,12 @@ def _repo_ops():
     se renderiza) y además sería justo lo que el check 86 prohíbe: una
     instancia horneada en el código.
     """
-    c = rutas.leer_conf()
+    c = paths.leer_conf()
     dueno, repo = c.get("GH_OWNER"), c.get("PLATFORM_REPO")
     if not dueno or not repo:
         raise SystemExit(
             f"no puedo derivar el repo de plataforma: falta GH_OWNER/PLATFORM_REPO "
-            f"en {rutas.conf()} (¿corriste el wizard?)")
+            f"en {paths.conf()} (¿corriste el wizard?)")
     return f"git@github.com:{dueno}/{repo}.git"
 MAIN_TF = os.path.join(RAIZ, "tofu", "envs", "cloudflare-tunnel", "main.tf")
 JENKINS_VALUES = os.path.join(RAIZ, "k8s", "base", "platform", "jenkins", "values.yaml")
@@ -99,7 +100,7 @@ VERSION_CONTRATO = 1
 NOMBRE_VALIDO = re.compile(r"^[a-z][a-z0-9-]{2,29}$")
 TIPOS = {"estatico", "http", "postgres", "worker"}
 # Los que salen de una imagen que alguien COMPILA Y FIRMA. El resto los
-# provee la plataforma (postgres sale de servicios.yaml), y esa
+# provee la plataforma (postgres sale de services.yaml), y esa
 # diferencia es la que decide si el contrato necesita un `repo`.
 TIPOS_CON_IMAGEN = {"estatico", "http", "worker"}
 # `internet` entró el 2026-08-21 con org-shop: su API habla con Webpay
@@ -169,11 +170,11 @@ def _coherencia_de_tipo(n, tipo, s):
 
     elif tipo == "postgres":
         # Lo provee la PLATAFORMA: imagen firmada, disco, credencial y
-        # políticas salen de servicios.yaml, no de un repo del tenant.
+        # políticas salen de services.yaml, no de un repo del tenant.
         if tiene("repo"):
             raise Invalido(
                 f"servicio {n!r} es postgres y declara `repo`.\n"
-                f"  Las bases las provee la plataforma (servicios.yaml): imagen\n"
+                f"  Las bases las provee la plataforma (services.yaml): imagen\n"
                 f"  firmada, disco y credencial. Un repo acá significa que se quiso\n"
                 f"  otra cosa.")
         for campo in ("puerto", "publico"):
@@ -189,7 +190,7 @@ def _coherencia_de_tipo(n, tipo, s):
 
 
 def capacidades():
-    """Las capacidades que se pueden pedir son las que ai/ruteo.yaml sabe
+    """Las capacidades que se pueden pedir son las que ai/routes.yaml sabe
     servir HOY, no una lista escrita acá.
 
     La versión anterior tenía el conjunto a mano e incluía `embeddings` y
@@ -257,7 +258,7 @@ def validar(c, planes):
     cuota = _exige(c, "cuota", "contrato")
     if cuota not in planes["cuota"]:
         raise Invalido(f"cuota {cuota!r} no existe. Hay: {', '.join(sorted(planes['cuota']))}\n"
-                       f"  Si hace falta una nueva, se AGREGA UN PLAN en planes.yaml.\n"
+                       f"  Si hace falta una nueva, se AGREGA UN PLAN en plans.yaml.\n"
                        f"  No se ponen números en el contrato (§3 del protocolo).")
 
     alm = c.get("almacenamiento") or {}
@@ -292,7 +293,7 @@ def validar(c, planes):
                     f"  proveedores (§5 del protocolo). Si ve un nombre de modelo\n"
                     f"  acá, el contrato está mal escrito.\n"
                     f"  Si la capacidad es la correcta y falta el engine, se agrega\n"
-                    f"  en ai/ruteo.yaml DESPUÉS de implementarlo — no antes.")
+                    f"  en ai/routes.yaml DESPUÉS de implementarlo — no antes.")
 
     servicios = _exige(c, "servicios", "contrato")
     if not servicios:
@@ -304,7 +305,7 @@ def validar(c, planes):
         # contrato podía declarar `version: "17"` en su base y el
         # generador la ignoraba, dejando a quien lo escribió creyendo
         # que había fijado algo. La versión de un servicio provisto por
-        # la plataforma la decide servicios.yaml, y para eso está.
+        # la plataforma la decide services.yaml, y para eso está.
         _solo(s, {"nombre", "tipo", "repo", "puerto", "publico", "usa"}, "servicios[]")
         n = _exige(s, "nombre", "servicios[]")
         if n in vistos:
@@ -331,7 +332,7 @@ def validar(c, planes):
     #
     # Decía "sin repo no hay nada que desplegar", y era cierto cuando
     # todo servicio salía de un build. Desde #41 dejó de serlo: un
-    # `postgres` lo provee la plataforma desde servicios.yaml, y un
+    # `postgres` lo provee la plataforma desde services.yaml, y un
     # bucket lo aprovisiona un Job. Un contrato de pura infraestructura
     # se rechazaba con una razón que ya no era verdad.
     #
@@ -346,7 +347,7 @@ def validar(c, planes):
             f"estos servicios se CONSTRUYEN: {cuales}.\n"
             f"  Los tipos {', '.join(sorted(TIPOS_CON_IMAGEN))} salen de una imagen que\n"
             f"  alguien tiene que compilar y firmar. `postgres` no: lo provee la\n"
-            f"  plataforma desde servicios.yaml, y para eso no hace falta repo.")
+            f"  plataforma desde services.yaml, y para eso no hace falta repo.")
 
     # ── dominio: solo si algo es PÚBLICO ──────────────────────────
     publicos = [s["nombre"] for s in servicios if s.get("publico")]
@@ -392,10 +393,10 @@ def validar(c, planes):
 # ──────────────────────────────────────────────────────────────────
 
 # La cabecera de lo derivado y el resto de los centinelas viven en
-# lib/aegis/marcas.py: el que los ESCRIBE y el que los RECONOCE tienen
+# lib/aegis/markers.py: el que los ESCRIBE y el que los RECONOCE tienen
 # que usar la misma cadena, y en v2 estaba copiada ocho veces (clase B
 # del registro, regla 5.6).
-CABECERA = marcas.CABECERA
+CABECERA = markers.CABECERA
 
 
 def _hash(texto):
@@ -445,7 +446,7 @@ metadata:
   name: {ns}-quota
   namespace: {ns}
 spec:
-  # Plan `{c["cuota"]}` de planes.yaml. Los números NO se editan acá:
+  # Plan `{c["cuota"]}` de plans.yaml. Los números NO se editan acá:
   # se cambia el plan, o se le cambia la cuota al contrato.
   hard:""")
     for k in ("requests.cpu", "requests.memory", "limits.cpu", "limits.memory",
@@ -478,8 +479,8 @@ imagePullSecrets:
 def render_datos(c, h):
     """Los servicios que provee la PLATAFORMA, no un repo del tenant.
 
-    Hoy solo postgres. Sale de servicios.yaml, que es la tabla de "con
-    qué se cumple cada tipo" — el mismo papel que ai/ruteo.yaml cumple
+    Hoy solo postgres. Sale de services.yaml, que es la tabla de "con
+    qué se cumple cada tipo" — el mismo papel que ai/routes.yaml cumple
     para las capacidades de AI.
     """
     bases = [s for s in c["servicios"] if s["tipo"] == "postgres"]
@@ -500,7 +501,7 @@ def render_datos(c, h):
 # tocar a la vecina, y el costo en RAM de un postgres ocioso es
 # despreciable frente a esa garantía.
 #
-# La imagen va POR DIGEST (servicios.yaml). Con un tag, Kyverno le
+# La imagen va POR DIGEST (services.yaml). Con un tag, Kyverno le
 # agregaría el digest al admitir y desired != live para siempre; la
 # salida obvia —ignoreDifferences sobre la imagen— APAGA el auto-sync.
 # Con el digest en git la mutación es un no-op. Es el hallazgo #36."""]
@@ -1090,7 +1091,7 @@ resources:
     if any(s["tipo"] == "postgres" for s in c["servicios"]):
         partes.append("  - datos.yaml")
     if c.get("dominio") and any(s.get("publico") for s in c["servicios"]):
-        partes.append("  - ruteo.yaml")
+        partes.append("  - routes.yaml")
     if secretos:
         partes.append("generators:\n  - secret-generator.yaml")
     return "\n".join(partes) + "\n"
@@ -1146,7 +1147,7 @@ def renderizar(c, planes, crudo):
     if (datos := render_datos(c, h)) is not None:
         salida["datos.yaml"] = datos
     if (ruteo := render_ruteo(c, h)) is not None:
-        salida["ruteo.yaml"] = ruteo
+        salida["routes.yaml"] = ruteo
     if secretos:
         salida["secret-generator.yaml"] = render_secret_generator(c, h, secretos)
     return salida, secretos
@@ -1157,7 +1158,7 @@ def renderizar(c, planes, crudo):
 # ──────────────────────────────────────────────────────────────────
 
 def _sin_hash(t):
-    return marcas.sin_hash(t)
+    return markers.sin_hash(t)
 
 
 def aplicar(ruta, escribir):
@@ -1191,7 +1192,7 @@ def aplicar(ruta, escribir):
         # I3: si el archivo fue editado a mano, negarse y mostrar qué
         # cambió. La salida es el contrato, no el archivo — pero pisar
         # el trabajo de alguien sin mostrarlo es peor que no generar.
-        if marcas.es_generado(viejo) and _sin_hash(viejo) != _sin_hash(nuevo):
+        if markers.es_generado(viejo) and _sin_hash(viejo) != _sin_hash(nuevo):
             marca_vieja = [l for l in viejo.splitlines() if l.startswith("# hash:")]
             marca_nueva = [l for l in nuevo.splitlines() if l.startswith("# hash:")]
             if marca_vieja == marca_nueva:
@@ -1263,8 +1264,8 @@ PATRON_HOSTNAMES = re.compile(r"^(\s*)public_hostnames\s*=\s*\[[^\]]*\]", re.M)
 
 def etiquetas_del_borde():
     edge = yaml.safe_load(open(EDGE, encoding="utf-8"))
-    raiz = edge["dominio_raiz"]
-    etiquetas = list(edge.get("plataforma") or [])
+    raiz = edge["root_domain"]
+    etiquetas = list(edge.get("platform") or [])
     de_contratos = []
     for nombre in sorted(os.listdir(DIR_ORGS)):
         if not nombre.endswith((".yaml", ".yml")):
@@ -1489,8 +1490,8 @@ def migrar(rutas, destino):
               f"  Una versión nueva se justifica SOLO si cambia el contrato (§8).\n"
               f"  Cambiar los números de un plan, agregar una capacidad al ruteo o\n"
               f"  cambiar con qué se implementa un tipo NO son versión nueva: por\n"
-              f"  eso viven fuera del contrato, en planes.yaml, ai/ruteo.yaml y\n"
-              f"  servicios.yaml.", file=sys.stderr)
+              f"  eso viven fuera del contrato, en plans.yaml, ai/routes.yaml y\n"
+              f"  services.yaml.", file=sys.stderr)
         return 1
 
     rc = 0
@@ -1523,8 +1524,8 @@ def migrar(rutas, destino):
 #
 # Tres fuentes, un archivo:
 #
-#   ai/ruteo.yaml   -> capacidades (con qué se sirve cada promesa)
-#   planes.yaml     -> planes (los techos, con nombre)
+#   ai/routes.yaml   -> capacidades (con qué se sirve cada promesa)
+#   plans.yaml     -> planes (los techos, con nombre)
 #   orgs/*.yaml     -> tenants (qué plan tiene cada organización)
 #
 # El mapa tenant->plan se DERIVA de los contratos y no se escribe a
@@ -1574,7 +1575,7 @@ def registro_ai_json():
 
       del contrato   el nombre de la tarea, su capacidad, su prompt y
                      —lo que de verdad había que derivar— el TENANT
-      de ai/tareas.yaml   la clase y los topes numéricos
+      de ai/tasks.yaml   la clase y los topes numéricos
 
     El tenant era el acoplamiento peligroso. Hasta #60 había que
     acordarse de escribirlo a mano en registro.yaml, y si faltaba el
@@ -1584,7 +1585,7 @@ def registro_ai_json():
 
     Los números NO se derivan y es deliberado: son ajuste fino por tarea
     y el contrato no tiene forma honesta de expresarlos sin volverse un
-    archivo de configuración. Mismo criterio que planes.yaml.
+    archivo de configuración. Mismo criterio que plans.yaml.
     """
     cfg = yaml.safe_load(open(TAREAS_AI, encoding="utf-8"))
     clases = cfg.get("clases") or {}
@@ -1609,12 +1610,12 @@ def registro_ai_json():
             if clase not in clases:
                 raise Invalido(
                     f"la tarea {clave!r} usa la clase {clase!r}, que no está en\n"
-                    f"  ai/tareas.yaml. Las que hay: {', '.join(sorted(clases))}")
+                    f"  ai/tasks.yaml. Las que hay: {', '.join(sorted(clases))}")
             cap = tarea["capacidad"]
             if cap not in caps:
                 raise Invalido(
                     f"la tarea {clave!r} pide la capacidad {cap!r}, que no está en\n"
-                    f"  ai/ruteo.yaml. Las que hay: {', '.join(sorted(caps))}")
+                    f"  ai/routes.yaml. Las que hay: {', '.join(sorted(caps))}")
             # Una tarea del carril CPU (clase `cpu`, #26) NO lleva
             # prompt: no genera texto. Se exige la coherencia en los dos
             # sentidos — un prompt en una tarea de embeddings es alguien
@@ -1661,8 +1662,8 @@ def render_registro_ai():
 # hash: {h}
 #
 # Sale de `ai.tareas` de cada contrato en orgs/ (nombre, capacidad,
-# prompt y el TENANT autorizado) + ai/tareas.yaml (clase y topes) +
-# ai/ruteo.yaml (qué engine sirve cada capacidad).
+# prompt y el TENANT autorizado) + ai/tasks.yaml (clase y topes) +
+# ai/routes.yaml (qué engine sirve cada capacidad).
 #
 # LOS PROMPTS NO ESTÁN ACÁ: son contenido escrito a mano y viven en
 # prompts.yaml, al lado. Mezclarlos garantizaba que el generador
@@ -1683,6 +1684,9 @@ data:
 
 
 def aplicar_registro_ai(escribir):
+    rc = _sin_subsistema_ai("registro de AI")
+    if rc is not None:
+        return rc
     nuevo = render_registro_ai()
     print(f"\nregistro de AI  {gris}(k8s/base/ai-system/registro.yaml){fin}")
     try:
@@ -1705,7 +1709,7 @@ def render_ruteo_k8s():
     return f"""# GENERADO por {CMD_ORG} — no editar a mano.
 # hash: {h}
 #
-# Sale de ai/ruteo.yaml (capacidades) + planes.yaml (planes) + el
+# Sale de ai/routes.yaml (capacidades) + plans.yaml (planes) + el
 # `ai.plan` de cada contrato en orgs/ (tenants).
 #
 # Para cambiarlo se edita la FUENTE y se corre `{CMD_ORG_APPLY}`.
@@ -1748,7 +1752,7 @@ def render_tenants():
         c = yaml.safe_load(open(os.path.join(DIR_ORGS, nombre), encoding="utf-8")) or {}
         orgs.append(c["organizacion"])
 
-    partes = [marcas.BANNER + f"""
+    partes = [markers.BANNER + f"""
 # Una Application por CONTRATO en orgs/. Se rederiva en cada
 # `{CMD_ORG_APPLY}`, así que agregar una organización es escribir
 # su contrato y nada más.
@@ -1862,7 +1866,7 @@ def render_appprojects():
         if repos:
             proyectos.append((c["organizacion"], repos))
 
-    partes = [marcas.BANNER + f"""
+    partes = [markers.BANNER + f"""
 # Un AppProject por CONTRATO que declara repo. Se rederiva en cada
 # `{CMD_ORG_APPLY}`.
 #
@@ -1930,7 +1934,7 @@ spec:
     #
     # La única forma de acotarlo por kind es que el kind no le
     # pertenezca: el ruteo lo deriva la plataforma del contrato
-    # (ruteo.yaml, App org-{org}) y acá se le quita la lapicera.
+    # (routes.yaml, App org-{org}) y acá se le quita la lapicera.
     - {{group: traefik.io, kind: IngressRoute}}
     # Y el Middleware por el MISMO motivo, agregado con #81/#90
     # (2026-08-13). El ruteo derivado engancha tres middlewares por
@@ -2030,7 +2034,7 @@ def render_argocd_secretgen():
     # quién la use, y un secreto que nadie consume es superficie sin
     # contrapartida (I4).
     lineas = [
-        *marcas.MARCO,
+        *markers.MARCO,
         "# REGLA TEMPORAL (corrida #4, bug que frenó la fase 35): esta App",
         "# sincroniza en fase 35 — un entry cuyo .enc.yaml se genera en una fase",
         "# POSTERIOR rompe el build ENTERO de kustomize (es atómico) y NINGÚN",
@@ -2155,7 +2159,7 @@ def render_garage_kustomization():
         # existe cuando alguna organización pidió bucket.
         recursos.append("aprovisionar.yaml")
     lineas = [
-        *marcas.MARCO,
+        *markers.MARCO,
         "# Sale del conjunto de contratos: `aprovisionar.yaml` se lista solo",
         "# cuando alguna organización declaró `almacenamiento.bucket`, porque",
         "# kustomize falla si un recurso listado no existe.",
@@ -2178,7 +2182,7 @@ def render_garage_secretgen():
          "Credencial de lectura del registry interno, para pullear la imagen."),
     ]
     lineas = [
-        *marcas.MARCO,
+        *markers.MARCO,
         "apiVersion: viaduct.ai/v1",
         "kind: ksops",
         "metadata:",
@@ -2265,7 +2269,7 @@ def render_aprovisionar():
     script = open(APROVISIONAR_JS, encoding="utf-8").read()
     sangrado = "\n".join("    " + l if l.strip() else "" for l in script.rstrip("\n").split("\n"))
 
-    partes = [marcas.BANNER + f"""
+    partes = [markers.BANNER + f"""
 # Un Job por organización que declaró `almacenamiento.bucket`.
 #
 # El script es ai/aprovisionar-bucket.mjs, que vive como ARCHIVO y no
@@ -2407,11 +2411,11 @@ def aplicar_aprovisionar(escribir):
 # verificando primero que el texto derivado reproducía el manual
 # carácter por carácter.
 
-MARCA_JOBS_INI = marcas.MARCA_JOBS_INI
-MARCA_JOBS_FIN = marcas.MARCA_JOBS_FIN
+MARCA_JOBS_INI = markers.MARCA_JOBS_INI
+MARCA_JOBS_FIN = markers.MARCA_JOBS_FIN
 # Sin re.S: `(?:.*\n)*?` come líneas enteras y no puede pasarse de la
 # marca de cierre aunque el bloque esté vacío.
-PATRON_BLOQUE_JOBS = marcas.PATRON_BLOQUE_JOBS
+PATRON_BLOQUE_JOBS = markers.PATRON_BLOQUE_JOBS
 # El plugin multibranch no habla URLs: habla owner/repository. Se
 # aceptan las dos formas que puede traer un `repo:` (ssh y https) y se
 # rechaza lo demás — un repo fuera de GitHub necesita otro branchSource,
@@ -2498,16 +2502,16 @@ def render_bloque_jobs():
 # siguiera funcionando.
 #
 # Esto deriva el objetivo; las REGLAS que lo consumen son genéricas y
-# viven en reglas/vmalert-reglas.yaml (una regla para todos los
+# viven en rules/vmalert-rules.yaml (una regla para todos los
 # inquilinos, no N copias). Por eso agregar una organización no agrega
 # alertas: agrega un target, y las alertas que ya existen lo cubren.
 #
 # Se sondea el `dominio:` y NO los hostnames de plataforma: esos van
 # detrás de Cloudflare Access y su 302 al login contaría como éxito —
 # el error que el check 90 del init existe para prohibir.
-MARCA_SONDAS_INI = marcas.MARCA_SONDAS_INI
-MARCA_SONDAS_FIN = marcas.MARCA_SONDAS_FIN
-PATRON_BLOQUE_SONDAS = marcas.PATRON_BLOQUE_SONDAS
+MARCA_SONDAS_INI = markers.MARCA_SONDAS_INI
+MARCA_SONDAS_FIN = markers.MARCA_SONDAS_FIN
+PATRON_BLOQUE_SONDAS = markers.PATRON_BLOQUE_SONDAS
 
 
 def sondas_de_inquilinos():
@@ -2740,9 +2744,76 @@ def aplicar_tenants(escribir):
     return 0
 
 
+def orgs_con_ai():
+    """Las organizaciones cuyo contrato declara `ai:`, ordenadas.
+
+    Se le pregunta al CONTRATO y no al árbol: el contrato es el que
+    PROMETE, y una promesa que la instancia no puede cumplir es
+    justamente lo que hay que ver.
+    """
+    orgs = []
+    for nombre in sorted(os.listdir(DIR_ORGS)):
+        if not nombre.endswith((".yaml", ".yml")):
+            continue
+        c = yaml.safe_load(open(os.path.join(DIR_ORGS, nombre), encoding="utf-8")) or {}
+        if c.get("ai"):
+            orgs.append(c["organizacion"])
+    return sorted(orgs)
+
+
+def _sin_subsistema_ai(que):
+    """Los TRES desenlaces del subsistema AI, dichos en voz alta.
+
+    Reproducido el 2026-08-24 sobre la semilla de v3: un contrato
+    perfectamente válido SIN bloque `ai:` hacía morir a `aegis org
+    apply` con un traceback —
+
+        FileNotFoundError: .../k8s/base/ai-system/routes.yaml
+
+    — y no al principio, sino DESPUÉS de haber escrito los seis
+    manifiestos de la organización. O sea que dejaba el árbol a medias
+    y la culpa parecía del contrato.
+
+    La causa era que las dos etapas de AI corrían SIEMPRE, sin
+    preguntar si el subsistema estaba. Con la decisión de que AI no
+    viaja en la semilla (solo sus documentos y su protocolo), «no
+    está» dejó de ser una anomalía y pasó a ser la forma NORMAL de un
+    árbol recién clonado.
+
+    Pero no se puede saltar en silencio, y acá está la única línea que
+    importa: una ausencia no es un caso legítimo hasta que se
+    distingue de un error (regla 3 del diseño de la CLI).
+
+      · sin subsistema y sin contratos que lo pidan  -> NO APLICA (0)
+      · sin subsistema y CON contratos que lo piden  -> FALLA (1)
+      · con subsistema                               -> seguir (None)
+
+    El segundo caso es el que vale el helper: un contrato que declara
+    `ai:` en una instancia sin AI no es un detalle de generación, es
+    una promesa que nadie va a poder cumplir, y el momento de verla es
+    ahora y no cuando el front pida una traducción.
+    """
+    if os.path.isdir(DIR_AI):
+        return None
+    print(f"\n{que}  {gris}(k8s/base/ai-system/){fin}")
+    piden = orgs_con_ai()
+    if piden:
+        print(f"  {rojo}\u2717{fin} {len(piden)} contrato(s) declaran `ai:` "
+              f"({', '.join(piden)}) y este \u00e1rbol no tiene el subsistema AI")
+        print(f"  {gris}el contrato promete algo que la instancia no puede dar: "
+              f"o se trae el subsistema, o sale `ai:` del contrato{fin}")
+        return 1
+    print(f"  {gris}\u25cb NO APLICA: el subsistema AI no est\u00e1 en este "
+          f"\u00e1rbol y ning\u00fan contrato lo pide{fin}")
+    return 0
+
+
 def aplicar_ruteo(escribir):
+    rc = _sin_subsistema_ai("ruteo")
+    if rc is not None:
+        return rc
     nuevo = render_ruteo_k8s()
-    print(f"\nruteo  {gris}(k8s/base/ai-system/ruteo.yaml){fin}")
+    print(f"\nruteo  {gris}(k8s/base/ai-system/routes.yaml){fin}")
     try:
         viejo = open(RUTEO_K8S, encoding="utf-8").read()
     except FileNotFoundError:

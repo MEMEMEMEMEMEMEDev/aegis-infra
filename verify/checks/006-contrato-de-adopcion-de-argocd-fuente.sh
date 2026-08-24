@@ -3,7 +3,7 @@
 check() {
 if python3 - "$AEGIS_ROOT" <<'EOF'
 import sys, yaml, pathlib
-root = pathlib.Path(sys.argv[1]); P = root/"semilla"/"plataforma"
+root = pathlib.Path(sys.argv[1]); P = root/"seed"/"platform"
 docs = [d for d in yaml.safe_load_all((P/"k8s"/"argocd-apps"/"core.yaml").open()) if d]
 app = next(d for d in docs if d.get("kind")=="Application"
            and d["metadata"]["name"]=="argocd")

@@ -12,7 +12,7 @@ check() {
 #
 # El invariante no cambió — "algo rutea hacia ese Service" —, cambió
 # dónde vive ese algo. Se busca por NOMBRE DE SERVICE en TODA la
-# semilla: el árbol de la app y k8s/organizations/*/ruteo.yaml. Lo que
+# semilla: el árbol de la app y k8s/organizations/*/routes.yaml. Lo que
 # importa es que exista una ruta, no quién la escribe.
 if python3 - "$AEGIS_ROOT" <<'EOF'
 import sys, yaml, pathlib
@@ -29,7 +29,7 @@ def docs(f):
 # Todos los Services a los que apunta ALGUNA IngressRoute de la semilla,
 # esté en el repo de la app o del lado de la plataforma.
 ruteados = set()
-for f in (root/"semilla").rglob("*.y*ml"):
+for f in (root/"seed").rglob("*.y*ml"):
     for d in docs(f):
         if d.get("kind") != "IngressRoute":
             continue
@@ -39,10 +39,10 @@ for f in (root/"semilla").rglob("*.y*ml"):
                     ruteados.add(s["name"])
 
 evaluadas = 0
-for app in (root/"semilla").iterdir():
+for app in (root/"seed").iterdir():
     # `plantillas` tampoco es un seed de app: se evalúa aparte, abajo,
     # porque su exposición vive en otro archivo (el contrato template).
-    if not app.is_dir() or app.name in ("plataforma", "plantillas"):
+    if not app.is_dir() or app.name in ("platform", "templates"):
         continue
     servicios, texts = set(), []
     for f in app.rglob("*.y*ml"):
@@ -66,9 +66,9 @@ for app in (root/"semilla").iterdir():
 # deriva aegis-org DEL CONTRATO al instanciar (#54 — el kind ni
 # siquiera le pertenece al repo de la app). Lo que sí puede y debe
 # declarar la plantilla es la exposición: un esqueleto con Service cuyo
-# contrato.yaml.tpl no dice `publico:` instanciaría apps que nacen
+# contract.yaml.tpl no dice `publico:` instanciaría apps que nacen
 # invisibles — exactamente el CR-5 que este check existe para cazar.
-pl = root/"semilla"/"plantillas"
+pl = root/"seed"/"templates"
 if pl.is_dir():
     for p in sorted(pl.iterdir()):
         if not p.is_dir():
@@ -84,10 +84,10 @@ if pl.is_dir():
         evaluadas += 1
         if any("expose: false" in t for t in texts):
             continue
-        tpl = p/"contrato.yaml.tpl"
+        tpl = p/"contract.yaml.tpl"
         if "publico:" not in (tpl.read_text() if tpl.exists() else ""):
             print(f"FAIL plantilla {p.name}: esqueleto con Service(s) "
-                  f"{sorted(servicios)} y contrato.yaml.tpl sin `publico:` — "
+                  f"{sorted(servicios)} y contract.yaml.tpl sin `publico:` — "
                   f"toda app instanciada nacería invisible desde el edge (CR-5)")
             ok = False
 # Un recorrido que no recorrió nada no es un veredicto: si ningún seed
@@ -96,7 +96,7 @@ if evaluadas == 0:
     print("FAIL ningún seed con Service: el check 55 no evaluó nada")
     ok = False
 # P2.12: el canary con 1 réplica NO puede tener ventana de rollout:
-dep = yaml.safe_load_all((root/"semilla"/"canario"/"k8s/base/deployment.yaml").open())
+dep = yaml.safe_load_all((root/"seed"/"canary"/"k8s/base/deployment.yaml").open())
 d = next(x for x in dep if x and x.get("kind") == "Deployment")
 ru = ((d["spec"].get("strategy") or {}).get("rollingUpdate") or {})
 if ru.get("maxUnavailable") != 0:

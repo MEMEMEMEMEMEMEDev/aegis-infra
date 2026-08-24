@@ -31,14 +31,14 @@ import yaml
 # el comando vivía DENTRO de la instancia. Al mudar el código al
 # producto la misma línea siguió compilando y pasó a apuntar al lugar
 # equivocado — la «dependencia invisible a un grep» de C1/C2.
-RAIZ = str(rutas.platform_dir())
+RAIZ = str(paths.platform_dir())
 AQUI = os.path.join(_AEGIS_ROOT, "libexec")
 
 # ── preámbulo canónico de python (V-102) ─────────────────────────────
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
-from aegis import rutas                  # noqa: E402
+from aegis import paths                  # noqa: E402
 
 # El generador es un MÓDULO, no un ejecutable cargado por su ruta: si
 # el paquete falta, esto revienta acá y no pasa por «no aplica» (A2).
@@ -160,7 +160,7 @@ def valida(servicios):
 
 
 def valida_contrato(texto):
-    planes = yaml.safe_load(open(os.path.join(RAIZ, "planes.yaml"), encoding="utf-8"))
+    planes = yaml.safe_load(open(os.path.join(RAIZ, "plans.yaml"), encoding="utf-8"))
     try:
         gen.validar(yaml.safe_load(texto), planes)
         return None

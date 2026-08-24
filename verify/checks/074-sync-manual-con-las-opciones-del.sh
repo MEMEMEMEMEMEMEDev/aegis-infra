@@ -20,7 +20,7 @@ BAD74="$(echo "$ASY74" | grep -c "p '{\"operation\":{\"sync\":{}}}'" || true)"
 # dueño se sincroniza ANTES que sus dependientes en la fase 35:
 if ! python3 - "$AEGIS_ROOT" <<'EOF'
 import sys, pathlib, re, yaml
-root = pathlib.Path(sys.argv[1]); P = root/"semilla"/"plataforma"
+root = pathlib.Path(sys.argv[1]); P = root/"seed"/"platform"
 # orden GLOBAL de syncs: todas las fases en orden lexicográfico, y
 # dentro de cada una, orden de línea (así el check vale para
 # jenkins-secrets→jenkins de la 50, no solo para la 35):
@@ -88,7 +88,7 @@ if [[ "${1:-}" == "--with-charts" ]]; then
     TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
     python3 - "$AEGIS_ROOT" > "$TMP/charts.tsv" <<'EOF'
 import sys, yaml, pathlib
-root = pathlib.Path(sys.argv[1]); P = root/"semilla"/"plataforma"
+root = pathlib.Path(sys.argv[1]); P = root/"seed"/"platform"
 for f in (P/"k8s"/"argocd-apps").glob("*.yaml"):
     for d in yaml.safe_load_all(f.open()):
         if not d or d.get("kind") != "Application": continue

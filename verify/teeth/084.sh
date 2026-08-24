@@ -10,5 +10,5 @@
 # nace de un clone de la semilla— esa escritura falla.
 rojo_1() {
     printf '\ncp x "$PLATFORM_DIR/k8s/base/carpeta-que-la-semilla-no-trae/archivo.yaml"\n' \
-        >> "$AEGIS_ROOT/init/phases/85-observabilidad.sh"
+        >> "$AEGIS_ROOT/init/phases/85-observability.sh"
 }

@@ -1052,12 +1052,12 @@ aegis_exec() {
 
 # cli_help — imprime el bloque `# aegis-help:` del archivo que llama,
 # más la tabla de códigos de salida. La tabla NO se escribe acá: vive
-# en share/codigos-de-salida.txt y la lee también lib/aegis/
-# desenlaces.py, para que bash y python no puedan discrepar sobre lo
+# en share/exit-codes.txt y la lee también lib/aegis/
+# outcomes.py, para que bash y python no puedan discrepar sobre lo
 # que significa un 2.
 cli_help() {
     local archivo="${1:-${BASH_SOURCE[1]}}"
     sed -n '/^# aegis-help:/,/^[^#]/p' "$archivo" | sed '1d;$d;s/^# \?//'
     echo
-    cat "$AEGIS_ROOT/share/codigos-de-salida.txt"
+    cat "$AEGIS_ROOT/share/exit-codes.txt"
 }

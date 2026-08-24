@@ -47,18 +47,18 @@ import urllib.request
 
 # ── preámbulo canónico de python (V-102) ─────────────────────────────
 # El producto sale de la variable (bin/aegis la exporta) o de este
-# archivo; la INSTANCIA la decide lib/aegis/rutas.py y nadie más.
+# archivo; la INSTANCIA la decide lib/aegis/paths.py y nadie más.
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
-from aegis import cli, rutas             # noqa: E402
+from aegis import cli, paths             # noqa: E402
 
 # RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
 # En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
 # el comando vivía DENTRO de la instancia. Al mudar el código al
 # producto la misma línea siguió compilando y pasó a apuntar al lugar
 # equivocado — la «dependencia invisible a un grep» de C1/C2.
-RAIZ = str(rutas.platform_dir())
+RAIZ = str(paths.platform_dir())
 TOKENS = os.path.join(RAIZ, "tofu", "secrets", "tokens.enc.yaml")
 CONF = os.environ.get(
     "AEGIS_INIT_CONF", os.path.join(RAIZ, "..", "init", "aegis-init.conf"))
@@ -165,8 +165,8 @@ def main():
     g = generador()
     import yaml
     edge = yaml.safe_load(open(os.path.join(RAIZ, "edge.yaml"), encoding="utf-8"))
-    dominio_raiz = edge["dominio_raiz"]
-    esperados = {f"{e}.{dominio_raiz}" for e in g.etiquetas_del_borde()}
+    root_domain = edge["root_domain"]
+    esperados = {f"{e}.{root_domain}" for e in g.etiquetas_del_borde()}
 
     token, zona = credenciales()
     # NO se cae en silencio ni se da por bueno. "No se pudo evaluar" es
@@ -190,7 +190,7 @@ def main():
     faltan = sorted(esperados - vivos)
     # Solo los CNAME del dominio raíz: la zona puede tener registros de
     # otras cosas del operador que aegis no gestiona ni debe reclamar.
-    nuestros = {v for v in vivos if v.endswith("." + dominio_raiz)}
+    nuestros = {v for v in vivos if v.endswith("." + root_domain)}
     sobran = sorted(nuestros - esperados)
 
     if faltan:

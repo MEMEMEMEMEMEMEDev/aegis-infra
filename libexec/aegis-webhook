@@ -54,18 +54,18 @@ import sys
 
 # ── preámbulo canónico de python (V-102) ─────────────────────────────
 # El producto sale de la variable (bin/aegis la exporta) o de este
-# archivo; la INSTANCIA la decide lib/aegis/rutas.py y nadie más.
+# archivo; la INSTANCIA la decide lib/aegis/paths.py y nadie más.
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
-from aegis import cli, desenlaces, rutas  # noqa: E402
+from aegis import cli, outcomes, paths  # noqa: E402
 
 # RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
 # En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
 # el comando vivía DENTRO de la instancia. Al mudar el código al
 # producto la misma línea siguió compilando y pasó a apuntar al lugar
 # equivocado — la «dependencia invisible a un grep» de C1/C2.
-RAIZ = str(rutas.platform_dir())
+RAIZ = str(paths.platform_dir())
 AQUI = os.path.join(_AEGIS_ROOT, "libexec")
 JENKINS_VALUES = os.path.join(RAIZ, "k8s", "base", "platform", "jenkins", "values.yaml")
 EDGE = os.path.join(RAIZ, "edge.yaml")
@@ -101,12 +101,12 @@ def repos_con_job():
     return sorted(set(bloques))
 
 
-def dominio_raiz():
+def root_domain():
     try:
         import yaml
-        return (yaml.safe_load(open(EDGE, encoding="utf-8")) or {})["dominio_raiz"]
+        return (yaml.safe_load(open(EDGE, encoding="utf-8")) or {})["root_domain"]
     except Exception as e:
-        raise Error(f"no pude leer dominio_raiz de edge.yaml: {e}")
+        raise Error(f"no pude leer root_domain de edge.yaml: {e}")
 
 
 def hmac_del_cluster():
@@ -187,12 +187,12 @@ def main():
                    help="reemplaza la narración por el documento de estados")
     a = p.parse_args()
     a.aplicar = (a.verbo == "apply")
-    pasos = desenlaces.Pasos(json_mode=a.json_mode)
+    pasos = outcomes.Pasos(json_mode=a.json_mode)
     narrar = not a.json_mode
 
     try:
         repos = repos_con_job()
-        url = f"https://jenkins.{dominio_raiz()}/github-webhook/"
+        url = f"https://jenkins.{root_domain()}/github-webhook/"
         hmac = hmac_del_cluster() if a.aplicar else None
     except Error as e:
         if narrar:

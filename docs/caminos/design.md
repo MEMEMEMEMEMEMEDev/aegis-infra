@@ -101,8 +101,8 @@ de gobierno) y el `tofu apply` del borde (del operador por diseño,
 
 ## 4. Plantillas
 
-Estructura: `semilla/plantillas/<nombre>/`
-- `contrato.yaml.tpl` — el contrato con `__ORG__` y `__DOMINIO__`
+Estructura: `seed/templates/<nombre>/`
+- `contract.yaml.tpl` — el contrato con `__ORG__` y `__DOMINIO__`
 - `repos/<svc>/…` — código inicial completo por servicio: fuente,
   `Containerfile`, `k8s/base/` + overlay (el Jenkinsfile NO va acá:
   lo instancia §2b desde el template canónico)
@@ -154,7 +154,7 @@ lo que sea", dice su propio Jenkinsfile). Checklist completa:
 
 1. línea en `mirror-images/images.txt` (origen POR DIGEST) + correr
    el job → espejada y firmada
-2. entrada en `servicios.yaml`: imagen del registry interno por
+2. entrada en `services.yaml`: imagen del registry interno por
    digest, recursos, forma de la credencial. La decisión se toma UNA
    vez, para todas las orgs
 3. derivación en `aegis-org`: `tipo: <sustrato>` en un contrato →

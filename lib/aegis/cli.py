@@ -11,12 +11,12 @@ import os
 import shutil
 import subprocess
 
-from . import rutas
-from .desenlaces import TABLA
+from . import paths
+from .outcomes import TABLA
 
 
 def libexec() -> str:
-    return str(rutas.aegis_root() / "libexec")
+    return str(paths.aegis_root() / "libexec")
 
 
 def cmd(sub="") -> str:
@@ -33,7 +33,7 @@ def cmd(sub="") -> str:
 
 def parser(prog, descripcion, protocolo=None, **kw):
     """argparse con el epílogo de la casa: la tabla de códigos (una
-    sola, la de desenlaces.py) y dónde está escrito el protocolo."""
+    sola, la de outcomes.py) y dónde está escrito el protocolo."""
     import argparse
     epi = TABLA
     if protocolo:

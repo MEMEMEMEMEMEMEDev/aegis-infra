@@ -8,10 +8,10 @@
 # fue mérito de este diente.
 rojo_1() {
     printf '\n# el repo: git@github.com:ejemplo-org/ops-stack-v2.git\n' \
-        >> "$AEGIS_ROOT/semilla/plataforma/edge.yaml"
+        >> "$AEGIS_ROOT/seed/platform/edge.yaml"
 }
 # control: la forma CORRECTA de nombrar lo mismo en el artefacto
 control_1() {
     printf '\n# el repo: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git\n' \
-        >> "$AEGIS_ROOT/semilla/plataforma/edge.yaml"
+        >> "$AEGIS_ROOT/seed/platform/edge.yaml"
 }

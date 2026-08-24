@@ -1,0 +1,66 @@
+# edge.yaml — lo que el borde tiene que exponer.
+#
+# La lista de hostnames públicos de tofu se DERIVA de acá más los
+# `dominio:` de todos los contratos en orgs/. Nadie edita
+# `public_hostnames` en main.tf a mano nunca más.
+#
+# POR QUÉ. El hostname estaba declarado dos veces: en el contrato de la
+# organización y a mano en el .tf. Esa duplicación ya costó dos veces:
+#
+#  - ai.__ROOT_DOMAIN__ quedó en main.tf y nunca se aplicó (tarea #35). El
+#    IngressRoute existía en el cluster esperando tráfico que no llegaba.
+#  - blog.__ROOT_DOMAIN__ hubo que acordarse de agregarlo a mano el
+#    2026-08-03.
+#
+# Y el modo de fallo es el peor: si falta, el hostname simplemente NO
+# EXISTE. No hay error, no hay alarma, no hay nada rojo. El manifiesto
+# del cluster está perfecto y nadie llega.
+#
+# Con la derivación, declarar `dominio:` en el contrato es TODO lo que
+# hay que hacer.
+
+# El dominio raíz. Los contratos declaran el FQDN completo
+# (`blog.__ROOT_DOMAIN__`) porque es lo que un humano reconoce; tofu quiere
+# solo la etiqueta (`blog`), y el generador hace la resta.
+root_domain: __ROOT_DOMAIN__
+
+# Las puertas de la PLATAFORMA, que no salen de ningún contrato porque
+# no pertenecen a ninguna organización. Son del sustrato mismo.
+#
+# `ai` YA NO ESTÁ ACÁ, retirado en #25 el 2026-08-07, y el motivo vale
+# más que la línea que falta.
+#
+# El razonamiento original era bueno: darle hostname propio a la AI para
+# que su kill switch y sus rate limits fueran independientes de
+# cualquier sitio. Lo que ese razonamiento daba por hecho era que la AI
+# se consume DESDE INTERNET, y medido resultó que no:
+#
+#   - ningún front de blog, portafolio ni ejemplo nombra el hostname
+#   - los BFF hablan con la puerta INTERNA por DNS de cluster
+#   - la puerta pública no sirve inferencia (dos muxes distintos, y hay
+#     un test del gateway que falla si alguien la mete ahí)
+#
+# O sea que lo único que ese hostname le ofrecía a internet era
+# `GET /status` sin credencial: modo, engine, cola y versión. Le contaba
+# a cualquiera cuándo la GPU está encendida —justo cuando hay algo que
+# atacar— y qué build corre. Reconocimiento gratis a cambio de nada.
+#
+# El kill switch no se pierde: sigue siendo `ai cerrar`, que baja el
+# engine a cero réplicas. Eso siempre fue más fuerte que cualquier WAF.
+#
+# CUÁNDO VUELVE: cuando exista el flujo de tickets (§7.2 del diseño),
+# que es el único caso que necesita que un navegador hable directo con
+# la AI. Ese endpoint ya está escrito, apagado por bandera y devolviendo
+# 501. El día que se encienda, este hostname vuelve JUNTO con Turnstile
+# delante — no después.
+platform:
+  - aegis
+  - argocd
+  - jenkins
+  # grafana y ntfy (fase-85 §5): la observabilidad es sustrato, no
+  # organización. grafana va TRAS Access (módulo cloudflare-access,
+  # grafana.tf); ntfy sale SIN Access —la app del teléfono no puede
+  # autenticarse ante Cloudflare— y se defiende con su deny-all propio
+  # más los tres middlewares del borde (check 91).
+  - grafana
+  - ntfy

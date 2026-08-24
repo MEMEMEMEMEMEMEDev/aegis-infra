@@ -5,7 +5,7 @@ check() {
 # prompt INTERACTIVO latente de tofu (rompe D11). Cruce estático:
 if python3 - "$AEGIS_ROOT" <<'EOF'
 import re, sys, pathlib
-root = pathlib.Path(sys.argv[1]); P = root/"semilla"/"plataforma"
+root = pathlib.Path(sys.argv[1]); P = root/"seed"/"platform"
 wrapper = (P/"tofu"/"tofu-apply.sh").read_text()
 # solo ASIGNACIONES export reales — mencionar el nombre en un guard
 # o mensaje no inyecta nada (el primer teeth-test de este check se

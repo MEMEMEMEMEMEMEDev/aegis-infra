@@ -100,14 +100,14 @@ except ImportError:
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
-from aegis import cli, rutas             # noqa: E402
+from aegis import cli, paths             # noqa: E402
 
 # RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
 # En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
 # el comando vivía DENTRO de la instancia. Al mudar el código al
 # producto la misma línea siguió compilando y pasó a apuntar al lugar
 # equivocado — la «dependencia invisible a un grep» de C1/C2.
-RAIZ = str(rutas.platform_dir())
+RAIZ = str(paths.platform_dir())
 AQUI = os.path.join(_AEGIS_ROOT, "libexec")
 DIR_ORGS = os.path.join(RAIZ, "orgs")
 DIR_STAGING = os.path.join(RAIZ, ".aegis-app")
@@ -353,14 +353,14 @@ def _registrar_key(owner, repo, publica):
 # ── nueva: el camino de plantilla (solo archivos) ─────────────────────
 
 def _dir_plantillas():
-    """Dónde viven las plantillas: `semilla/plantillas/` del PRODUCTO.
+    """Dónde viven las plantillas: `seed/templates/` del PRODUCTO.
 
     La resolución asume el layout de aegis dev seed: platform/ (la
     instancia, RAIZ de este script) vive ANIDADO en la raíz del repo
     producto (aegis-v2), con semilla/ al lado. O sea:
 
         <producto>/            ← os.path.dirname(RAIZ)
-        ├── semilla/plantillas/   las plantillas (el catálogo de §4)
+        ├── seed/templates/   las plantillas (el catálogo de §4)
         └── platform/             esta instancia (RAIZ)
 
     En una instancia SIN el repo producto alrededor —un clone suelto de
@@ -370,7 +370,7 @@ def _dir_plantillas():
     las plantillas a la instancia empaquetada es de A7 (RUTA.md), no de
     este comando.
     """
-    d = os.path.join(os.path.dirname(RAIZ), "semilla", "plantillas")
+    d = os.path.join(os.path.dirname(RAIZ), "seed", "templates")
     if not os.path.isdir(d):
         raise Error(
             f"no encuentro las plantillas: no existe {d}\n"
@@ -410,7 +410,7 @@ def _valores_de(org):
     instancia misma — segunda fuente de verdad, cero:
 
       __ORG__      la palabra
-      __DOMINIO__  <org>.<dominio_raiz de edge.yaml> — la misma raíz de
+      __DOMINIO__  <org>.<root_domain de edge.yaml> — la misma raíz de
                    la que aegis-org deriva el CNAME del borde
       __REPO__     git@github.com:<owner>/<org>-app.git — el owner sale
                    de REPO_OPS del generador (el repo de ESTA instancia:
@@ -419,9 +419,9 @@ def _valores_de(org):
     gen = _generador()
     owner, _ = _owner_repo(gen.REPO_OPS)
     edge = yaml.safe_load(open(gen.EDGE, encoding="utf-8")) or {}
-    raiz = edge.get("dominio_raiz")
+    raiz = edge.get("root_domain")
     if not raiz:
-        raise Error(f"{os.path.relpath(gen.EDGE, RAIZ)} no declara dominio_raiz — "
+        raise Error(f"{os.path.relpath(gen.EDGE, RAIZ)} no declara root_domain — "
                     f"sin él no puedo derivar el `dominio:` del contrato")
     return {"__ORG__": org, "__DOMINIO__": f"{org}.{raiz}",
             "__REPO__": f"git@github.com:{owner}/{org}-app.git"}
@@ -444,9 +444,9 @@ def _instanciar_contrato(org, dir_plantilla, valores, tot):
     de tocar disco. Un contrato que el generador rechazaría no se
     escribe: la plantilla está rota y el error es de la plantilla."""
     destino = os.path.join(DIR_ORGS, f"{org}.yaml")
-    tpl = os.path.join(dir_plantilla, "contrato.yaml.tpl")
+    tpl = os.path.join(dir_plantilla, "contract.yaml.tpl")
     if not os.path.exists(tpl):
-        raise Error(f"la plantilla no tiene contrato.yaml.tpl ({tpl})")
+        raise Error(f"la plantilla no tiene contract.yaml.tpl ({tpl})")
     texto = _render_tpl(open(tpl, encoding="utf-8").read(), valores,
                         os.path.relpath(tpl, RAIZ))
     gen = _generador()
@@ -758,7 +758,7 @@ def main():
                    help="el nombre de la organización nueva")
     s.add_argument("--template", metavar="P", dest="plantilla",
                    help="instancia contrato y esqueletos desde "
-                        "semilla/plantillas/<P>/. Sin esto, modo artesano: el "
+                        "seed/templates/<P>/. Sin esto, modo artesano: el "
                         "contrato ya es tuyo y solo se re-deriva")
     s = sub.add_parser("apply",
                        help="ejecuta los pasos de GitHub de cada contrato: "

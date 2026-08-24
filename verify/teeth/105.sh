@@ -6,4 +6,4 @@ rojo_1() {
     printf '\nOTRA_COPIA = "# ║  GENERADO POR `aegis org` — NO EDITAR A MANO ║"\n' \
         >> "$AEGIS_ROOT/lib/aegis/org.py"
 }
-rojo_2() { sed -i 's/marcas\.es_generado(viejo)/"GENERADO POR `aegis org`" in viejo/' "$AEGIS_ROOT/lib/aegis/org.py"; }
+rojo_2() { sed -i 's/markers\.es_generado(viejo)/"GENERADO POR `aegis org`" in viejo/' "$AEGIS_ROOT/lib/aegis/org.py"; }

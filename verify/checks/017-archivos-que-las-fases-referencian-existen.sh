@@ -8,7 +8,7 @@ check() {
 # fase 20 hace cd — y las rutas $AEGIS_V2_ROOT/init/*):
 if python3 - "$AEGIS_ROOT" <<'EOF'
 import re, sys, pathlib
-root = pathlib.Path(sys.argv[1]); P = root/"semilla"/"plataforma"
+root = pathlib.Path(sys.argv[1]); P = root/"seed"/"platform"
 ok = True; n = 0
 for ph in sorted((root/"init"/"phases").glob("*.sh")):
     t = ph.read_text()

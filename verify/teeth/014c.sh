@@ -4,6 +4,6 @@
 # del token compara contra basura.
 rojo_1() {
     sed -i "s|^log()  { printf .*|log()  { printf '[tofu-wrapper] %s\\\\n' \"\$*\"; }|" \
-        "$AEGIS_ROOT/semilla/plataforma/tofu/tofu-apply.sh"
+        "$AEGIS_ROOT/seed/platform/tofu/tofu-apply.sh"
 }
-control_1() { printf '\n# comentario legitimo sobre log()\n' >> "$AEGIS_ROOT/semilla/plataforma/tofu/tofu-apply.sh"; }
+control_1() { printf '\n# comentario legitimo sobre log()\n' >> "$AEGIS_ROOT/seed/platform/tofu/tofu-apply.sh"; }

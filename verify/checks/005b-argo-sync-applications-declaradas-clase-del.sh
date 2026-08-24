@@ -3,7 +3,7 @@
 check() {
 if python3 - "$AEGIS_ROOT" <<'EOF'
 import re, sys, yaml, pathlib
-root = pathlib.Path(sys.argv[1]); P = root/"semilla"/"plataforma"
+root = pathlib.Path(sys.argv[1]); P = root/"seed"/"platform"
 # Se recorre TODO platform/k8s y no solo argocd-apps/. Una App
 # declarada es una App declarada, viva donde viva: desde 2026-07-28 la
 # del canary vive en el bundle de su organizacion —que es donde esta su

@@ -7,7 +7,7 @@ check() {
 # pesado (reintentos/solapamientos del multibranch = caso normal):
 if python3 - "$AEGIS_ROOT" <<'EOF'
 import re, sys, yaml, pathlib
-root = pathlib.Path(sys.argv[1]); P = root/"semilla"/"plataforma"
+root = pathlib.Path(sys.argv[1]); P = root/"seed"/"platform"
 def cpu_m(v):
     v = str(v).strip().strip('"')
     return int(v[:-1]) if v.endswith("m") else int(float(v)*1000)

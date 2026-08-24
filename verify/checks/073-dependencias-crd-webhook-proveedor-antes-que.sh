@@ -10,7 +10,7 @@ check() {
 D73=""
 if ! python3 - "$AEGIS_ROOT" <<'EOF'
 import sys, pathlib, re, yaml
-root = pathlib.Path(sys.argv[1]); P = root/"semilla"/"plataforma"
+root = pathlib.Path(sys.argv[1]); P = root/"seed"/"platform"
 # 1) orden real de syncs en la fase 35 (líneas no-comentario):
 order, seen = [], set()
 for ln in (root/"init/phases/35-gitops.sh").read_text().splitlines():

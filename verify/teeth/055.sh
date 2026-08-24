@@ -4,7 +4,7 @@
 # llega. Es el defecto más caro de encontrar en producción y el más
 # barato de encontrar acá.
 rojo_1() {
-    cat >> "$AEGIS_ROOT/semilla/canario/k8s/base/deployment.yaml" <<'YAML'
+    cat >> "$AEGIS_ROOT/seed/canary/k8s/base/deployment.yaml" <<'YAML'
 ---
 apiVersion: v1
 kind: Service

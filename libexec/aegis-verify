@@ -55,7 +55,7 @@ esac; done
 # veces exactamente lo mismo: el doble de tiempo y —peor— un número de
 # checks que sugiere una cobertura que no existe. Cuando T-04 aterrice,
 # esto se enciende solo.
-hay_perfil_local() { grep -rqI '__EDGE_' "$AEGIS_ROOT/semilla" 2>/dev/null; }
+hay_perfil_local() { grep -rqI '__EDGE_' "$AEGIS_ROOT/seed" 2>/dev/null; }
 AVISO_PERFIL=""
 case "${PROFILES:=both}" in
     cloudflare) LISTA_PERFILES=(cloudflare) ;;

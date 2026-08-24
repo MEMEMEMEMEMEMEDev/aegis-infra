@@ -15,7 +15,7 @@ check() {
 D90=""
 # Salía de $ROOT/platform — la INSTANCIA. Ver la nota del check 26:
 # con producto e instancia en la misma carpeta la ruta equivocada daba
-# el mismo resultado. El artefacto es la SEMILLA.
+# el mismo resultado. El artefacto es la SEED.
 ACCESS_MOD="$P/tofu/modules/cloudflare-access"
 if [[ ! -f "$ACCESS_MOD/main.tf" ]]; then
     D90="$D90 no existe el módulo cloudflare-access: no se pudo derivar qué hostnames están protegidos;"

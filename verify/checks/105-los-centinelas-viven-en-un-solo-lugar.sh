@@ -11,17 +11,17 @@ check() {
 # La regla: si dos partes tienen que reconocer la misma cadena, la
 # cadena vive UNA vez y las dos la importan.
 D105=""
-M="$LIBS/aegis/marcas.py"
-[[ -f "$M" ]] || { fail "no existe lib/aegis/marcas.py — los centinelas no tienen dueño"; return; }
+M="$LIBS/aegis/markers.py"
+[[ -f "$M" ]] || { fail "no existe lib/aegis/markers.py — los centinelas no tienen dueño"; return; }
 # Nadie más puede escribir estas cadenas a mano.
 for centinela in 'GENERADO POR `aegis org`' '--- DERIVADO por aegis-org' '# hash: sha256:'; do
-    COPIAS="$(grep -rlF "$centinela" "$LIBS" "$LIBEXEC" 2>/dev/null | grep -v '/marcas.py$' || true)"
+    COPIAS="$(grep -rlF "$centinela" "$LIBS" "$LIBEXEC" 2>/dev/null | grep -v '/markers.py$' || true)"
     [[ -z "$COPIAS" ]] \
-        || D105="$D105 '$centinela' escrito a mano fuera de marcas.py: $(echo "$COPIAS" | tr '\n' ' ');"
+        || D105="$D105 '$centinela' escrito a mano fuera de markers.py: $(echo "$COPIAS" | tr '\n' ' ');"
 done
 # y el que RECONOCE tiene que usar el mismo módulo que el que escribe
-grep -q 'marcas.es_generado' "$LIBS/aegis/org.py" 2>/dev/null \
-    || D105="$D105 el guardia de «editado a mano» no usa marcas.es_generado;"
+grep -q 'markers.es_generado' "$LIBS/aegis/org.py" 2>/dev/null \
+    || D105="$D105 el guardia de «editado a mano» no usa markers.es_generado;"
 if [[ -n "$D105" ]]; then fail "centinelas:$D105"
-else pass "los centinelas viven en lib/aegis/marcas.py y los usan tanto el que escribe como el que reconoce"; fi
+else pass "los centinelas viven en lib/aegis/markers.py y los usan tanto el que escribe como el que reconoce"; fi
 }

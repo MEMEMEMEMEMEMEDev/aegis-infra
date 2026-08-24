@@ -521,7 +521,7 @@ despachar $? "$salida_trab" "las operaciones de sync trabadas"
 # ── 3c. la cuota de CI contra los pipelines REALES ────────────────
 # Existe porque verify-static NO PUEDE hacer este chequeo.
 #
-# Aquél verifica LA SEMILLA, y ahí los únicos pipelines que hay son la
+# Aquél verifica LA SEED, y ahí los únicos pipelines que hay son la
 # plantilla y ci-images. Los que de verdad corren viven en los repos de
 # las apps, que la semilla no conoce. Así que el check 36 de allá vigila
 # el invariante contra un SUSTITUTO — y pasaba en verde mientras esta

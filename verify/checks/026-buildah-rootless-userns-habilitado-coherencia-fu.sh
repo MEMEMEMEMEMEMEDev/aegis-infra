@@ -30,7 +30,7 @@ nc "$FASES/20-k3s.sh" | grep -q 'unshare --user' \
 # Es la trampa que la cabecera del verificador de v2 denunciaba en su
 # propio encabezado y que igual se coló tres veces (26, 90, 91): con
 # producto e instancia en la misma carpeta, la ruta equivocada daba el
-# mismo resultado y nadie lo veía. Acá miran la SEMILLA.
+# mismo resultado y nadie lo veía. Acá miran la SEED.
 for jf in "$P"/ci-images/Jenkinsfile \
           "$P"/docs/protocols/templates/Jenkinsfile.app; do
     b="$(basename "$(dirname "$jf")")/$(basename "$jf")"

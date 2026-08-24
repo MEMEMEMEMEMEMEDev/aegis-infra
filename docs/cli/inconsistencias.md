@@ -199,8 +199,8 @@ El módulo se carga como `aegis_org` (guion **bajo**) desde el archivo
 - `platform/bin/aegis-secreto:516-518`
 - `platform/bin/aegis-org-prueba:26-27`
 - `platform/bin/aegis-tipos-prueba:29-30`
-- `semilla/plataforma/bin/aegis-secreto:518`
-- `semilla/plataforma/bin/aegis-tipos-prueba:30`
+- `seed/platform/bin/aegis-secreto:518`
+- `seed/platform/bin/aegis-tipos-prueba:30`
 - [ ] pendiente
 
 ### C2 · Invocaciones armadas por tupla o variable (invisibles a un grep simple)
@@ -217,7 +217,7 @@ El módulo se carga como `aegis_org` (guion **bajo**) desde el archivo
 
 ### C3 · La única llamada de una fase del init a `platform/bin/`
 
-- **Dónde**: `init/phases/85-observabilidad.sh:298`
+- **Dónde**: `init/phases/85-observability.sh:298`
   (`bin/aegis-org borde`)
 - **Modo de falla**: muere en la fase 85 de una corrida real, **horas adentro
   del bootstrap**. Y el check 17 (*"archivos que las fases referencian
@@ -281,7 +281,7 @@ Los 10 donde un usuario nuevo queda sin siguiente movimiento:
 7. `lib/config.sh:184` — bloquea toda corrida desatendida.
 8. `platform/bin/aegis-sync:31-32,59` — tres en un archivo de 59 líneas.
    `aegis-sync` es el comando más citado por otros comandos.
-9. `semilla/plataforma/orgs/README.md:11-14` — **el README que se siembra en
+9. `seed/platform/orgs/README.md:11-14` — **el README que se siembra en
    cada instancia nueva**. Cuatro comandos consecutivos que mueren juntos.
 10. `platform/bin/aegis-app:371` y `:556-557` — las dos paredes de entrada al
     comando de alta.
@@ -290,11 +290,11 @@ Los 10 donde un usuario nuevo queda sin siguiente movimiento:
 
 ---
 
-# CLASE F — LA SEMILLA
+# CLASE F — LA SEED
 
 ### F1 · Solo lleva 3 de los 12 comandos
 
-`semilla/plataforma/bin/` tiene `aegis-org`, `aegis-secreto`,
+`seed/platform/bin/` tiene `aegis-org`, `aegis-secreto`,
 `aegis-tipos-prueba`. **Faltan los otros 9.**
 
 ### F2 · Su `aegis-org` está atrasado y diverge en contenido real
@@ -307,12 +307,12 @@ validación de `prompt` por clase. **No es des-renderizado: es atraso.**
 ### F3 · `init/` no forma parte del árbol comparado
 
 No existe `semilla/init/`. `aegis-semilla` solo compara `platform/` ↔
-`semilla/plataforma/`. **Un renombrado en `init/` no lo detecta nadie por esta
-vía** — y encima `verify-static.sh` mide la SEMILLA, no la instancia.
+`seed/platform/`. **Un renombrado en `init/` no lo detecta nadie por esta
+vía** — y encima `verify-static.sh` mide la SEED, no la instancia.
 
 ### F4 · El fallo aparece en otra máquina, no acá
 
-`semilla/plataforma/bin/aegis-tipos-prueba:30` carga `aegis-org` por nombre. Si
+`seed/platform/bin/aegis-tipos-prueba:30` carga `aegis-org` por nombre. Si
 los dos árboles se desincronizan, la prueba del artefacto entregado revienta en
 **el bootstrap de una instancia nueva**, no en el commit que lo causó. Es
 exactamente el modo de fallo que `aegis-semilla` existe para evitar.
@@ -328,12 +328,12 @@ Solo la de OPERADOR es peligrosa (alguien la sigue paso a paso):
 | archivo | bloques | nota |
 |---|---|---|
 | `OPERAR.md` | 16 | **El manual de guardia. El más peligroso del repo.** |
-| `docs/protocols/organizacion.md` ×2 | 28 c/u | Copias byte-idénticas: doble mantenimiento |
+| `docs/protocols/organization.md` ×2 | 28 c/u | Copias byte-idénticas: doble mantenimiento |
 | `docs/protocols/rotation-checklist.md` ×2 | 2 | Se sigue ítem por ítem |
 | `docs/protocols/rotate-age-key.md` ×2 | 34 | Ceremonia ejecutada literal |
 | `docs/protocols/edge.md` | 8 | Solo en `platform/`, no viaja a la semilla |
-| `semilla/plantillas/base/README.md` | 0 (7 menciones) | Lo lee quien crea una app |
-| `semilla/plataforma/orgs/README.md` | 4 | Ver E9 |
+| `seed/templates/base/README.md` | 0 (7 menciones) | Lo lee quien crea una app |
+| `seed/platform/orgs/README.md` | 4 | Ver E9 |
 | `caminos/design.md` | 0 (24 menciones) | **Es la fuente de verdad del diseño de la CLI** — renombrar sin tocarlo deja el diseño mintiendo |
 | `AGENTS.md` | 6 | Instrucciones que un agente ejecuta |
 
@@ -353,7 +353,7 @@ arreglarlo de paso.
 |---|---|---|
 | H1 | `aegis-rotate.sh` se anuncia como **`aegis-rotar`**, un nombre que no existe | `init/aegis-rotate.sh:1094` |
 | H2 | Los `.tf` citan `aegis-rotate --verificar`, **sin el `.sh`** | `tofu/modules/cloudflare-access/main.tf:29,30,43`, `grafana.tf:16`, `envs/cloudflare-tunnel/variables.tf:106` |
-| H3 | La doc documenta **`aegis org rotar <org> <secreto>`**, subcomando inexistente | `docs/protocols/organizacion.md:342` |
+| H3 | La doc documenta **`aegis org rotar <org> <secreto>`**, subcomando inexistente | `docs/protocols/organization.md:342` |
 | H4 | **35 archivos generados llevan `aegis org` (forma despachador, que no existe) Y `bin/aegis-org` en el mismo archivo** | banners de `k8s/organizations/*/`, `k8s/argocd-apps/tenants.yaml`, etc. |
 | H5 | Tres convenciones de banner vivas a la vez | las 35 de H4 + `k8s/base/ai-system/{ruteo,registro,kustomization}.yaml` en minúsculas |
 | H6 | **Las dos pruebas de aceptación son huérfanas**: nadie las corre, `verify-static` no las invoca, no hay CI (`.github/` no existe) | `aegis-org-prueba`, `aegis-tipos-prueba` |
@@ -371,7 +371,7 @@ Esto no es una inconsistencia: es el hueco por donde entran todas las demás.
    `platform/bin/`.** La única referencia en los 91 checks es el check 4 →
    `aegis-org`, y ese check ES el caso A2. **Mover los otros 11 al despachador
    es invisible: la suite sale `TODO PASS`.**
-2. `verify-static.sh` apunta a `semilla/plataforma`, no a `platform/`.
+2. `verify-static.sh` apunta a `seed/platform`, no a `platform/`.
 3. El check 17 no alcanza `bin/aegis-org borde` de la fase 85 (ver C3).
 4. No hay CI: `.github/` no existe. Nada corre solo.
 
@@ -402,25 +402,25 @@ por árbol: **`init/` tiende al inglés, `platform/bin/` al español**, con
    `bin/aegis-respaldo` (ES). `OPERAR.md:269` los explica juntos.
 4. **"rotate" vs "rotar"**: `aegis-rotate.sh` (EN) con flags `--rotar`,
    `--revisar`, `--verificar`, `--continuar` (ES). El caso más chirriante.
-5. **"canary" vs "canario"**: `semilla/canario/` (ES) genera
+5. **"canary" vs "canary"**: `seed/canary/` (ES) genera
    `org-canary` (EN).
-6. **"template" vs "plantilla"**: `semilla/plantillas/` (ES) vs
+6. **"template" vs "plantilla"**: `seed/templates/` (ES) vs
    `docs/protocols/templates/` (EN); flag `--plantilla` (ES).
 7. **"tenant" vs "organización"**: el mismo objeto según la capa —
    `orgs/`/`org-shop` vs `aegis-tenant-shop`/`aegis-tenants` vs
    `aegis-organizaciones`. Y `allow-tenants-a-gateway` es
    **inglés-español-inglés dentro de un solo nombre de recurso**.
-8. **`platform/` (EN) y `semilla/plataforma/` (ES) son el mismo árbol.**
+8. **`platform/` (EN) y `seed/platform/` (ES) son el mismo árbol.**
 9. **"routing"**: todo `ruteo` (ES) genera objetos `IngressRoute` (EN).
 10. **`ai stop` y `ai cerrar` son alias del mismo comando en dos idiomas.**
 
 ### Archivos hermanos en dos idiomas
 
-- Los tres contratos maestros: `edge.yaml` (EN), `planes.yaml` (ES),
-  `servicios.yaml` (ES).
+- Los tres contratos maestros: `edge.yaml` (EN), `plans.yaml` (ES),
+  `services.yaml` (ES).
 - Los cuatro dashboards: `bootstrap.yaml` + `supply-chain.yaml` (EN) junto a
   `borde.yaml` + `plataforma.yaml` (ES).
-- Las catorce fases del init: todas EN salvo `85-observabilidad.sh` y
+- Las catorce fases del init: todas EN salvo `85-observability.sh` y
   `15-terceros.sh`.
 - Los cuatro contratos de organización: `blog`/`shop` (EN),
   `ejemplo`/`portafolio` (ES).

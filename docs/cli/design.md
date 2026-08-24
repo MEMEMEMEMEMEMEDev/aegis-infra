@@ -227,7 +227,7 @@ Del registro, sección H — cosas que **ya están rotas hoy**:
 
 - `aegis-rotate.sh` se anuncia como `aegis-rotar`, un nombre que no existe.
 - Los `.tf` citan `aegis-rotate --verificar`, sin el `.sh`.
-- `docs/protocols/organizacion.md` documenta `aegis org rotar <org> <secreto>`,
+- `docs/protocols/organization.md` documenta `aegis org rotar <org> <secreto>`,
   un subcomando fantasma.
 - **35 archivos generados llevan `aegis org` (la forma despachador, que todavía
   no existe) y `bin/aegis-org` en el mismo banner**, más un tercer formato de

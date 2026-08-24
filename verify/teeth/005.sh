@@ -3,6 +3,6 @@
 # «Unknown» para siempre, y el motivo no aparece en ninguna alerta.
 rojo_1() {
     sed -i '0,/^    path: /s|^    path: .*|    path: k8s/base/directorio-que-no-existe|' \
-        "$AEGIS_ROOT/semilla/plataforma/k8s/argocd-apps/ci-supply-tenants.yaml"
+        "$AEGIS_ROOT/seed/platform/k8s/argocd-apps/ci-supply-tenants.yaml"
 }
-control_1() { printf '\n# comentario legitimo\n' >> "$AEGIS_ROOT/semilla/plataforma/k8s/argocd-apps/ci-supply-tenants.yaml"; }
+control_1() { printf '\n# comentario legitimo\n' >> "$AEGIS_ROOT/seed/platform/k8s/argocd-apps/ci-supply-tenants.yaml"; }

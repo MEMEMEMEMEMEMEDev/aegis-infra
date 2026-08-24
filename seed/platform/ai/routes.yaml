@@ -1,0 +1,51 @@
+# routes.yaml — QUÉ pide una organización vs CON QUÉ se le sirve.
+#
+# Plano de plataforma. Ninguna organización edita esto ni lo menciona:
+# los contratos nombran una CAPACIDAD (`chat.rapido`), que es una
+# promesa de comportamiento, y acá se dice con qué se cumple hoy.
+#
+# POR QUÉ EXISTE LA SEPARACIÓN. El día que haya créditos de un tercero,
+# agregar Vertex es cambiar el `proveedor` de una fila. Cero contratos
+# migrados. Si el contrato dijera `qwen3-4b`, habría que editar todas
+# las organizaciones y cada una sería una oportunidad de equivocarse.
+#
+# ── qué se puede declarar acá ─────────────────────────────────────
+#
+# SOLO capacidades que el gateway sepa servir. Declarar `embeddings`
+# antes de que exista el carril de CPU no adelanta nada: deja una
+# promesa que revienta recién cuando alguien la invoca, y el primero en
+# enterarse es un visitante. El gateway rechaza al ARRANCAR un
+# proveedor no implementado, a propósito.
+#
+# ── de acá NO sale el archivo que lee el gateway ──────────────────
+#
+# `bin/aegis-org` combina esto con plans.yaml y con el `ai.plan` de
+# cada contrato, y escribe k8s/base/ai-system/routes.yaml. Ese archivo
+# es GENERADO y lleva su hash: no se edita a mano.
+
+version: 1
+
+capacidades:
+  # Conversación: NPCs, guías, chat de sitio. Contexto corto a
+  # propósito — es lo que hace que la latencia sea baja con una sola
+  # GPU detrás.
+  chat.rapido:
+    proveedor: local
+    engine: llm
+    modelo: qwen3-4b
+    contexto_max: 12288
+
+  # Misma máquina, misma ventana: hoy `chat.largo` no promete más
+  # contexto que `chat.rapido`, promete que se TOLERA más latencia. Son
+  # dos capacidades y no una porque el día que el contexto largo se
+  # sirva con otro proveedor, las tareas que ya lo pidieron no se tocan.
+  chat.largo:
+    proveedor: local
+    engine: llm
+    modelo: qwen3-4b
+    contexto_max: 12288
+
+# Pendientes a propósito, sin declarar hasta que haya con qué servirlas:
+#
+#   embeddings     -> carril CPU (tarea #26)
+#   transcripcion  -> faster-whisper, mismo carril

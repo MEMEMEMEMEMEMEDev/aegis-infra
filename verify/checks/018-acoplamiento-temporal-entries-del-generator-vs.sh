@@ -38,7 +38,7 @@ check() {
 #              permanente apaga la señal igual que un verde falso.
 if python3 - "$AEGIS_ROOT" <<'EOF'
 import re, sys, yaml, pathlib
-root = pathlib.Path(sys.argv[1]); P = root/"semilla"/"plataforma"
+root = pathlib.Path(sys.argv[1]); P = root/"seed"/"platform"
 # App: path -> name, y si es automated (sincroniza sola en la 35):
 apps, automated = {}, {}
 for f in (P/"k8s"/"argocd-apps").glob("*.yaml"):
@@ -84,7 +84,7 @@ for g in sorted(P.rglob("secret-generator.yaml")):
     for e in (yaml.safe_load(g.open()) or {}).get("files", []):
         checked += 1
         # NO se exige que el archivo exista ni esté versionado, y es
-        # deliberado: EN LA SEMILLA NINGUNO EXISTE. Los crea el init, y
+        # deliberado: EN LA SEED NINGUNO EXISTE. Los crea el init, y
         # después los commitea. Exigirlo daba 12 FAILs contra un clone
         # virgen — o sea contra el artefacto que este verificador
         # existe para verificar. Lo que importa es el ORDEN.

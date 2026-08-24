@@ -2,13 +2,13 @@
 # origen: V-134 (02 §1) — nuevo en v3
 check() {
 # La mitad de la deuda de v2 salía de que el mismo código vivía en dos
-# lugares (semilla/plataforma/bin/ y platform/bin/) y hacía falta una
+# lugares (seed/platform/bin/ y platform/bin/) y hacía falta una
 # herramienta entera para vigilar que las copias no se separaran.
 # F1-F4 lo midieron: 3 de 12 comandos viajaban, el generador estaba 444
 # renglones atrás, y el fallo aparecía «en otra máquina, no acá».
 # v3 no vigila la copia: la elimina. El código vive en el producto.
 D134=""
-[[ -d "$P/bin" ]] && D134="$D134 volvió semilla/plataforma/bin/ (el código vive en libexec/, no en el artefacto);"
+[[ -d "$P/bin" ]] && D134="$D134 volvió seed/platform/bin/ (el código vive en libexec/, no en el artefacto);"
 
 # EXCEPCIÓN DECLARADA, con su motivo y su fecha — una excepción escrita
 # es distinta de un agujero: tofu/tofu-apply.sh es el envoltorio que

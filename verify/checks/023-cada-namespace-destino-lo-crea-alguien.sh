@@ -10,7 +10,7 @@ check() {
 # Un app kustomize que depende de su PROPIO CreateNamespace NO basta.
 if python3 - "$AEGIS_ROOT" <<'EOF'
 import yaml, glob, pathlib, sys
-root = pathlib.Path(sys.argv[1]); P = root/"semilla"/"plataforma"
+root = pathlib.Path(sys.argv[1]); P = root/"seed"/"platform"
 PRE = {"argocd","kube-system","kube-public","kube-node-lease","default"}
 apps = []
 app_paths = []   # (path) de apps que apuntan a k8s/ (kustomize/dir)

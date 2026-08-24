@@ -103,12 +103,12 @@ Reabrirlas pide evidencia nueva, no opinión nueva.
   logs de pods Y 1 año para eventos supply-chain: una sola
   instancia a 1 año violaría la retención corta de logs — y su
   porqué (§3.1: la retención corta ACOTA el daño de un secreto
-  filtrado). Dos instancias (`vlogs` para logs, `vlogs-eventos`
+  filtrado). Dos instancias (`vlogs` para logs, `vlogs-events`
   para eventos + gates.jsonl) son la separación métricas≠eventos≠
   logs de §2 hecha física: cada dato con SU retención, sin
   depender de features pagas ni de disciplina de queries.
 - Colector: Vector (un DaemonSet; en el nodo único, un pod). Lee
-  stdout de pods → vlogs. Su ruteo de `AEGIS_EVENT ` a vlogs-eventos
+  stdout de pods → vlogs. Su ruteo de `AEGIS_EVENT ` a vlogs-events
   sigue configurado y no estorba, pero NO es por donde llega el
   evento: **la salida de un paso `sh` de Jenkins nunca toca el stdout
   del pod** — durable-task la escribe a un archivo y la transmite por

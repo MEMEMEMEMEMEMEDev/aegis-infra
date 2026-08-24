@@ -16,7 +16,7 @@ check() {
 #     lib/paths.sh.
 #
 # ALCANCE: los comandos de bash. Los de python siguen calculando su
-# RAIZ desde __file__ hasta que exista lib/aegis/rutas.py.
+# RAIZ desde __file__ hasta que exista lib/aegis/paths.py.
 # VERIFICAR (2026-08-23, T-02): extender esta regla a los de python.
 D102=""
 # También los SUBCOMANDOS (libexec/state/*, libexec/dev/*): son

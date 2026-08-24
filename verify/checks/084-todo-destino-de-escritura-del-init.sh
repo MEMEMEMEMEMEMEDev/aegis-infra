@@ -46,7 +46,7 @@ text = {f: open(f, encoding="utf-8", errors="replace").read() for f in files}
 # trae, y de la que la fase 10 lo siembra— es la semilla. El
 # invariante no cambió: todo destino de escritura tiene que existir
 # tras un git clone. Cambió dónde se comprueba.
-resolved = {"PLATFORM_DIR": "semilla/plataforma"}
+resolved = {"PLATFORM_DIR": "seed/platform"}
 assign = re.compile(r'^\s*([A-Z_]+)="\$\{?([A-Z_]+)\}?(/[^"]*)?"\s*$', re.M)
 dynamic = []
 for _ in range(5):                      # punto fijo: cadenas de 5 saltos
@@ -70,7 +70,7 @@ for f, t in text.items():
         if var not in resolved:
             continue
         p = (resolved[var] + (sub or "")).rstrip("/")
-        if p and p != "semilla/plataforma":
+        if p and p != "seed/platform":
             targets.add(p)
 # $APP_VALUES = "$PLATFORM_DIR/${CONTRACT[4]}", y CONTRACT sale de
 # parsear core.yaml (contrato de adopción, FUENTE ÚNICA — fase 30).
@@ -81,14 +81,14 @@ dynamic = set(dynamic)
 if "APP_VALUES" in dynamic:
     try:
         import yaml
-        core = os.path.join(root, "semilla/plataforma/k8s/argocd-apps/core.yaml")
+        core = os.path.join(root, "seed/platform/k8s/argocd-apps/core.yaml")
         docs = [d for d in yaml.safe_load_all(open(core)) if d]
         app = next(d for d in docs if d.get("kind") == "Application"
                    and d["metadata"]["name"] == "argocd")
         src = next(s for s in app["spec"]["sources"] if "chart" in s)
         vf = src["helm"]["valueFiles"][0]
         assert vf.startswith("$values/"), f"valueFiles sin ref $values: {vf}"
-        resolved["APP_VALUES"] = "semilla/plataforma/" + vf[len("$values/"):]
+        resolved["APP_VALUES"] = "seed/platform/" + vf[len("$values/"):]
         targets.add(resolved["APP_VALUES"])     # entra al verificado
         dynamic.discard("APP_VALUES")
     except Exception as e:

@@ -8,7 +8,7 @@ ASG61="$(body_of argo_secrets_gate "$LIBS/common.sh")"
 echo "$ASG61" | grep -q 'expected' || D61="$D61 argo_secrets_gate sin expected_sha;"
 echo "$ASG61" | grep -q 'status.sync.revision' \
     || D61="$D61 no compara contra la revisión viva;"
-for ph in 50-jenkins 70-deploy-auto 80-supply-chain 85-observabilidad; do
+for ph in 50-jenkins 70-deploy-auto 80-supply-chain 85-observability; do
     # ancla válida: rev-parse HEAD (repo local) o APP_HEAD (ls-remote
     # del repo de la app — sesión 21, P1.14):
     sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba}' "$FASES/$ph.sh" \

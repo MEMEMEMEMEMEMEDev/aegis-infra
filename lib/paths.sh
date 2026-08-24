@@ -23,7 +23,7 @@
 # Este archivo NO depende de nada: lo sourcean tanto common.sh (y con
 # ella todo el init) como los comandos que tienen que funcionar con el
 # init roto (destroy/backup/restore). El equivalente en python es
-# lib/aegis/rutas.py, que lee las MISMAS variables de entorno.
+# lib/aegis/paths.py, que lee las MISMAS variables de entorno.
 
 : "${AEGIS_ROOT:?paths.sh requiere AEGIS_ROOT (el producto) — lo exporta bin/aegis; un libexec invocado a mano lo resuelve con el preámbulo canónico (V-102)}"
 

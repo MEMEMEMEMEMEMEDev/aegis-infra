@@ -116,11 +116,11 @@ cat > "$TMP/verify/checks/008-perfil.sh" <<'C'
 # titulo: check cualquiera
 check() { pass "nada"; }
 C
-mkdir -p "$TMP/semilla"
+mkdir -p "$TMP/seed"
 V --only 008 --profile local >/dev/null 2>&1
 [[ $? == 2 ]] && ok "un perfil que el artefacto todavía no tiene = rc 2" \
     || mal "--profile local sin perfil local en el árbol NO dio rc 2"
-printf '__EDGE_MODO__\n' > "$TMP/semilla/marca-perfil.yaml"
+printf '__EDGE_MODO__\n' > "$TMP/seed/profile-marker.yaml"
 V --only 008 --profile local >/dev/null 2>&1
 [[ $? == 0 ]] && ok "con el perfil presente en el artefacto, corre" \
     || mal "--profile local NO corrió con el perfil presente"

@@ -24,7 +24,7 @@ check() {
 #      middlewares son una COPIA de los que emite el generador. Una
 #      copia que nadie compara se desincroniza; ésta se compara.
 #
-#   c) las rutas de PLATAFORMA (k8s/base/** de la SEMILLA — B4,
+#   c) las rutas de PLATAFORMA (k8s/base/** de la SEED — B4,
 #      fase-85 §5). La doctrina completa es una DISYUNTIVA: o el
 #      hostname está detrás de Access (derivado de los .tf del
 #      módulo, como el check 90 — jamás una lista horneada acá) o la
@@ -43,7 +43,7 @@ if not raiz.is_dir():
     print(f"    no existe {raiz}", file=sys.stderr); sys.exit(1)
 
 specs, malo = {}, []
-for ruteo in sorted(raiz.glob("*/ruteo.yaml")):
+for ruteo in sorted(raiz.glob("*/routes.yaml")):
     org = ruteo.parent.name
     docs = [d for d in yaml.safe_load_all(ruteo.read_text()) if d]
     mws = {d["metadata"]["name"]: d["spec"]
@@ -63,7 +63,7 @@ for ruteo in sorted(raiz.glob("*/ruteo.yaml")):
             malo.append(f"{org}: la ruta {r['match'][:40]!r} no lleva {faltan}")
         for u in usa:
             if u not in mws:
-                malo.append(f"{org}: la ruta referencia el middleware {u!r} que NO existe en su ruteo.yaml")
+                malo.append(f"{org}: la ruta referencia el middleware {u!r} que NO existe en su routes.yaml")
 
     # (b) el contenido, indexado por sufijo para poder comparar entre
     #     organizaciones (blog-ritmo vs canary-ritmo).
