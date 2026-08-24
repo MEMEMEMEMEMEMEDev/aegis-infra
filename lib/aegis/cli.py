@@ -1,18 +1,18 @@
-"""Lo común de la línea de comandos: el parser y CÓMO se invoca a otro.
+"""What the command line has in common: the parser, and HOW one command
+invokes another.
 
-`run()` es la regla 5.1 de la doctrina hecha función. El bug que la
-justifica está fechado: `aegis-check:766,785` invocaba a
-`aegis-edge` y `aegis-webhook` por ruta relativa, y el `case` de
-salida no tenía rama para 127. Con el comando ausente, la ronda decía
-«sin fallos» — el peor desenlace posible: verde por no haber podido
-mirar.
+`run()` is doctrine rule 5.1 turned into a function. The bug that
+justifies it is dated: `aegis-check:766,785` invoked `aegis-edge` and
+`aegis-webhook` by relative path, and its exit `case` had no branch for
+127. With the command absent, the round reported "no failures" — the
+worst possible outcome: green for not having been able to look.
 """
 import os
 import shutil
 import subprocess
 
 from . import paths
-from .outcomes import TABLA
+from .outcomes import TABLE
 
 
 def libexec() -> str:
@@ -20,68 +20,72 @@ def libexec() -> str:
 
 
 def cmd(sub="") -> str:
-    """El nombre con el que el operador invocó la CLI.
+    """The name the operator actually invoked the CLI with.
 
-    Nunca se escribe «aegis» literal en un mensaje: sale de aquí, que
-    lo lee de AEGIS_CMD (lo exporta bin/aegis desde argv[0]). Es la
-    respuesta de clase a los ~155 strings de la Clase E — no se
-    traducen uno por uno, se derivan de uno solo. Check V-103.
+    The word "aegis" is never written literally into a message: it comes
+    from here, which reads AEGIS_CMD (exported by bin/aegis from
+    argv[0]). This is the class-level answer to the ~155 Class E strings
+    — they are not translated one by one, they are derived from one.
+    Check V-103 watches it.
     """
     base = os.environ.get("AEGIS_CMD", "aegis")
     return f"{base} {sub}".strip()
 
 
-def parser(prog, descripcion, protocolo=None, **kw):
-    """argparse con el epílogo de la casa: la tabla de códigos (una
-    sola, la de outcomes.py) y dónde está escrito el protocolo."""
+def parser(prog, description, protocol=None, **kw):
+    """argparse with the house epilogue: the exit-code table (one single
+    table, the one in outcomes.py) and where the protocol is written."""
     import argparse
-    epi = TABLA
-    if protocolo:
-        epi += f"\n\nel protocolo completo: {protocolo}"
+    epi = TABLE
+    if protocol:
+        epi += f"\n\nthe full protocol: {protocol}"
     return argparse.ArgumentParser(
-        prog=cmd(prog), description=descripcion, epilog=epi,
+        prog=cmd(prog), description=description, epilog=epi,
         formatter_class=argparse.RawDescriptionHelpFormatter, **kw)
 
 
-class NoSePudo(Exception):
-    """El instrumento no llegó al sujeto. rc 2, jamás 0 y jamás 1."""
+class CouldNotEvaluate(Exception):
+    """The instrument never reached the subject. rc 2, never 0 and never 1."""
 
 
-def run(comando, *args, capturar=True, entrada=None):
-    """Invoca otro comando de aegis y devuelve (rc, stdout, stderr).
+def run(command, *args, capture=True, stdin_text=None):
+    """Invoke another aegis command and return (rc, stdout, stderr).
 
-    Tres estados que v2 confundía en uno (regla 5.5):
-      · el comando NO EXISTE            → NoSePudo («no existe»)
-      · existe y no se pudo ejecutar    → NoSePudo («no ejecutable»)
-      · existe, corrió y dio un rc      → se devuelve tal cual
-    Ninguno de los dos primeros puede terminar en «sin fallos».
+    Three states that v2 collapsed into one (rule 5.5):
+      · the command DOES NOT EXIST      -> CouldNotEvaluate ("does not exist")
+      · it exists and would not run     -> CouldNotEvaluate ("not executable")
+      · it exists, ran, and returned rc  -> returned as is
+    Neither of the first two may end up as "no failures".
     """
-    destino = os.path.join(libexec(), f"aegis-{comando}")
-    if not os.path.exists(destino):
-        raise NoSePudo(f"el comando {cmd(comando)} no existe en {libexec()} "
-                       f"— no es que no haya fallos: es que no se pudo mirar")
-    if not os.access(destino, os.X_OK):
-        raise NoSePudo(f"{destino} existe pero no es ejecutable (chmod +x)")
-    r = subprocess.run([destino, *args], capture_output=capturar, text=True,
-                       input=entrada)
-    # 126/127 desde el propio exec: el intérprete no estaba, o el
-    # archivo no era ejecutable. No es un veredicto del comando.
+    target = os.path.join(libexec(), f"aegis-{command}")
+    if not os.path.exists(target):
+        raise CouldNotEvaluate(
+            f"the command {cmd(command)} does not exist in {libexec()} "
+            f"— this is not 'no failures': it is 'could not look'")
+    if not os.access(target, os.X_OK):
+        raise CouldNotEvaluate(f"{target} exists but is not executable (chmod +x)")
+    r = subprocess.run([target, *args], capture_output=capture, text=True,
+                       input=stdin_text)
+    # 126/127 straight from exec: the interpreter was missing, or the
+    # file was not executable. That is not a verdict from the command.
     if r.returncode in (126, 127):
-        raise NoSePudo(f"{cmd(comando)} no se pudo ejecutar (rc {r.returncode}: "
-                       f"¿falta el intérprete del shebang?)")
+        raise CouldNotEvaluate(
+            f"{cmd(command)} could not be executed (rc {r.returncode}: "
+            f"is the shebang's interpreter missing?)")
     return r.returncode, (r.stdout or ""), (r.stderr or "")
 
 
-def run_json(comando, *args):
-    """Como run(), pero leyendo el CONTRATO en vez de la prosa.
+def run_json(command, *args):
+    """Like run(), but reading the CONTRACT instead of the prose.
 
-    Agrega --json y devuelve el documento. Es lo que reemplaza a
-    `"webhook creado" in r.stdout` (A3): el consumidor lee estados, no
-    frases."""
+    Adds --json and returns the document. This is what replaces
+    `"webhook creado" in r.stdout` (A3): the consumer reads states, not
+    sentences."""
     import json
-    rc, out, err = run(comando, *args, "--json")
+    rc, out, err = run(command, *args, "--json")
     try:
         return rc, json.loads(out)
     except (ValueError, json.JSONDecodeError):
-        raise NoSePudo(f"{cmd(comando)} --json no devolvió un documento legible "
-                       f"(¿todavía no implementa el contrato de salida?)")
+        raise CouldNotEvaluate(
+            f"{cmd(command)} --json did not return a readable document "
+            f"(does it not implement the exit contract yet?)")

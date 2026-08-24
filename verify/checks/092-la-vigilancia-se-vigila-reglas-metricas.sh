@@ -60,8 +60,8 @@ vmag_txt = (OBS / "vmagent/values.yaml").read_text()
 vmag = yaml.safe_load(vmag_txt)
 jobs = [j["job_name"] for j in vmag["config"]["scrape_configs"]]
 
-MARCA_INI = "# --- DERIVADO por aegis-org (sondas de tenant): no editar a mano ---"
-MARCA_FIN = "# --- FIN DERIVADO ---"
+MARCA_INI = "# --- DERIVED by aegis-org (tenant probes): do not edit by hand ---"
+MARCA_FIN = "# --- END DERIVED ---"
 i, f = vmag_txt.find(MARCA_INI), vmag_txt.find(MARCA_FIN)
 if i < 0 or f < 0:
     malo.append("vmagent/values.yaml: faltan las marcas del bloque que deriva aegis-org "

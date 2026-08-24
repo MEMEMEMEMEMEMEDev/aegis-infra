@@ -155,7 +155,7 @@ def main():
     # que el default cambie de significado a mitad de camino. Sin
     # argumentos también funciona: es lo que la ronda invoca.
     ap = cli.parser("edge", __doc__.split("\n")[0],
-                    protocolo="docs/protocols/edge.md")
+                    protocol="docs/protocols/edge.md")
     sub = ap.add_subparsers(dest="verbo")
     sub.add_parser("check", help="compara los hostnames vivos contra los que derivan de los contratos")
     ap.add_argument("--json", action="store_true", dest="json_mode",

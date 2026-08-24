@@ -82,6 +82,19 @@ and that narration is the most valuable thing in this codebase.
 | `ntfy-puente` | `ntfy-bridge` | |
 | `dominio_raiz` | `root_domain` | contract and edge key |
 | `equivalencia-org.sh` | `org-equivalence.sh` | |
+| `desenlaces`/`Pasos.paso` | `outcomes`/`Steps.step` | and the state VALUES with them: `hecho`→`done`, `ya-estaba`→`already`, `mal`→`wrong`, `no-evaluable`→`not-evaluable`. These are the machine-readable contract in `gates.jsonl`, so producers and consumers moved together. |
+| `NoSePudo` | `CouldNotEvaluate` | |
+| `RC_USO` | `RC_USAGE` | |
+| `CABECERA` | `HEADER` | |
+| `MARCO` | `FRAME` | now computed, not hand-drawn: the box width follows the text, so a translation cannot silently break the alignment |
+| `FIRMA_GENERADO` | `GENERATED_SIGNATURE` | |
+| `PREFIJO_HASH` | `HASH_PREFIX` | |
+| `es_generado` | `is_generated` | |
+| `sin_hash` | `without_hash` | |
+| `MARCA_JOBS_INI` | `JOBS_BLOCK_START` | and `_FIN`→`_END`, `MARCA_SONDAS_*`→`PROBES_BLOCK_*` |
+| `PATRON_BLOQUE_JOBS` | `JOBS_BLOCK_PATTERN` | |
+| `PREFIJO_RETOME` | `RESUME_PREFIX` | the literal moved too: `Retomar:` → `Resume:` |
+| `FIN DERIVADO` | `END DERIVED` | |
 
 ## 3b. Being retired — in progress
 

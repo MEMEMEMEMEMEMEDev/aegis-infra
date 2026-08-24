@@ -187,7 +187,7 @@ def main():
                    help="reemplaza la narración por el documento de estados")
     a = p.parse_args()
     a.aplicar = (a.verbo == "apply")
-    pasos = outcomes.Pasos(json_mode=a.json_mode)
+    steps = outcomes.Steps(json_mode=a.json_mode)
     narrar = not a.json_mode
 
     try:
@@ -198,8 +198,8 @@ def main():
         if narrar:
             print(f"  {ama}!{fin} webhooks NO EVALUADOS — {e}")
             print(f"    {gris}Esto NO es un visto bueno: es un chequeo que no corrió.{fin}")
-        pasos.no_evaluable("webhooks", motivo=str(e).replace(" ", "_"))
-        pasos.salir()
+        steps.not_evaluable("webhooks", reason=str(e).replace(" ", "_"))
+        steps.finish()
 
     faltan = 0
     for owner, repo in repos:
@@ -209,35 +209,35 @@ def main():
         except Error as e:
             if narrar:
                 print(f"  {ama}!{fin} {owner}/{repo}: {e}")
-            pasos.no_evaluable(nombre, motivo=str(e).replace(" ", "_"))
-            pasos.salir()
+            steps.not_evaluable(nombre, reason=str(e).replace(" ", "_"))
+            steps.finish()
         if estado == "falta":
             if narrar:
                 print(f"  {rojo}✗{fin} {owner}/{repo} {gris}sin webhook — solo construye "
                       f"cuando corre el escaneo periódico{fin}")
-            pasos.mal(nombre)
+            steps.wrong(nombre)
             faltan += 1
         elif estado == "creado":
             if narrar:
                 print(f"  {verde}+{fin} {owner}/{repo} {gris}webhook creado{fin}")
-            pasos.hecho(nombre)
+            steps.done(nombre)
         elif estado == "resync":
             if narrar:
                 print(f"  {gris}~{fin} {owner}/{repo} {gris}HMAC re-sincronizado{fin}")
             # re-sincronizar el HMAC es mantenimiento del PATCH
             # idempotente, no un cambio de estado: «ya estaba».
-            pasos.ya_estaba(nombre, hmac="resincronizado")
+            steps.already(nombre, hmac="resincronizado")
         else:
             if narrar:
                 print(f"  {verde}✓{fin} {owner}/{repo}")
-            pasos.ya_estaba(nombre)
+            steps.already(nombre)
 
     if narrar:
         if faltan:
             print(f"\n  {gris}para crearlos:  {cli.cmd('webhook apply')}{fin}")
         elif not a.aplicar:
             print(f"  {verde}✓{fin} los {len(repos)} repos con job en Jenkins tienen webhook")
-    pasos.salir()
+    steps.finish()
 
 
 if __name__ == "__main__":

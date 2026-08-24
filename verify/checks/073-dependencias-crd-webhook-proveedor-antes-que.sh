@@ -98,10 +98,10 @@ fi
 # como symlink) y sale de $AEGIS_CMD, nunca literal — la regla de
 # clase contra los ~155 strings de la Clase E. Lo que este check
 # prohíbe es la forma RELATIVA, que es la que fallaba.
-RETOME="$(nc "$LIBEXEC/aegis-init" | grep 'Retomar:' | head -1)"
+RETOME="$(nc "$LIBEXEC/aegis-init" | grep 'Resume:' | head -1)"
 if [[ -z "$RETOME" ]]; then
     D73="$D73 C: el init ya no imprime cómo retomar;"
-elif ! grep -q 'AEGIS_CMD' <<< "$RETOME" && ! grep -qE 'Retomar: (/|\$AEGIS_ROOT)' <<< "$RETOME"; then
+elif ! grep -q 'AEGIS_CMD' <<< "$RETOME" && ! grep -qE 'Resume: (/|\$AEGIS_ROOT)' <<< "$RETOME"; then
     D73="$D73 C: el comando de retome no se puede pegar desde otro cwd ($RETOME);"
 fi
 if [[ -n "$D73" ]]; then fail "dependencias/UX:$D73"

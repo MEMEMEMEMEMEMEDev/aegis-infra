@@ -1,5 +1,5 @@
-códigos de salida:
-  0  hecho / ya estaba      se midió y está bien
-  1  MAL / falta            se midió y falta o está mal algo
-  2  NO SE PUDO EVALUAR     el instrumento no llegó al sujeto
-  3  uso inválido           flags o argumentos mal
+exit codes:
+  0  done / already so     it was measured and it is right
+  1  WRONG / missing       it was measured and something is missing or wrong
+  2  COULD NOT EVALUATE    the instrument never reached the subject
+  3  invalid usage         bad flags or arguments

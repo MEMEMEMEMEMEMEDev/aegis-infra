@@ -262,8 +262,8 @@ DELIBERADAS = [
 # derivado no es el archivo entero sino una región de él.
 DES_DERIVADOS = {
     "k8s/base/observability/vmagent/values.yaml": (
-        "    # --- DERIVADO por aegis-org (sondas de tenant): no editar a mano ---",
-        "    # --- FIN DERIVADO ---",
+        "    # --- DERIVED by aegis-org (tenant probes): do not edit by hand ---",
+        "    # --- END DERIVED ---",
         "las sondas por organización las escribe `aegis-org aplicar` desde los "
         "contratos; la semilla no tiene contratos, así que el bloque va vacío."),
 }

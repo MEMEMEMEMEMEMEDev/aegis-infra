@@ -1,37 +1,38 @@
 #!/usr/bin/env bash
-# lib/paths.sh — el ÚNICO lugar donde se decide dónde está cada cosa.
+# lib/paths.sh — the ONLY place where it is decided where each thing is.
 #
-# Producto ≠ instancia (02 §1). En v2 eran la misma carpeta y por eso
-# nadie tuvo que elegir: el repo del artefacto era también el
-# directorio donde vivían platform/, .init-state/ y el store. Cuando la
-# instancia avanzó por su cuenta, ese doble papel se volvió la mitad de
-# la deuda (docs/cli/inconsistencias.md F1-F4).
+# Product != instance (02 §1). In v2 they were the same folder, so nobody
+# ever had to choose: the artifact's repo was also the directory where
+# platform/, .init-state/ and the store lived. When the instance moved on
+# by itself, that double role became half of the debt
+# (docs/cli/inconsistencias.md F1-F4).
 #
-#   AEGIS_ROOT  el PRODUCTO — este repo, versionado, de solo lectura
-#               para la corrida: bin/ libexec/ lib/ init/ verify/
-#               semilla/.
-#   AEGIS_HOME  la INSTANCIA — mutable, propia de esta máquina:
+#   AEGIS_ROOT  the PRODUCT — this repo, versioned, read-only for the
+#               duration of a run: bin/ libexec/ lib/ init/ verify/
+#               seed/.
+#   AEGIS_HOME  the INSTANCE — mutable, belonging to this machine:
 #               platform/ .init-state/ .state-secrets/ .age-public
 #               aegis.conf.
 #
-# Cada comando de v2 recalculaba esto desde su propio __file__ (seis
-# copias de la misma línea: aegis-org:32, aegis-app:96, aegis-edge:45,
-# aegis-destroy:26, aegis-backup:21, aegis-restore:15) y eran
-# exactamente el tipo de dependencia invisible a un grep que C1/C2 del
-# registro nombran. Acá hay una sola.
+# Every v2 command recomputed this from its own __file__ (six copies of
+# the same line: aegis-org:32, aegis-app:96, aegis-edge:45,
+# aegis-destroy:26, aegis-backup:21, aegis-restore:15) and they were
+# exactly the kind of dependency invisible to a grep that C1/C2 of the
+# register names. Here there is one.
 #
-# Este archivo NO depende de nada: lo sourcean tanto common.sh (y con
-# ella todo el init) como los comandos que tienen que funcionar con el
-# init roto (destroy/backup/restore). El equivalente en python es
-# lib/aegis/paths.py, que lee las MISMAS variables de entorno.
+# This file depends on NOTHING: it is sourced both by common.sh (and
+# with it the whole init) and by the commands that have to work with a
+# broken init (destroy/backup/restore). Its python equivalent is
+# lib/aegis/paths.py, which reads the SAME environment variables.
 
-: "${AEGIS_ROOT:?paths.sh requiere AEGIS_ROOT (el producto) — lo exporta bin/aegis; un libexec invocado a mano lo resuelve con el preámbulo canónico (V-102)}"
+: "${AEGIS_ROOT:?paths.sh needs AEGIS_ROOT (the product) — bin/aegis exports it; a libexec invoked by hand resolves it with the canonical preamble (V-102)}"
 
 aegis_home() {
     if [[ -n "${AEGIS_HOME:-}" ]]; then printf '%s\n' "$AEGIS_HOME"; return 0; fi
-    # Compatibilidad con la forma v2: si el producto tiene un platform/
-    # al lado, ESA es la instancia (así está hoy la máquina de casa, y
-    # así queda hasta que v3 esté lista — no se migra a la fuerza).
+    # Compatibility with the v2 shape: if the product has a platform/
+    # beside it, THAT is the instance (which is how the house machine is
+    # today, and how it stays until v3 is ready — nothing is migrated by
+    # force).
     if [[ -d "$AEGIS_ROOT/platform" ]]; then printf '%s\n' "$AEGIS_ROOT"; return 0; fi
     printf '%s\n' "$HOME/aegis"
 }

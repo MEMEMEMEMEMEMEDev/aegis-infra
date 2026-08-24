@@ -83,7 +83,7 @@ def _repo_ops():
     se renderiza) y además sería justo lo que el check 86 prohíbe: una
     instancia horneada en el código.
     """
-    c = paths.leer_conf()
+    c = paths.read_conf()
     dueno, repo = c.get("GH_OWNER"), c.get("PLATFORM_REPO")
     if not dueno or not repo:
         raise SystemExit(
@@ -396,7 +396,7 @@ def validar(c, planes):
 # lib/aegis/markers.py: el que los ESCRIBE y el que los RECONOCE tienen
 # que usar la misma cadena, y en v2 estaba copiada ocho veces (clase B
 # del registro, regla 5.6).
-CABECERA = markers.CABECERA
+HEADER = markers.HEADER
 
 
 def _hash(texto):
@@ -422,7 +422,7 @@ def render_bundle(c, planes, h):
     org = c["organizacion"]
     ns = f"org-{org}"
     cuota = planes["cuota"][c["cuota"]]
-    lineas = [CABECERA.format(org=org, hash=h)]
+    lineas = [HEADER.format(org=org, hash=h)]
     lineas.append(f"""\
 #
 # Namespace, cuota y la identidad con la que se pullea.
@@ -493,7 +493,7 @@ def render_datos(c, h):
     t = cat["tipos"]["postgres"]
     imagen = f"{cat['registro']}/{t['imagen']}@{t['digest']}"
 
-    partes = [CABECERA.format(org=org, hash=h), f"""\
+    partes = [HEADER.format(org=org, hash=h), f"""\
 #
 # Bases de datos de esta organización.
 #
@@ -669,7 +669,7 @@ def render_apps(c, h):
     if not repos:
         return None
 
-    partes = [CABECERA.format(org=org, hash=h), """\
+    partes = [HEADER.format(org=org, hash=h), """\
 #
 # Las Applications de esta organización.
 #
@@ -724,7 +724,7 @@ spec:
 def render_netpol(c, h):
     org = c["organizacion"]
     ns = f"org-{org}"
-    partes = [CABECERA.format(org=org, hash=h), f"""\
+    partes = [HEADER.format(org=org, hash=h), f"""\
 #
 # Aislamiento de red. TODO denegado salvo lo que el contrato concedió.
 #
@@ -943,7 +943,7 @@ def render_ruteo(c, h):
     # caso especial que después alguien tenga que recordar.
     publicos.sort(key=lambda s: (-len(s["publico"]), s["nombre"]))
 
-    partes = [CABECERA.format(org=org, hash=h), f"""\
+    partes = [HEADER.format(org=org, hash=h), f"""\
 #
 # El ruteo de esta organización — DERIVADO de `dominio` y de los
 # `publico:` del contrato. El repo de la app ya no lo escribe: no puede,
@@ -1075,7 +1075,7 @@ spec:
 
 def render_kustomization(c, h, secretos):
     org = c["organizacion"]
-    partes = [CABECERA.format(org=org, hash=h), """\
+    partes = [HEADER.format(org=org, hash=h), """\
 #
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -1099,7 +1099,7 @@ resources:
 
 def render_secret_generator(c, h, secretos):
     org = c["organizacion"]
-    partes = [CABECERA.format(org=org, hash=h), f"""\
+    partes = [HEADER.format(org=org, hash=h), f"""\
 #
 apiVersion: viaduct.ai/v1
 kind: ksops
@@ -1157,8 +1157,8 @@ def renderizar(c, planes, crudo):
 # Aplicar
 # ──────────────────────────────────────────────────────────────────
 
-def _sin_hash(t):
-    return markers.sin_hash(t)
+def _without_hash(t):
+    return markers.without_hash(t)
 
 
 def aplicar(ruta, escribir):
@@ -1192,7 +1192,7 @@ def aplicar(ruta, escribir):
         # I3: si el archivo fue editado a mano, negarse y mostrar qué
         # cambió. La salida es el contrato, no el archivo — pero pisar
         # el trabajo de alguien sin mostrarlo es peor que no generar.
-        if markers.es_generado(viejo) and _sin_hash(viejo) != _sin_hash(nuevo):
+        if markers.is_generated(viejo) and _without_hash(viejo) != _without_hash(nuevo):
             marca_vieja = [l for l in viejo.splitlines() if l.startswith("# hash:")]
             marca_nueva = [l for l in nuevo.splitlines() if l.startswith("# hash:")]
             if marca_vieja == marca_nueva:
@@ -2034,7 +2034,7 @@ def render_argocd_secretgen():
     # quién la use, y un secreto que nadie consume es superficie sin
     # contrapartida (I4).
     lineas = [
-        *markers.MARCO,
+        *markers.FRAME,
         "# REGLA TEMPORAL (corrida #4, bug que frenó la fase 35): esta App",
         "# sincroniza en fase 35 — un entry cuyo .enc.yaml se genera en una fase",
         "# POSTERIOR rompe el build ENTERO de kustomize (es atómico) y NINGÚN",
@@ -2159,7 +2159,7 @@ def render_garage_kustomization():
         # existe cuando alguna organización pidió bucket.
         recursos.append("aprovisionar.yaml")
     lineas = [
-        *markers.MARCO,
+        *markers.FRAME,
         "# Sale del conjunto de contratos: `aprovisionar.yaml` se lista solo",
         "# cuando alguna organización declaró `almacenamiento.bucket`, porque",
         "# kustomize falla si un recurso listado no existe.",
@@ -2182,7 +2182,7 @@ def render_garage_secretgen():
          "Credencial de lectura del registry interno, para pullear la imagen."),
     ]
     lineas = [
-        *markers.MARCO,
+        *markers.FRAME,
         "apiVersion: viaduct.ai/v1",
         "kind: ksops",
         "metadata:",
@@ -2411,11 +2411,11 @@ def aplicar_aprovisionar(escribir):
 # verificando primero que el texto derivado reproducía el manual
 # carácter por carácter.
 
-MARCA_JOBS_INI = markers.MARCA_JOBS_INI
-MARCA_JOBS_FIN = markers.MARCA_JOBS_FIN
+JOBS_BLOCK_START = markers.JOBS_BLOCK_START
+JOBS_BLOCK_END = markers.JOBS_BLOCK_END
 # Sin re.S: `(?:.*\n)*?` come líneas enteras y no puede pasarse de la
 # marca de cierre aunque el bloque esté vacío.
-PATRON_BLOQUE_JOBS = markers.PATRON_BLOQUE_JOBS
+JOBS_BLOCK_PATTERN = markers.JOBS_BLOCK_PATTERN
 # El plugin multibranch no habla URLs: habla owner/repository. Se
 # aceptan las dos formas que puede traer un `repo:` (ssh y https) y se
 # rechaza lo demás — un repo fuera de GitHub necesita otro branchSource,
@@ -2451,7 +2451,7 @@ def trabajos_de_jenkins():
 
 
 def render_bloque_jobs():
-    lineas = [MARCA_JOBS_INI]
+    lineas = [JOBS_BLOCK_START]
     lineas.append(f"""\
           # Un job multibranch por repo declarado en un contrato de
           # orgs/. El nombre del job es el de su Application: un repo,
@@ -2482,7 +2482,7 @@ def render_bloque_jobs():
                   }}
                 }}
               }}""")
-    lineas.append(MARCA_JOBS_FIN)
+    lineas.append(JOBS_BLOCK_END)
     return "\n".join(lineas)
 
 
@@ -2509,9 +2509,9 @@ def render_bloque_jobs():
 # Se sondea el `dominio:` y NO los hostnames de plataforma: esos van
 # detrás de Cloudflare Access y su 302 al login contaría como éxito —
 # el error que el check 90 del init existe para prohibir.
-MARCA_SONDAS_INI = markers.MARCA_SONDAS_INI
-MARCA_SONDAS_FIN = markers.MARCA_SONDAS_FIN
-PATRON_BLOQUE_SONDAS = markers.PATRON_BLOQUE_SONDAS
+PROBES_BLOCK_START = markers.PROBES_BLOCK_START
+PROBES_BLOCK_END = markers.PROBES_BLOCK_END
+PROBES_BLOCK_PATTERN = markers.PROBES_BLOCK_PATTERN
 
 
 def sondas_de_inquilinos():
@@ -2537,7 +2537,7 @@ def sondas_de_inquilinos():
 
 
 def render_bloque_sondas():
-    lineas = [MARCA_SONDAS_INI]
+    lineas = [PROBES_BLOCK_START]
     lineas.append(f"""\
     # Un probe por organización con dominio y ruta pública. Mide el
     # camino COMPLETO que recorre un cliente: DNS, borde, túnel,
@@ -2563,23 +2563,23 @@ def render_bloque_sondas():
           replacement: "$1"
         - target_label: __address__
           replacement: blackbox.observability.svc:9115""")
-    lineas.append(MARCA_SONDAS_FIN)
+    lineas.append(PROBES_BLOCK_END)
     return "\n".join(lineas)
 
 
 def aplicar_sondas(escribir):
     texto = open(VMAGENT_VALUES, encoding="utf-8").read()
-    if not PATRON_BLOQUE_SONDAS.search(texto):
+    if not PROBES_BLOCK_PATTERN.search(texto):
         raise Invalido(
             f"no encontré las marcas del bloque derivado en {VMAGENT_VALUES}.\n"
             f"  Tienen que existir estas dos líneas (con su sangría de 4\n"
             f"  espacios, dentro de scrape_configs):\n"
-            f"{MARCA_SONDAS_INI}\n"
-            f"{MARCA_SONDAS_FIN}\n"
+            f"{PROBES_BLOCK_START}\n"
+            f"{PROBES_BLOCK_END}\n"
             f"  Sin ellas no hay forma de saber qué es derivado y qué es de una\n"
             f"  persona, y pisar a ciegas es peor que no generar.")
     sondas = sondas_de_inquilinos()
-    nuevo = PATRON_BLOQUE_SONDAS.sub(lambda _: render_bloque_sondas(), texto, count=1)
+    nuevo = PROBES_BLOCK_PATTERN.sub(lambda _: render_bloque_sondas(), texto, count=1)
     print(f"\nsondas  {gris}(k8s/base/observability/vmagent/values.yaml){fin}")
     if nuevo == texto:
         print(f"  {gris}={fin} sondas de tenant  {gris}{len(sondas)} sonda(s){fin}")
@@ -2597,17 +2597,17 @@ def aplicar_sondas(escribir):
 
 def aplicar_jenkins(escribir):
     texto = open(JENKINS_VALUES, encoding="utf-8").read()
-    if not PATRON_BLOQUE_JOBS.search(texto):
+    if not JOBS_BLOCK_PATTERN.search(texto):
         raise Invalido(
             f"no encontré las marcas del bloque derivado en {JENKINS_VALUES}.\n"
             f"  Tienen que existir estas dos líneas (con su sangría de 10\n"
             f"  espacios, dentro del configScript aegis-jobs):\n"
-            f"{MARCA_JOBS_INI}\n"
-            f"{MARCA_JOBS_FIN}\n"
+            f"{JOBS_BLOCK_START}\n"
+            f"{JOBS_BLOCK_END}\n"
             f"  Sin ellas no hay forma de saber qué es derivado y qué es de una\n"
             f"  persona, y pisar a ciegas es peor que no generar.")
     nombres = [n for n, _, _ in trabajos_de_jenkins()]
-    nuevo = PATRON_BLOQUE_JOBS.sub(lambda _: render_bloque_jobs(), texto, count=1)
+    nuevo = JOBS_BLOCK_PATTERN.sub(lambda _: render_bloque_jobs(), texto, count=1)
     print(f"\njenkins  {gris}(k8s/base/platform/jenkins/values.yaml){fin}")
     if nuevo == texto:
         print(f"  {gris}={fin} jobs de tenant  {gris}{len(nombres)} job(s){fin}")

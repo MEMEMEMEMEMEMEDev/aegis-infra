@@ -55,8 +55,8 @@ else
     N87S="$(python3 - "$VMA87" <<'PY'
 import re, sys, pathlib
 t = pathlib.Path(sys.argv[1]).read_text()
-i = t.find("# --- DERIVADO por aegis-org (sondas de tenant): no editar a mano ---")
-f = t.find("# --- FIN DERIVADO ---")
+i = t.find("# --- DERIVED by aegis-org (tenant probes): do not edit by hand ---")
+f = t.find("# --- END DERIVED ---")
 print(-1 if i < 0 or f < 0 else len(re.findall(r"^\s*-\s*job_name:", t[i:f], re.M)))
 PY
 )"

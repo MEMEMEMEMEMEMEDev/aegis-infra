@@ -1,30 +1,29 @@
-"""Dónde está cada cosa — la versión python de lib/paths.sh.
+"""Where everything lives — the python half of lib/paths.sh.
 
-Las dos deciden lo mismo y leen las MISMAS variables de entorno, así
-que un comando de bash y uno de python puestos uno al lado del otro no
-pueden discrepar sobre dónde está la instancia. Si algún día
-discrepan, es un bug de una sola clase y se arregla en dos archivos,
-no en veinte.
+Both decide the same thing and read the SAME environment variables, so
+a bash command and a python one sitting side by side cannot disagree
+about where the instance is. If they ever do, it is a single class of
+bug and it gets fixed in two files, not twenty.
 
-  AEGIS_ROOT   el PRODUCTO: bin/ libexec/ lib/ init/ verify/ semilla/
-  AEGIS_HOME   la INSTANCIA: platform/ .init-state/ .state-secrets/
+  AEGIS_ROOT   the PRODUCT: bin/ libexec/ lib/ init/ verify/ seed/
+  AEGIS_HOME   the INSTANCE: platform/ .init-state/ .state-secrets/
                .age-public aegis.conf
 
-El bug que esto cierra, encontrado el 2026-08-23 al mudar el código:
-`aegis-org` calculaba su raíz como `dirname(dirname(__file__))`. Vivía
-en <instancia>/platform/bin/, así que eso daba <instancia>/platform y
-funcionaba. Al mudarse a <producto>/libexec/ la misma línea siguió
-compilando y pasó a apuntar al PRODUCTO — buscando orgs/ y k8s/ donde
-no están. Ninguna herramienta lo habría avisado: es la «dependencia
-invisible a un grep» de C1/C2, con la fecha puesta.
+The bug this closes, found on 2026-08-23 while moving the code:
+`aegis-org` computed its root as `dirname(dirname(__file__))`. It lived
+in <instance>/platform/bin/, so that gave <instance>/platform and it
+worked. Once it moved to <product>/libexec/ the same line kept
+compiling and started pointing at the PRODUCT — looking for orgs/ and
+k8s/ where they are not. No tool would have warned: it is C1/C2's
+"dependency invisible to a grep", with a date on it.
 """
 import os
 import pathlib
 
 
 def aegis_root() -> pathlib.Path:
-    """El producto. De la variable si la hay; si no, desde este archivo
-    (lib/aegis/paths.py → dos niveles arriba)."""
+    """The product. From the variable if there is one; otherwise from
+    this file (lib/aegis/paths.py -> two levels up)."""
     v = os.environ.get("AEGIS_ROOT")
     if v:
         return pathlib.Path(v)
@@ -32,21 +31,22 @@ def aegis_root() -> pathlib.Path:
 
 
 def aegis_home() -> pathlib.Path:
-    """La instancia. Misma regla que lib/paths.sh, en el mismo orden."""
+    """The instance. Same rule as lib/paths.sh, in the same order."""
     v = os.environ.get("AEGIS_HOME")
     if v:
         return pathlib.Path(v)
-    raiz = aegis_root()
-    # compatibilidad con la forma v2: si el producto tiene un platform/
-    # al lado, esa es la instancia (así está hoy la máquina de casa).
-    if (raiz / "platform").is_dir():
-        return raiz
+    root = aegis_root()
+    # compatibility with the v2 shape: if the product has a platform/
+    # beside it, that is the instance (which is how the house machine
+    # still is today).
+    if (root / "platform").is_dir():
+        return root
     return pathlib.Path.home() / "aegis"
 
 
 def platform_dir() -> pathlib.Path:
-    """El checkout vivo del repo de plataforma. Es lo que en v2 se
-    llamaba RAIZ dentro de aegis-org."""
+    """The live checkout of the platform repo. This is what v2 called
+    RAIZ inside aegis-org."""
     return pathlib.Path(os.environ.get("PLATFORM_DIR") or (aegis_home() / "platform"))
 
 
@@ -66,22 +66,21 @@ def conf() -> pathlib.Path:
     return pathlib.Path(os.environ.get("AEGIS_CONF") or (aegis_home() / "aegis.conf"))
 
 
-def leer_conf() -> dict:
-    """El aegis.conf del wizard, como diccionario.
+def read_conf() -> dict:
+    """The wizard's aegis.conf, as a dictionary.
 
-    Es un archivo de asignaciones de bash (CLAVE=valor). Se lee, no se
-    ejecuta: un conf no debería poder correr comandos, y en v2 los
-    comandos de python que lo necesitaban lo parseaban cada uno a su
-    manera."""
+    It is a file of bash assignments (KEY=value). It is READ, never
+    executed: a config file should not be able to run commands, and in
+    v2 every python command that needed it parsed it its own way."""
     d = {}
     p = conf()
     if not p.is_file():
         return d
-    for linea in p.read_text().splitlines():
-        linea = linea.strip()
-        if not linea or linea.startswith("#") or "=" not in linea:
+    for line in p.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
             continue
-        k, _, v = linea.partition("=")
+        k, _, v = line.partition("=")
         k = k.strip()
         if not k.replace("_", "").isalnum():
             continue

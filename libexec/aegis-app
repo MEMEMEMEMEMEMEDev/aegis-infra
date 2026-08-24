@@ -730,7 +730,7 @@ def aplicar_webhooks(escribir, tot):
     from aegis import cli
     try:
         rc, doc = cli.run_json("webhook", *(["--aplicar"] if escribir else []))
-    except cli.NoSePudo as e:
+    except cli.CouldNotEvaluate as e:
         marca(tot, "aviso", "webhooks", str(e))
         return
     creo = any(pa["estado"] == "hecho" for pa in doc.get("pasos", []))

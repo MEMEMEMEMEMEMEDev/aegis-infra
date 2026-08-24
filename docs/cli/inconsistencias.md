@@ -169,14 +169,14 @@ desincronizan, el mecanismo deja de funcionar sin avisar.
 ### B2 · La marca que delimita el bloque de jobs de Jenkins
 
 - **Dónde**: `platform/bin/aegis-org:2393`
-  (`MARCA_JOBS_INI = "# --- DERIVADO por aegis-org (jobs de tenant)..."`)
+  (`JOBS_BLOCK_START = "# --- DERIVADO por aegis-org (jobs de tenant)..."`)
 - **Leída en**: `platform/k8s/base/platform/jenkins/values.yaml:102,107`
 - **Qué protege**: es un contrato de texto entre el generador y un YAML
   versionado. Sin la marca, el bloque derivado se reescribe en el lugar
   equivocado o no se reescribe.
 - [ ] pendiente
 
-### B3 · El literal "Retomar:" que un check valida por texto exacto
+### B3 · El literal "Resume:" que un check valida por texto exacto
 
 - **Dónde**: `init/aegis-init.sh:212`, validado por `init/verify-static.sh:2171`
 - **Doble acople**: un nombre de archivo *dentro* de un mensaje impreso, que
@@ -267,7 +267,7 @@ No rompen nada. **Solo guían mal**, que en esta casa es peor.
 
 Los 10 donde un usuario nuevo queda sin siguiente movimiento:
 
-1. `init/aegis-init.sh:212` — `"Retomar: ... --profile ... --from ..."`. Única
+1. `init/aegis-init.sh:212` — `"Resume: ... --profile ... --from ..."`. Única
    salida tras una fase fallida del bootstrap. (Y ver B3.)
 2. `platform/bin/aegis-app:573-578` — el bloque **"siguientes pasos, EN ORDEN"**.
    Es el handoff completo del alta de una organización.
@@ -301,7 +301,7 @@ Los 10 donde un usuario nuevo queda sin siguiente movimiento:
 
 124.690 B (vivo, 2026-08-21) contra 105.042 B (semilla, 2026-08-11) —
 **444 líneas de diff**. Le falta `USOS = {..., "internet"}`, todo el bloque de
-derivación de jobs de Jenkins (`MARCA_JOBS_INI`), las cabeceras CSP, y la
+derivación de jobs de Jenkins (`JOBS_BLOCK_START`), las cabeceras CSP, y la
 validación de `prompt` por clase. **No es des-renderizado: es atraso.**
 
 ### F3 · `init/` no forma parte del árbol comparado

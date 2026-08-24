@@ -224,8 +224,8 @@ config:
           replacement: "$1"
         - target_label: __address__
           replacement: blackbox.observability.svc:9115
-    # --- DERIVADO por aegis-org (sondas de tenant): no editar a mano ---
-    # --- FIN DERIVADO ---
+    # --- DERIVED by aegis-org (tenant probes): do not edit by hand ---
+    # --- END DERIVED ---
 
 resources:                      # fase-85 §10
   requests: {cpu: 50m, memory: 64Mi}

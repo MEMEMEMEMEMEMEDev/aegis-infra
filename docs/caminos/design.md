@@ -53,9 +53,9 @@ app — derivable del `repo:` del contrato y no se deriva (el hueco #2
 del mapa de onboarding). Diseño: un bloque delimitado en ese
 values.yaml, propiedad del generador:
 
-    # --- DERIVADO por aegis-org (jobs de tenant): no editar a mano ---
+    # --- DERIVED by aegis-org (tenant jobs): do not edit by hand ---
     ...un job por cada servicio con repo, de todos los contratos...
-    # --- FIN DERIVADO ---
+    # --- END DERIVED ---
 
 Fuera del bloque, lo escrito a mano sobrevive (los jobs de plataforma
 como mirror-images). Deuda de migración anotada: los 5 jobs actuales

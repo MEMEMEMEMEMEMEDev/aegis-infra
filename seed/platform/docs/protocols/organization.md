@@ -356,7 +356,7 @@ idempotente aunque lo sea.
 **I3 — Los archivos generados llevan cabecera y hash.**
 
 ```yaml
-# GENERADO POR aegis org — NO EDITAR A MANO.
+# GENERADO POR aegis org — DO NOT EDIT BY HAND.
 # contrato: orgs/veterinaria.yaml
 # hash: sha256:3f9a…   (del contrato que lo produjo)
 ```

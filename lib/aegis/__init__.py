@@ -1,17 +1,18 @@
-"""aegis — el paquete que comparten los comandos de python.
+"""aegis — the package the python commands share.
 
-Existe por una razón medida: en v2 seis comandos cargaban a `aegis-org`
-con SourceFileLoader para reusar su validación y sus derivaciones
-(docs/cli/inconsistencias.md C1). Cargar un EJECUTABLE por su ruta como
-si fuera un módulo tiene tres consecuencias que se pagaron:
+It exists for a measured reason: in v2 six commands loaded `aegis-org`
+with SourceFileLoader to reuse its validation and its derivations
+(docs/cli/inconsistencias.md C1). Loading an EXECUTABLE by path as if it
+were a module has three consequences, and all three were paid for:
 
-  · el check 4 pasaba idéntico con el archivo ausente (A2 del registro):
-    el `except ImportError` trataba «no está» como «no aplica»;
-  · un `grep` no encuentra esa dependencia — C1/C2 la llaman
-    «invisible»: el día que el archivo cambia de lugar, nada avisa;
-  · y el ejecutable, al cargarse, corría su preámbulo entero.
+  · check 4 passed identically with the file ABSENT (A2 in the register):
+    the surrounding `except ImportError` treated "it is not there" as
+    "this does not apply";
+  · a `grep` does not find that dependency — C1/C2 call it "invisible":
+    the day the file moves, nothing warns;
+  · and the executable, on being loaded, ran its whole preamble.
 
-Ahora es un paquete de verdad: `from aegis import contrato`. Si el
-paquete falta, el import falla y el check se pone rojo, que es lo
-correcto — ausencia no es caso legítimo.
+Now it is a real package: `from aegis import org`. If the package is
+missing, the import fails and the check goes red, which is the correct
+outcome — absence is not a legitimate case.
 """

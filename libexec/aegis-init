@@ -218,7 +218,7 @@ for p in "${PHASES[@]}"; do
         # operador lo copió tal cual desde otro directorio → "No such
         # file or directory". Un comando que se imprime para
         # copiar-pegar se imprime ABSOLUTO, siempre:
-        log_error "Retomar: ${AEGIS_CMD:-aegis} init --profile $PROFILE --from $name"
+        log_error "Resume: ${AEGIS_CMD:-aegis} init --profile $PROFILE --from $name"
         exit 1
     fi
 done

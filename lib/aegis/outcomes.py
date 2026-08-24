@@ -1,103 +1,103 @@
-"""Los tres desenlaces, como contrato de salida.
+"""The three outcomes, as an exit contract.
 
-La doctrina de la casa dice que un comando termina de una de tres
-maneras y que confundirlas es la enfermedad, no el síntoma:
+House doctrine says a command ends in one of three ways, and that
+confusing them is the disease rather than the symptom:
 
-    0  HECHO o YA ESTABA     se midió y está bien
-    1  MAL / FALTA           se midió y falta o está mal algo
-    2  NO SE PUDO EVALUAR    el instrumento no llegó al sujeto
-    3  USO INVÁLIDO          flags o argumentos mal
+    0  DONE or ALREADY SO    it was measured and it is right
+    1  WRONG / MISSING       it was measured and something is off
+    2  COULD NOT EVALUATE    the instrument never reached the subject
+    3  INVALID USAGE         bad flags or arguments
 
-El 2 es el que casi nunca existe en las herramientas y el que más
-falta: sin él, «no pude medir» se disfraza de verde («no encontré
-fallos») o de rojo («está mal»). Las dos mentiras son caras y la
-primera es peor, porque nadie va a investigar un verde.
+The 2 is the one almost no tool has, and the one most sorely missed:
+without it, "I could not measure" disguises itself as green ("found no
+failures") or as red ("it is broken"). Both lies are expensive and the
+first is worse, because nobody investigates a green.
 
-Y hay un segundo contrato, para cuando el que lee no es una persona:
-todo paso emite una línea
+And there is a second contract, for when the reader is not a person:
+every step emits a line
 
-    aegis: <paso>  <hecho|ya-estaba|mal|no-evaluable>  [clave=valor ...]
+    aegis: <step>  <done|already|wrong|not-evaluable>  [key=value ...]
 
-y con --json la narración se reemplaza por un documento. Los
-consumidores leen ESO. En v2, `aegis-app` decidía si el webhook se
-había creado buscando el texto «webhook creado» en la salida de
-`aegis-webhook` (aegis-app:713): un cambio de redacción rompía el
-programa. Eso es A3 del registro, y es imposible acá porque no hay
-prosa que grepear.
+and with --json the narration is replaced by a document. Consumers read
+THAT. In v2, `aegis-app` decided whether the webhook had been created by
+looking for the words "webhook creado" in `aegis-webhook`'s output
+(aegis-app:713): a change of wording broke the program. That is A3 in the
+register, and it is impossible here because there is no prose to grep.
 """
 import json
 import sys
 
-HECHO = "hecho"
-YA_ESTABA = "ya-estaba"
-MAL = "mal"
-NO_EVALUABLE = "no-evaluable"
+DONE = "done"
+ALREADY = "already"
+WRONG = "wrong"
+NOT_EVALUABLE = "not-evaluable"
 
-# Un solo lugar donde vive la tabla de códigos: la leen este módulo, el
-# --help de python (cli.py) y el de bash (lib/common.sh, cli_help). Si
-# la tabla se escribiera dos veces, dos veces habría que acordarse.
-RC = {HECHO: 0, YA_ESTABA: 0, MAL: 1, NO_EVALUABLE: 2}
-RC_USO = 3
+# One single place where the exit-code table lives: this module reads
+# it, python's --help (cli.py) reads it, and bash's (lib/common.sh,
+# cli_help) reads it. Written twice, it would be twice to remember.
+RC = {DONE: 0, ALREADY: 0, WRONG: 1, NOT_EVALUABLE: 2}
+RC_USAGE = 3
 
-def _tabla():
-    """La tabla vive en share/exit-codes.txt y la leen los DOS
-    lenguajes: este módulo y cli_help() de lib/common.sh. Escrita dos
-    veces sería dos veces que acordarse de cambiarla, y la que nadie
-    cambia es la que el operador termina leyendo."""
+
+def _table():
+    """The table lives in share/exit-codes.txt and BOTH languages read
+    it: this module and cli_help() in lib/common.sh. Written twice it
+    would be twice to remember to change, and the copy nobody changes is
+    the one the operator ends up reading."""
     from . import paths
     p = paths.aegis_root() / "share" / "exit-codes.txt"
     if not p.is_file():
-        raise RuntimeError(f"falta {p}: el producto está incompleto")
+        raise RuntimeError(f"missing {p}: the product is incomplete")
     return p.read_text().rstrip("\n")
 
 
-TABLA = _tabla()
+TABLE = _table()
 
 
-class Pasos:
-    """La lista de pasos de una corrida y su desenlace global.
+class Steps:
+    """The list of steps in a run, and its overall outcome.
 
-    El rc global es el PEOR de los pasos, con una regla que no es
-    obvia: «no pude evaluar» pesa más que «está mal». Si de diez cosas
-    nueve están bien y una no se pudo medir, el desenlace honesto no es
-    «una mal»: es «no sé». Un rojo se investiga; un «no sé» disfrazado
-    de rojo hace perder el tiempo en el lugar equivocado.
+    The overall rc is the WORST of the steps, with one rule that is not
+    obvious: "could not evaluate" outweighs "it is wrong". If nine of ten
+    things are fine and one could not be measured, the honest outcome is
+    not "one is wrong": it is "I do not know". A red gets investigated; an
+    "I do not know" dressed as a red wastes the time somewhere else.
     """
 
     def __init__(self, json_mode=False):
-        self.pasos = []
+        self.steps = []
         self.json_mode = json_mode
 
-    def paso(self, nombre, estado, **datos):
-        if estado not in RC:
-            raise ValueError(f"estado desconocido: {estado!r}")
-        self.pasos.append({"paso": nombre, "estado": estado, **datos})
+    def step(self, name, state, **data):
+        if state not in RC:
+            raise ValueError(f"unknown state: {state!r}")
+        self.steps.append({"step": name, "state": state, **data})
         if not self.json_mode:
-            extra = "".join(f" {k}={v}" for k, v in datos.items())
-            print(f"aegis: {nombre}  {estado}{extra}")
+            extra = "".join(f" {k}={v}" for k, v in data.items())
+            print(f"aegis: {name}  {state}{extra}")
         return self
 
-    def hecho(self, nombre, **d):        return self.paso(nombre, HECHO, **d)
-    def ya_estaba(self, nombre, **d):    return self.paso(nombre, YA_ESTABA, **d)
-    def mal(self, nombre, **d):          return self.paso(nombre, MAL, **d)
-    def no_evaluable(self, nombre, **d): return self.paso(nombre, NO_EVALUABLE, **d)
+    def done(self, name, **d):           return self.step(name, DONE, **d)
+    def already(self, name, **d):        return self.step(name, ALREADY, **d)
+    def wrong(self, name, **d):          return self.step(name, WRONG, **d)
+    def not_evaluable(self, name, **d):  return self.step(name, NOT_EVALUABLE, **d)
 
     @property
     def rc(self):
-        if not self.pasos:
-            # Cero pasos NO es éxito. Un comando que no hizo nada y sale
-            # 0 es el silencio con otro nombre.
-            return RC[NO_EVALUABLE]
-        peor = 0
-        for p in self.pasos:
-            r = RC[p["estado"]]
+        if not self.steps:
+            # Zero steps is NOT success. A command that did nothing and
+            # exits 0 is silence under another name.
+            return RC[NOT_EVALUABLE]
+        worst = 0
+        for s in self.steps:
+            r = RC[s["state"]]
             if r == 2:
                 return 2
-            peor = max(peor, r)
-        return peor
+            worst = max(worst, r)
+        return worst
 
-    def salir(self):
+    def finish(self):
         if self.json_mode:
-            json.dump({"pasos": self.pasos, "rc": self.rc}, sys.stdout, ensure_ascii=False)
+            json.dump({"steps": self.steps, "rc": self.rc}, sys.stdout, ensure_ascii=False)
             print()
         sys.exit(self.rc)
