@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# aegis-summary: Dispara un sync de ArgoCD sin romper la app
+# aegis-group:   operate
 # aegis-sync — dispara un sync de ArgoCD SIN romper la app.
 #
 # ── por qué existe ────────────────────────────────────────────────

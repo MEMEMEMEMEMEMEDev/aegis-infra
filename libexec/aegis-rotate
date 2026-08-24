@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# aegis-summary: El protocolo de rotación, ejecutable
+# aegis-group:   infra
 # aegis-rotate — EL PROTOCOLO DE ROTACIÓN, EJECUTABLE.
 #
 # ── qué cambió y por qué ────────────────────────────────────────────

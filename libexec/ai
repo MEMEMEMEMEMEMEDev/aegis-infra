@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# aegis-summary: El control del operador sobre el sustrato de AI
+# aegis-group:   operate
 # ai — el control del operador sobre el sustrato de AI.
 #
 # UNA SOLA FUENTE DE VERDAD: este script escribe el ConfigMap ai-modo y

@@ -1,0 +1,5 @@
+códigos de salida:
+  0  hecho / ya estaba      se midió y está bien
+  1  MAL / falta            se midió y falta o está mal algo
+  2  NO SE PUDO EVALUAR     el instrumento no llegó al sujeto
+  3  uso inválido           flags o argumentos mal

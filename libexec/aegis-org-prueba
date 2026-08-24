@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# aegis-summary: Prueba de aceptación del protocolo de organizaciones
+# aegis-group:   dev
+# aegis-hidden:  true
 """Prueba de aceptación #1 del protocolo de organizaciones.
 
 Compara los OBJETOS de Kubernetes que produce el generador contra los
@@ -20,13 +23,23 @@ import sys
 
 import yaml
 
-AQUI = os.path.dirname(os.path.abspath(__file__))
-RAIZ = os.path.dirname(AQUI)
+# RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
+# En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
+# el comando vivía DENTRO de la instancia. Al mudar el código al
+# producto la misma línea siguió compilando y pasó a apuntar al lugar
+# equivocado — la «dependencia invisible a un grep» de C1/C2.
+RAIZ = str(rutas.platform_dir())
+AQUI = os.path.join(_AEGIS_ROOT, "libexec")
 
-spec = importlib.util.spec_from_loader(
-    "aegis_org", importlib.machinery.SourceFileLoader("aegis_org", os.path.join(AQUI, "aegis-org")))
-gen = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(gen)
+# ── preámbulo canónico de python (V-102) ─────────────────────────────
+_AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
+    os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
+from aegis import rutas                  # noqa: E402
+
+# El generador es un MÓDULO, no un ejecutable cargado por su ruta: si
+# el paquete falta, esto revienta acá y no pasa por «no aplica» (A2).
+from aegis import org as gen             # noqa: E402
 
 rojo = "\033[31m"; verde = "\033[32m"; ama = "\033[33m"; gris = "\033[90m"; fin = "\033[0m"
 

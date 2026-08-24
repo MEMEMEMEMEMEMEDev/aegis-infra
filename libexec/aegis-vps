@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# aegis-summary: El VPS de laboratorio: user-data, token del túnel, shred
+# aegis-group:   infra
+# aegis-hidden:  true
 # aegis-vps — render | entregar | shred
 #
 # Herramienta del MANTENEDOR para el VPS de laboratorio (no del

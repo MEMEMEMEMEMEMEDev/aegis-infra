@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# aegis — el despachador.
+#
+# Una sola puerta: `aegis <comando> [args...]` ejecuta
+# libexec/aegis-<comando> y le pasa TODO lo demás sin mirarlo. Este
+# archivo conoce exactamente tres cosas: --help, --version y help.
+# Cualquier otra flag es del comando, no suya — `aegis org apply
+# --check` llega íntegro a aegis-org.
+#
+# Tres reglas horneadas, cada una con su bug detrás:
+#
+# 1. EL NOMBRE SALE DE argv[0]. $AEGIS_CMD se exporta y todo mensaje
+#    que nombre un comando al operador se construye con él, jamás
+#    literal. Es la respuesta de clase a los ~155 strings de la Clase E
+#    (docs/cli/inconsistencias.md): no se traducen uno por uno, se
+#    derivan de uno solo. Si mañana el binario se llama distinto, los
+#    mensajes lo siguen. Lo vigila el check V-103.
+#
+# 2. LIBEXEC SE RESUELVE SIGUIENDO SYMLINKS. La fase 05 instala
+#    /usr/local/bin/aegis -> <producto>/bin/aegis (symlink y no copia,
+#    así un `git pull` del producto actualiza la CLI). Con dirname a
+#    secas, AEGIS_ROOT sería /usr/local y no habría ni fases ni libs.
+#    Si readlink no está, MUERE con el motivo — no adivina.
+#
+# 3. EL MENÚ SE DERIVA. No hay lista de comandos en ningún lado: se
+#    lee el metadata de cada libexec/aegis-*. Un comando sin metadata
+#    no aparece en el menú Y hace fallar `aegis verify` (V-101). En v2
+#    solo 1 de 12 comandos tenía a alguien que lo verificara.
+set -uo pipefail
+
+export AEGIS_CMD="$(basename "$0")"
+
+command -v readlink >/dev/null || {
+    echo "$AEGIS_CMD: falta readlink — no puedo saber dónde vive el producto" >&2; exit 2; }
+AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+export AEGIS_ROOT
+LIBEXEC="$AEGIS_ROOT/libexec"
+export AEGIS_HOME="${AEGIS_HOME:-$( . "$AEGIS_ROOT/lib/paths.sh" >/dev/null 2>&1; printf '%s' "$AEGIS_HOME" )}"
+
+# ── metadata de un comando ───────────────────────────────────────────
+# En las primeras 20 líneas, para que leerlo sea barato y para que
+# quede arriba de todo donde se ve.
+meta() { sed -n "1,20{s/^# $1:[[:space:]]*//p}" "$2" | head -1; }
+
+version() {
+    if git -C "$AEGIS_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+        git -C "$AEGIS_ROOT" describe --tags --always --dirty 2>/dev/null && return 0
+    fi
+    [[ -f "$AEGIS_ROOT/VERSION" ]] && { cat "$AEGIS_ROOT/VERSION"; return 0; }
+    echo "desconocida (ni repo git ni VERSION en $AEGIS_ROOT)"
+}
+
+menu() {
+    printf '\033[1maegis\033[0m — plataforma GitOps autoalojada · %s\n\n' "$(version)"
+    printf 'uso: %s <comando> [subcomando] [opciones]\n' "$AEGIS_CMD"
+    printf '     %s <comando> --help    para el detalle de cada uno\n\n' "$AEGIS_CMD"
+    # El orden de los grupos es el del diseño (docs/cli/design.md §4):
+    # primero lo que se hace una vez, después lo de todos los días.
+    for g in setup apps operate infra backup dev; do
+        local hubo=false
+        for f in "$LIBEXEC"/aegis-*; do
+            [[ -f "$f" ]] || continue
+            [[ "$(meta aegis-group "$f")" == "$g" ]] || continue
+            [[ "$(meta aegis-hidden "$f")" == "true" ]] && continue
+            $hubo || { printf '\033[1m%s\033[0m\n' "$g"; hubo=true; }
+            printf '  %-12s %s\n' "${f##*/aegis-}" "$(meta aegis-summary "$f")"
+        done
+        $hubo && echo
+    done
+    printf 'códigos de salida: 0 hecho o ya estaba · 1 falta o está mal ·\n'
+    printf '                   2 NO SE PUDO EVALUAR · 3 uso inválido\n'
+}
+
+# ── despacho ─────────────────────────────────────────────────────────
+case "${1:-}" in
+    ""|help|--help|-h) menu; exit 0 ;;
+    --version|-V)      version; exit 0 ;;
+    -*) echo "$AEGIS_CMD: '$1' no es un comando (las flags son del comando, no del despachador)" >&2
+        echo "probá: $AEGIS_CMD --help" >&2; exit 3 ;;
+esac
+
+CMD="$1"; shift
+DESTINO="$LIBEXEC/aegis-$CMD"
+
+if [[ ! -e "$DESTINO" ]]; then
+    # Sugerencias por parecido: un typo no merece una pared. Se derivan
+    # de lo que EXISTE, no de una lista.
+    PARECIDOS="$(for f in "$LIBEXEC"/aegis-*; do
+                     [[ -f "$f" ]] || continue
+                     n="${f##*/aegis-}"
+                     [[ "$n" == *"$CMD"* || "$CMD" == *"$n"* || "${n:0:2}" == "${CMD:0:2}" ]] && printf '%s ' "$n"
+                 done)"
+    echo "$AEGIS_CMD: '$CMD' no es un comando." >&2
+    [[ -n "$PARECIDOS" ]] && echo "parecidos: $PARECIDOS" >&2
+    echo "el menú completo: $AEGIS_CMD --help" >&2
+    exit 2
+fi
+if [[ ! -x "$DESTINO" ]]; then
+    # 126 sería «Permiso denegado» y mandaría a cazar fantasmas. El
+    # motivo real cabe en un renglón, y el arreglo también.
+    echo "$AEGIS_CMD: $DESTINO existe pero no es ejecutable — chmod +x $DESTINO" >&2
+    exit 2
+fi
+exec "$DESTINO" "$@"

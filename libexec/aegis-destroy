@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# aegis-summary: Desarma lo que el init creó afuera (nube y repos)
+# aegis-group:   setup
 # aegis-destroy — teardown del footprint EXTERNO que el init crea y que
 # sobrevive a un snapshot revert (W-10 / R5). Hoy la única limpieza está
 # ACOPLADA al camino de creación (25-edge-tofu solo borra la "nube sucia"

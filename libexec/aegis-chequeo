@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# aegis-summary: La ronda: mide la realidad contra lo declarado
+# aegis-group:   operate
 # aegis-chequeo — la ronda de rutina, la que se corre al volver de un
 # apagado o antes de empezar a tocar algo.
 #

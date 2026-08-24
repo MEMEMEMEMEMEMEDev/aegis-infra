@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# aegis-summary: Levanta la plataforma entera, fase por fase
+# aegis-group:   setup
 # aegis-init — orquestador del bootstrap completo de aegis (v2).
 #
 # USO:

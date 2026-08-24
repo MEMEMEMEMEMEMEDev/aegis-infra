@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# aegis-summary: Deja la máquina en el estado que el init necesita
+# aegis-group:   setup
 # aegis-preflight — deja una VM en el estado que aegis-init necesita antes de
 # correr (fixes de entorno descubiertos en las corridas reales). Idempotente:
 # re-correr debe dar todo OK. Auto-repara lo que puede (reloj, DNS, paquetes,

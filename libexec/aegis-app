@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# aegis-summary: El alta de una organización: contrato primero, aplicar después
+# aegis-group:   apps
 """aegis-app — el alta de una organización: `nueva` escribe archivos, `aplicar` toca GitHub.
 
 EL PROBLEMA QUE RESUELVE
@@ -93,8 +95,19 @@ try:
 except ImportError:
     sys.exit("falta pyyaml (python3-yaml)")
 
-AQUI = os.path.dirname(os.path.abspath(__file__))
-RAIZ = os.path.dirname(AQUI)
+# ── preámbulo canónico de python (V-102) ─────────────────────────────
+_AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
+    os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
+from aegis import rutas                  # noqa: E402
+
+# RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
+# En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
+# el comando vivía DENTRO de la instancia. Al mudar el código al
+# producto la misma línea siguió compilando y pasó a apuntar al lugar
+# equivocado — la «dependencia invisible a un grep» de C1/C2.
+RAIZ = str(rutas.platform_dir())
+AQUI = os.path.join(_AEGIS_ROOT, "libexec")
 DIR_ORGS = os.path.join(RAIZ, "orgs")
 DIR_STAGING = os.path.join(RAIZ, ".aegis-app")
 WEBHOOK = os.path.join(AQUI, "aegis-webhook")
@@ -119,23 +132,19 @@ class Error(Exception):
 
 
 def _generador():
-    """bin/aegis-org como módulo — la lista de repos sale de AHÍ.
+    """El generador, como MÓDULO del paquete.
 
-    Mismo mecanismo que usa aegis-secreto: reimplementar `repos_de` acá
-    sería la cuarta copia de la misma regla, y la forma de fallar sería
-    fea — el repo se crea con un nombre, la Application lee otro, y el
-    error habla de permisos y no de que dos listas divergieron.
+    La lista de repos sale de AHÍ: reimplementar `repos_de` acá sería
+    la cuarta copia de la misma regla, y la forma de fallar sería fea
+    —el repo se crea con un nombre, la Application lee otro, y el error
+    habla de permisos y no de que dos listas divergieron—.
+
+    En v2 esto cargaba el ejecutable aegis-org con SourceFileLoader
+    (C1). Ahora es un import de verdad: si el paquete no está, falla
+    acá con el motivo, en vez de degradarse en silencio.
     """
-    import importlib.machinery
-    import importlib.util
-    if getattr(_generador, "_cache", None) is None:
-        p = os.path.join(AQUI, "aegis-org")
-        spec = importlib.util.spec_from_loader(
-            "aegis_org", importlib.machinery.SourceFileLoader("aegis_org", p))
-        m = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(m)
-        _generador._cache = m
-    return _generador._cache
+    from aegis import org
+    return org
 
 
 def _contrato(arg):
@@ -701,21 +710,30 @@ def aplicar_webhooks(escribir, tot):
     # flush ANTES de ceder el stdout: con la salida entubada python
     # bufferea y lo delegado aparecería arriba de su propio título.
     sys.stdout.flush()
-    r = subprocess.run([WEBHOOK] + (["--aplicar"] if escribir else []),
-                       capture_output=True, text=True)
-    sys.stdout.write(r.stdout)
-    sys.stderr.write(r.stderr)
-    if r.returncode == 0:
-        # El rc no distingue «creó» de «solo re-sincronizó», y para la
-        # convergencia importa: un resync es mantenimiento del PATCH
-        # idempotente, no un cambio de estado. Se lee del reporte del
-        # delegado — sus estados son estables («webhook creado»).
-        creo = escribir and "webhook creado" in r.stdout
-        marca(tot, "hecho" if creo else "ya", "webhooks", "ver detalle arriba")
-    elif r.returncode == 1:
-        marca(tot, "haria", "webhooks", "bin/aegis-webhook --aplicar")
+    # El rc no distingue «creó» de «solo re-sincronizó», y para la
+    # convergencia importa: un resync es mantenimiento del PATCH
+    # idempotente, no un cambio de estado.
+    #
+    # Hasta el 2026-08-23 esa distinción se sacaba buscando la frase
+    # «webhook creado» en la salida del delegado (A3 del registro): una
+    # tilde de menos allá rompía la tabla de acá, y el síntoma aparecía
+    # en otro comando. Ahora se lee el CONTRATO: cada paso emite su
+    # estado y --json los devuelve como documento.
+    from aegis import cli
+    try:
+        rc, doc = cli.run_json("webhook", *(["--aplicar"] if escribir else []))
+    except cli.NoSePudo as e:
+        marca(tot, "aviso", "webhooks", str(e))
+        return
+    creo = any(pa["estado"] == "hecho" for pa in doc.get("pasos", []))
+    if rc == 0:
+        marca(tot, "hecho" if creo else "ya", "webhooks",
+              f"{len(doc.get('pasos', []))} repos")
+    elif rc == 1:
+        faltan = [pa["paso"] for pa in doc.get("pasos", []) if pa["estado"] == "mal"]
+        marca(tot, "haria", "webhooks", f"{cli.cmd('webhook apply')} ({len(faltan)} sin webhook)")
     else:
-        marca(tot, "aviso", "webhooks", "aegis-webhook no pudo evaluar (rc 2)")
+        marca(tot, "aviso", "webhooks", f"{cli.cmd('webhook')} no pudo evaluar (rc 2)")
 
 
 def main():

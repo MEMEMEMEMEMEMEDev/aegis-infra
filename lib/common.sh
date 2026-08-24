@@ -1013,3 +1013,51 @@ retry_net() {
     done
     return 1
 }
+
+# ══ la CLI: invocar a otro comando, y la ayuda ═══════════════════════
+# (03 §1/§2/§5 — las dos funciones que faltaban en v2)
+
+# aegis_exec <comando> [args...] — la regla 5.1 hecha función.
+#
+# El bug que la justifica tiene línea y fecha: aegis-chequeo:766,785
+# invocaba a aegis-borde y aegis-webhook por ruta relativa, y el `case`
+# que clasificaba la salida no tenía rama para 127. Con el comando
+# ausente —renombrado, movido, sin permisos— la ronda no decía «no pude
+# mirar»: decía «sin fallos». Verde por ceguera es el peor desenlace
+# que puede dar una herramienta de vigilancia, porque nadie investiga
+# un verde.
+#
+# Acá 126 y 127 son rc 2 CON el motivo, nunca 0 y nunca 1.
+aegis_exec() {
+    local cmd="$1"; shift
+    local destino="$AEGIS_ROOT/libexec/aegis-$cmd"
+    if [[ ! -e "$destino" ]]; then
+        printf 'NO SE PUDO EVALUAR: el comando %s no existe (%s) — no es que no haya fallos: es que no se pudo mirar\n' \
+            "${AEGIS_CMD:-aegis} $cmd" "$destino" >&2
+        return 2
+    fi
+    if [[ ! -x "$destino" ]]; then
+        printf 'NO SE PUDO EVALUAR: %s existe pero no es ejecutable (chmod +x)\n' "$destino" >&2
+        return 2
+    fi
+    "$destino" "$@"
+    local rc=$?
+    if [[ $rc == 126 || $rc == 127 ]]; then
+        printf 'NO SE PUDO EVALUAR: %s no se pudo ejecutar (rc %s: ¿falta el intérprete del shebang?)\n' \
+            "${AEGIS_CMD:-aegis} $cmd" "$rc" >&2
+        return 2
+    fi
+    return $rc
+}
+
+# cli_help — imprime el bloque `# aegis-help:` del archivo que llama,
+# más la tabla de códigos de salida. La tabla NO se escribe acá: vive
+# en share/codigos-de-salida.txt y la lee también lib/aegis/
+# desenlaces.py, para que bash y python no puedan discrepar sobre lo
+# que significa un 2.
+cli_help() {
+    local archivo="${1:-${BASH_SOURCE[1]}}"
+    sed -n '/^# aegis-help:/,/^[^#]/p' "$archivo" | sed '1d;$d;s/^# \?//'
+    echo
+    cat "$AEGIS_ROOT/share/codigos-de-salida.txt"
+}

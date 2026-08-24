@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# aegis-summary: Restaura los tres estados desde un bundle
+# aegis-group:   backup
 # aegis-restore — restaura los 3 estados desde un bundle de aegis-backup
 # (W-09 / R4). El inverso exacto: descifra con la age key privada (el
 # irreducible del operador) y coloca cada estado en su sitio. Es la mitad

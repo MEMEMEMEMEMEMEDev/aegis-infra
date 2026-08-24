@@ -38,10 +38,17 @@ DUENOS="$(grep -rhoE '(git@|https://)github\.com[:/][A-Za-z0-9_.-]+/[A-Za-z0-9_.
 # 3) refuerzo cuando SÍ hay config local: los valores que distinguen a
 #    esta instancia son los que DIFIEREN del default del .example — uno
 #    igual al default no identifica a nadie y no es fuga.
-if [[ -f "$AEGIS_ROOT/init/aegis-init.conf" ]]; then
+# El conf de la INSTANCIA (02 §1): en v2 vivía dentro del producto y
+# esta comparación funcionaba sola. Con el corte producto/instancia hay
+# que ir a buscarlo — si no, el sub-check más fuerte (contrastar los
+# valores REALES de esta máquina contra el artefacto) se apagaba solo y
+# el check pasaba «por forma» sin decir que había perdido la mitad de
+# su alcance. Lo reveló su diente.
+CONF86="${AEGIS_CONF:-${AEGIS_HOME:-$HOME/aegis}/aegis.conf}"
+if [[ -f "$CONF86" ]]; then
     N86=0
     for k in GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN REGISTRY_CLUSTER_IP ACME_EMAIL; do
-        vivo="$(grep -E "^\s*$k=" "$AEGIS_ROOT/init/aegis-init.conf" | head -1 | sed -E 's/^[^=]+=\s*"?([^"#]*[^"# ])"?.*/\1/')"
+        vivo="$(grep -E "^\s*$k=" "$CONF86" | head -1 | sed -E 's/^[^=]+=\s*"?([^"#]*[^"# ])"?.*/\1/')"
         ejem="$(grep -E "^\s*$k=" "$AEGIS_ROOT/init/aegis-init.conf.example" | head -1 | sed -E 's/^[^=]+=\s*"?([^"#]*[^"# ])"?.*/\1/')"
         [[ -z "$vivo" || "$vivo" == "$ejem" ]] && continue
         N86=$((N86+1))
@@ -50,7 +57,7 @@ if [[ -f "$AEGIS_ROOT/init/aegis-init.conf" ]]; then
     done
     EXTRA86="+ $N86 valores propios contrastados contra el .example"
 else
-    EXTRA86="(sin aegis-init.conf: solo el contraste por forma)"
+    EXTRA86="(sin $CONF86: solo el contraste por forma)"
 fi
 if [[ -n "$D86" ]]; then fail "la semilla tiene una instancia adentro:$D86"
 else pass "la semilla no hornea ninguna instancia: sin age/PEM versionado, todo repo por __GH_OWNER__ $EXTRA86"; fi

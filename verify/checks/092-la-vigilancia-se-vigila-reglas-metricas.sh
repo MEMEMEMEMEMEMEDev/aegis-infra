@@ -41,7 +41,7 @@ check() {
 #  10. vmagent con Recreate: su buffer es un PVC RWO con lock exclusivo
 #      y con RollingUpdate el rollout entra en CrashLoop para siempre.
 D92=""
-python3 - "$P" "$LIBEXEC" <<'PY' || D92="$D92 (ver detalle arriba);"
+python3 - "$P" "$AEGIS_ROOT/lib/aegis/org.py" <<'PY' || D92="$D92 (ver detalle arriba);"
 import json, re, sys, pathlib, yaml
 
 P = pathlib.Path(sys.argv[1])
@@ -49,7 +49,7 @@ OBS = P / "k8s/base/observability"
 # En v2 el generador vivía DENTRO del artefacto (semilla/plataforma/
 # bin/). En v3 el código vive en el producto y la semilla es artefacto
 # puro (02 §1, V-134): el generador de sondas se busca en libexec/.
-ROOT_BIN = pathlib.Path(sys.argv[2])
+GENERADOR = pathlib.Path(sys.argv[2])
 if not OBS.is_dir():
     print(f"    no existe {OBS}: no hay observabilidad que cruzar", file=sys.stderr)
     sys.exit(1)
@@ -83,7 +83,11 @@ else:
 # «apunta a un job que nadie declara», el patrón que emite el generador
 # se LEE del generador. Hornearlo acá sería la misma trampa que este
 # check persigue: una copia que envejece sola.
-GEN = ROOT_BIN / "aegis-org"
+# El generador dejó de ser un ejecutable y es un módulo del paquete
+# (lib/aegis/org.py): `aegis org` es ahora 34 renglones de argparse
+# encima. Este check mide el GENERADOR, así que sigue al cuerpo, no al
+# nombre del archivo.
+GEN = GENERADOR
 generables = []
 if GEN.is_file():
     generables = [re.sub(r"\{[a-z_]+\}", "xx", m)

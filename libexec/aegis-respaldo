@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# aegis-summary: Captura y restaura los DATOS de los inquilinos
+# aegis-group:   backup
 """aegis-respaldo — captura y restaura los DATOS de los inquilinos.
 
 Es la otra mitad de `init/aegis-backup.sh`. Aquél respalda el ESTADO de
@@ -126,7 +128,20 @@ try:
 except ImportError:
     sys.exit("falta pyyaml (python3-yaml)")
 
-RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# ── preámbulo canónico de python (V-102) ─────────────────────────────
+# El producto sale de la variable (bin/aegis la exporta) o de este
+# archivo; la INSTANCIA la decide lib/aegis/rutas.py y nadie más.
+_AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
+    os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
+from aegis import rutas                  # noqa: E402
+
+# RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
+# En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
+# el comando vivía DENTRO de la instancia. Al mudar el código al
+# producto la misma línea siguió compilando y pasó a apuntar al lugar
+# equivocado — la «dependencia invisible a un grep» de C1/C2.
+RAIZ = str(rutas.platform_dir())
 DIR_ORGS = os.path.join(RAIZ, "orgs")
 SERVICIOS = os.path.join(RAIZ, "servicios.yaml")
 DESTINO_DEF = os.environ.get(

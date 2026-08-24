@@ -17,7 +17,12 @@ for ph in sorted((root/"init"/"phases").glob("*.sh")):
         if not (P/m.group(0)).is_file():
             print(f"FAIL {ph.name}: referencia inexistente platform/{m.group(0)}")
             ok = False
-    for m in re.finditer(r'\$AEGIS_V2_ROOT/(init/[A-Za-z0-9_./-]+\.(?:py|sh|tpl))\b', t):
+    # $AEGIS_V2_ROOT era el nombre en v2. Al renombrar la variable,
+    # esta expresión dejó de encontrar NADA y la mitad del check quedó
+    # muerta en silencio — verde por no tener sujetos. Lo reveló su
+    # diente: se metió una referencia inexistente y no se inmutó.
+    # Ahora cubre también lib/ y libexec/, que en v2 vivían bajo init/.
+    for m in re.finditer(r'\$AEGIS_ROOT/((?:init|lib|libexec)/[A-Za-z0-9_./-]+\.(?:py|sh|tpl))\b', t):
         n += 1
         if not (root/m.group(1)).is_file():
             print(f"FAIL {ph.name}: referencia inexistente {m.group(1)}")

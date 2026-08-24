@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# aegis-summary: Respalda los tres estados que solo viven en esta máquina
+# aegis-group:   backup
 # aegis-backup — DR de los 3 estados que SÓLO viven en la VM y que la age
 # key sola NO recupera (W-09 / R4). Produce UN bundle age-cifrado, portable
 # (cualquier sink offsite/offline sirve) y con el

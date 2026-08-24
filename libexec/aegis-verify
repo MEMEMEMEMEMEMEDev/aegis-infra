@@ -167,11 +167,17 @@ correr_dientes() {
             tmp="$(mktemp -d /dev/shm/aegis-teeth.XXXXXX)"
             cp -a "$AEGIS_ROOT/." "$tmp/" 2>/dev/null
             if ( set -u; AEGIS_ROOT="$tmp"; source "$td"; "rojo_$k" ) >/dev/null 2>&1; then
-                if AEGIS_ROOT="$tmp" "$tmp/libexec/aegis-verify" --only "$num" --profile "$(perfil_actual)" >/dev/null 2>&1; then
-                    printf '  \033[1;31mrojo_%s NO muerde\033[0m (mutación aplicada y el check %s siguió verde)\n' "$k" "$num"
-                else
-                    muerden=$((muerden+1))
-                fi
+                AEGIS_ROOT="$tmp" "$tmp/libexec/aegis-verify" --only "$num" --profile "$(perfil_actual)" >/dev/null 2>&1
+                case $? in
+                    # 1 = el check se puso ROJO: eso es morder.
+                    1) muerden=$((muerden+1)) ;;
+                    # 0 = la mutación pasó desapercibida.
+                    0) printf '  \033[1;31mrojo_%s NO muerde\033[0m (mutación aplicada y el check %s siguió verde)\n' "$k" "$num" ;;
+                    # 3 = el check se ROMPIÓ (dos veredictos, o ninguno).
+                    # No cuenta como diente: un check que revienta ante
+                    # una mutación no está protegiendo, está fallando.
+                    *) printf '  \033[1;35mrojo_%s rompió el check %s (exit 3)\033[0m — un bug del verificador no es una defensa\n' "$k" "$num" ;;
+                esac
             else
                 printf '  \033[1;35mrojo_%s no se pudo aplicar\033[0m (el diente está roto, no el check)\n' "$k"
             fi

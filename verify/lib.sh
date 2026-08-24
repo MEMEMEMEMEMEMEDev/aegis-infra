@@ -76,3 +76,10 @@ export P FASES LIBS LIBEXEC SEMILLA
 # para el otro, con el motivo escrito.
 perfil() { printf '%s\n' "${AEGIS_VERIFY_PROFILE:-cloudflare}"; }
 es_local() { [[ "$(perfil)" == "local" ]]; }
+
+# Y dónde está la INSTANCIA, para los checks que necesitan contrastar
+# el artefacto contra la máquina real (el 86, sobre todo). Sale del
+# mismo resolvedor que usa el producto: un check que recalcula rutas
+# es un check que un día mide otra cosa.
+# shellcheck source=../lib/paths.sh
+source "$AEGIS_ROOT/lib/paths.sh"

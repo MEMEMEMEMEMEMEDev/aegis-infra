@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# aegis-summary: Que un push llegue a Jenkins, en todos los repos
+# aegis-group:   infra
 """aegis-webhook — que un push llegue a Jenkins, en todos los repos.
 
 EL PROBLEMA QUE RESUELVE
@@ -49,8 +51,21 @@ import re
 import subprocess
 import sys
 
-AQUI = os.path.dirname(os.path.abspath(__file__))
-RAIZ = os.path.dirname(AQUI)
+# ── preámbulo canónico de python (V-102) ─────────────────────────────
+# El producto sale de la variable (bin/aegis la exporta) o de este
+# archivo; la INSTANCIA la decide lib/aegis/rutas.py y nadie más.
+_AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
+    os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
+from aegis import cli, desenlaces, rutas  # noqa: E402
+
+# RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
+# En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
+# el comando vivía DENTRO de la instancia. Al mudar el código al
+# producto la misma línea siguió compilando y pasó a apuntar al lugar
+# equivocado — la «dependencia invisible a un grep» de C1/C2.
+RAIZ = str(rutas.platform_dir())
+AQUI = os.path.join(_AEGIS_ROOT, "libexec")
 JENKINS_VALUES = os.path.join(RAIZ, "k8s", "base", "platform", "jenkins", "values.yaml")
 EDGE = os.path.join(RAIZ, "edge.yaml")
 
@@ -156,41 +171,66 @@ def main():
     p = argparse.ArgumentParser(prog="aegis-webhook", description=__doc__.split("\n")[0])
     p.add_argument("--aplicar", action="store_true",
                    help="crea los que falten y re-sincroniza el HMAC de los que están")
+    # El CONTRATO de salida (03 §3). Hasta hoy, quien quería saber si
+    # este comando había CREADO algo —y no solo re-sincronizado— tenía
+    # que leer la frase «webhook creado» en la narración: aegis-app:722
+    # hacía exactamente eso, y un cambio de redacción acá rompía la
+    # tabla de allá (A3 del registro). Ahora el estado se emite; la
+    # prosa queda para las personas.
+    p.add_argument("--json", action="store_true", dest="json_mode",
+                   help="reemplaza la narración por el documento de estados")
     a = p.parse_args()
+    pasos = desenlaces.Pasos(json_mode=a.json_mode)
+    narrar = not a.json_mode
 
     try:
         repos = repos_con_job()
         url = f"https://jenkins.{dominio_raiz()}/github-webhook/"
         hmac = hmac_del_cluster() if a.aplicar else None
     except Error as e:
-        print(f"  {ama}!{fin} webhooks NO EVALUADOS — {e}")
-        print(f"    {gris}Esto NO es un visto bueno: es un chequeo que no corrió.{fin}")
-        return 2
+        if narrar:
+            print(f"  {ama}!{fin} webhooks NO EVALUADOS — {e}")
+            print(f"    {gris}Esto NO es un visto bueno: es un chequeo que no corrió.{fin}")
+        pasos.no_evaluable("webhooks", motivo=str(e).replace(" ", "_"))
+        pasos.salir()
 
     faltan = 0
     for owner, repo in repos:
+        nombre = f"webhook:{owner}/{repo}"
         try:
             estado = asegurar(owner, repo, url, hmac, a.aplicar)
         except Error as e:
-            print(f"  {ama}!{fin} {owner}/{repo}: {e}")
-            return 2
+            if narrar:
+                print(f"  {ama}!{fin} {owner}/{repo}: {e}")
+            pasos.no_evaluable(nombre, motivo=str(e).replace(" ", "_"))
+            pasos.salir()
         if estado == "falta":
-            print(f"  {rojo}✗{fin} {owner}/{repo} {gris}sin webhook — solo construye "
-                  f"cuando corre el escaneo periódico{fin}")
+            if narrar:
+                print(f"  {rojo}✗{fin} {owner}/{repo} {gris}sin webhook — solo construye "
+                      f"cuando corre el escaneo periódico{fin}")
+            pasos.mal(nombre)
             faltan += 1
         elif estado == "creado":
-            print(f"  {verde}+{fin} {owner}/{repo} {gris}webhook creado{fin}")
+            if narrar:
+                print(f"  {verde}+{fin} {owner}/{repo} {gris}webhook creado{fin}")
+            pasos.hecho(nombre)
         elif estado == "resync":
-            print(f"  {gris}~{fin} {owner}/{repo} {gris}HMAC re-sincronizado{fin}")
+            if narrar:
+                print(f"  {gris}~{fin} {owner}/{repo} {gris}HMAC re-sincronizado{fin}")
+            # re-sincronizar el HMAC es mantenimiento del PATCH
+            # idempotente, no un cambio de estado: «ya estaba».
+            pasos.ya_estaba(nombre, hmac="resincronizado")
         else:
-            print(f"  {verde}✓{fin} {owner}/{repo}")
+            if narrar:
+                print(f"  {verde}✓{fin} {owner}/{repo}")
+            pasos.ya_estaba(nombre)
 
-    if faltan:
-        print(f"\n  {gris}para crearlos:  bin/aegis-webhook --aplicar{fin}")
-        return 1
-    if not a.aplicar:
-        print(f"  {verde}✓{fin} los {len(repos)} repos con job en Jenkins tienen webhook")
-    return 0
+    if narrar:
+        if faltan:
+            print(f"\n  {gris}para crearlos:  {cli.cmd('webhook apply')}{fin}")
+        elif not a.aplicar:
+            print(f"  {verde}✓{fin} los {len(repos)} repos con job en Jenkins tienen webhook")
+    pasos.salir()
 
 
 if __name__ == "__main__":
