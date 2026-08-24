@@ -4,7 +4,7 @@
 # guarda a la etapa y dejarla como estaba el 2026-08-24, cuando `aegis
 # org apply` moría con FileNotFoundError después de haber escrito seis
 # manifiestos.
-rojo_1() {
+red_1() {
     python3 - "$AEGIS_ROOT/lib/aegis/org.py" <<'PY'
 import sys
 p = sys.argv[1]
@@ -19,7 +19,7 @@ PY
 }
 
 # la otra etapa, porque son dos y el check tiene que ver las dos
-rojo_2() {
+red_2() {
     python3 - "$AEGIS_ROOT/lib/aegis/org.py" <<'PY'
 import sys
 p = sys.argv[1]
@@ -36,7 +36,7 @@ PY
 # una etapa NUEVA que escribe a ciegas en un subsistema que no está:
 # el check tiene que morder lo que venga, no solo las dos que ya
 # conoce. Es la diferencia entre vigilar la clase y vigilar el caso.
-rojo_3() {
+red_3() {
     cat >> "$AEGIS_ROOT/lib/aegis/org.py" <<'PY'
 
 

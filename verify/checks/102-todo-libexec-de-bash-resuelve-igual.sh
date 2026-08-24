@@ -1,4 +1,4 @@
-# titulo: todo comando de bash resuelve el producto igual y no inventa la instancia
+# title: todo comando de bash resuelve el producto igual y no inventa la instancia
 # origen: V-102 (02 §1) — nuevo en v3
 check() {
 # En v2 cada comando calculaba su raíz desde su propio __file__: seis

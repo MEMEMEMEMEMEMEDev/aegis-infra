@@ -1,4 +1,4 @@
-# titulo: become: NO depender del flag que ansible ignora (bug 1)
+# title: become: NO depender del flag que ansible ignora (bug 1)
 # origen: verify-static.sh (v2) ══ 22
 check() {
 # Corrida #6, bug 1: --become-password-file estaba "verificado contra

@@ -1,4 +1,4 @@
-# titulo: el camino de error no puede reventar
+# title: el camino de error no puede reventar
 # origen: nuevo en v3 — el defecto del 2026-08-24
 check() {
 # Un comando que no puede seguir tiene UNA obligación: decir por qué.

@@ -1,4 +1,4 @@
-# titulo: backup/restore de los 3 estados: DR con roundtrip probado (W-09/R4)
+# title: backup/restore de los 3 estados: DR con roundtrip probado (W-09/R4)
 # origen: verify-static.sh (v2) ══ 80
 check() {
 # R4: los 3 estados (.state-secrets/.init-state/tfstate) SÓLO viven en la VM

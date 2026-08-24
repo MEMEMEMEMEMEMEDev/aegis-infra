@@ -1,4 +1,4 @@
-# titulo: dependencias CRD/webhook: proveedor ANTES que consumidor (A v1.1)
+# title: dependencias CRD/webhook: proveedor ANTES que consumidor (A v1.1)
 # origen: verify-static.sh (v2) ══ 73
 check() {
 # Hallazgo A v1.1 (6ª instancia de la familia): argocd-secrets
@@ -73,13 +73,13 @@ echo "$ASY73" | grep -q 'wh_refires' \
     || D73="$D73 argo_sync sin reintento LARGO para webhook no listo (3x10s era insuficiente: 1-2 min desde cero);"
 echo "$ASY73" | grep -q 'syncResult.resources\[\]\?.message' \
     || D73="$D73 argo_sync clasifica por el SÍNTOMA de la App y no lee la causa del detalle por recurso;"
-NC35="$(nc "$FASES/35-gitops.sh")"
+NC35="$(nc "$PHASES/35-gitops.sh")"
 echo "$NC35" | grep -q 'webhook_serving cert-manager' \
     || D73="$D73 la 35 no espera ENDPOINTS del webhook de cert-manager;"
-L_CM="$(awk '!/^[[:space:]]*#/ && /argo_sync cert-manager /{print NR; exit}' "$FASES/35-gitops.sh")"
-L_WH="$(awk '!/^[[:space:]]*#/ && /webhook_serving cert-manager/{print NR; exit}' "$FASES/35-gitops.sh")"
-L_SEC="$(awk '!/^[[:space:]]*#/ && /argo_sync argocd-secrets/{print NR; exit}' "$FASES/35-gitops.sh")"
-L_SELF="$(awk '!/^[[:space:]]*#/ && /argo_sync argocd /{print NR; exit}' "$FASES/35-gitops.sh")"
+L_CM="$(awk '!/^[[:space:]]*#/ && /argo_sync cert-manager /{print NR; exit}' "$PHASES/35-gitops.sh")"
+L_WH="$(awk '!/^[[:space:]]*#/ && /webhook_serving cert-manager/{print NR; exit}' "$PHASES/35-gitops.sh")"
+L_SEC="$(awk '!/^[[:space:]]*#/ && /argo_sync argocd-secrets/{print NR; exit}' "$PHASES/35-gitops.sh")"
+L_SELF="$(awk '!/^[[:space:]]*#/ && /argo_sync argocd /{print NR; exit}' "$PHASES/35-gitops.sh")"
 if [[ -z "$L_CM" || -z "$L_WH" || -z "$L_SEC" ]] || ! (( L_CM < L_WH && L_WH < L_SEC )); then
     D73="$D73 el orden cert-manager → webhook servido → argocd-secrets no se respeta;"
 fi

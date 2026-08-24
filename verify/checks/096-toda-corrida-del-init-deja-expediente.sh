@@ -1,4 +1,4 @@
-# titulo: toda corrida del init deja expediente
+# title: toda corrida del init deja expediente
 # origen: verify-static.sh (v2) ══ 96
 check() {
 # Etapa C mínima (RUTA.md): hoy el stderr del init se pierde con la

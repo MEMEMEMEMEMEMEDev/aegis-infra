@@ -1,4 +1,4 @@
-# titulo: --from/--only con fase inexistente = error duro (corrida #10)
+# title: --from/--only con fase inexistente = error duro (corrida #10)
 # origen: verify-static.sh (v2) ══ 32
 check() {
 # un nombre que no matchea ninguna fase hacía skipear TODO el loop y

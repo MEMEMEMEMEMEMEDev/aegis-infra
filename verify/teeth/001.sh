@@ -5,18 +5,18 @@
 # meterle sintaxis rota a un script de verdad.
 
 # un `if` sin `fi` — el error más común al editar una fase a las 2 AM
-rojo_1() {
+red_1() {
     printf '\nif [[ -f /tmp/x ]]; then\n    echo hola\n' >> "$AEGIS_ROOT/init/phases/20-k3s.sh"
 }
 
 # una comilla sin cerrar en una lib: bash -n lo ve, un grep no
-rojo_2() {
+red_2() {
     printf '\necho "esto no cierra\n' >> "$AEGIS_ROOT/lib/jenkins.sh"
 }
 
 # y en un comando, no solo en las fases: el alcance de v3 incluye
 # libexec/ y lib/, que en v2 vivían en otro lado
-rojo_3() {
+red_3() {
     printf '\ncase x in\n' >> "$AEGIS_ROOT/libexec/aegis-rotate"
 }
 
@@ -28,6 +28,6 @@ control_1() { printf '\n# comentario legitimo\n' >> "$AEGIS_ROOT/init/phases/20-
 # lenguaje salía solo del shebang, y los seis módulos de lib/aegis/ se
 # chequeaban por casualidad, según si su docstring mencionaba la
 # palabra «python». 5.800 renglones cubiertos por azar.
-rojo_4() {
+red_4() {
     printf '\ndef roto(:\n' >> "$AEGIS_ROOT/lib/aegis/markers.py"
 }

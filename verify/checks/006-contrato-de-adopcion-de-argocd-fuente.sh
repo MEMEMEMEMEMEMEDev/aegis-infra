@@ -1,4 +1,4 @@
-# titulo: contrato de adopción de argocd (fuente única)
+# title: contrato de adopción de argocd (fuente única)
 # origen: verify-static.sh (v2) ══ 6
 check() {
 if python3 - "$AEGIS_ROOT" <<'EOF'

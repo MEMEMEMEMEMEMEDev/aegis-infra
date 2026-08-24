@@ -1,4 +1,4 @@
-# titulo: arrancar con CERO organizaciones no es un caso de borde
+# title: arrancar con CERO organizaciones no es un caso de borde
 # origen: verify-static.sh (v2) ══ 87
 check() {
 # Los dos manifiestos de organizaciones los DERIVA `bin/aegis-org` de
@@ -32,7 +32,7 @@ fi
 grep -q '^yaml_has_docs()' "$LIBS/common.sh" \
     || D87="$D87 falta yaml_has_docs en common.sh;"
 grep -qE '^\s*if\s+yaml_has_docs\s+"\$PLATFORM_DIR/k8s/bootstrap/appprojects-tenants\.yaml"' \
-     "$FASES/35-gitops.sh" \
+     "$PHASES/35-gitops.sh" \
     || D87="$D87 la 35 aplica appprojects-tenants.yaml sin preguntar si tiene documentos;"
 # 4) el TERCER derivado, que no es un archivo entero sino una REGIÓN
 #    (agregado 2026-08-22 con la derivación de sondas). vmagent/

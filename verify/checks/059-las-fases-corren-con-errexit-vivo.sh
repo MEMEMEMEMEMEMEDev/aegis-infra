@@ -1,4 +1,4 @@
-# titulo: las fases corren con errexit VIVO (F-A #15 — el misterio del set -e)
+# title: las fases corren con errexit VIVO (F-A #15 — el misterio del set -e)
 # origen: verify-static.sh (v2) ══ 59
 check() {
 # `if ( source fase )` pone la fase en contexto de condición → bash

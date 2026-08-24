@@ -1,4 +1,4 @@
-# titulo: seed del canary completo
+# title: seed del canary completo
 # origen: verify-static.sh (v2) ══ 5c
 check() {
 SEED_MISSING=""

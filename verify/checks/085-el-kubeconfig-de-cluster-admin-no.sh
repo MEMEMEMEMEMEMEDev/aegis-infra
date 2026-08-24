@@ -1,4 +1,4 @@
-# titulo: el kubeconfig de cluster-admin no nace world-readable
+# title: el kubeconfig de cluster-admin no nace world-readable
 # origen: verify-static.sh (v2) ══ 85
 check() {
 # Corrida en Linux nativo (2026-07-25): k3s se instalaba con
@@ -16,7 +16,7 @@ GV85="$P/ansible/inventory/group_vars/all.yml"
 # `sudo install ... \` + ruta en la línea siguiente se lee como copia
 # sin privilegio (falso positivo que este mismo check produjo al
 # escribirse — la angostura es la enfermedad crónica del verificador).
-F20="$(sed -e :a -e '/\\$/N; s/\\\n[[:space:]]*//; ta' "$FASES/20-k3s.sh" \
+F20="$(sed -e :a -e '/\\$/N; s/\\\n[[:space:]]*//; ta' "$PHASES/20-k3s.sh" \
        | nc)"
 MODE85="$(grep -oE '\-\-write-kubeconfig-mode[= ]+0?[0-7]{3}' "$GV85" 2>/dev/null \
           | grep -oE '0?[0-7]{3}$' | tail -1)"

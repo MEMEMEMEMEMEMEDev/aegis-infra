@@ -1,4 +1,4 @@
-# titulo: todo comando declara su metadata y el menú lo lista
+# title: todo comando declara su metadata y el menú lo lista
 # origen: V-101 (03 §2) — nuevo en v3
 check() {
 # La sección «Cobertura ausente» del registro con su número: de 12

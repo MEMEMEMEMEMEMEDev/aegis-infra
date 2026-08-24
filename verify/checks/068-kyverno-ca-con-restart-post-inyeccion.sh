@@ -1,10 +1,10 @@
-# titulo: Kyverno: CA con restart post-inyección + deny-by-default (W-04)
+# title: Kyverno: CA con restart post-inyección + deny-by-default (W-04)
 # origen: verify-static.sh (v2) ══ 68
 check() {
 # P1.1 (confirmado en vivo): subPath NO refresca — sin restart, los
 # controllers quedan con el CA viejo → x509 → deny fail-closed.
 D68=""
-NC80B="$(nc "$FASES/80-supply-chain.sh")"
+NC80B="$(nc "$PHASES/80-supply-chain.sh")"
 echo "$NC80B" | grep -q 'CA_INYECTADO_ESTA_CORRIDA' \
     || D68="$D68 la 80 no distingue si el CA se inyectó en ESTA corrida;"
 echo "$NC80B" | grep -q 'rollout restart' \

@@ -1,9 +1,9 @@
-# titulo: '|| true' solo donde es legítimo
+# title: '|| true' solo donde es legítimo
 # origen: verify-static.sh (v2) ══ 9
 check() {
 # legítimos: git commit (nada que commitear), limpieza best-effort,
 # greps de inventario. Ilegítimos: sobre secretos/gates/aplicación.
-BAD="$(grep -rn '|| true' "$FASES" \
+BAD="$(grep -rn '|| true' "$PHASES" \
     | nc_hits \
     | grep -vE 'git .*commit|--no-verify|log_info|kustomization.yaml 2>/dev/null' \
     | grep -vE '>&2 \|\| true' \

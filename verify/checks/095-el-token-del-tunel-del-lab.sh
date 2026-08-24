@@ -1,4 +1,4 @@
-# titulo: el token del túnel del lab nunca se imprime
+# title: el token del túnel del lab nunca se imprime
 # origen: verify-static.sh (v2) ══ 95
 check() {
 # El token es un credencial de larga vida que da entrada de red al

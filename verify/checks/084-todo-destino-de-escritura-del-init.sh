@@ -1,4 +1,4 @@
-# titulo: todo destino de escritura del init en platform/ sobrevive a un clone limpio
+# title: todo destino de escritura del init en platform/ sobrevive a un clone limpio
 # origen: verify-static.sh (v2) ══ 84
 check() {
 # Corrida en Linux nativo (2026-07-25): la fase 15 hace

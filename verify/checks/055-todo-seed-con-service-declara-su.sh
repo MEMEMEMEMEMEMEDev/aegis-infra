@@ -1,4 +1,4 @@
-# titulo: todo seed con Service declara su EXPOSICIÓN (generalización CR-5)
+# title: todo seed con Service declara su EXPOSICIÓN (generalización CR-5)
 # origen: verify-static.sh (v2) ══ 55
 check() {
 # CR-5 era detectable estáticamente: una app con Service y sin

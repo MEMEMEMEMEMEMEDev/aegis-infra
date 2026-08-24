@@ -1,4 +1,4 @@
-# titulo: los centinelas los escribe y los reconoce el mismo módulo
+# title: los centinelas los escribe y los reconoce el mismo módulo
 # origen: V-105 (03 §5.6) — nuevo en v3
 check() {
 # Clase B del registro, tres casos. El más caro: el banner «GENERADO

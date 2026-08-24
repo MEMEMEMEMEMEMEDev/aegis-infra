@@ -1,4 +1,4 @@
-# titulo: las copias a mano de los middlewares son byte a byte lo que emite el generador
+# title: las copias a mano de los middlewares son byte a byte lo que emite el generador
 # origen: verify-static.sh (v2) ══ 91, parte (b) — partida en v3
 check() {
 # El canario no tiene contrato (es lo que prueba que el camino del

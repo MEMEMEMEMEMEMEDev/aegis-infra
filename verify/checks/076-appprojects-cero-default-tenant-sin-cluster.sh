@@ -1,4 +1,4 @@
-# titulo: AppProjects: cero default + tenant sin cluster-scoped (W-06 / R1-B)
+# title: AppProjects: cero default + tenant sin cluster-scoped (W-06 / R1-B)
 # origen: verify-static.sh (v2) ══ 76
 check() {
 D76=""
@@ -35,15 +35,15 @@ echo "$PLAT76" | grep -qF "namespace: '*'" \
 grep -rq 'project:[[:space:]]*aegis-tenant-canary' "$P/k8s" 2>/dev/null \
     || D76="$D76 ninguna App en aegis-tenant-canary (el canary quedó en el proyecto de plataforma);"
 # 5) la 35 aplica los AppProjects ANTES de root (clase C1)
-L_AP="$(grep -n 'appprojects.yaml' "$FASES/35-gitops.sh" | head -1 | cut -d: -f1)"
-L_ROOT="$(grep -n 'argocd-apps/root.yaml' "$FASES/35-gitops.sh" | head -1 | cut -d: -f1)"
+L_AP="$(grep -n 'appprojects.yaml' "$PHASES/35-gitops.sh" | head -1 | cut -d: -f1)"
+L_ROOT="$(grep -n 'argocd-apps/root.yaml' "$PHASES/35-gitops.sh" | head -1 | cut -d: -f1)"
 if [[ -z "$L_AP" || -z "$L_ROOT" ]] || (( L_AP > L_ROOT )); then
     D76="$D76 la 35 no aplica los AppProjects antes de root (o falta);"
 fi
 # 5b) y aplica TAMBIÉN los derivados, antes de root (#19). Sin esta
 #     línea el bootstrap crea los proyectos del sustrato, root sincroniza,
 #     y las Applications de las organizaciones quedan "project not found".
-L_APT="$(grep -n 'appprojects-tenants.yaml' "$FASES/35-gitops.sh" | head -1 | cut -d: -f1)"
+L_APT="$(grep -n 'appprojects-tenants.yaml' "$PHASES/35-gitops.sh" | head -1 | cut -d: -f1)"
 if [[ -z "$L_APT" ]] || (( L_APT > L_ROOT )); then
     D76="$D76 la 35 no aplica appprojects-tenants.yaml antes de root (o falta);"
 fi

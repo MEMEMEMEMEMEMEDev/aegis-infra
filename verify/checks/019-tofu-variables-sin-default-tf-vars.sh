@@ -1,4 +1,4 @@
-# titulo: tofu: variables sin default ↔ TF_VARs del wrapper
+# title: tofu: variables sin default ↔ TF_VARs del wrapper
 # origen: verify-static.sh (v2) ══ 19
 check() {
 # Corrida #4: toda variable declarada sin default y no inyectada =

@@ -2,7 +2,7 @@
 # cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
 
 # saca del artefacto justo lo que el check dice medir
-rojo_1() {
+red_1() {
     grep -vE 'registry_cluster_ip }} registry.registry-system.svc.cluster.local' "$AEGIS_ROOT/seed/platform/ansible/playbooks/registry-host-trust.yml" > "$AEGIS_ROOT/seed/platform/ansible/playbooks/registry-host-trust.yml.diente" \
         && mv "$AEGIS_ROOT/seed/platform/ansible/playbooks/registry-host-trust.yml.diente" "$AEGIS_ROOT/seed/platform/ansible/playbooks/registry-host-trust.yml"
 }

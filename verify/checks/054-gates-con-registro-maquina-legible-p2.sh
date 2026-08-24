@@ -1,4 +1,4 @@
-# titulo: gates con registro máquina-legible (P2.13 in-VM)
+# title: gates con registro máquina-legible (P2.13 in-VM)
 # origen: verify-static.sh (v2) ══ 54
 check() {
 D54=""

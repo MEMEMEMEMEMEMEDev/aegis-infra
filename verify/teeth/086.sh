@@ -6,7 +6,7 @@
 # repo literal). El de contrastar contra el conf de la máquina solo
 # corre si hay instancia — y descubrir que en v3 ya no la encontraba
 # fue mérito de este diente.
-rojo_1() {
+red_1() {
     printf '\n# el repo: git@github.com:ejemplo-org/ops-stack-v2.git\n' \
         >> "$AEGIS_ROOT/seed/platform/edge.yaml"
 }

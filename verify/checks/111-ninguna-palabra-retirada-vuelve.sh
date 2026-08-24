@@ -1,4 +1,4 @@
-# titulo: ninguna palabra retirada del glosario vuelve al código
+# title: ninguna palabra retirada del glosario vuelve al código
 # origen: nuevo en v3 — el renombrado ES->EN del 2026-08-24
 check() {
 # El trinquete de la conversión al inglés. Mover 34.600 renglones de

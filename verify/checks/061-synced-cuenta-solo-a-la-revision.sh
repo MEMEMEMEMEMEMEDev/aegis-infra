@@ -1,4 +1,4 @@
-# titulo: Synced cuenta SOLO a la revisión pusheada (F-B #15)
+# title: Synced cuenta SOLO a la revisión pusheada (F-B #15)
 # origen: verify-static.sh (v2) ══ 61
 check() {
 # el sync murió por DNS transitorio y el gate pasó con el Synced
@@ -11,7 +11,7 @@ echo "$ASG61" | grep -q 'status.sync.revision' \
 for ph in 50-jenkins 70-deploy-auto 80-supply-chain 85-observability; do
     # ancla válida: rev-parse HEAD (repo local) o APP_HEAD (ls-remote
     # del repo de la app — sesión 21, P1.14):
-    sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba}' "$FASES/$ph.sh" \
+    sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba}' "$PHASES/$ph.sh" \
       | nc | grep 'argo_secrets_gate' \
       | grep -v 'APP_HEAD' | grep -vq 'rev-parse HEAD' 2>/dev/null \
       && D61="$D61 $ph llama argo_secrets_gate sin el sha pusheado;"

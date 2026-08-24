@@ -2,7 +2,7 @@
 # cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
 
 # saca del artefacto justo lo que el check dice medir
-rojo_1() {
+red_1() {
     grep -vE 'check_domain_on_cloudflare' "$AEGIS_ROOT/init/phases/00-preflight.sh" > "$AEGIS_ROOT/init/phases/00-preflight.sh.diente" \
         && mv "$AEGIS_ROOT/init/phases/00-preflight.sh.diente" "$AEGIS_ROOT/init/phases/00-preflight.sh"
 }

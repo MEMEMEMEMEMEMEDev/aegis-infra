@@ -2,7 +2,7 @@
 # Corrida #7: registry-host-trust corre kubectl con become:true y root
 # NO tiene ~/.kube/config → "Extraer ca.crt ... FAILED" a mitad de la
 # fase 40.
-rojo_1() {
+red_1() {
     sed -i '/^[[:space:]]*KUBECONFIG:/d' "$AEGIS_ROOT/seed/platform/ansible/playbooks/registry-host-trust.yml"
 }
 # control: el comentario que EXPLICA el fix también nombra KUBECONFIG.

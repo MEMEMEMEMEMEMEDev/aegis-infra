@@ -1,4 +1,4 @@
-# titulo: teardown desacoplado: aegis-destroy (fin de la nube sucia) (W-10/R5)
+# title: teardown desacoplado: aegis-destroy (fin de la nube sucia) (W-10/R5)
 # origen: verify-static.sh (v2) ══ 82
 check() {
 # La limpieza de CF estaba ACOPLADA al camino de creación (25 solo borra si

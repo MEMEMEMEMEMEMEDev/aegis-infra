@@ -1,4 +1,4 @@
-# titulo: hallazgos H1-H7 de la corrida #15 ABSORBIDOS (sesión 22)
+# title: hallazgos H1-H7 de la corrida #15 ABSORBIDOS (sesión 22)
 # origen: verify-static.sh (v2) ══ 71
 check() {
 D71=""
@@ -39,16 +39,16 @@ nc "$LIBS/common.sh" | grep -q 'DRIFT' \
     || D71="$D71 H7: los timeouts de sync no distinguen drift de timing;"
 # H6: la 12 siembra el canary SIEMPRE (historia huérfana + force) y
 # el gate valida el sha remoto == seed (resultado, no intención):
-NC12="$(nc "$FASES/12-workrepos.sh")"
+NC12="$(nc "$PHASES/12-workrepos.sh")"
 echo "$NC12" | grep -q 'app-repo-estado-igual-al-seed' \
     || D71="$D71 H6: la 12 sin gate de estado-igual-al-seed;"
-grep -q 'ya tiene contenido — no re-siembro' "$FASES/12-workrepos.sh" \
+grep -q 'ya tiene contenido — no re-siembro' "$PHASES/12-workrepos.sh" \
     && D71="$D71 H6: el skip 'no re-siembro' sigue vivo (deja .argocd-source residual);"
-sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba}' "$FASES/12-workrepos.sh" \
+sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba}' "$PHASES/12-workrepos.sh" \
   | nc | grep 'SEED_TMP.*push' | grep -q -- '--force' \
     || D71="$D71 H6: el push del canary sin --force (la historia vieja sobrevive);"
 # H6 defensa: la 70 valida el tag EFECTIVO del Deployment:
-nc "$FASES/70-deploy-auto.sh" | grep -q 'tag-efectivo-en-registry' \
+nc "$PHASES/70-deploy-auto.sh" | grep -q 'tag-efectivo-en-registry' \
     || D71="$D71 H6: la 70 no valida el tag efectivo contra el registry;"
 # H4: existencia de coredns ANTES del rollout status, en el playbook
 # (awk sobre líneas NO-comentario: el grep -n crudo ancló el
@@ -63,15 +63,15 @@ fi
 nc "$LIBS/common.sh" | grep -q '(¿red?)' \
     && D71="$D71 H4: retry_net sigue etiquetando todo fallo como '(¿red?)';"
 # H1: gate de skew real + la señal débil degradada:
-nc "$FASES/00-preflight.sh" | grep -q 'gate "reloj-sin-skew"' \
+nc "$PHASES/00-preflight.sh" | grep -q 'gate "reloj-sin-skew"' \
     || D71="$D71 H1: la 00 sin gate de skew de reloj;"
 CSK71="$(body_of check_clock_skew "$LIBS/checks.sh")"
 echo "$CSK71" | grep -qi 'date:' || D71="$D71 H1: el skew no se mide contra el header Date;"
 echo "$CSK71" | grep -q '60' || D71="$D71 H1: sin umbral de 60s;"
-nc "$FASES/00-preflight.sh" | grep -q 'gate .*check_clock_ntp' \
+nc "$PHASES/00-preflight.sh" | grep -q 'gate .*check_clock_ntp' \
     && D71="$D71 H1: timedatectl sigue siendo GATE (señal no confiable con chrony);"
 # H3: jq auto-instalado con NOPASSWD antes del gate:
-NC00="$(nc "$FASES/00-preflight.sh")"
+NC00="$(nc "$PHASES/00-preflight.sh")"
 echo "$NC00" | grep -q 'install -y jq' \
     || D71="$D71 H3: la 00 no instala jq sola (freno determinista de toda VM limpia);"
 # H2: runner con 2ª pasada + purga del estado generado:

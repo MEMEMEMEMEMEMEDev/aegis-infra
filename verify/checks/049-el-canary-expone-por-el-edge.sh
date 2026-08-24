@@ -1,4 +1,4 @@
-# titulo: el canary EXPONE por el edge, y la ruta NO la escribe su repo (CR-5 #14 / #54)
+# title: el canary EXPONE por el edge, y la ruta NO la escribe su repo (CR-5 #14 / #54)
 # origen: verify-static.sh (v2) ══ 49
 check() {
 # EL INVARIANTE ES "el canary se alcanza desde el edge", no "el archivo

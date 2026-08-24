@@ -1,4 +1,4 @@
-# titulo: Applications: paths de git existen en el repo
+# title: Applications: paths de git existen en el repo
 # origen: verify-static.sh (v2) ══ 5
 check() {
 if python3 - "$AEGIS_ROOT" <<'EOF'

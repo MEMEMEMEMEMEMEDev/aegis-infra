@@ -1,4 +1,4 @@
-# titulo: el lab entra por túnel o no entra
+# title: el lab entra por túnel o no entra
 # origen: verify-static.sh (v2) ══ 94
 check() {
 # 2026-08-22: el VPS de laboratorio nació a mano con el 22 abierto y

@@ -1,4 +1,4 @@
-# titulo: fases que mutan el repo de plataforma SINCRONIZAN antes (CR-6 in-VM)
+# title: fases que mutan el repo de plataforma SINCRONIZAN antes (CR-6 in-VM)
 # origen: verify-static.sh (v2) ══ 52
 check() {
 # Enfermedad D (estado dual git): un fix manual en GitHub durante un

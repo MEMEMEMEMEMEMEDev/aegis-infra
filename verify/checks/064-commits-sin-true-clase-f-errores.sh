@@ -1,4 +1,4 @@
-# titulo: commits SIN || true — clase F (errores tragados)
+# title: commits SIN || true — clase F (errores tragados)
 # origen: verify-static.sh (v2) ══ 64
 check() {
 # `git commit || true` en 6 fases tragaba fallos REALES: el push

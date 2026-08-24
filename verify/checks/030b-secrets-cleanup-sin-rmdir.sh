@@ -1,4 +1,4 @@
-# titulo: el cleanup de secretos no usa rmdir
+# title: el cleanup de secretos no usa rmdir
 # origen: verify-static.sh (v2) ══ 30, parte b — partida en v3
 check() {
 # rmdir falla con subdirectorios (docker/) → la fase queda FALLIDA con

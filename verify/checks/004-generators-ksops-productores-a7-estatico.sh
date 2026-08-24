@@ -1,4 +1,4 @@
-# titulo: generators KSOPS ↔ productores (A7 estático)
+# title: generators KSOPS ↔ productores (A7 estático)
 # origen: verify-static.sh (v2) ══ 4
 check() {
 # TRES PRODUCTORES, no uno (corregido 2026-08-05, #48).

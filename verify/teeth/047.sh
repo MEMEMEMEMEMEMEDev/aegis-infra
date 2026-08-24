@@ -2,7 +2,7 @@
 # cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
 
 # saca del artefacto justo lo que el check dice medir
-rojo_1() {
+red_1() {
     grep -vE 'operationState.message' "$AEGIS_ROOT/lib/common.sh" > "$AEGIS_ROOT/lib/common.sh.diente" \
         && mv "$AEGIS_ROOT/lib/common.sh.diente" "$AEGIS_ROOT/lib/common.sh"
 }

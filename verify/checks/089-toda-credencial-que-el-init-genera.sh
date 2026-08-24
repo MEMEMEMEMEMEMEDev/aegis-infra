@@ -1,4 +1,4 @@
-# titulo: toda credencial que el init GENERA se sabe rotar (#82)
+# title: toda credencial que el init GENERA se sabe rotar (#82)
 # origen: verify-static.sh (v2) ══ 89
 check() {
 # La rotación fue prosa hasta el 2026-08-12: rotation-checklist.md tenía

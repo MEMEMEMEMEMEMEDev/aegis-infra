@@ -1,4 +1,4 @@
-# titulo: ningún mensaje al operador escribe un nombre de comando a mano
+# title: ningún mensaje al operador escribe un nombre de comando a mano
 # origen: V-103 (03 §1) — nuevo en v3
 check() {
 # La Clase E del registro: ~155 strings con el nombre de un comando

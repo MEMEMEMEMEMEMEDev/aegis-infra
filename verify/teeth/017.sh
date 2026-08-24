@@ -6,9 +6,9 @@
 # quedado muerta al renombrar $AEGIS_V2_ROOT: buscaba una variable que
 # ya no existe, así que no tenía sujetos y pasaba en verde. Los dos
 # rojos de abajo cubren las dos mitades.
-rojo_1() {
+red_1() {
     printf '\nansible-playbook ansible/playbooks/no-existe.yml\n' >> "$AEGIS_ROOT/init/phases/20-k3s.sh"
 }
-rojo_2() {
+red_2() {
     printf '\nsource "$AEGIS_ROOT/lib/no-existe.sh"\n' >> "$AEGIS_ROOT/init/phases/35-gitops.sh"
 }

@@ -2,7 +2,7 @@
 # cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
 
 # saca del artefacto justo lo que el check dice medir
-rojo_1() {
+red_1() {
     grep -vE 'skipped due to when conditional' "$AEGIS_ROOT/init/phases/70-deploy-auto.sh" > "$AEGIS_ROOT/init/phases/70-deploy-auto.sh.diente" \
         && mv "$AEGIS_ROOT/init/phases/70-deploy-auto.sh.diente" "$AEGIS_ROOT/init/phases/70-deploy-auto.sh"
 }

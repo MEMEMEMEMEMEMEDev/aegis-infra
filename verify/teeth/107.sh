@@ -4,7 +4,7 @@
 # del motivo recibe un traceback sobre la línea que iba a dárselo.
 
 # el defecto exacto que tenía `aegis dev seed` hasta el 2026-08-24
-rojo_1() {
+red_1() {
     python3 - "$AEGIS_ROOT/libexec/dev/seed" <<'PY'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
@@ -14,7 +14,7 @@ PY
 }
 
 # y en un raise, que es la otra forma de salir por la mala
-rojo_2() {
+red_2() {
     python3 - "$AEGIS_ROOT/lib/aegis/org.py" <<'PY'
 import sys, pathlib, re
 p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")

@@ -2,7 +2,7 @@
 # cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
 
 # saca del artefacto justo lo que el check dice medir
-rojo_1() {
+red_1() {
     grep -vE 'chmod\s+6?00\s+"?\$HOME/\.kube/config|install -m\s*600' "$AEGIS_ROOT/init/phases/20-k3s.sh" > "$AEGIS_ROOT/init/phases/20-k3s.sh.diente" \
         && mv "$AEGIS_ROOT/init/phases/20-k3s.sh.diente" "$AEGIS_ROOT/init/phases/20-k3s.sh"
 }

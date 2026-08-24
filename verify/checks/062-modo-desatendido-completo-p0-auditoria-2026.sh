@@ -1,4 +1,4 @@
-# titulo: modo DESATENDIDO completo (P0 auditoría 2026-07-18)
+# title: modo DESATENDIDO completo (P0 auditoría 2026-07-18)
 # origen: verify-static.sh (v2) ══ 62
 check() {
 # el diseño asumía operador presente: 9+ prompts sin bypass, wizard
@@ -19,11 +19,11 @@ echo "$ASK62" | grep -q 'tries' \
     || D62="$D62 ask() sin tope de intentos inválidos;"
 nc "$LIBS/config.sh" | grep -q 'ni_mode && die' \
     || D62="$D62 ensure_config no exige conf pre-hecho en desatendido;"
-nc "$FASES/15-terceros.sh" | grep -q 'CF_MASTER_FILE' \
+nc "$PHASES/15-terceros.sh" | grep -q 'CF_MASTER_FILE' \
     || D62="$D62 fase 15 sin camino por archivo para la maestra CF;"
 nc "$LIBS/secrets.sh" | grep -q 'AEGIS_AGE_BACKUP_FILE' \
     || D62="$D62 ceremonia sin camino por archivo para el resguardo age;"
-nc "$FASES/12-workrepos.sh" | grep -q 'ni_mode && die' \
+nc "$PHASES/12-workrepos.sh" | grep -q 'ni_mode && die' \
     || D62="$D62 repo sin marcador se auto-confirmaría en desatendido (pisaría un repo real con push --force);"
 ABS62="$(body_of ansible_become_setup "$LIBS/common.sh")"
 echo "$ABS62" | grep -q 'ni_mode && die' \

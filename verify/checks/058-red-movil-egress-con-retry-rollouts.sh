@@ -1,4 +1,4 @@
-# titulo: red móvil: egress con retry + rollouts pull-aware (E-1, fases 20/40)
+# title: red móvil: egress con retry + rollouts pull-aware (E-1, fases 20/40)
 # origen: verify-static.sh (v2) ══ 58
 check() {
 # la firma del operador: "se cae, lo re-tiro sin cambiar nada y
@@ -25,11 +25,11 @@ for pat in 'pip install' 'bin/ansible-playbook.*playbooks/'; do
 done
 # (c) nadie espera coredns con rollout status directo (timeout corto
 # convertía LENTO en FALLO — va por wait_rollout):
-BAD58C="$(grep -rn 'rollout status deploy/coredns' "$FASES" \
+BAD58C="$(grep -rn 'rollout status deploy/coredns' "$PHASES" \
     | nc_hits || true)"
 [[ -n "$BAD58C" ]] && D58="$D58 coredns con rollout status directo (usar wait_rollout):"$'\n'"$BAD58C"
 # (d) los probes que pullean imagen en 40 llevan retry_net:
-F40_J="$(sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba}' "$FASES/40-registry-pki.sh" \
+F40_J="$(sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba}' "$PHASES/40-registry-pki.sh" \
     | nc)"
 for probe in tls-probe dns-probe; do
     echo "$F40_J" | grep "run $probe" | grep -vq retry_net 2>/dev/null && \

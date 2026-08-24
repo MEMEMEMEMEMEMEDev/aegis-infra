@@ -1,4 +1,4 @@
-# titulo: ningún comando decide leyendo la PROSA de otro
+# title: ningún comando decide leyendo la PROSA de otro
 # origen: V-104 (03 §3) — nuevo en v3
 check() {
 # A3 del registro, con línea: aegis-app:713 decidía si el webhook se

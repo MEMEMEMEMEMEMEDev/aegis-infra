@@ -8,7 +8,7 @@
 # El defecto real: una fase escribe en un directorio de platform/ que
 # la semilla no trae, así que en una máquina nueva —donde platform/
 # nace de un clone de la semilla— esa escritura falla.
-rojo_1() {
+red_1() {
     printf '\ncp x "$PLATFORM_DIR/k8s/base/carpeta-que-la-semilla-no-trae/archivo.yaml"\n' \
         >> "$AEGIS_ROOT/init/phases/85-observability.sh"
 }

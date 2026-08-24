@@ -1,4 +1,4 @@
-# titulo: el log() del wrapper de tofu va a stderr
+# title: el log() del wrapper de tofu va a stderr
 # origen: verify-static.sh (v2) ══ 14, parte c — partida en v3
 check() {
 # Los callers capturan subcomandos de LECTURA con $() (output -raw

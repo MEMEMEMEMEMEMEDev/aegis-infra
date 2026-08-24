@@ -1,4 +1,4 @@
-# titulo: kustomizations: resources referenciados existen
+# title: kustomizations: resources referenciados existen
 # origen: verify-static.sh (v2) ══ 7
 check() {
 if python3 - "$AEGIS_ROOT" <<'EOF'

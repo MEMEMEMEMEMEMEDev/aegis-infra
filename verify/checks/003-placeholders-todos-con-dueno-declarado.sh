@@ -1,4 +1,4 @@
-# titulo: placeholders: todos con dueño declarado
+# title: placeholders: todos con dueño declarado
 # origen: verify-static.sh (v2) ══ 3
 check() {
 # clase-config (dueño: render_platform_placeholders — fase 10 en

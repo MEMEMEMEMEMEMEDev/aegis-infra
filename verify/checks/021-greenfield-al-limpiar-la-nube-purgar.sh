@@ -1,4 +1,4 @@
-# titulo: greenfield: al limpiar la nube, purgar el tfstate LOCAL
+# title: greenfield: al limpiar la nube, purgar el tfstate LOCAL
 # origen: verify-static.sh (v2) ══ 21
 check() {
 # Corrida #6, bug 2: el pre-check de nube sucia borra el tunnel de
@@ -8,7 +8,7 @@ check() {
 # JUNTAS. Estático: el bloque de limpieza de la fase 25 DEBE purgar el
 # tfstate del env (rm de terraform.tfstate) — no basta con borrar en la
 # nube. Se exige la co-ocurrencia en el mismo archivo:
-P25="$FASES/25-edge-tofu.sh"
+P25="$PHASES/25-edge-tofu.sh"
 if grep -q 'cfd_tunnel/\$TID_PREV' "$P25" \
    && grep -qE 'rm -f .*\$TUNNEL_ENV/terraform\.tfstate' "$P25"; then
     pass "fase 25: la limpieza de nube purga también el tfstate local"

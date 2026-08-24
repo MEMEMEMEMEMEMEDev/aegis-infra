@@ -1,4 +1,4 @@
-# titulo: D11 — el store cifrado y la re-derivación de entorno existen
+# title: D11 — el store cifrado y la re-derivación de entorno existen
 # origen: verify-static.sh (v2) ══ 15, parte d — partida en v3
 check() {
 # Sin store, cada re-corrida regenera credenciales y el desatendido

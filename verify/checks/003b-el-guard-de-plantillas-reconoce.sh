@@ -1,4 +1,4 @@
-# titulo: el guard de plantillas reconoce todo placeholder que la semilla usa
+# title: el guard de plantillas reconoce todo placeholder que la semilla usa
 # origen: nuevo en v3 — el defecto del 2026-08-24
 check() {
 # `aegis app` rinde las plantillas de seed/templates/ y después

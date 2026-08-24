@@ -1,4 +1,4 @@
-# titulo: las cuatro funciones de log rutean a stderr (definición)
+# title: las cuatro funciones de log rutean a stderr (definición)
 # origen: verify-static.sh (v2) ══ 14, parte a — partida en v3
 check() {
 # Si un log vuelve a stdout, toda función gen_* capturada con $() se

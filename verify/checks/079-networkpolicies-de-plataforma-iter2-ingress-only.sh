@@ -1,4 +1,4 @@
-# titulo: NetworkPolicies de plataforma iter2: ingress-only + entrega real (W-07)
+# title: NetworkPolicies de plataforma iter2: ingress-only + entrega real (W-07)
 # origen: verify-static.sh (v2) ══ 79
 check() {
 # iter2 aísla el PLANO DE CONTROL (trivy/jenkins/argocd) por ingress. NO
@@ -65,7 +65,7 @@ PY
 # default-deny de trivy, un pod recién creado pierde la carrera contra el
 # ipset de kube-router (exit 7) y el retry EXTERNO no ayuda (pod nuevo cada
 # vez). Sin el loop interno, la fase 80 frena (corrida 2026-07-23).
-_T80="$FASES/80-supply-chain.sh"
+_T80="$PHASES/80-supply-chain.sh"
 awk '/gate "trivy-responde"/{f=1} f{print} f&&/>\/dev\/null"/{exit}' "$_T80" 2>/dev/null \
     | grep -Eq "for i in |until curl" \
     || D79="$D79 el probe trivy-responde no reintenta DENTRO del pod (perdería el race del netpol de kube-router);"

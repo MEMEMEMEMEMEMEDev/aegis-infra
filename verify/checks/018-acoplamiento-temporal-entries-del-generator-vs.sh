@@ -1,4 +1,4 @@
-# titulo: acoplamiento temporal: entries del generator vs fase de sync
+# title: acoplamiento temporal: entries del generator vs fase de sync
 # origen: verify-static.sh (v2) ══ 18
 check() {
 # Corrida #4 (bug que frenó): un entry estático cuyo .enc.yaml se

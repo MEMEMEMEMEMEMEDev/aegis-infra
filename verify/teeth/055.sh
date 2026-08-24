@@ -3,7 +3,7 @@
 # Nadie la ve fallar — el manifiesto está perfecto y el tráfico no
 # llega. Es el defecto más caro de encontrar en producción y el más
 # barato de encontrar acá.
-rojo_1() {
+red_1() {
     cat >> "$AEGIS_ROOT/seed/canary/k8s/base/deployment.yaml" <<'YAML'
 ---
 apiVersion: v1

@@ -2,7 +2,7 @@
 # cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
 
 # saca del artefacto justo lo que el check dice medir
-rojo_1() {
+red_1() {
     grep -vE 'CA_INYECTADO_ESTA_CORRIDA' "$AEGIS_ROOT/init/phases/80-supply-chain.sh" > "$AEGIS_ROOT/init/phases/80-supply-chain.sh.diente" \
         && mv "$AEGIS_ROOT/init/phases/80-supply-chain.sh.diente" "$AEGIS_ROOT/init/phases/80-supply-chain.sh"
 }

@@ -1,4 +1,4 @@
-# titulo: sync manual con las OPCIONES del spec + dueño del ns primero (D v1.2)
+# title: sync manual con las OPCIONES del spec + dueño del ns primero (D v1.2)
 # origen: verify-static.sh (v2) ══ 74
 check() {
 # Un `operation.sync` VACÍO no hereda spec.syncPolicy.syncOptions

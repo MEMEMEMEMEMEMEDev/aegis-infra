@@ -1,4 +1,4 @@
-# titulo: la semilla es artefacto puro — sin bin/ y sin ejecutables
+# title: la semilla es artefacto puro — sin bin/ y sin ejecutables
 # origen: V-134 (02 §1) — nuevo en v3
 check() {
 # La mitad de la deuda de v2 salía de que el mismo código vivía en dos

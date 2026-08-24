@@ -3,15 +3,15 @@
 # El riesgo real no es que falte AI: es que MAÑANA alguien saque otro
 # subsistema y no escriba nada. El rojo principal simula exactamente
 # eso — borrar el protocolo y dejar la ausencia muda.
-rojo_1() { rm -f "$AEGIS_ROOT/seed/platform/docs/protocols/attach-ai-subsystem.md"; }
+red_1() { rm -f "$AEGIS_ROOT/seed/platform/docs/protocols/attach-ai-subsystem.md"; }
 
 # vaciar la carpeta de protocolos entera: la misma ausencia por otro
 # camino, para que el check no dependa de un nombre de archivo.
-rojo_2() { rm -rf "$AEGIS_ROOT/seed/platform/docs/protocols"; }
+red_2() { rm -rf "$AEGIS_ROOT/seed/platform/docs/protocols"; }
 
 # y el caso que importa de verdad: un subsistema NUEVO que se saca sin
 # documentar. Si el check solo vigilara a AI, esto pasaría en verde.
-rojo_3() {
+red_3() {
     cat >> "$AEGIS_ROOT/lib/aegis/org.py" <<'PY'
 
 
@@ -30,7 +30,7 @@ control_1() {
 # de exclusión de `aegis dev seed` — una regla podada por el tiempo deja
 # de proteger sin avisar, y una mentira en el lugar donde se busca la
 # verdad es peor que no tener nada escrito.
-rojo_4() {
+red_4() {
     printf '\n<!-- aegis-absent: k8s/base/garage-system -->\n' \
         >> "$AEGIS_ROOT/seed/platform/docs/protocols/attach-ai-subsystem.md"
 }

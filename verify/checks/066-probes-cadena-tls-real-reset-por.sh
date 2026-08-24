@@ -1,11 +1,11 @@
-# titulo: probes: cadena TLS real, reset por intento, pins
+# title: probes: cadena TLS real, reset por intento, pins
 # origen: verify-static.sh (v2) ══ 66
 check() {
 D66=""
 # las aserciones van sobre las LÍNEAS DEL PROBE (joined), no sobre
 # la fase entera — 'registry-tls' aparece en otros gates y un grep
 # global era mención≠uso (el diente de la sesión 21 lo destapó):
-TLS66="$(sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba}' "$FASES/40-registry-pki.sh" \
+TLS66="$(sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba}' "$PHASES/40-registry-pki.sh" \
   | nc | grep 'tls-probe')"
 echo "$TLS66" | grep -q ' -k ' \
     && D66="$D66 registry-tls-real usa -k (no valida la cadena — el cert malo explota 2 fases después);"
@@ -21,7 +21,7 @@ for par in "40-registry-pki:dns-probe" "40-registry-pki:tls-probe" \
            "80-supply-chain:trivy-probe" "80-supply-chain:scope-probe" \
            "80-supply-chain:unsigned-probe"; do
     f="${par%%:*}"; p="${par##*:}"
-    NC66="$(sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba}' "$FASES/$f.sh" | nc)"
+    NC66="$(sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba}' "$PHASES/$f.sh" | nc)"
     if echo "$NC66" | grep -q "run $p"; then
         echo "$NC66" | grep -qE "(delete pod $p .*--ignore-not-found|probe_reset [a-z-]+ $p)" \
             || D66="$D66 $f/$p sin delete previo (AlreadyExists anula el retry);"

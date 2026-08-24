@@ -1,7 +1,7 @@
-# titulo: tag inicial del canary = el que EXISTE en el registry (H1 #13)
+# title: tag inicial del canary = el que EXISTE en el registry (H1 #13)
 # origen: verify-static.sh (v2) ══ 46
 check() {
-F70_NC="$(nc "$FASES/70-deploy-auto.sh")"
+F70_NC="$(nc "$PHASES/70-deploy-auto.sh")"
 if echo "$F70_NC" | grep -q 'tags/list' \
    && echo "$F70_NC" | grep -q 'tag-real-en-registry' \
    && echo "$F70_NC" | grep -q 'newTag: main-'; then

@@ -1,4 +1,4 @@
-# titulo: archivos que las fases referencian EXISTEN (clase bug 4)
+# title: archivos que las fases referencian EXISTEN (clase bug 4)
 # origen: verify-static.sh (v2) ══ 17
 check() {
 # el requirements.txt de ansible estaba referenciado y NO existía —

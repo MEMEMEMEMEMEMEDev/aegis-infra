@@ -1,4 +1,4 @@
-# titulo: rotación: invalidar el store (fin del no-op silencioso) (W-09/R5)
+# title: rotación: invalidar el store (fin del no-op silencioso) (W-09/R5)
 # origen: verify-static.sh (v2) ══ 81
 check() {
 # El bug: gen_or_restore RESTAURA el .enc viejo → re-correr la fase NO rota

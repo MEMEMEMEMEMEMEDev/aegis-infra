@@ -1,4 +1,4 @@
-# titulo: syncs robustos + telemetría completa (P1.3/P1.11/clase G)
+# title: syncs robustos + telemetría completa (P1.3/P1.11/clase G)
 # origen: verify-static.sh (v2) ══ 70
 check() {
 D70=""
@@ -25,7 +25,7 @@ nc "$AEGIS_ROOT"/init/phases/*.sh | grep -q 'REG_HOST="registry\.' \
     && D70="$D70 REG_HOST duplicado a mano en fases (la fuente única es REGISTRY_HOST_INTERNAL);"
 nc "$LIBS/common.sh" | grep -q '^REGISTRY_HOST_INTERNAL=' \
     || D70="$D70 falta REGISTRY_HOST_INTERNAL en common.sh;"
-nc "$FASES/40-registry-pki.sh" | grep -q 'clusterip-coincide-con-el-service' \
+nc "$PHASES/40-registry-pki.sh" | grep -q 'clusterip-coincide-con-el-service' \
     || D70="$D70 REGISTRY_CLUSTER_IP jamás se valida contra el Service real;"
 if [[ -n "$D70" ]]; then fail "syncs/telemetría:$D70"
 else pass "selfHeal adoptado, backoff real, 404≠API-rota, gates.jsonl completo, registry con fuente única validada"; fi

@@ -1,7 +1,7 @@
 # dientes del check 104 (ningún comando lee la prosa de otro)
 # A3: aegis-app decidía si el webhook se había creado buscando la
 # frase «webhook creado» en la salida del otro comando.
-rojo_1() {
+red_1() {
     cat >> "$AEGIS_ROOT/libexec/aegis-app" <<'PY'
 
 

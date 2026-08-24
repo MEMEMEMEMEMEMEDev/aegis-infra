@@ -1,4 +1,4 @@
-# titulo: NetworkPolicies: default-deny del tenant + DNS en egress (W-07)
+# title: NetworkPolicies: default-deny del tenant + DNS en egress (W-07)
 # origen: verify-static.sh (v2) ══ 77
 check() {
 D77=""
@@ -32,7 +32,7 @@ else
 fi
 grep -q 'netpol.yaml' "$NPD/kustomization.yaml" \
     || D77="$D77 el kustomization de org-canary no lista netpol.yaml;"
-grep -q 'netpol-tenant-aislado' "$FASES/80-supply-chain.sh" \
+grep -q 'netpol-tenant-aislado' "$PHASES/80-supply-chain.sh" \
     || D77="$D77 falta el gate netpol-tenant-aislado (aislamiento sin verificar en runtime);"
 # W-07 iter2 (RBAC del tenant): el SA default de org-canary NO monta
 # el token de la API (el tenant no administra el cluster):

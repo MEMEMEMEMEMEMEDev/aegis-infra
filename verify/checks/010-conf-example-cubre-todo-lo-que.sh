@@ -1,4 +1,4 @@
-# titulo: conf.example cubre todo lo que las fases exigen
+# title: conf.example cubre todo lo que las fases exigen
 # origen: verify-static.sh (v2) ══ 10
 check() {
 MISSING=""

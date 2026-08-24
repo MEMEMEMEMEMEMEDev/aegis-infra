@@ -1,8 +1,8 @@
-# titulo: gates fail-closed force-kill: opt-in, no silenciosos, razón correcta (W-08)
+# title: gates fail-closed force-kill: opt-in, no silenciosos, razón correcta (W-08)
 # origen: verify-static.sh (v2) ══ 83
 check() {
 D83=""
-F80FC="$(nc "$FASES/80-supply-chain.sh")"
+F80FC="$(nc "$PHASES/80-supply-chain.sh")"
 echo "$F80FC" | grep -q 'AEGIS_VALIDATE_FAILCLOSED' \
     || D83="$D83 los gates fail-closed no son opt-in (crashearían cada bootstrap);"
 echo "$F80FC" | grep -q '_failclosed_gates' \

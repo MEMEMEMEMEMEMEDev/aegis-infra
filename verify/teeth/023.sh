@@ -2,7 +2,7 @@
 # Corrida #7, bug A: la App registry tenía CreateNamespace=true pero es
 # kustomize/KSOPS, y el sync falló con «namespaces registry-system not
 # found». CreateNamespace no es confiable para apps kustomize.
-rojo_1() {
+red_1() {
     cat >> "$AEGIS_ROOT/seed/platform/k8s/argocd-apps/ci-supply-tenants.yaml" <<'YAML'
 ---
 apiVersion: argoproj.io/v1alpha1

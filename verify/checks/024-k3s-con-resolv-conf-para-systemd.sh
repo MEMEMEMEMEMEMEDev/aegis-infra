@@ -1,4 +1,4 @@
-# titulo: k3s con resolv-conf para systemd-resolved (bug B externa)
+# title: k3s con resolv-conf para systemd-resolved (bug B externa)
 # origen: verify-static.sh (v2) ══ 24
 check() {
 # Corrida #7, bug B capa externa: Ubuntu usa systemd-resolved →

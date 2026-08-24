@@ -1,4 +1,4 @@
-# titulo: cada namespace destino lo CREA alguien confiable (bug A)
+# title: cada namespace destino lo CREA alguien confiable (bug A)
 # origen: verify-static.sh (v2) ══ 23
 check() {
 # Corrida #7, bug A: la App registry tenía CreateNamespace=true pero

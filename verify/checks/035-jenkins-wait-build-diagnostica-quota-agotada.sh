@@ -1,4 +1,4 @@
-# titulo: jenkins_wait_build DIAGNOSTICA quota agotada (corrida #11)
+# title: jenkins_wait_build DIAGNOSTICA quota agotada (corrida #11)
 # origen: verify-static.sh (v2) ══ 35
 check() {
 # RQ llena → el plugin no crea el pod → el build no arranca nunca y

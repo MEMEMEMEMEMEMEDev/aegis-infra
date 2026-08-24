@@ -1,4 +1,4 @@
-# titulo: .gitignore del repo de plataforma (tofu/ansible)
+# title: .gitignore del repo de plataforma (tofu/ansible)
 # origen: verify-static.sh (v2) ══ 20
 check() {
 # Corrida #4: git add -A pusheó .terraform/ (233MB, GitHub rechaza)

@@ -1,4 +1,4 @@
-# titulo: store: 'existe pero no descifra' ≠ 'no existe' (corrida #11)
+# title: store: 'existe pero no descifra' ≠ 'no existe' (corrida #11)
 # origen: verify-static.sh (v2) ══ 37
 check() {
 # sops mudo (0 chars) se trataba como ausencia → el caller REGENERABA
@@ -15,7 +15,7 @@ D37=""
 echo "$RS_BODY"   | grep -q 'return 2'       || D37="$D37 restore_secret sin rc-2;"
 echo "$GOR_BODY"  | grep -q 'store_rc_guard' || D37="$D37 gen_or_restore sin guard;"
 echo "$GORK_BODY" | grep -q 'store_rc_guard' || D37="$D37 gen_or_restore_keypair sin guard;"
-nc "$FASES/80-supply-chain.sh" \
+nc "$PHASES/80-supply-chain.sh" \
     | grep -q 'store_rc_guard' || D37="$D37 fase 80 (cosign) sin guard;"
 if [[ -n "$D37" ]]; then fail "store no-descifra tratado como ausencia:$D37"
 else pass "no-descifra = rc 2 + guard en todos los generadores (nunca regenerar sobre sops mudo)"; fi

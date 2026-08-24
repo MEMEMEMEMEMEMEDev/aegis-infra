@@ -1,4 +1,4 @@
-# titulo: HMACs sin \\n final — byte-idénticos en los DOS lados (corrida #12)
+# title: HMACs sin \\n final — byte-idénticos en los DOS lados (corrida #12)
 # origen: verify-static.sh (v2) ══ 38
 check() {
 # `openssl rand -hex 32 > out` deja \n; el Secret K8s lo conserva
@@ -10,7 +10,7 @@ GH32_BODY="$(body_of gen_hex32 "$LIBS/secrets.sh" \
     | nc)"
 echo "$GH32_BODY" | grep 'openssl rand' | grep -q "tr -d '\\\\n'" \
     || D38="$D38 gen_hex32 emite \\n (openssl sin tr -d);"
-F15_NC="$(nc "$FASES/15-terceros.sh")"
+F15_NC="$(nc "$PHASES/15-terceros.sh")"
 echo "$F15_NC" | grep -q 'assert_no_newline "\$HMAC_ARGO"' \
     && echo "$F15_NC" | grep -q 'assert_no_newline "\$HMAC_JENK"' \
     || D38="$D38 fase 15 sin assert_no_newline sobre los HMAC (store viejo pasaría);"

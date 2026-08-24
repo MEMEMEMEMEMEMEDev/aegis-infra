@@ -11,7 +11,7 @@
 # Y un productor tardío. Con el entry solo, el check lo trata como
 # «lo produce el camino de contratos» y sigue — que es correcto, y por
 # eso el primer intento de este diente no mordía.
-rojo_1() {
+red_1() {
     sed -i 's|^  - secret-github-webhook.enc.yaml.*|  - secret-tardio.enc.yaml\n&|' \
         "$AEGIS_ROOT/seed/platform/k8s/base/platform/argocd-secrets/secret-generator.yaml"
     printf '\nmake_enc_secret "$PLATFORM_DIR/k8s/base/platform/argocd-secrets/secret-tardio.enc.yaml"\n' \

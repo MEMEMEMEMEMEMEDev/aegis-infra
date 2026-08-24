@@ -1,4 +1,4 @@
-# titulo: el alcance de la firma se declara por ETIQUETA, jamás por lista (#14)
+# title: el alcance de la firma se declara por ETIQUETA, jamás por lista (#14)
 # origen: verify-static.sh (v2) ══ 88
 check() {
 # EL incidente del 2026-07-27, y el que #52 encontró todavía vivo en la

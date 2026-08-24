@@ -1,4 +1,4 @@
-# titulo: preflight versionado cubre las deps de entorno del init (W-02)
+# title: preflight versionado cubre las deps de entorno del init (W-02)
 # origen: verify-static.sh (v2) ══ 78
 check() {
 D78=""

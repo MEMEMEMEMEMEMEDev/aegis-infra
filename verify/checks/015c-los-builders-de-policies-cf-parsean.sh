@@ -1,4 +1,4 @@
-# titulo: D11 — los policy builders de Cloudflare parsean
+# title: D11 — los policy builders de Cloudflare parsean
 # origen: verify-static.sh (v2) ══ 15, parte c — partida en v3
 check() {
 # Con ast y no importándolos: un import deja __pycache__ dentro del

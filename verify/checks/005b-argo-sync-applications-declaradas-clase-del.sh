@@ -1,4 +1,4 @@
-# titulo: argo_sync ↔ Applications declaradas (clase del hueco hello-aegis)
+# title: argo_sync ↔ Applications declaradas (clase del hueco hello-aegis)
 # origen: verify-static.sh (v2) ══ 5b
 check() {
 if python3 - "$AEGIS_ROOT" <<'EOF'

@@ -1,4 +1,4 @@
-# titulo: la vigilancia se vigila: reglas ↔ métricas ↔ jobs ↔ paneles
+# title: la vigilancia se vigila: reglas ↔ métricas ↔ jobs ↔ paneles
 # origen: verify-static.sh (v2) ══ 92
 check() {
 # Hasta hoy este verificador tenía CERO checks de observabilidad, y el

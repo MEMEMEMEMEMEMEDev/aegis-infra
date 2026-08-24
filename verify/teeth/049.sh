@@ -2,7 +2,7 @@
 # cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
 
 # saca del artefacto justo lo que el check dice medir
-rojo_1() {
+red_1() {
     grep -vE 'entryPoints:.*\bweb\b|^\s*-\s*web\s*$' "$AEGIS_ROOT/seed/platform/k8s/organizations/org-canary/routes.yaml" > "$AEGIS_ROOT/seed/platform/k8s/organizations/org-canary/routes.yaml.diente" \
         && mv "$AEGIS_ROOT/seed/platform/k8s/organizations/org-canary/routes.yaml.diente" "$AEGIS_ROOT/seed/platform/k8s/organizations/org-canary/routes.yaml"
 }

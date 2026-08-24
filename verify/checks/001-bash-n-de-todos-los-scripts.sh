@@ -1,4 +1,4 @@
-# titulo: todo script del producto y del artefacto parsea
+# title: todo script del producto y del artefacto parsea
 # origen: verify-static.sh (v2) ══ 1
 check() {
 # En v2 esto barría `-name '*.sh'`, y en v2 alcanzaba: los comandos

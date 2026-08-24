@@ -6,14 +6,14 @@
 
 # el patrón exacto que tenía el producto hasta el 2026-08-24: no
 # reconoce ningún placeholder con guion bajo adentro.
-rojo_1() {
+red_1() {
     sed -i 's|^PLACEHOLDER = re.compile(r"__\[A-Z0-9_\]+__")|PLACEHOLDER = re.compile(r"__[A-Z]+__")|' \
         "$AEGIS_ROOT/libexec/aegis-app"
 }
 
 # un patrón que exige minúsculas: no reconoce NADA de lo que la semilla
 # usa. Si el check solo mirase el patrón de reojo, este pasaría.
-rojo_2() {
+red_2() {
     sed -i 's|^PLACEHOLDER = re.compile(r"__\[A-Z0-9_\]+__")|PLACEHOLDER = re.compile(r"__[a-z]+__")|' \
         "$AEGIS_ROOT/libexec/aegis-app"
 }

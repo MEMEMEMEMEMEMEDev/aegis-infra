@@ -1,4 +1,4 @@
-# titulo: quota jenkins-system ≥ jenkins-0 + 2 builds solapados (corrida #11)
+# title: quota jenkins-system ≥ jenkins-0 + 2 builds solapados (corrida #11)
 # origen: verify-static.sh (v2) ══ 36
 check() {
 # Aritmética, no fe: con limits.cpu=8, ci-images residual (2500m) +

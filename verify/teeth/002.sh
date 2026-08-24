@@ -10,7 +10,7 @@
 # mecanismo existe para impedir.
 
 # un flujo abierto: [uno, dos  sin cerrar el corchete
-rojo_1() {
+red_1() {
     printf '\nclave_rota: [uno, dos\n' >> "$AEGIS_ROOT/seed/platform/edge.yaml"
 }
 
@@ -20,7 +20,7 @@ rojo_1() {
 # primero — el resto entraría al cluster sin que nadie los mirara).
 # (El rojo anterior era una clave duplicada: PyYAML la acepta y pisa el
 # valor. Otro diente que no mordía por culpa del diente.)
-rojo_2() {
+red_2() {
     printf '\n---\nreferencia: *ancla_que_no_existe\n' >> "$AEGIS_ROOT/seed/platform/services.yaml"
 }
 

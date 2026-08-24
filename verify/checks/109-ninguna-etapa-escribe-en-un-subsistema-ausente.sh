@@ -1,4 +1,4 @@
-# titulo: ninguna etapa del generador escribe donde el artefacto no tiene carpeta
+# title: ninguna etapa del generador escribe donde el artefacto no tiene carpeta
 # origen: nuevo en v3 — reproducido el 2026-08-24 sobre la semilla pelada
 check() {
 # El bug, con reproducción: un contrato válido SIN bloque `ai:` hacía

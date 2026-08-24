@@ -1,4 +1,4 @@
-# titulo: ningún echo de UI a stdout en las libs
+# title: ningún echo de UI a stdout en las libs
 # origen: verify-static.sh (v2) ══ 14, parte b — partida en v3
 check() {
 # Los saltos de línea tras `read -rsp` contaminaban el valor retornado.

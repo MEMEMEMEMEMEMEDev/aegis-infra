@@ -1,4 +1,4 @@
-# titulo: playbooks que corren kubectl como root fijan KUBECONFIG (bug B)
+# title: playbooks que corren kubectl como root fijan KUBECONFIG (bug B)
 # origen: verify-static.sh (v2) ══ 25
 check() {
 # Corrida #7 (tarea censurada): registry-host-trust corre kubectl con

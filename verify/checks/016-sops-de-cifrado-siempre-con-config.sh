@@ -1,4 +1,4 @@
-# titulo: sops de cifrado SIEMPRE con --config o --age (patrón A)
+# title: sops de cifrado SIEMPRE con --config o --age (patrón A)
 # origen: verify-static.sh (v2) ══ 16
 check() {
 # sops sin --config resuelve .sops.yaml por CWD — y el init corre

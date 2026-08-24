@@ -1,4 +1,4 @@
-# titulo: D11 — el init no asume ningún gestor de secretos concreto
+# title: D11 — el init no asume ningún gestor de secretos concreto
 # origen: verify-static.sh (v2) ══ 15, parte a — partida en v3
 check() {
 # D11 (automatización total): el operador no tiene por qué usar el

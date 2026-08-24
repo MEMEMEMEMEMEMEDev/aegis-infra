@@ -95,6 +95,18 @@ and that narration is the most valuable thing in this codebase.
 | `PATRON_BLOQUE_JOBS` | `JOBS_BLOCK_PATTERN` | |
 | `PREFIJO_RETOME` | `RESUME_PREFIX` | the literal moved too: `Retomar:` → `Resume:` |
 | `FIN DERIVADO` | `END DERIVED` | |
+| `# titulo:` | `# title:` | the metadata line every check carries |
+| `rojo_N` | `red_N` | the tooth prefix — and the tooth's *kind* string with it, which is what `"${kind}_$k"` builds |
+| `FASES` | `PHASES` | |
+| `numero_de` / `titulo_de` | `number_of` / `title_of` | |
+| `correr_check` / `correr_dientes` / `correr_harness` | `run_check` / `run_teeth` / `run_harness` | |
+| `_diente_uno` | `_one_tooth` | |
+| `perfil_actual` / `hay_perfil_local` | `current_profile` / `has_local_profile` | |
+| `seleccion` | `selection` | |
+| `FALLOS` / `PASOS` / `SALTOS` | `FAILURES` / `PASSED` / `SKIPPED` | |
+| `TRABAJOS` / `LISTA_PERFILES` / `AVISO_PERFIL` | `JOBS_LIST` / `PROFILE_LIST` / `PROFILE_NOTICE` | |
+| `es_local` | `is_local` | and `perfil()` → `profile()` |
+| `PARECIDOS` | `SIMILAR` | |
 
 ## 3b. Being retired — in progress
 

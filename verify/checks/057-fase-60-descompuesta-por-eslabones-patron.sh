@@ -1,9 +1,9 @@
-# titulo: fase 60 descompuesta por ESLABONES (Patrón B — historia #10/#11/#12)
+# title: fase 60 descompuesta por ESLABONES (Patrón B — historia #10/#11/#12)
 # origen: verify-static.sh (v2) ══ 57
 check() {
 # el gate único push→build acoplaba edge/HMAC/scan/build y moría mudo
 # con el diagnóstico en un comentario. Cada eslabón, su gate:
-F60="$FASES/60-webhook.sh"
+F60="$PHASES/60-webhook.sh"
 F60_NC="$(nc "$F60")"
 D57=""
 for g in edge-jenkins-responde hook-jenkins-registrado delivery-push-2xx \

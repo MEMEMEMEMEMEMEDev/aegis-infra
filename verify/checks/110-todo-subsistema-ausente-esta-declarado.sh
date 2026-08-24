@@ -1,4 +1,4 @@
-# titulo: todo subsistema que la semilla NO trae tiene su protocolo escrito
+# title: todo subsistema que la semilla NO trae tiene su protocolo escrito
 # origen: nuevo en v3 — P-03 (2026-08-24): AI viaja documentada, no cableada
 check() {
 # Un subsistema ausente POR DECISIÓN y uno ausente POR OLVIDO se ven

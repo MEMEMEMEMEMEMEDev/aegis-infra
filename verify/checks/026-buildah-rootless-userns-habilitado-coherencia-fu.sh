@@ -1,4 +1,4 @@
-# titulo: buildah rootless: userns habilitado + coherencia fuse (bug D)
+# title: buildah rootless: userns habilitado + coherencia fuse (bug D)
 # origen: verify-static.sh (v2) ══ 26
 check() {
 # Corrida #8: el pod de buildah (idéntico al v1 VERDE en WSL2) murió
@@ -17,7 +17,7 @@ BH="$P/ansible/playbooks/bootstrap-host.yml"
 nc "$BH" | grep -qE 'name:\s*kernel\.apparmor_restrict_unprivileged_userns' \
     || D26="$D26 falta el sysctl userns en bootstrap-host;"
 # b) la fase 20 lo EJERCE (unshare real, no proxy):
-nc "$FASES/20-k3s.sh" | grep -q 'unshare --user' \
+nc "$PHASES/20-k3s.sh" | grep -q 'unshare --user' \
     || D26="$D26 falta el gate userns-sin-privilegios en fase 20;"
 # c) W-05: buildah ELIMINADO — kaniko construye SIN privilegios (extrae
 #    capas al FS directo, no hace los mounts que mataron a buildah

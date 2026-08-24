@@ -1,4 +1,4 @@
-# titulo: regcreds con type dockerconfigjson (corrida #9)
+# title: regcreds con type dockerconfigjson (corrida #9)
 # origen: verify-static.sh (v2) ══ 28
 check() {
 # el kubelet IGNORA un Secret Opaque como imagePullSecret ("no basic

@@ -1,11 +1,11 @@
-# titulo: gates que esperan HABLAN al fallar (H7 #13)
+# title: gates que esperan HABLAN al fallar (H7 #13)
 # origen: verify-static.sh (v2) ══ 47
 check() {
 D47=""
 # $F70_NC lo dejaba el check 46: el segundo de los cuatro acoplamientos
 # de v2. `--only 47` en aquel archivo comparaba contra una variable
 # vacía y pasaba en verde sin mirar nada.
-F70_NC="$(nc "$FASES/70-deploy-auto.sh")"
+F70_NC="$(nc "$PHASES/70-deploy-auto.sh")"
 grep -q '^gate_diag()' "$LIBS/common.sh" || D47="$D47 falta gate_diag;"
 # iu-cr-vivo e iu-write-back-commit salieron con el Image Updater
 # (#59); el gate que los reemplaza es pipeline-escribio-el-digest.

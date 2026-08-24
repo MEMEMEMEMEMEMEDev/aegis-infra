@@ -1,4 +1,4 @@
-# titulo: todo comando citado en los documentos existe
+# title: todo comando citado en los documentos existe
 # origen: V-106 (03 §8) — nuevo en v3
 check() {
 # H3 del registro: `organizacion.md:342` documentaba `aegis org rotar`,

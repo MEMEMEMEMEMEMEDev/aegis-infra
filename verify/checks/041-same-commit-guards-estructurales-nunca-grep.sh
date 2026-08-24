@@ -1,4 +1,4 @@
-# titulo: same-commit: guards ESTRUCTURALES, nunca grep textual (H4 #13, SISTÉMICO)
+# title: same-commit: guards ESTRUCTURALES, nunca grep textual (H4 #13, SISTÉMICO)
 # origen: verify-static.sh (v2) ══ 41
 check() {
 # el grep -q por NOMBRE matcheaba el COMENTARIO que documenta el
@@ -9,11 +9,11 @@ check() {
 D41=""
 grep -q '^yaml_lists_file()' "$LIBS/common.sh" \
     || D41="$D41 falta yaml_lists_file en common.sh;"
-BAD41="$(grep -rn 'grep -q' "$FASES/" \
+BAD41="$(grep -rn 'grep -q' "$PHASES/" \
     | nc_hits \
     | grep -E "grep -q ['\"][^'\"]*\.yaml['\"]" || true)"
 [[ -n "$BAD41" ]] && D41="$D41 grep textual sobre nombre .yaml (matchea comentarios):"$'\n'"$BAD41"
-N_USES="$(grep -rh 'yaml_lists_file' "$FASES/" | grep -vcE '^\s*#')"
+N_USES="$(grep -rh 'yaml_lists_file' "$PHASES/" | grep -vcE '^\s*#')"
 # DOS same-commit y no cuatro desde #59, con dos usos cada uno (guard +
 # gate). Se fueron los dos del Image Updater: el de la fase 40, que
 # agregaba su regcred a la lista del generador, y el de la 70, que

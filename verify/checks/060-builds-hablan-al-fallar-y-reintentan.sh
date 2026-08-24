@@ -1,4 +1,4 @@
-# titulo: builds HABLAN al fallar y reintentan SOLO por red (F-C/F-D #15)
+# title: builds HABLAN al fallar y reintentan SOLO por red (F-C/F-D #15)
 # origen: verify-static.sh (v2) ══ 60
 check() {
 D60=""
@@ -15,7 +15,7 @@ echo "$JBR" | grep -q 'jenkins_next_build' \
     || D60="$D60 el retry no captura next antes del POST (carrera #9);"
 nc "$LIBS/common.sh" | grep -q '^AEGIS_NET_SIGS=' \
     || D60="$D60 falta AEGIS_NET_SIGS en common.sh;"
-nc "$FASES/50-jenkins.sh" | grep -q 'jenkins_build_retry ci-images' \
+nc "$PHASES/50-jenkins.sh" | grep -q 'jenkins_build_retry ci-images' \
     || D60="$D60 fase 50 no usa jenkins_build_retry para ci-images;"
 if [[ -n "$D60" ]]; then fail "builds:$D60"
 else pass "FAILURE imprime el console; retry SOLO con firma de red (fallo real corta ya)"; fi

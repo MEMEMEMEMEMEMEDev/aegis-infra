@@ -1,4 +1,4 @@
-# titulo: policy de firma: orden 70/80 como MECANISMO (corrida #12)
+# title: policy de firma: orden 70/80 como MECANISMO (corrida #12)
 # origen: verify-static.sh (v2) ══ 39
 check() {
 # La App kyverno-policies es automated: cualquier policy listada
@@ -18,7 +18,7 @@ print(' '.join((yaml.safe_load(open('$KPK')) or {}).get('resources') or []))")"
     grep -q 'clusterpolicy' <<< "$KPK_RES" \
         && D39="$D39 el ClusterPolicy está listado ESTÁTICO (entra vivo pre-80);"
 fi
-F80_NC="$(nc "$FASES/80-supply-chain.sh")"
+F80_NC="$(nc "$PHASES/80-supply-chain.sh")"
 echo "$F80_NC" | grep -q 'kyverno-policies/kustomization.yaml' \
     && echo "$F80_NC" | grep -q 'clusterpolicy-require-aegis-signature.yaml' \
     || D39="$D39 la fase 80 no agrega el policy al kustomization (quedaría huérfano);"

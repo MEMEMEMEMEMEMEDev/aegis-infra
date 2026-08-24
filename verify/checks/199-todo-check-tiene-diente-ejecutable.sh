@@ -1,4 +1,4 @@
-# titulo: META — todo check tiene un diente ejecutable
+# title: META — todo check tiene un diente ejecutable
 # origen: V-199 (06 §1) — nuevo en v3
 check() {
 # La lección más cara del verificador de v2: «19 mutaciones, 19 bien

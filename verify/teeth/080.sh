@@ -9,10 +9,10 @@
 # que ya no existe, y la corrida completa de dientes lo denunció como
 # «el diente está roto, no el check». Que el mecanismo detecte sus
 # propias piezas podridas es la mitad del punto.)
-rojo_1() {
+red_1() {
     grep -vE "name 'aegis.key'|sops/age" "$AEGIS_ROOT/libexec/state/backup" > "$AEGIS_ROOT/libexec/state/backup.d" \
         && mv "$AEGIS_ROOT/libexec/state/backup.d" "$AEGIS_ROOT/libexec/state/backup"
 }
-rojo_2() { grep -v 'force' "$AEGIS_ROOT/libexec/state/restore" > "$AEGIS_ROOT/libexec/state/restore.d" \
+red_2() { grep -v 'force' "$AEGIS_ROOT/libexec/state/restore" > "$AEGIS_ROOT/libexec/state/restore.d" \
         && mv "$AEGIS_ROOT/libexec/state/restore.d" "$AEGIS_ROOT/libexec/state/restore"; }
 control_1() { printf '\n# comentario legitimo\n' >> "$AEGIS_ROOT/libexec/state/backup"; }

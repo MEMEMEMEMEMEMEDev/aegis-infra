@@ -1,4 +1,4 @@
-# titulo: --from RE-EJECUTA la fase nombrada aunque tenga marker (corrida #11)
+# title: --from RE-EJECUTA la fase nombrada aunque tenga marker (corrida #11)
 # origen: verify-static.sh (v2) ══ 34
 check() {
 # --from 15 con marker previo saltaba la fase pedida por nombre → el

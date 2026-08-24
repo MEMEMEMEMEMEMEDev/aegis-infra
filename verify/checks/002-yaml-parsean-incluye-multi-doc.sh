@@ -1,4 +1,4 @@
-# titulo: YAML parsean (incluye multi-doc)
+# title: YAML parsean (incluye multi-doc)
 # origen: verify-static.sh (v2) ══ 2
 check() {
 if python3 - "$AEGIS_ROOT" <<'EOF'

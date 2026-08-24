@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aegis-summary: Verificación estática del artefacto: todo lo comprobable sin cluster
+# aegis-summary: Static verification of the artifact: everything checkable without a cluster
 # aegis-group:   setup
 # aegis-subcommands:
 #
@@ -7,30 +7,31 @@
 # Usage: aegis verify [--only NNN]... [--profile cloudflare|local|both]
 #                     [--with-charts] [--teeth [NNN]] [--harness] [--list]
 #
-# Corre los checks de verify/checks/ contra el árbol del producto. Cada
-# check es un archivo, con un bug real y fechado detrás.
+# Runs the checks in verify/checks/ against the product tree. Every check
+# is one file, with a real, dated bug behind it.
 #
-#   --only NNN        corre solo ese check (repetible)
-#   --profile         qué perfil de borde se asume (default: both)
-#   --with-charts     además baja los charts pinneados y los renderiza
-#   --teeth [NNN]     prueba los DIENTES: muta el árbol a propósito y
-#                     exige que el check se ponga rojo
-#   --harness         corre los harness funcionales de verify/harness/
-#   --list            lista los checks y sale
+#   --only NNN        run only that check (repeatable)
+#   --profile         which edge profile is assumed (default: both)
+#   --with-charts     also pull the pinned charts and render them
+#   --teeth [NNN]     exercise the TEETH: mutate the tree on purpose and
+#                     require the check to turn red
+#   --harness         run the functional harnesses in verify/harness/
+#   --list            list the checks and exit
 #
-# Códigos de salida:
-#   0  todo PASS
-#   1  hay FAIL — el artefacto está mal
-#   3  bug del VERIFICADOR (un check sin veredicto, con dos, o no
-#      determinista entre dos pasadas) — ni verde ni rojo del artefacto
+# Exit codes:
+#   0  everything PASS
+#   1  there are FAILs — the artifact is wrong
+#   3  a bug in the VERIFIER (a check with no verdict, with two, or not
+#      deterministic across two passes) — neither green nor red about the
+#      artifact
 #
-# El protocolo de por qué acá no va `pipefail` está en verify/lib.sh.
+# Why there is no `pipefail` here is written down in verify/lib.sh.
 
 set -u
 
-# ── preámbulo canónico (V-102) ───────────────────────────────────────
+# ── canonical preamble (V-102) ───────────────────────────────────────
 if [[ -z "${AEGIS_ROOT:-}" ]]; then
-    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} verify: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} verify: readlink is missing — I will not guess where the product lives" >&2; exit 2; }
     AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 fi
 export AEGIS_ROOT
@@ -47,66 +48,65 @@ while (($#)); do case "$1" in
     --harness)      DO_HARNESS=true; shift ;;
     --list)         DO_LIST=true; shift ;;
     -h|--help)      sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; exit 0 ;;
-    *) echo "${AEGIS_CMD:-aegis} verify: flag desconocida: $1" >&2; exit 3 ;;
+    *) echo "${AEGIS_CMD:-aegis} verify: unknown flag: $1" >&2; exit 3 ;;
 esac; done
-# ¿EXISTE el perfil local en el artefacto? Se DERIVA, no se supone: se
-# materializa con los placeholders de clase `perfil` (__EDGE_*__), que
-# trae T-04. Mientras no estén, correr «los dos perfiles» es correr dos
-# veces exactamente lo mismo: el doble de tiempo y —peor— un número de
-# checks que sugiere una cobertura que no existe. Cuando T-04 aterrice,
-# esto se enciende solo.
-hay_perfil_local() { grep -rqI '__EDGE_' "$AEGIS_ROOT/seed" 2>/dev/null; }
-AVISO_PERFIL=""
+# DOES the local profile exist in the artifact? It is DERIVED, not
+# assumed: it materialises with the `profile` class of placeholders
+# (__EDGE_*__), which T-04 brings. Until they are there, running "both
+# profiles" is running exactly the same thing twice: double the time
+# and — worse — a check count that suggests coverage which does not
+# exist. When T-04 lands, this turns itself on.
+has_local_profile() { grep -rqI '__EDGE_' "$AEGIS_ROOT/seed" 2>/dev/null; }
+PROFILE_NOTICE=""
 case "${PROFILES:=both}" in
-    cloudflare) LISTA_PERFILES=(cloudflare) ;;
+    cloudflare) PROFILE_LIST=(cloudflare) ;;
     local)
-        if hay_perfil_local; then LISTA_PERFILES=(local)
+        if has_local_profile; then PROFILE_LIST=(local)
         else
-            echo "NO SE PUDO EVALUAR: el perfil local todavía no existe en el artefacto" >&2
-            echo "  (no hay placeholders __EDGE_*__ en semilla/ — los trae T-04)" >&2
+            echo "COULD NOT EVALUATE: the local profile does not exist in the artifact yet" >&2
+            echo "  (no __EDGE_*__ placeholders under seed/ — T-04 brings them)" >&2
             exit 2
         fi ;;
     both)
-        if hay_perfil_local; then LISTA_PERFILES=(cloudflare local)
+        if has_local_profile; then PROFILE_LIST=(cloudflare local)
         else
-            LISTA_PERFILES=(cloudflare)
-            AVISO_PERFIL="el perfil local todavía no existe en el artefacto (T-04): se verificó solo cloudflare"
+            PROFILE_LIST=(cloudflare)
+            PROFILE_NOTICE="the local profile does not exist in the artifact yet (T-04): only cloudflare was verified"
         fi ;;
-    *) echo "${AEGIS_CMD:-aegis} verify: --profile debe ser cloudflare, local o both" >&2; exit 3 ;;
+    *) echo "${AEGIS_CMD:-aegis} verify: --profile must be cloudflare, local or both" >&2; exit 3 ;;
 esac
 export AEGIS_VERIFY_WITH_CHARTS="$WITH_CHARTS"
 
-# Higiene: __pycache__ es estado GENERADO, no artefacto, y fue el
-# sospechoso principal del falso rojo no determinista de la corrida #15.
-# Los checks son función pura del árbol VERSIONADO.
+# Hygiene: __pycache__ is GENERATED state, not artifact, and it was the
+# prime suspect in the non-deterministic false red of run #15. The checks
+# are a pure function of the VERSIONED tree.
 find "$AEGIS_ROOT" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null
 
-# ── la lista se DERIVA, no se escribe ────────────────────────────────
-# En v2 agregar un check era editar un archivo de 3938 renglones y
-# confiar en no pisar el estado de otro. Acá el número sale del nombre
-# del archivo y el orden del sort: no hay lista que mantener, y por lo
-# tanto no hay lista que se desactualice.
-mapfile -t TODOS < <(find "$VERIFY/checks" -maxdepth 1 -name '[0-9][0-9][0-9]*.sh' -type f 2>/dev/null | sort)
-[[ ${#TODOS[@]} -gt 0 ]] || { echo "${AEGIS_CMD:-aegis} verify: no hay checks en $VERIFY/checks — un verificador sin checks NO es verde" >&2; exit 3; }
+# ── the list is DERIVED, not written ─────────────────────────────────
+# In v2, adding a check meant editing a 3938-line file and trusting you
+# had not stepped on another one's state. Here the number comes from the
+# filename and the order from the sort: there is no list to maintain, and
+# therefore no list that can fall out of date.
+mapfile -t ALL < <(find "$VERIFY/checks" -maxdepth 1 -name '[0-9][0-9][0-9]*.sh' -type f 2>/dev/null | sort)
+[[ ${#ALL[@]} -gt 0 ]] || { echo "${AEGIS_CMD:-aegis} verify: no checks in $VERIFY/checks — a verifier with no checks is NOT green" >&2; exit 3; }
 
-numero_de() { local b; b="$(basename "$1")"; printf '%s\n' "${b%%-*}"; }
-titulo_de() { sed -n 's/^# titulo: //p' "$1" | head -1; }
+number_of() { local b; b="$(basename "$1")"; printf '%s\n' "${b%%-*}"; }
+title_of()  { sed -n 's/^# title: //p' "$1" | head -1; }
 
 if $DO_LIST; then
-    for c in "${TODOS[@]}"; do printf '%s  %s\n' "$(numero_de "$c")" "$(titulo_de "$c")"; done
+    for c in "${ALL[@]}"; do printf '%s  %s\n' "$(number_of "$c")" "$(title_of "$c")"; done
     exit 0
 fi
 
-# Filtro --only: acepta 3, 03, 003, 15a y 005b — el operador escribe el
-# número como lo ve en la salida, no como lo guarda el filesystem. Y
-# `--only 15` corre 15a, 15b, 15c y 15d: los checks partidos siguen
-# siendo UN bug con UNA fecha, y quien los invoca por su número los
-# quiere todos.
-seleccion() {
+# --only filter: accepts 3, 03, 003, 15a and 005b — the operator types
+# the number as it appears in the output, not as the filesystem stores
+# it. And `--only 15` runs 15a, 15b, 15c and 15d: a split check is still
+# ONE bug with ONE date, and whoever invokes it by number wants them all.
+selection() {
     local c n o n_num n_suf o_num o_suf
-    if [[ ${#ONLY[@]} -eq 0 ]]; then printf '%s\n' "${TODOS[@]}"; return; fi
-    for c in "${TODOS[@]}"; do
-        n="$(numero_de "$c")"; n_num="${n%%[!0-9]*}"; n_suf="${n#"$n_num"}"
+    if [[ ${#ONLY[@]} -eq 0 ]]; then printf '%s\n' "${ALL[@]}"; return; fi
+    for c in "${ALL[@]}"; do
+        n="$(number_of "$c")"; n_num="${n%%[!0-9]*}"; n_suf="${n#"$n_num"}"
         for o in "${ONLY[@]}"; do
             o_num="${o%%[!0-9]*}"; o_suf="${o#"$o_num"}"
             [[ -z "$o_num" ]] && continue
@@ -116,19 +116,19 @@ seleccion() {
         done
     done
 }
-mapfile -t SELEC < <(seleccion)
-if [[ ${#SELEC[@]} -eq 0 ]]; then
-    echo "${AEGIS_CMD:-aegis} verify: --only no seleccionó ningún check (¿número inexistente?)" >&2; exit 3
+mapfile -t SELECTED < <(selection)
+if [[ ${#SELECTED[@]} -eq 0 ]]; then
+    echo "${AEGIS_CMD:-aegis} verify: --only selected no check (nonexistent number?)" >&2; exit 3
 fi
 
-# ── correr UN check ──────────────────────────────────────────────────
-# En su propio subshell y con su propio archivo de veredicto. El check
-# no puede mentir sobre su resultado: no lo escribe él, lo cuenta esto.
-FALLOS=0 BUG=0 PASOS=0 SALTOS=0
-correr_check() {
+# ── running ONE check ────────────────────────────────────────────────
+# In its own subshell and with its own verdict file. The check cannot lie
+# about its result: it does not write it, this counts it.
+FAILURES=0 BUG=0 PASSED=0 SKIPPED=0
+run_check() {
     local chk="$1" num tit vf rc n_pass n_fail n_skip
-    num="$(numero_de "$chk")"; tit="$(titulo_de "$chk")"
-    printf '\033[1m══ %s. %s ══\033[0m\n' "${num#00}" "${tit:-(sin título)}"
+    num="$(number_of "$chk")"; tit="$(title_of "$chk")"
+    printf '\033[1m══ %s. %s ══\033[0m\n' "${num#00}" "${tit:-(untitled)}"
     vf="$(mktemp)"
     (
         set -u
@@ -138,7 +138,7 @@ correr_check() {
         # shellcheck source=/dev/null
         source "$chk"
         if ! declare -F check >/dev/null; then
-            echo "el archivo no define check()" >&2; exit 97
+            echo "the file does not define check()" >&2; exit 97
         fi
         check
     )
@@ -148,121 +148,122 @@ correr_check() {
     rm -f "$vf"
 
     if [[ "$rc" == 97 ]]; then
-        printf '\033[1;35mBUG\033[0m  %s: el archivo no define check() — no es un check, es un archivo suelto\n' "$num"
+        printf '\033[1;35mBUG\033[0m  %s: the file does not define check() — it is not a check, it is a loose file\n' "$num"
         BUG=1; return
     fi
-    # EL RENGLÓN QUE FALTA, imposible por construcción: un check que no
-    # dijo nada no es «pasó». Es el silencio, y el silencio es rojo.
+    # THE MISSING LINE, impossible by construction: a check that said
+    # nothing did not "pass". It is silence, and silence is red.
     if [[ "$total" == 0 ]]; then
-        printf '\033[1;31mFAIL\033[0m %s: no emitió veredicto (rc=%s) — un check que no habla no verifica nada\n' "$num" "$rc"
-        FALLOS=1; return
+        printf '\033[1;31mFAIL\033[0m %s: emitted no verdict (rc=%s) — a check that does not speak verifies nothing\n' "$num" "$rc"
+        FAILURES=1; return
     fi
-    # Dos veredictos = el check se contradice o cuenta dos cosas en un
-    # archivo. Es bug del VERIFICADOR, no del artefacto: exit 3.
+    # Two verdicts = the check contradicts itself, or counts two things
+    # in one file. That is a bug in the VERIFIER, not the artifact: exit 3.
     if [[ "$total" -gt 1 ]]; then
-        printf '\033[1;35mBUG\033[0m  %s: emitió %s veredictos (%s PASS / %s FAIL / %s SKIP) — un check, un veredicto\n' \
+        printf '\033[1;35mBUG\033[0m  %s: emitted %s verdicts (%s PASS / %s FAIL / %s SKIP) — one check, one verdict\n' \
             "$num" "$total" "$n_pass" "$n_fail" "$n_skip"
         BUG=1; return
     fi
-    (( n_fail )) && FALLOS=1
-    (( n_pass )) && PASOS=$((PASOS+1))
-    (( n_skip )) && SALTOS=$((SALTOS+1))
+    (( n_fail )) && FAILURES=1
+    (( n_pass )) && PASSED=$((PASSED+1))
+    (( n_skip )) && SKIPPED=$((SKIPPED+1))
     return 0
 }
 
-# ── los dientes ──────────────────────────────────────────────────────
-# Un check sin diente es una promesa sin prueba. `--teeth` muta el árbol
-# a propósito (rojo_k) y exige FAIL; después aplica un cambio legítimo
-# (control_k) y exige PASS. Si el rojo no muerde, el check no protege
-# nada; si el control se pone rojo, el check muerde de más.
+# ── the teeth ────────────────────────────────────────────────────────
+# A check without a tooth is a promise without proof. `--teeth` mutates
+# the tree on purpose (red_k) and demands FAIL; then it applies a
+# legitimate change (control_k) and demands PASS. If the red does not
+# bite, the check protects nothing; if the control turns red, the check
+# bites too much.
 #
-# EN PARALELO, y no por elegancia: en serie son ~3 horas para 112
-# checks —cada mutación es una copia del árbol y una corrida entera del
-# check— y una prueba que tarda tres horas es una prueba que no se
-# corre. Cada trabajo es independiente por construcción (copia propia
-# en tmpfs), así que el paralelismo es gratis salvo por la RAM.
-perfil_actual() { printf '%s\n' "${AEGIS_VERIFY_PROFILE:-cloudflare}"; }
+# IN PARALLEL, and not for elegance: serially it is ~3 hours for 112
+# checks — every mutation is a copy of the tree and a whole run of the
+# check — and a test that takes three hours is a test that does not get
+# run. Each job is independent by construction (its own copy in tmpfs),
+# so the parallelism is free except for RAM.
+current_profile() { printf '%s\n' "${AEGIS_VERIFY_PROFILE:-cloudflare}"; }
 
-# un trabajo = una mutación. Corre aislado y deja su veredicto en un
-# archivo; el que agrega es el padre.
-_diente_uno() {
-    local num="$1" tipo="$2" k="$3" td="$4" res="$5"
+# one job = one mutation. Runs isolated and leaves its verdict in a file;
+# the parent is the one that aggregates.
+_one_tooth() {
+    local num="$1" kind="$2" k="$3" td="$4" res="$5"
     local tmp rc
     tmp="$(mktemp -d /dev/shm/aegis-teeth.XXXXXX)"
     cp -a "$AEGIS_ROOT/." "$tmp/" 2>/dev/null
-    if ! ( set -u; AEGIS_ROOT="$tmp"; source "$td"; "${tipo}_$k" ) >/dev/null 2>&1; then
-        printf '%s\t%s\t%s\tROTO\n' "$num" "$tipo" "$k" >> "$res"
+    if ! ( set -u; AEGIS_ROOT="$tmp"; source "$td"; "${kind}_$k" ) >/dev/null 2>&1; then
+        printf '%s\t%s\t%s\tBROKEN\n' "$num" "$kind" "$k" >> "$res"
         rm -rf "$tmp"; return
     fi
-    AEGIS_ROOT="$tmp" "$tmp/libexec/aegis-verify" --only "$num" --profile "$(perfil_actual)" >/dev/null 2>&1
+    AEGIS_ROOT="$tmp" "$tmp/libexec/aegis-verify" --only "$num" --profile "$(current_profile)" >/dev/null 2>&1
     rc=$?
     rm -rf "$tmp"
-    # 1 = el check se puso ROJO: eso es morder.
-    # 0 = la mutación pasó desapercibida.
-    # 3 = el check se ROMPIÓ (dos veredictos, o ninguno): un bug del
-    #     verificador no es una defensa.
-    printf '%s\t%s\t%s\t%s\n' "$num" "$tipo" "$k" "$rc" >> "$res"
+    # 1 = the check turned RED: that is biting.
+    # 0 = the mutation went unnoticed.
+    # 3 = the check BROKE (two verdicts, or none): a bug in the verifier
+    #     is not a defence.
+    printf '%s\t%s\t%s\t%s\n' "$num" "$kind" "$k" "$rc" >> "$res"
 }
 
-correr_dientes() {
+run_teeth() {
     local chk num td k
-    local -a TRABAJOS=()
-    for chk in "${SELEC[@]}"; do
-        num="$(numero_de "$chk")"; td="$VERIFY/teeth/$num.sh"
+    local -a JOBS_LIST=()
+    for chk in "${SELECTED[@]}"; do
+        num="$(number_of "$chk")"; td="$VERIFY/teeth/$num.sh"
         [[ -n "$TEETH_ONLY" && "$num" != "$TEETH_ONLY" && "${num#00}" != "$TEETH_ONLY" ]] && continue
-        [[ -f "$td" ]] || continue          # el 199 se encarga de reclamarlo
-        for k in $(grep -oE '^rojo_[0-9]+' "$td" | sed 's/rojo_//' | sort -n); do
-            TRABAJOS+=("$num rojo $k $td")
+        [[ -f "$td" ]] || continue          # check 199 is the one that claims it
+        for k in $(grep -oE '^red_[0-9]+' "$td" | sed 's/red_//' | sort -n); do
+            JOBS_LIST+=("$num red $k $td")
         done
         for k in $(grep -oE '^control_[0-9]+' "$td" | sed 's/control_//' | sort -n); do
-            TRABAJOS+=("$num control $k $td")
+            JOBS_LIST+=("$num control $k $td")
         done
     done
-    [[ ${#TRABAJOS[@]} -gt 0 ]] || { echo "no hay dientes que correr en la selección"; return 0; }
+    [[ ${#JOBS_LIST[@]} -gt 0 ]] || { echo "no teeth to run in this selection"; return 0; }
 
     local RES; RES="$(mktemp)"
-    local N=${#TRABAJOS[@]} hechos=0
+    local N=${#JOBS_LIST[@]} done_n=0
     local JOBS="${AEGIS_TEETH_JOBS:-$(nproc 2>/dev/null || echo 4)}"
-    printf '%s mutaciones en %s trabajos paralelos\n' "$N" "$JOBS"
-    for t in "${TRABAJOS[@]}"; do
+    printf '%s mutations in %s parallel jobs\n' "$N" "$JOBS"
+    for t in "${JOBS_LIST[@]}"; do
         while (( $(jobs -rp | wc -l) >= JOBS )); do wait -n; done
         # shellcheck disable=SC2086
-        _diente_uno $t "$RES" &
-        hechos=$((hechos+1))
-        (( hechos % 20 == 0 )) && printf '  … %s/%s\n' "$hechos" "$N"
+        _one_tooth $t "$RES" &
+        done_n=$((done_n+1))
+        (( done_n % 20 == 0 )) && printf '  … %s/%s\n' "$done_n" "$N"
     done
     wait
 
-    # agregación: un check está sano si TODOS sus rojos muerden y
-    # NINGÚN control se pone rojo.
+    # aggregation: a check is healthy if ALL of its reds bite and NO
+    # control turns red.
     local rc_total=0
-    for chk in "${SELEC[@]}"; do
-        num="$(numero_de "$chk")"
+    for chk in "${SELECTED[@]}"; do
+        num="$(number_of "$chk")"
         grep -q "^$num	" "$RES" || continue
-        local muerden=0 total_r=0 sanos=0 total_c=0 linea tipo kk rc
-        while IFS=$'\t' read -r n tipo kk rc; do
+        local biting=0 total_r=0 healthy=0 total_c=0 kind kk rc
+        while IFS=$'\t' read -r n kind kk rc; do
             [[ "$n" == "$num" ]] || continue
-            if [[ "$tipo" == rojo ]]; then
+            if [[ "$kind" == red ]]; then
                 total_r=$((total_r+1))
                 case "$rc" in
-                    1) muerden=$((muerden+1)) ;;
-                    0) printf '  \033[1;31mrojo_%s NO muerde\033[0m (mutación aplicada y el check %s siguió verde)\n' "$kk" "$num" ;;
-                    ROTO) printf '  \033[1;35mrojo_%s no se pudo aplicar\033[0m (el diente está roto, no el check)\n' "$kk" ;;
-                    *) printf '  \033[1;35mrojo_%s rompió el check %s (exit %s)\033[0m — un bug del verificador no es una defensa\n' "$kk" "$num" "$rc" ;;
+                    1) biting=$((biting+1)) ;;
+                    0) printf '  \033[1;31mred_%s DOES NOT BITE\033[0m (mutation applied and check %s stayed green)\n' "$kk" "$num" ;;
+                    BROKEN) printf '  \033[1;35mred_%s could not be applied\033[0m (the tooth is broken, not the check)\n' "$kk" ;;
+                    *) printf '  \033[1;35mred_%s broke check %s (exit %s)\033[0m — a bug in the verifier is not a defence\n' "$kk" "$num" "$rc" ;;
                 esac
             else
                 total_c=$((total_c+1))
                 case "$rc" in
-                    0) sanos=$((sanos+1)) ;;
-                    ROTO) printf '  \033[1;35mcontrol_%s no se pudo aplicar\033[0m\n' "$kk" ;;
-                    *) printf '  \033[1;31mcontrol_%s se puso ROJO\033[0m (el check %s muerde un cambio legítimo)\n' "$kk" "$num" ;;
+                    0) healthy=$((healthy+1)) ;;
+                    BROKEN) printf '  \033[1;35mcontrol_%s could not be applied\033[0m\n' "$kk" ;;
+                    *) printf '  \033[1;31mcontrol_%s turned RED\033[0m (check %s bites a legitimate change)\n' "$kk" "$num" ;;
                 esac
             fi
         done < "$RES"
-        if [[ "$muerden" == "$total_r" && "$sanos" == "$total_c" ]]; then
-            printf '\033[1;32m  %s: %s/%s muerden · %s/%s controles sanos\033[0m\n' "$num" "$muerden" "$total_r" "$sanos" "$total_c"
+        if [[ "$biting" == "$total_r" && "$healthy" == "$total_c" ]]; then
+            printf '\033[1;32m  %s: %s/%s bite · %s/%s controls healthy\033[0m\n' "$num" "$biting" "$total_r" "$healthy" "$total_c"
         else
-            printf '\033[1;31m  %s: %s/%s muerden · %s/%s controles sanos\033[0m\n' "$num" "$muerden" "$total_r" "$sanos" "$total_c"
+            printf '\033[1;31m  %s: %s/%s bite · %s/%s controls healthy\033[0m\n' "$num" "$biting" "$total_r" "$healthy" "$total_c"
             rc_total=1
         fi
     done
@@ -270,73 +271,73 @@ correr_dientes() {
     return $rc_total
 }
 
-# ── harness funcionales ──────────────────────────────────────────────
-correr_harness() {
+# ── functional harnesses ─────────────────────────────────────────────
+run_harness() {
     local rc_total=0 h rc
     for h in "$VERIFY"/harness/*.sh; do
         [[ -f "$h" ]] || continue
         printf '\033[1m── harness: %s ──\033[0m\n' "$(basename "$h" .sh)"
         AEGIS_ROOT="$AEGIS_ROOT" bash "$h"
         rc=$?
-        # Los TRES desenlaces también acá. La primera versión trataba
-        # cualquier rc distinto de 0 como «FALLÓ», y en la VPS —donde
-        # no está el árbol de v2 que el harness de equivalencia usa
-        # como referencia— eso convertía un «no pude medir» en un
-        # rojo. Es exactamente la confusión que todo este proyecto
-        # existe para no cometer: un rojo se investiga, un «no sé»
-        # disfrazado de rojo hace perder el tiempo en otro lado.
+        # The THREE outcomes here too. The first version treated any rc
+        # other than 0 as "FAILED", and on the VPS — where the v2 tree
+        # the equivalence harness uses as a reference does not exist —
+        # that turned "I could not measure" into a red. It is exactly the
+        # confusion this whole project exists not to make: a red gets
+        # investigated, an "I do not know" dressed as a red wastes the
+        # time somewhere else.
         case $rc in
             0) printf '\033[1;32mOK\033[0m %s\n' "$(basename "$h" .sh)" ;;
-            2) printf '\033[1;33mNO SE PUDO EVALUAR\033[0m %s (no es un visto bueno: es una prueba que no corrió)\n' "$(basename "$h" .sh)" ;;
-            *) printf '\033[1;31mFALLÓ\033[0m %s\n' "$(basename "$h" .sh)"; rc_total=1 ;;
+            2) printf '\033[1;33mCOULD NOT EVALUATE\033[0m %s (this is not approval: it is a test that did not run)\n' "$(basename "$h" .sh)" ;;
+            *) printf '\033[1;31mFAILED\033[0m %s\n' "$(basename "$h" .sh)"; rc_total=1 ;;
         esac
     done
     return $rc_total
 }
 
-# ── la corrida ───────────────────────────────────────────────────────
+# ── the run ──────────────────────────────────────────────────────────
 if $DO_HARNESS; then
-    correr_harness; exit $?
+    run_harness; exit $?
 fi
 
 if $DO_TEETH; then
-    for prof in "${LISTA_PERFILES[@]}"; do
+    for prof in "${PROFILE_LIST[@]}"; do
         export AEGIS_VERIFY_PROFILE="$prof"
-        printf '\033[1;36m══════ DIENTES · perfil %s ══════\033[0m\n' "$prof"
-        correr_dientes || BUG=1
+        printf '\033[1;36m══════ TEETH · profile %s ══════\033[0m\n' "$prof"
+        run_teeth || BUG=1
     done
-    [[ "$BUG" == 0 ]] && { printf '\033[1;32m══ DIENTES: todos muerden ══\033[0m\n'; exit 0; }
-    printf '\033[1;31m══ DIENTES: hay checks que no protegen lo que dicen ══\033[0m\n'; exit 1
+    [[ "$BUG" == 0 ]] && { printf '\033[1;32m══ TEETH: they all bite ══\033[0m\n'; exit 0; }
+    printf '\033[1;31m══ TEETH: there are checks that do not protect what they claim ══\033[0m\n'; exit 1
 fi
 
-for prof in "${LISTA_PERFILES[@]}"; do
+for prof in "${PROFILE_LIST[@]}"; do
     export AEGIS_VERIFY_PROFILE="$prof"
-    [[ ${#LISTA_PERFILES[@]} -gt 1 ]] && printf '\033[1;36m══════ perfil %s ══════\033[0m\n' "$prof"
-    for chk in "${SELEC[@]}"; do correr_check "$chk"; done
+    [[ ${#PROFILE_LIST[@]} -gt 1 ]] && printf '\033[1;36m══════ profile %s ══════\033[0m\n' "$prof"
+    for chk in "${SELECTED[@]}"; do run_check "$chk"; done
 done
 
 echo
 if [[ "$BUG" != 0 ]]; then
-    printf '\033[1;35m══ BUG DEL VERIFICADOR: hay checks que no emiten un veredicto y solo uno ══\033[0m\n'
+    printf '\033[1;35m══ VERIFIER BUG: there are checks that do not emit one verdict and only one ══\033[0m\n'
     exit 3
 fi
-if [[ "$FALLOS" == 0 ]]; then
-    printf '\033[1;32m══ VERIFICACIÓN ESTÁTICA: TODO PASS (%s checks, %s no evaluados) ══\033[0m\n' "$PASOS" "$SALTOS"
-    [[ -n "${AVISO_PERFIL:-}" ]] && printf '\033[1;33m   %s\033[0m\n' "$AVISO_PERFIL"
+if [[ "$FAILURES" == 0 ]]; then
+    printf '\033[1;32m══ STATIC VERIFICATION: ALL PASS (%s checks, %s not evaluated) ══\033[0m\n' "$PASSED" "$SKIPPED"
+    [[ -n "${PROFILE_NOTICE:-}" ]] && printf '\033[1;33m   %s\033[0m\n' "$PROFILE_NOTICE"
     exit 0
 fi
-# H2 corrida #15: el check 69 dio FAIL en la 1ª pasada de una VM recién
-# copiada y PASS estable después (3/3), sin ningún cambio en el árbol.
-# Un veredicto que no es reproducible es un bug del VERIFICADOR, no del
-# artefacto, y merece su propio código de salida en vez de un rojo que
-# manda a cazar fantasmas.
+# H2 run #15: check 69 gave FAIL on the 1st pass of a freshly copied VM
+# and stable PASS afterwards (3/3), with no change to the tree. A verdict
+# that is not reproducible is a bug in the VERIFIER, not the artifact, and
+# it deserves its own exit code instead of a red that sends you chasing
+# ghosts.
 if [[ -z "${AEGIS_VERIFY_RETRY:-}" ]]; then
-    printf '\033[1;33mhubo FAILs — 2ª pasada de confirmación (H2: determinismo del verificador)\033[0m\n'
+    printf '\033[1;33mthere were FAILs — 2nd confirmation pass (H2: verifier determinism)\033[0m\n'
     if AEGIS_VERIFY_RETRY=1 "$0" "$@" >/dev/null 2>&1; then
-        printf '\033[1;33m══ CHECK INESTABLE (H2): la 2ª pasada PASÓ sin ningún cambio en el árbol — bug del VERIFICADOR. exit 3 ══\033[0m\n'
+        printf '\033[1;33m══ UNSTABLE CHECK (H2): the 2nd pass PASSED with no change to the tree — VERIFIER bug. exit 3 ══\033[0m\n'
         exit 3
     fi
-    printf '\033[1;31mla 2ª pasada REPRODUJO los fallos — veredicto ROJO confirmado\033[0m\n'
+    printf '\033[1;31mthe 2nd pass REPRODUCED the failures — RED verdict confirmed\033[0m\n'
 fi
-printf '\033[1;31m══ VERIFICACIÓN ESTÁTICA: HAY FALLOS ══\033[0m\n'
+printf '\033[1;31m══ STATIC VERIFICATION: THERE ARE FAILURES ══\033[0m\n'
 exit 1

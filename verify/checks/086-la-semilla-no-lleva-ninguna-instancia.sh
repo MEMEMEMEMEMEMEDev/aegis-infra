@@ -1,4 +1,4 @@
-# titulo: la semilla no lleva NINGUNA instancia horneada adentro
+# title: la semilla no lleva NINGUNA instancia horneada adentro
 # origen: verify-static.sh (v2) ══ 86
 check() {
 # El riesgo estructural de sincronizar la semilla desde la instancia:

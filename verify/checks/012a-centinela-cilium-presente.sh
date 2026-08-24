@@ -1,4 +1,4 @@
-# titulo: el centinela de cilium sigue en group_vars
+# title: el centinela de cilium sigue en group_vars
 # origen: verify-static.sh (v2) ══ 12, parte a — partida en v3
 check() {
 # El perfil hetzner necesita cilium y el greenfield no. El centinela

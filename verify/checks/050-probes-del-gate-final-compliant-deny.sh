@@ -1,4 +1,4 @@
-# titulo: probes del gate final compliant + deny CITANDO la policy (CR-3/CR-4 #14)
+# title: probes del gate final compliant + deny CITANDO la policy (CR-3/CR-4 #14)
 # origen: verify-static.sh (v2) ══ 50
 check() {
 # CR-4: un pod pelado en org-canary lo rechazan PSS/quota AUNQUE
@@ -8,7 +8,7 @@ check() {
 D50=""
 # los kubectl run van con continuaciones \ — unirlas ANTES de grepear
 # (line-based vería la primera línea "sin --overrides" en falso):
-F80_J="$(sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba}' "$FASES/80-supply-chain.sh" \
+F80_J="$(sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba}' "$PHASES/80-supply-chain.sh" \
     | nc)"
 echo "$F80_J" | grep -q 'grep -q .require-aegis-signature. <<<' \
     || D50="$D50 el negativo no asserta el mensaje del deny (falso verde CR-4);"

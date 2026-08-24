@@ -1,4 +1,4 @@
-# titulo: ninguna ruta pública sale al mundo sin protección: Access delante o los tres middlewares (#81/#90)
+# title: ninguna ruta pública sale al mundo sin protección: Access delante o los tres middlewares (#81/#90)
 # origen: verify-static.sh (v2) ══ 91
 check() {
 # PARTIDO en v3: este archivo mide la DISYUNTIVA (Access o los tres

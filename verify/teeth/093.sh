@@ -2,7 +2,7 @@
 # cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
 
 # saca del artefacto justo lo que el check dice medir
-rojo_1() {
+red_1() {
     grep -vE '\(\(\s*dijo\s*\)\)\s*\|\|\s*aviso' "$AEGIS_ROOT/libexec/aegis-check" > "$AEGIS_ROOT/libexec/aegis-check.diente" \
         && mv "$AEGIS_ROOT/libexec/aegis-check.diente" "$AEGIS_ROOT/libexec/aegis-check"
 }

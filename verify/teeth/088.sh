@@ -9,7 +9,7 @@
 # Una lista solo puede nombrar lo que ya existe; la etiqueta la lleva
 # el bundle de cada inquilino, así que la cobertura llega con la
 # organización.
-rojo_1() {
+red_1() {
     python3 - "$AEGIS_ROOT/seed/platform/k8s/base/kyverno-policies/clusterpolicy-require-aegis-signature.yaml" <<'PY'
 import re, sys
 p = sys.argv[1]

@@ -1,4 +1,4 @@
-# titulo: ninguna sonda del init mide el borde de Cloudflare creyendo medir el cluster (#87)
+# title: ninguna sonda del init mide el borde de Cloudflare creyendo medir el cluster (#87)
 # origen: verify-static.sh (v2) ══ 90
 check() {
 # El defecto que este check existe para impedir, medido el 2026-08-13:
@@ -31,7 +31,7 @@ else
                   | sed -E 's/.*"([a-z0-9-]+)\..*/\1/' | sort -u)"
     [[ -n "$PROTEGIDOS" ]] \
         || D90="$D90 el módulo de Access no declara ningún domain reconocible (¿cambió la forma?);"
-    for FASE in "$FASES"/*.sh; do
+    for FASE in "$PHASES"/*.sh; do
         # se unen continuaciones y se descartan comentarios: el defecto
         # vive en el código, y un ejemplo dentro de un comentario no es
         # un defecto (H4/check 41 — jamás grep de un nombre a secas).

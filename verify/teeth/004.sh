@@ -2,7 +2,7 @@
 # cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
 
 # el sujeto desaparece: si el check no lo nota, no lo estaba leyendo
-rojo_1() { rm -f "$AEGIS_ROOT/init/phases/85-observability.sh"; }
+red_1() { rm -f "$AEGIS_ROOT/init/phases/85-observability.sh"; }
 
 # control: un cambio LEGÍTIMO no puede ponerlo rojo
 control_1() { printf '# comentario legitimo\n' >> "$AEGIS_ROOT/init/phases/85-observability.sh"; }
@@ -17,7 +17,7 @@ control_1() { printf '# comentario legitimo\n' >> "$AEGIS_ROOT/init/phases/85-ob
 # Este rojo saca al generador de donde el check lo busca ahora. Si el
 # check volviera a la forma vieja —«no está, entonces no aplica»—
 # pasaría en verde. Eso es lo que no puede volver a pasar.
-rojo_3() {
+red_3() {
     mv "$AEGIS_ROOT/lib/aegis/org.py" "$AEGIS_ROOT/lib/aegis/org.py.escondido"
 }
 

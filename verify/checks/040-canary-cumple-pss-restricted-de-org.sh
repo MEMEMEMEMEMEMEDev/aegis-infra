@@ -1,4 +1,4 @@
-# titulo: canary cumple PSS restricted de org-canary (corrida #12)
+# title: canary cumple PSS restricted de org-canary (corrida #12)
 # origen: verify-static.sh (v2) ══ 40
 check() {
 # org-canary es enforce=restricted; un Deployment con

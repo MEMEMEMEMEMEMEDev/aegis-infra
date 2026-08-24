@@ -1,4 +1,4 @@
-# titulo: el paquete de python no solo parsea: CARGA
+# title: el paquete de python no solo parsea: CARGA
 # origen: nuevo en v3 — el renombrado ES->EN del 2026-08-24
 check() {
 # El check 001 valida SINTAXIS con `ast.parse`, y eso es exactamente lo

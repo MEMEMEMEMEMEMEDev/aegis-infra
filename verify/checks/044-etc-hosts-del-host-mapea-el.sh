@@ -1,4 +1,4 @@
-# titulo: /etc/hosts del host mapea el registry (H2 #13 — kubelet no resuelve .svc)
+# title: /etc/hosts del host mapea el registry (H2 #13 — kubelet no resuelve .svc)
 # origen: verify-static.sh (v2) ══ 44
 check() {
 RHT44="$(nc "$P/ansible/playbooks/registry-host-trust.yml")"

@@ -1,4 +1,4 @@
-# titulo: la ronda no puede quedarse callada (los tres silencios)
+# title: la ronda no puede quedarse callada (los tres silencios)
 # origen: verify-static.sh (v2) ══ 93
 check() {
 # La Enfermedad E tiene una forma peor que el verde falso: el RENGLÓN

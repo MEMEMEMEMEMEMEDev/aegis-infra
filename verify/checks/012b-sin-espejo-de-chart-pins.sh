@@ -1,4 +1,4 @@
-# titulo: los chart pins no tienen espejo en group_vars
+# title: los chart pins no tienen espejo en group_vars
 # origen: verify-static.sh (v2) ══ 12, parte b — partida en v3
 check() {
 # Los pines viven en UN lugar. Un espejo en group_vars es dos verdades

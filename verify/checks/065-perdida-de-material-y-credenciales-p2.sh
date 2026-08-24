@@ -1,4 +1,4 @@
-# titulo: pérdida de material y credenciales (P2 auditoría)
+# title: pérdida de material y credenciales (P2 auditoría)
 # origen: verify-static.sh (v2) ══ 65
 check() {
 D65=""
@@ -19,11 +19,11 @@ echo "$CB65" | nc | grep -Eq 'cat +"\$file"' \
     && D65="$D65 la ceremonia imprime la age key al pane (cat del archivo) — se graba en tmux/script/transcript;"
 echo "$CB65" | grep -q '/dev/shm/aegis-resguardo' \
     || D65="$D65 la ceremonia interactiva no usa el camino tmpfs (resguardo leído desde otra terminal);"
-nc "$FASES/15-terceros.sh" | grep -q 'x-oauth-scopes' \
+nc "$PHASES/15-terceros.sh" | grep -q 'x-oauth-scopes' \
     || D65="$D65 el gh token se hornea como credencial de CI sin gate de scopes reales;"
-grep -q 'ya existe — skip' "$FASES/30-argocd.sh" \
+grep -q 'ya existe — skip' "$PHASES/30-argocd.sh" \
     && D65="$D65 la 30 sigue con skip-if-exists (material rotado queda stale en el cluster);"
-nc "$FASES/30-argocd.sh" | grep -q 'gen_or_restore redis_auth' \
+nc "$PHASES/30-argocd.sh" | grep -q 'gen_or_restore redis_auth' \
     || D65="$D65 el password de redis no sale del store (apply convergente lo rotaría por corrida);"
 PF65="$(body_of _jenkins_pass_file "$LIBS/jenkins.sh")"
 echo "$PF65" | grep -q 'umask 077' \

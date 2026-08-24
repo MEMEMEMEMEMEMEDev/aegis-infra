@@ -1,4 +1,4 @@
-# titulo: inyecciones multi-línea SOLO via inject_placeholder (CR-1/CR-2 #14)
+# title: inyecciones multi-línea SOLO via inject_placeholder (CR-1/CR-2 #14)
 # origen: verify-static.sh (v2) ══ 48
 check() {
 # La familia hermana del H4 aplicada a las INYECCIONES: replace()
@@ -20,9 +20,9 @@ grep -q '^placeholder_pending()' "$LIBS/common.sh" \
 # (b) ninguna fase inyecta a mano (replace() de python sobre un
 # placeholder = el camino que rompió la #14); fase 80 usa el helper
 # para SUS DOS placeholders de clase-generado:
-BAD48="$(grep -rn 'replace("__' "$FASES" || true)"
+BAD48="$(grep -rn 'replace("__' "$PHASES" || true)"
 [[ -n "$BAD48" ]] && D48="$D48 replace() manual de placeholder:"$'\n'"$BAD48"
-N_IP="$(grep -c 'inject_placeholder ' "$FASES/80-supply-chain.sh" || true)"
+N_IP="$(grep -c 'inject_placeholder ' "$PHASES/80-supply-chain.sh" || true)"
 (( N_IP >= 2 )) || D48="$D48 fase 80 con $N_IP usos de inject_placeholder (esperados >=2: COSIGN_PUB + AEGIS_CA_PEM);"
 # (c) NINGÚN comentario de platform/ escribe un placeholder de
 # clase-generado literal (el helper los ignora, pero la defensa es
@@ -33,7 +33,7 @@ BAD48C="$(grep -rn '__COSIGN_PUB__\|__AEGIS_CA_PEM__\|__AGE_PUBLIC__\|__OBS_CA_P
   | grep -E ':[0-9]+:\s*#|#.*__(COSIGN_PUB|AEGIS_CA_PEM|AGE_PUBLIC|OBS_CA_PEM|OBS_NTFY_OPERADOR_HASH|OBS_NTFY_PUENTE_HASH)__' || true)"
 [[ -n "$BAD48C" ]] && D48="$D48 placeholder literal en comentario:"$'\n'"$BAD48C"
 # (d) gate del RESULTADO tras cada inyección (regla de la familia H4):
-F80_NC="$(nc "$FASES/80-supply-chain.sh")"
+F80_NC="$(nc "$PHASES/80-supply-chain.sh")"
 echo "$F80_NC" | grep -q 'cosign-pub-inyectada' \
     || D48="$D48 falta gate cosign-pub-inyectada;"
 echo "$F80_NC" | grep -q 'ca-inyectado-en-kyverno' \

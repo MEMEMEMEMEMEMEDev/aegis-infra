@@ -1,13 +1,13 @@
-# titulo: gates de Jenkins SIN /wfapi/ (H3 #13 — plugin no instalado)
+# title: gates de Jenkins SIN /wfapi/ (H3 #13 — plugin no instalado)
 # origen: verify-static.sh (v2) ══ 42
 check() {
 # /wfapi/ lo provee pipeline-stage-view (NO instalado; los stage-STEP
 # y stage-tags-metadata son OTROS plugins) → 404 eterno con el
 # sistema funcionando. Los gates van por el core (/api/json) y el
 # console del build:
-BAD42="$(grep -rn '/wfapi/' "$FASES" "$AEGIS_ROOT/init/lib" \
+BAD42="$(grep -rn '/wfapi/' "$PHASES" "$AEGIS_ROOT/init/lib" \
     | nc_hits || true)"
-AL_BODY="$(body_of _antiloop_skipped "$FASES/70-deploy-auto.sh" \
+AL_BODY="$(body_of _antiloop_skipped "$PHASES/70-deploy-auto.sh" \
     | nc)"
 D42=""
 [[ -n "$BAD42" ]] && D42="$D42 uso de /wfapi/:"$'\n'"$BAD42"

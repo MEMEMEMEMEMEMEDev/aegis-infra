@@ -2,7 +2,7 @@
 # El canario es el único sitio escrito a mano, y por eso el más fácil
 # de dejar sin los tres middlewares — que es exactamente lo que pasó
 # en la semilla hasta el 2026-08-23.
-rojo_1() {
+red_1() {
     python3 - "$AEGIS_ROOT/seed/platform/k8s/organizations/org-canary/routes.yaml" <<'PY'
 import re, sys
 p = sys.argv[1]; t = open(p).read()

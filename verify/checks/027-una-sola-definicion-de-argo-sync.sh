@@ -1,4 +1,4 @@
-# titulo: UNA sola definición de argo_sync (bug C — anti-drift)
+# title: UNA sola definición de argo_sync (bug C — anti-drift)
 # origen: verify-static.sh (v2) ══ 27
 check() {
 # Corrida #8: 5 fases definían su argo_sync local (patch + wait de
@@ -6,7 +6,7 @@ check() {
 # todas. El fix del bug C es la definición CANÓNICA de common.sh
 # (espera la fase TERMINAL de la operación nueva); una def local
 # nueva la taparía en silencio:
-SYNC_LOCAL="$(grep -rln '^argo_sync()' "$FASES/" || true)"
+SYNC_LOCAL="$(grep -rln '^argo_sync()' "$PHASES/" || true)"
 SYNC_COMMON="$(grep -c '^argo_sync()' "$LIBS/common.sh" || true)"
 if [[ -n "$SYNC_LOCAL" ]]; then
     fail "argo_sync REDEFINIDO local (tapa el fix del bug C):"$'\n'"$SYNC_LOCAL"
