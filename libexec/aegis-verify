@@ -1,0 +1,265 @@
+#!/usr/bin/env bash
+# aegis-summary: Verificación estática del artefacto: todo lo comprobable sin cluster
+# aegis-group:   setup
+# aegis-subcommands:
+#
+# aegis-help:
+# Usage: aegis verify [--only NNN]... [--profile cloudflare|local|both]
+#                     [--with-charts] [--teeth [NNN]] [--harness] [--list]
+#
+# Corre los checks de verify/checks/ contra el árbol del producto. Cada
+# check es un archivo, con un bug real y fechado detrás.
+#
+#   --only NNN        corre solo ese check (repetible)
+#   --profile         qué perfil de borde se asume (default: both)
+#   --with-charts     además baja los charts pinneados y los renderiza
+#   --teeth [NNN]     prueba los DIENTES: muta el árbol a propósito y
+#                     exige que el check se ponga rojo
+#   --harness         corre los harness funcionales de verify/harness/
+#   --list            lista los checks y sale
+#
+# Códigos de salida:
+#   0  todo PASS
+#   1  hay FAIL — el artefacto está mal
+#   3  bug del VERIFICADOR (un check sin veredicto, con dos, o no
+#      determinista entre dos pasadas) — ni verde ni rojo del artefacto
+#
+# El protocolo de por qué acá no va `pipefail` está en verify/lib.sh.
+
+set -u
+
+# ── preámbulo canónico (V-102) ───────────────────────────────────────
+if [[ -z "${AEGIS_ROOT:-}" ]]; then
+    command -v readlink >/dev/null || { echo "aegis-verify: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
+    AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+fi
+export AEGIS_ROOT
+VERIFY="$AEGIS_ROOT/verify"
+
+ONLY=() PROFILES="" WITH_CHARTS=false DO_TEETH=false TEETH_ONLY="" DO_HARNESS=false DO_LIST=false
+while (($#)); do case "$1" in
+    --only)         ONLY+=("$2"); shift 2 ;;
+    --profile)      PROFILES="$2"; shift 2 ;;
+    --with-charts)  WITH_CHARTS=true; shift ;;
+    --teeth)        DO_TEETH=true
+                    if [[ "${2:-}" =~ ^[0-9] ]]; then TEETH_ONLY="$2"; shift; fi
+                    shift ;;
+    --harness)      DO_HARNESS=true; shift ;;
+    --list)         DO_LIST=true; shift ;;
+    -h|--help)      sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; exit 0 ;;
+    *) echo "aegis-verify: flag desconocida: $1" >&2; exit 3 ;;
+esac; done
+case "${PROFILES:=both}" in
+    cloudflare|local) LISTA_PERFILES=("$PROFILES") ;;
+    both)             LISTA_PERFILES=(cloudflare local) ;;
+    *) echo "aegis-verify: --profile debe ser cloudflare, local o both" >&2; exit 3 ;;
+esac
+export AEGIS_VERIFY_WITH_CHARTS="$WITH_CHARTS"
+
+# Higiene: __pycache__ es estado GENERADO, no artefacto, y fue el
+# sospechoso principal del falso rojo no determinista de la corrida #15.
+# Los checks son función pura del árbol VERSIONADO.
+find "$AEGIS_ROOT" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null
+
+# ── la lista se DERIVA, no se escribe ────────────────────────────────
+# En v2 agregar un check era editar un archivo de 3938 renglones y
+# confiar en no pisar el estado de otro. Acá el número sale del nombre
+# del archivo y el orden del sort: no hay lista que mantener, y por lo
+# tanto no hay lista que se desactualice.
+mapfile -t TODOS < <(find "$VERIFY/checks" -maxdepth 1 -name '[0-9][0-9][0-9]*.sh' -type f 2>/dev/null | sort)
+[[ ${#TODOS[@]} -gt 0 ]] || { echo "aegis-verify: no hay checks en $VERIFY/checks — un verificador sin checks NO es verde" >&2; exit 3; }
+
+numero_de() { local b; b="$(basename "$1")"; printf '%s\n' "${b%%-*}"; }
+titulo_de() { sed -n 's/^# titulo: //p' "$1" | head -1; }
+
+if $DO_LIST; then
+    for c in "${TODOS[@]}"; do printf '%s  %s\n' "$(numero_de "$c")" "$(titulo_de "$c")"; done
+    exit 0
+fi
+
+# Filtro --only: acepta 3, 03, 003, 15a y 005b — el operador escribe el
+# número como lo ve en la salida, no como lo guarda el filesystem. Y
+# `--only 15` corre 15a, 15b, 15c y 15d: los checks partidos siguen
+# siendo UN bug con UNA fecha, y quien los invoca por su número los
+# quiere todos.
+seleccion() {
+    local c n o n_num n_suf o_num o_suf
+    if [[ ${#ONLY[@]} -eq 0 ]]; then printf '%s\n' "${TODOS[@]}"; return; fi
+    for c in "${TODOS[@]}"; do
+        n="$(numero_de "$c")"; n_num="${n%%[!0-9]*}"; n_suf="${n#"$n_num"}"
+        for o in "${ONLY[@]}"; do
+            o_num="${o%%[!0-9]*}"; o_suf="${o#"$o_num"}"
+            [[ -z "$o_num" ]] && continue
+            if (( 10#$n_num == 10#$o_num )) && [[ -z "$o_suf" || "$o_suf" == "$n_suf" ]]; then
+                printf '%s\n' "$c"; break
+            fi
+        done
+    done
+}
+mapfile -t SELEC < <(seleccion)
+if [[ ${#SELEC[@]} -eq 0 ]]; then
+    echo "aegis-verify: --only no seleccionó ningún check (¿número inexistente?)" >&2; exit 3
+fi
+
+# ── correr UN check ──────────────────────────────────────────────────
+# En su propio subshell y con su propio archivo de veredicto. El check
+# no puede mentir sobre su resultado: no lo escribe él, lo cuenta esto.
+FALLOS=0 BUG=0 PASOS=0 SALTOS=0
+correr_check() {
+    local chk="$1" num tit vf rc n_pass n_fail n_skip
+    num="$(numero_de "$chk")"; tit="$(titulo_de "$chk")"
+    printf '\033[1m══ %s. %s ══\033[0m\n' "${num#00}" "${tit:-(sin título)}"
+    vf="$(mktemp)"
+    (
+        set -u
+        AEGIS_VERDICT_FILE="$vf"
+        # shellcheck source=/dev/null
+        source "$VERIFY/lib.sh"
+        # shellcheck source=/dev/null
+        source "$chk"
+        if ! declare -F check >/dev/null; then
+            echo "el archivo no define check()" >&2; exit 97
+        fi
+        check
+    )
+    rc=$?
+    n_pass=$(grep -c '^PASS' "$vf" 2>/dev/null); n_fail=$(grep -c '^FAIL' "$vf" 2>/dev/null); n_skip=$(grep -c '^SKIP' "$vf" 2>/dev/null)
+    local total=$(( n_pass + n_fail + n_skip ))
+    rm -f "$vf"
+
+    if [[ "$rc" == 97 ]]; then
+        printf '\033[1;35mBUG\033[0m  %s: el archivo no define check() — no es un check, es un archivo suelto\n' "$num"
+        BUG=1; return
+    fi
+    # EL RENGLÓN QUE FALTA, imposible por construcción: un check que no
+    # dijo nada no es «pasó». Es el silencio, y el silencio es rojo.
+    if [[ "$total" == 0 ]]; then
+        printf '\033[1;31mFAIL\033[0m %s: no emitió veredicto (rc=%s) — un check que no habla no verifica nada\n' "$num" "$rc"
+        FALLOS=1; return
+    fi
+    # Dos veredictos = el check se contradice o cuenta dos cosas en un
+    # archivo. Es bug del VERIFICADOR, no del artefacto: exit 3.
+    if [[ "$total" -gt 1 ]]; then
+        printf '\033[1;35mBUG\033[0m  %s: emitió %s veredictos (%s PASS / %s FAIL / %s SKIP) — un check, un veredicto\n' \
+            "$num" "$total" "$n_pass" "$n_fail" "$n_skip"
+        BUG=1; return
+    fi
+    (( n_fail )) && FALLOS=1
+    (( n_pass )) && PASOS=$((PASOS+1))
+    (( n_skip )) && SALTOS=$((SALTOS+1))
+    return 0
+}
+
+# ── los dientes ──────────────────────────────────────────────────────
+# Un check sin diente es una promesa sin prueba. `--teeth` muta el árbol
+# a propósito (rojo_k) y exige FAIL; después aplica un cambio legítimo
+# (control_k) y exige PASS. Si el rojo no muerde, el check no protege
+# nada; si el control se pone rojo, el check muerde de más.
+correr_dientes() {
+    local rc_total=0 chk num td tmp
+    for chk in "${SELEC[@]}"; do
+        num="$(numero_de "$chk")"; td="$VERIFY/teeth/$num.sh"
+        [[ -n "$TEETH_ONLY" && "$num" != "$TEETH_ONLY" && "${num#00}" != "$TEETH_ONLY" ]] && continue
+        if [[ ! -f "$td" ]]; then continue; fi   # el 199 se encarga de reclamarlo
+        local muerden=0 total_r=0 sanos=0 total_c=0 k
+        for k in $(grep -oE '^rojo_[0-9]+' "$td" | sed 's/rojo_//' | sort -n); do
+            total_r=$((total_r+1))
+            tmp="$(mktemp -d /dev/shm/aegis-teeth.XXXXXX)"
+            cp -a "$AEGIS_ROOT/." "$tmp/" 2>/dev/null
+            if ( set -u; AEGIS_ROOT="$tmp"; source "$td"; "rojo_$k" ) >/dev/null 2>&1; then
+                if AEGIS_ROOT="$tmp" "$tmp/libexec/aegis-verify" --only "$num" --profile "$(perfil_actual)" >/dev/null 2>&1; then
+                    printf '  \033[1;31mrojo_%s NO muerde\033[0m (mutación aplicada y el check %s siguió verde)\n' "$k" "$num"
+                else
+                    muerden=$((muerden+1))
+                fi
+            else
+                printf '  \033[1;35mrojo_%s no se pudo aplicar\033[0m (el diente está roto, no el check)\n' "$k"
+            fi
+            rm -rf "$tmp"
+        done
+        for k in $(grep -oE '^control_[0-9]+' "$td" | sed 's/control_//' | sort -n); do
+            total_c=$((total_c+1))
+            tmp="$(mktemp -d /dev/shm/aegis-teeth.XXXXXX)"
+            cp -a "$AEGIS_ROOT/." "$tmp/" 2>/dev/null
+            if ( set -u; AEGIS_ROOT="$tmp"; source "$td"; "control_$k" ) >/dev/null 2>&1; then
+                if AEGIS_ROOT="$tmp" "$tmp/libexec/aegis-verify" --only "$num" --profile "$(perfil_actual)" >/dev/null 2>&1; then
+                    sanos=$((sanos+1))
+                else
+                    printf '  \033[1;31mcontrol_%s se puso ROJO\033[0m (el check %s muerde un cambio legítimo)\n' "$k" "$num"
+                fi
+            else
+                printf '  \033[1;35mcontrol_%s no se pudo aplicar\033[0m\n' "$k"
+            fi
+            rm -rf "$tmp"
+        done
+        if [[ "$muerden" == "$total_r" && "$sanos" == "$total_c" ]]; then
+            printf '\033[1;32m  %s: %s/%s muerden · %s/%s controles sanos\033[0m\n' "$num" "$muerden" "$total_r" "$sanos" "$total_c"
+        else
+            printf '\033[1;31m  %s: %s/%s muerden · %s/%s controles sanos\033[0m\n' "$num" "$muerden" "$total_r" "$sanos" "$total_c"
+            rc_total=1
+        fi
+    done
+    return $rc_total
+}
+perfil_actual() { printf '%s\n' "${AEGIS_VERIFY_PROFILE:-cloudflare}"; }
+
+# ── harness funcionales ──────────────────────────────────────────────
+correr_harness() {
+    local rc_total=0 h
+    for h in "$VERIFY"/harness/*.sh; do
+        [[ -f "$h" ]] || continue
+        printf '\033[1m── harness: %s ──\033[0m\n' "$(basename "$h" .sh)"
+        if AEGIS_ROOT="$AEGIS_ROOT" bash "$h"; then
+            printf '\033[1;32mOK\033[0m %s\n' "$(basename "$h" .sh)"
+        else
+            printf '\033[1;31mFALLÓ\033[0m %s\n' "$(basename "$h" .sh)"; rc_total=1
+        fi
+    done
+    return $rc_total
+}
+
+# ── la corrida ───────────────────────────────────────────────────────
+if $DO_HARNESS; then
+    correr_harness; exit $?
+fi
+
+if $DO_TEETH; then
+    for prof in "${LISTA_PERFILES[@]}"; do
+        export AEGIS_VERIFY_PROFILE="$prof"
+        printf '\033[1;36m══════ DIENTES · perfil %s ══════\033[0m\n' "$prof"
+        correr_dientes || BUG=1
+    done
+    [[ "$BUG" == 0 ]] && { printf '\033[1;32m══ DIENTES: todos muerden ══\033[0m\n'; exit 0; }
+    printf '\033[1;31m══ DIENTES: hay checks que no protegen lo que dicen ══\033[0m\n'; exit 1
+fi
+
+for prof in "${LISTA_PERFILES[@]}"; do
+    export AEGIS_VERIFY_PROFILE="$prof"
+    [[ ${#LISTA_PERFILES[@]} -gt 1 ]] && printf '\033[1;36m══════ perfil %s ══════\033[0m\n' "$prof"
+    for chk in "${SELEC[@]}"; do correr_check "$chk"; done
+done
+
+echo
+if [[ "$BUG" != 0 ]]; then
+    printf '\033[1;35m══ BUG DEL VERIFICADOR: hay checks que no emiten un veredicto y solo uno ══\033[0m\n'
+    exit 3
+fi
+if [[ "$FALLOS" == 0 ]]; then
+    printf '\033[1;32m══ VERIFICACIÓN ESTÁTICA: TODO PASS (%s checks, %s no evaluados) ══\033[0m\n' "$PASOS" "$SALTOS"
+    exit 0
+fi
+# H2 corrida #15: el check 69 dio FAIL en la 1ª pasada de una VM recién
+# copiada y PASS estable después (3/3), sin ningún cambio en el árbol.
+# Un veredicto que no es reproducible es un bug del VERIFICADOR, no del
+# artefacto, y merece su propio código de salida en vez de un rojo que
+# manda a cazar fantasmas.
+if [[ -z "${AEGIS_VERIFY_RETRY:-}" ]]; then
+    printf '\033[1;33mhubo FAILs — 2ª pasada de confirmación (H2: determinismo del verificador)\033[0m\n'
+    if AEGIS_VERIFY_RETRY=1 "$0" "$@" >/dev/null 2>&1; then
+        printf '\033[1;33m══ CHECK INESTABLE (H2): la 2ª pasada PASÓ sin ningún cambio en el árbol — bug del VERIFICADOR. exit 3 ══\033[0m\n'
+        exit 3
+    fi
+    printf '\033[1;31mla 2ª pasada REPRODUJO los fallos — veredicto ROJO confirmado\033[0m\n'
+fi
+printf '\033[1;31m══ VERIFICACIÓN ESTÁTICA: HAY FALLOS ══\033[0m\n'
+exit 1

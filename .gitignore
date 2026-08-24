@@ -10,6 +10,10 @@ __pycache__/
 /.age-public
 /aegis.conf
 
+# El expediente de cada corrida vive en $AEGIS_HOME/.init-state/runs/ —
+# ya cubierto por /.init-state/ de arriba. En v2 hacía falta una línea
+# propia porque el log caía DENTRO del repo del producto (init/.init-logs/).
+
 # Bundles de aegis state backup / data backup: van age-cifrados, pero
 # adentro viaja el tfstate del borde con el token del túnel EN CLARO.
 # El resguardo va FUERA del árbol (misma regla que v2).

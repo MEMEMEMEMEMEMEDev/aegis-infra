@@ -1,18 +1,37 @@
 #!/usr/bin/env bash
-# aegis-init-log.sh — la etapa C mínima: NINGUNA corrida del init sin
-# expediente. Hoy el stderr del init se pierde con la terminal; un
-# fallo a las 3 horas no deja nada que leer. Este wrapper envuelve a
-# aegis-init.sh con script(1): conserva el TTY (el wizard sigue
-# preguntando) y captura stdout+stderr — el rc real del init pasa
-# (-e), no el de script.
+# aegis-summary: Corre el init dejando expediente de la corrida entera
+# aegis-group:   setup
 #
-# En v3 esto vive DENTRO del orquestador (plan/04 §5: run-id,
-# meta.json, runs pack). Este archivo es el puente hasta entonces:
-#   ./init/aegis-init-log.sh --profile greenfield [--only NN | --from NN]
+# La etapa C mínima: NINGUNA corrida del init sin expediente. Hoy el
+# stderr del init se pierde con la terminal, y un fallo a las tres
+# horas no deja nada que leer. Este wrapper envuelve al init con
+# script(1): conserva el TTY (el wizard sigue preguntando) y captura
+# stdout+stderr — el rc real del init pasa (-e), no el de script.
+#
+# En v3 esto termina DENTRO del orquestador (plan/04 §5: run-id,
+# meta.json, `aegis runs pack`). Este archivo es el puente hasta
+# entonces.
+#
+# DÓNDE queda el expediente: en la INSTANCIA, no en el producto. En v2
+# caía en init/.init-logs/ del propio repo, y hacía falta una línea de
+# .gitignore para que un `git add` distraído no versionara la corrida
+# entera con el stderr del host adentro. Ahora vive bajo
+# $AEGIS_HOME/.init-state/runs/, que es estado de esta máquina por
+# definición: no hay nada que excluir porque no está en el árbol del
+# producto.
 set -euo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-mkdir -p "$HERE/.init-logs"
+# ── preámbulo canónico (V-102) ───────────────────────────────────────
+if [[ -z "${AEGIS_ROOT:-}" ]]; then
+    command -v readlink >/dev/null || { echo "aegis-init-log: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
+    AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+fi
+export AEGIS_ROOT
+# shellcheck source=../lib/paths.sh
+source "$AEGIS_ROOT/lib/paths.sh"
+
+RUNS="$AEGIS_STATE_DIR/runs"
+mkdir -p "$RUNS"
 
 # el perfil solo para nombrar el archivo; si no viene, se nota.
 PROFILE="sin-perfil"
@@ -22,13 +41,16 @@ for a in "$@"; do
     prev="$a"
 done
 
-LOG="$HERE/.init-logs/$(date -u +%Y%m%dT%H%M%SZ)-$PROFILE.log"
+LOG="$RUNS/$(date -u +%Y%m%dT%H%M%SZ)-$PROFILE.log"
+# ANTES de correr: si la corrida se cuelga o muere de la peor manera,
+# el operador ya sabe dónde leer. Imprimirla al final es imprimirla
+# solo cuando no hace falta.
 printf 'expediente: %s\n' "$LOG"
 
 # script -qefc: -q sin banners, -e devuelve el rc del comando, -f
 # flush por línea (un kill -9 no se lleva el buffer), -c el comando.
 # printf %q arma el comando a prueba de espacios en los args.
-CMD="$(printf '%q ' "$HERE/aegis-init.sh" "$@")"
+CMD="$(printf '%q ' "$AEGIS_ROOT/libexec/aegis-init" "$@")"
 if script -qefc "$CMD" "$LOG"; then
     printf 'expediente: %s (rc 0)\n' "$LOG"
 else
