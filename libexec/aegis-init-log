@@ -23,7 +23,7 @@ set -euo pipefail
 
 # ── preámbulo canónico (V-102) ───────────────────────────────────────
 if [[ -z "${AEGIS_ROOT:-}" ]]; then
-    command -v readlink >/dev/null || { echo "aegis-init-log: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} init-log: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
     AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 fi
 export AEGIS_ROOT

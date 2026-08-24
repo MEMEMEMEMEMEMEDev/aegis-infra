@@ -2251,7 +2251,7 @@ def render_aprovisionar():
     porque necesitan el ADMIN TOKEN del almacenamiento: quien lo tenga
     puede darse acceso al bucket de cualquiera, así que no baja a un
     namespace de tenant. La clave de la organización sí está en los dos
-    lados —la escribe `aegis-secreto` con el mismo material— porque su
+    lados —la escribe `aegis-secret` con el mismo material— porque su
     app la consume y este Job la importa.
     """
     cat = yaml.safe_load(open(SERVICIOS, encoding="utf-8"))
@@ -2757,49 +2757,51 @@ def aplicar_ruteo(escribir):
 
 
 def main():
-    p = argparse.ArgumentParser(prog="aegis-org", description=__doc__.split("\n")[0])
+    p = argparse.ArgumentParser(prog=cli.cmd("org"), description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     for nombre, ayuda in (("plan", "muestra qué cambiaría, sin escribir"),
-                          ("aplicar", "escribe los manifiestos"),
-                          ("validar", "solo valida el contrato")):
+                          ("apply", "escribe los manifiestos"),
+                          ("validate", "solo valida el contrato")):
         s = sub.add_parser(nombre, help=ayuda)
         s.add_argument("contratos", nargs="+")
-    sub.add_parser("borde", help="deriva public_hostnames de todos los contratos")
-    sub.add_parser("ruteo", help="deriva el ConfigMap ai-ruteo de todos los contratos")
+    sub.add_parser("edge", help="deriva public_hostnames de todos los contratos")
+    sub.add_parser("routes", help="deriva el ConfigMap ai-ruteo de todos los contratos")
     # `plan-borrar` primero, y con ese nombre: el orden del help importa
     # cuando el comando de al lado destruye cosas.
-    for nombre, ayuda in (("plan-borrar", "muestra qué borraría, sin tocar nada"),
-                          ("borrar", "quita de git y DICE qué retirar del cluster")):
+    for nombre, ayuda in (("plan-delete", "muestra qué borraría, sin tocar nada"),
+                          ("delete", "quita de git y DICE qué retirar del cluster")):
         s = sub.add_parser(nombre, help=ayuda)
         s.add_argument("organizaciones", nargs="+", metavar="ORGANIZACION")
-    m = sub.add_parser("migrar", help="lleva un contrato a una versión nueva")
+    m = sub.add_parser("migrate", help="lleva un contrato a una versión nueva")
     m.add_argument("contratos", nargs="+")
-    m.add_argument("--a", type=int, required=True, metavar="VERSION",
+    # `--to` y no `--a`: la fricción 2 de A5 en su forma más chica —
+    # una preposición suelta no dice a qué se refiere.
+    m.add_argument("--to", type=int, required=True, metavar="VERSION",
                    dest="version_destino")
     a = p.parse_args()
 
-    if a.cmd == "borde":
+    if a.cmd == "edge":
         try:
             return aplicar_borde(escribir=True)
         except Invalido as e:
             print(f"{rojo}✗{fin} {e}", file=sys.stderr)
             return 1
 
-    if a.cmd == "ruteo":
+    if a.cmd == "routes":
         try:
             return aplicar_ruteo(escribir=True)
         except Invalido as e:
             print(f"{rojo}✗{fin} {e}", file=sys.stderr)
             return 1
 
-    if a.cmd == "migrar":
+    if a.cmd == "migrate":
         return migrar(a.contratos, a.version_destino)
 
-    if a.cmd in ("borrar", "plan-borrar"):
+    if a.cmd in ("delete", "plan-delete"):
         rc = 0
         for nombre in a.organizaciones:
             try:
-                rc |= borrar(nombre, escribir=(a.cmd == "borrar"))
+                rc |= borrar(nombre, escribir=(a.cmd == "delete"))
             except Invalido as e:
                 print(f"{rojo}✗ {nombre}{fin}\n  {e}", file=sys.stderr)
                 rc = 1
@@ -2819,7 +2821,7 @@ def main():
                               ("sondas", aplicar_sondas),
                               ("jenkinsfiles", aplicar_jenkinsfiles)):
                 try:
-                    rc |= fn(escribir=(a.cmd == "borrar"))
+                    rc |= fn(escribir=(a.cmd == "delete"))
                 except Invalido as e:
                     print(f"{rojo}✗ {etapa}{fin}\n  {e}", file=sys.stderr)
                     rc = 1
@@ -2828,12 +2830,12 @@ def main():
     rc = 0
     for ruta in a.contratos:
         try:
-            if a.cmd == "validar":
+            if a.cmd == "validate":
                 planes = yaml.safe_load(open(PLANES, encoding="utf-8"))
                 validar(yaml.safe_load(open(ruta, encoding="utf-8")), planes)
                 print(f"{verde}✓{fin} {ruta}")
             else:
-                rc |= aplicar(ruta, escribir=(a.cmd == "aplicar"))
+                rc |= aplicar(ruta, escribir=(a.cmd == "apply"))
         except Invalido as e:
             print(f"{rojo}✗ {ruta}{fin}\n  {e}", file=sys.stderr)
             rc = 1
@@ -2849,7 +2851,7 @@ def main():
     # tocar: dar de alta una organización cambia el mapa tenant->plan
     # entero, y ese archivo tiene que quedar consistente en la misma
     # corrida o el gateway arranca con una organización que no conoce.
-    if a.cmd in ("plan", "aplicar") and rc == 0:
+    if a.cmd in ("plan", "apply") and rc == 0:
         for etapa, fn in (("borde", aplicar_borde), ("ruteo", aplicar_ruteo),
          ("registro-ai", aplicar_registro_ai),
                           ("proyectos", aplicar_appprojects),
@@ -2861,7 +2863,7 @@ def main():
                           ("sondas", aplicar_sondas),
                           ("jenkinsfiles", aplicar_jenkinsfiles)):
             try:
-                rc |= fn(escribir=(a.cmd == "aplicar"))
+                rc |= fn(escribir=(a.cmd == "apply"))
             except Invalido as e:
                 print(f"{rojo}✗ {etapa}{fin}\n  {e}", file=sys.stderr)
                 rc = 1

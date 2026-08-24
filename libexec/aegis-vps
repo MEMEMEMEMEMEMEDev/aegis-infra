@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # aegis-summary: El VPS de laboratorio: user-data, token del túnel, shred
 # aegis-group:   infra
+# aegis-subcommands: render entregar shred
 # aegis-hidden:  true
 # aegis-vps — render | entregar | shred
 #
@@ -28,7 +29,7 @@ RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WRAPPER="$RAIZ/tofu/tofu-apply.sh"
 TPL="$RAIZ/vps/clouding-lab.cloud-init.yaml.tpl"
 
-die() { printf 'aegis-vps: %s\n' "$*" >&2; exit "${2:-1}"; }
+die() { printf '%s vps: %s\n' "${AEGIS_CMD:-aegis}" "$*" >&2; exit "${2:-1}"; }
 
 [[ -x "$WRAPPER" ]] || die "no existe el wrapper $WRAPPER — ¿estás en el checkout vivo (platform/)? El env vps-lab y su state viven ahí, no en la semilla" 2
 
@@ -63,21 +64,21 @@ for ph, env in (("__CF_TUNNEL_TOKEN__", "CF_TUNNEL_TOKEN"),
                 ("__SSH_PUBKEY_ED25519__", "PUB_ED")):
     v = os.environ[env].strip()
     if not v:
-        raise SystemExit(f"aegis-vps: {env} vacío")
+        raise SystemExit(f"{os.environ.get('AEGIS_CMD', 'aegis')} vps: {env} vacío")
     if ph not in t:
-        raise SystemExit(f"aegis-vps: el tpl no tiene {ph}")
+        raise SystemExit(f"{os.environ.get('AEGIS_CMD', 'aegis')} vps: el tpl no tiene {ph}")
     t = t.replace(ph, v)
 if "__" in "".join(l for l in t.splitlines() if not l.lstrip().startswith("#")):
-    raise SystemExit("aegis-vps: quedó un placeholder vivo fuera de comentarios")
+    raise SystemExit("aegis vps: quedó un placeholder vivo fuera de comentarios")
 open(os.environ["OUT"], "w").write(t)
 PY
     printf 'hecho: user-data renderizado en %s (%s bytes)\n' \
         "$DIR/user-data.yaml" "$(wc -c < "$DIR/user-data.yaml")"
-    printf 'pegalo en el panel de Clouding y después: aegis-vps shred\n'
+    printf 'pegalo en el panel de Clouding y después: %s vps shred\n' "${AEGIS_CMD:-aegis}"
     ;;
 entregar)
     HOST="${2:-}"
-    [[ -n "$HOST" ]] || die "uso: aegis-vps entregar <host-ssh>"
+    [[ -n "$HOST" ]] || die "uso: ${AEGIS_CMD:-aegis} vps entregar <host-ssh>"
     leer_token | ssh "$HOST" 'sudo cloudflared service install "$(cat)" && sudo systemctl restart cloudflared' \
         || die "la entrega a $HOST falló — el token NO quedó instalado"
     printf 'hecho: token entregado a %s por stdin; cloudflared reiniciado\n' "$HOST"
@@ -94,7 +95,7 @@ shred)
     [[ "$ENCONTRADOS" == 1 ]] || printf 'ya estaba: nada que destruir en /dev/shm\n'
     ;;
 *)
-    printf 'uso: aegis-vps render | entregar <host> | shred\n' >&2
+    printf 'uso: %s vps render | entregar <host> | shred\n' "${AEGIS_CMD:-aegis}" >&2
     exit 1
     ;;
 esac

@@ -48,7 +48,7 @@ escribe a mano.
 ```
 orgs/veterinaria.yaml     ← contrato (a mano)
         │
-        │  aegis org aplicar
+        │  aegis org apply
         ▼
 k8s/organizations/org-veterinaria/…   ← generado
 k8s/argocd-apps/tenants.yaml          ← generado (entrada)
@@ -164,7 +164,7 @@ repo, y su imagen (firmada, por digest), su disco y su credencial salen
 de `servicios.yaml`. Una base por organización, nunca compartida — un
 `DROP` de una no puede tocar a la vecina.
 
-`bin/aegis-tipos-prueba` recorre cada regla con su contraejemplo y exige
+`aegis dev test-types` recorre cada regla con su contraejemplo y exige
 que el generador la rechace **nombrando la razón correcta**: un rechazo
 por el motivo equivocado saldría verde igual, y ese es un error que ya
 se cometió cuatro veces esta semana.
@@ -188,16 +188,16 @@ se cometió cuatro veces esta semana.
 ## 4. El generador
 
 ```
-aegis org aplicar orgs/veterinaria.yaml      # renderiza a git
-aegis org aplicar orgs/*.yaml                # todas
+aegis org apply orgs/veterinaria.yaml      # renderiza a git
+aegis org apply orgs/*.yaml                # todas
 aegis org plan    orgs/veterinaria.yaml      # muestra el diff, no escribe
-aegis org borrar  veterinaria                # ver §7
+aegis org delete  veterinaria                # ver §7
 ```
 
 **El generador NO habla con el cluster.** No tiene `kubectl` en su
 camino. Escribe archivos en el repo y termina. Quien despliega es ArgoCD,
 después de que vos revises el diff y commitees. Esto no es purismo: es lo
-que hace que un `aegis org aplicar` sea seguro de correr en cualquier
+que hace que un `aegis org apply` sea seguro de correr en cualquier
 momento, incluso mal, porque lo peor que puede pasar es un diff feo que
 no commiteás.
 
@@ -235,7 +235,7 @@ Se derivó por dos cosas que se midieron, no por prolijidad:
 2. **Los repetidos derivan.** `aegis-tenant-canary` era el único de los
    cuatro proyectos de tenant sin `orphanedResources`: quedó afuera
    cuando #31 lo agregó a los otros tres. Consecuencia real: la app del
-   canary no se evaluaba nunca y `bin/aegis-chequeo` la contaba dentro
+   canary no se evaluaba nunca y `aegis check` la contaba dentro
    de *"nada huérfano"*. **Un bloque copiado tres veces se actualiza
    dos.** Derivado, los bloques son idénticos por construcción y no por
    disciplina.
@@ -278,7 +278,7 @@ otra, el init recifra todo lo que sí produce, y estas dos quedan
 cifradas con una llave que ya no existe. KSOPS no las descifra y la App
 `argocd-secrets` no sincroniza nunca.
 
-Ahora `bin/aegis-secreto --todos <contrato>` las crea en la misma pasada
+Ahora `aegis secret create <contrato>` las crea en la misma pasada
 que el resto de los secretos de la organización, y el generador las
 lista solo. El material se genera con `ssh-keygen` en tmpfs y se borra
 con `shred` — el mismo mecanismo que el init usa para la propia age key.
@@ -337,9 +337,19 @@ dos veces seguidas deja el árbol de git limpio la segunda vez. Es
 verificable y el CI lo verifica.
 
 **I2 — Los secretos se crean si faltan y NUNCA se regeneran.** Un
-`aegis org aplicar` sobre una organización viva no rota ninguna
-credencial. Rotar es un acto deliberado y tiene su propio comando
-(`aegis org rotar <org> <secreto>`). Sin esta regla nadie se anima a
+`aegis org apply` sobre una organización viva no rota ninguna
+credencial. Rotar es un acto deliberado y tiene su propio comando:
+`aegis secret rotate <archivo.enc.yaml>`.
+
+(Hasta el 2026-08-23 este renglón decía «aegis org rotar» (sin comillas
+invertidas acá a propósito: en este documento las comillas invertidas
+son invocaciones, y el check 106 las verifica una por una), un comando
+que NUNCA EXISTIÓ. Quien lo tecleaba no recibía un error útil sino un
+«subcomando inválido», y la conclusión natural es «me equivoqué yo», no
+«el documento está viejo». Lo encontró el check 106, que extrae de los
+documentos toda invocación citada y exige que exista: los documentos
+que el operador ejecuta son código con otra sintaxis, y envejecen
+igual.) Sin esta regla nadie se anima a
 correr el generador dos veces, y un generador que da miedo no es
 idempotente aunque lo sea.
 
@@ -359,7 +369,7 @@ contrato, no el archivo.
 y reaplicar QUITA la NetworkPolicy del bucket. El generador es dueño del
 directorio de la organización entero.
 Advertencia heredada: **quitar un recurso de git no lo quita del
-cluster** (`prune` omitido, A19). Por eso `aegis org aplicar` avisa
+cluster** (`prune` omitido, A19). Por eso `aegis org apply` avisa
 explícitamente qué archivos borró y qué hay que hacer con ellos. Ver §7.
 
 **I5 — El contrato inválido no produce nada.** Se valida entero antes de
@@ -553,8 +563,8 @@ Cada organización necesita, según lo que pida:
 | `garage-<org>` | si hay `bucket:` | par de claves S3 del bucket propio |
 
 ```
-bin/aegis-secreto --todos orgs/veterinaria.yaml    # crea los que falten
-bin/aegis-secreto --rotar <archivo>                # deliberado, de a uno
+aegis secret create orgs/veterinaria.yaml    # crea los que falten
+aegis secret --rotar <archivo>                # deliberado, de a uno
 ```
 
 `bin/aegis-org` **no** crea secretos: escribe manifiestos y no maneja
@@ -565,7 +575,7 @@ exacto para crearlo.
 Reglas, todas consecuencia de I2:
 
 1. **Crear si falta, jamás sobreescribir.** Reaplicar no rota. Es un
-   mecanismo, no una promesa: `aegis-secreto` sobre un archivo que
+   mecanismo, no una promesa: `aegis-secret` sobre un archivo que
    existe dice "no se toca" y sale.
 2. **El operador no ve el material.** Se genera con `secrets` (no
    `random`, que es un Mersenne Twister predecible), se le pasa a `sops`
@@ -691,7 +701,7 @@ en orden de dureza:
 4. **El piso se sostiene.** En la organización nueva, una imagen sin
    firmar es RECHAZADA por admisión, y un pod suyo no alcanza a otra
    organización. Se prueba ejerciendo el invariante, no leyendo el YAML
-   —la lección de `bin/aegis-chequeo` y de la Enfermedad B.
+   —la lección de `aegis check` y de la Enfermedad B.
 5. **Borrar y volver a crear** deja el sistema como al principio.
 
 ---

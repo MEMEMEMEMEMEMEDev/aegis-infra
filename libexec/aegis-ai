@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # aegis-summary: El control del operador sobre el sustrato de AI
 # aegis-group:   operate
+# aegis-subcommands: status start stop open demo max logs engine-logs
 # ai — el control del operador sobre el sustrato de AI.
 #
 # UNA SOLA FUENTE DE VERDAD: este script escribe el ConfigMap ai-modo y
@@ -74,19 +75,24 @@ gris()  { printf '\033[90m%s\033[0m\n' "$*"; }
 
 uso() {
   cat <<'EOF'
-ai — control del sustrato de AI de aegis
+aegis ai — control del sustrato de AI
 
-  ai status                  qué está pasando ahora
-  ai init [horas]            abre la jornada: enciende la GPU por N horas
-                             (default 8; se cierra sola — o antes con ai stop)
-  ai stop                    apaga la GPU (alias de cerrar)
-  ai abrir [--hasta HH:MM]   enciende la GPU (chequea la VRAM antes)
-  ai demo [minutos]          enciende con presupuestos amplios y TTL
-                             (default 60 min; se cierra solo)
-  ai max [--hasta HH:MM]     presupuestos amplios sin TTL
-  ai cerrar [motivo]         apaga la GPU
-  ai log [-f]                logs del gateway
-  ai engine-log [-f]         logs del engine
+  aegis ai status                qué está pasando ahora
+  aegis ai start [horas]         abre la jornada: enciende la GPU por N horas
+                                 (default 8; se cierra sola — o antes con stop)
+  aegis ai stop [motivo]         apaga la GPU
+  aegis ai open [--until HH:MM]  enciende la GPU (chequea la VRAM antes)
+  aegis ai demo [minutos]        enciende con presupuestos amplios y TTL
+                                 (default 60 min; se cierra solo)
+  aegis ai max [--until HH:MM]   presupuestos amplios sin TTL
+  aegis ai logs [-f]             logs del gateway
+  aegis ai engine-logs [-f]      logs del engine
+
+`start` y no `init`: `init` ya es el nombre del comando que instala la
+plataforma entera, y dos cosas con el mismo nombre haciendo cosas
+distintas es exactamente el tipo de colisión que se paga a las 3 AM.
+Los alias `abrir`/`cerrar` murieron: eran dos nombres para el mismo
+gesto, y el que sobrevive es el que dice la duración.
 
 Opciones:
   --force    saltea el chequeo de VRAM (sabé lo que hacés: arrancar
@@ -152,7 +158,7 @@ preflight_vram() {
   echo "  Lo que está usando la GPU ahora:"
   quien_usa_la_gpu | sed 's/^/    /'
   echo
-  echo "  Cerrá eso y reintentá, o forzá con:  ai abrir --force"
+  echo "  Cerrá eso y reintentá, o forzá con:  ${AEGIS_CMD:-aegis} ai open --force"
   return 1
 }
 
@@ -234,14 +240,14 @@ main() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --force) force=1 ;;
-      --hasta) hasta="${2:-}"; shift ;;
+      --until) hasta="${2:-}"; shift ;;
       *) args+=("$1") ;;
     esac
     shift
   done
 
   case "$cmd" in
-    status|estado) cmd_status ;;
+    status) cmd_status ;;
 
     # init/stop — los dos gestos del día a día, para teclearse sin mirar
     # el help: `ai init` abre la jornada y `ai stop` la termina. Son
@@ -251,7 +257,7 @@ main() {
     # una jornada que se abre sin fin programado depende de que el
     # operador se acuerde de cerrarla, y la GPU encendida de madrugada
     # ya no es un acto humano deliberado — es un olvido.
-    init)
+    start)
       local horas="${args[0]:-8}"
       case "$horas" in
         ''|*[!0-9]*) rojo "horas inválidas: $horas (se espera un entero)"; exit 1 ;;
@@ -260,13 +266,13 @@ main() {
       if [ "$force" -eq 0 ]; then preflight_vram || exit 1
       else gris "  (--force: chequeo de VRAM salteado)"; fi
       local vence; vence=$(date -u -d "+${horas} hours" +%Y-%m-%dT%H:%M:%SZ)
-      escribir_modo "abierto" "$vence" "jornada de ${horas} h (ai init)"
+      escribir_modo "abierto" "$vence" "jornada de ${horas} h (${AEGIS_CMD:-aegis} ai start)"
       verde "modo abierto hasta $vence UTC ($(date -d "$vence" '+%H:%M' 2>/dev/null || echo '?') local) — se cierra solo"
-      gris "  el engine tarda ~62 s en estar listo; mirá con: ai status"
+      gris "  el engine tarda ~62 s en estar listo; mirá con: ${AEGIS_CMD:-aegis} ai status"
       gris "  para cortar antes: ai stop"
       ;;
 
-    abrir)
+    open)
       echo "Abriendo..."
       if [ "$force" -eq 0 ]; then preflight_vram || exit 1
       else gris "  (--force: chequeo de VRAM salteado)"; fi
@@ -274,7 +280,7 @@ main() {
       [ -n "$hasta" ] && vence=$(vence_desde_hhmm "$hasta")
       escribir_modo "abierto" "$vence" "${args[0]:-abierto por el operador}"
       verde "modo abierto${vence:+ hasta $vence UTC}"
-      gris "  el engine tarda ~62 s en estar listo; mirá con: ai status"
+      gris "  el engine tarda ~62 s en estar listo; mirá con: ${AEGIS_CMD:-aegis} ai status"
       ;;
 
     demo)
@@ -298,7 +304,7 @@ main() {
       [ -z "$vence" ] && gris "  sin vencimiento: acordate de cerrarlo (o usá --hasta)"
       ;;
 
-    cerrar|stop)
+    stop)
       escribir_modo "cerrado" "" "${args[0]:-cerrado por el operador}"
       verde "modo cerrado — el controlador baja el engine en segundos"
       ;;
@@ -306,8 +312,8 @@ main() {
     # ${args[@]+...} y no ${args[@]}: con `set -u` una expansión de
     # array vacío es un error en bash, y `ai log` sin argumentos es el
     # caso normal.
-    log)        kubectl logs -n "$NS" deploy/ai-gateway ${args[@]+"${args[@]}"} ;;
-    engine-log) kubectl logs -n "$NS" deploy/"$ENGINE" ${args[@]+"${args[@]}"} ;;
+    logs)        kubectl logs -n "$NS" deploy/ai-gateway ${args[@]+"${args[@]}"} ;;
+    engine-logs) kubectl logs -n "$NS" deploy/"$ENGINE" ${args[@]+"${args[@]}"} ;;
 
     -h|--help|help) uso ;;
     *) rojo "comando desconocido: $cmd"; echo; uso; exit 1 ;;

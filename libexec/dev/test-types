@@ -17,7 +17,7 @@ generador la rechace. Es lo contrario de la prueba #1: aquella comprueba
 que lo bueno se reproduce, esta que lo malo no pasa. Sin la segunda,
 podría relajar cualquier validación sin que nada avisara.
 
-    bin/aegis-tipos-prueba
+    aegis dev test-types
 """
 import importlib.machinery
 import importlib.util

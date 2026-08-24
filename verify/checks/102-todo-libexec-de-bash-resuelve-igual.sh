@@ -2,7 +2,7 @@
 # origen: V-102 (02 §1) — nuevo en v3
 check() {
 # En v2 cada comando calculaba su raíz desde su propio __file__: seis
-# copias de la misma línea (aegis-org:32, aegis-app:96, aegis-borde:45,
+# copias de la misma línea (aegis-org:32, aegis-app:96, aegis-edge:45,
 # aegis-destroy:26, aegis-backup:21, aegis-restore:15). C1/C2 del
 # registro las llaman «dependencias invisibles a un grep»: el día que
 # el archivo cambia de profundidad, la línea sigue compilando y apunta

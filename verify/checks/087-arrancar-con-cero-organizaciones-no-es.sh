@@ -41,7 +41,7 @@ grep -qE '^\s*if\s+yaml_has_docs\s+"\$PLATFORM_DIR/k8s/bootstrap/appprojects-ten
 #
 #    Aquí el des-renderizado NO alcanza y por eso hizo falta este
 #    punto. `traer` convirtió blog.example.com en
-#    blog.__ROOT_DOMAIN__ —el guard de aegis-semilla pasó feliz, el
+#    blog.__ROOT_DOMAIN__ —el guard de aegis dev seed pasó feliz, el
 #    valor de esta instancia ya no estaba— pero los NOMBRES de las
 #    organizaciones se quedaron. La semilla quedó sondeando blog,
 #    ejemplo, portafolio y shop: cuatro sitios que en una instancia

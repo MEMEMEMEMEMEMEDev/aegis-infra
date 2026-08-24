@@ -248,7 +248,7 @@ data:
   # verdad sobre lo que está corriendo. Cuando ni siquiera hay eso —una
   # imagen desplegada sin ningún build medido— no es trabajo de una
   # alerta: es NO SE PUDO EVALUAR, y lo reporta la ronda de
-  # bin/aegis-chequeo. Una alerta que dispara el día uno, cuando no hay
+  # aegis check. Una alerta que dispara el día uno, cuando no hay
   # builds porque la plataforma acaba de nacer, es el falso rojo
   # crónico: grita, se ignora, y deja de servir para cuando importe.
   suministro.yaml: |

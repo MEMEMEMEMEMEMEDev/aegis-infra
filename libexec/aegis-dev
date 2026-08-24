@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# aegis-summary: Herramientas del mantenedor (semilla y pruebas de aceptación)
+# aegis-group:   dev
+# aegis-subcommands: seed test-org test-types
+# aegis-hidden:  true
+#
+# aegis-help:
+# Usage: aegis dev seed diff|pull|excluded
+#        aegis dev test-org <CONTRATO>
+#        aegis dev test-types
+#
+# No son del operador: son de quien construye el producto. Por eso
+# están ocultas del menú principal — pero existen, se verifican y se
+# corren dentro de `aegis verify` (H6: en v2 estas dos pruebas de
+# aceptación eran huérfanas, nadie las corría nunca).
+set -euo pipefail
+
+# ── preámbulo canónico (V-102) ───────────────────────────────────────
+if [[ -z "${AEGIS_ROOT:-}" ]]; then
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} dev: falta readlink" >&2; exit 2; }
+    AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+fi
+export AEGIS_ROOT
+# shellcheck source=../lib/paths.sh
+source "$AEGIS_ROOT/lib/paths.sh"
+
+uso() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/codigos-de-salida.txt"; }
+
+case "${1:-}" in
+    seed|test-org|test-types) VERBO="$1"; shift ;;
+    -h|--help|"")             uso; exit 0 ;;
+    *) printf '%s dev: «%s» no es un subcomando (seed | test-org | test-types)\n' "${AEGIS_CMD:-aegis}" "$1" >&2
+       exit 3 ;;
+esac
+exec "$AEGIS_ROOT/libexec/dev/$VERBO" "$@"

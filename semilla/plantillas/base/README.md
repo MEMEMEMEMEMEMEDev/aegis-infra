@@ -11,7 +11,7 @@ sin tocar el mundo, todo lo que el camino artesano escribe a mano.
 | `orgs/<org>.yaml` | `contrato.yaml.tpl`, con `__ORG__`/`__DOMINIO__`/`__REPO__` resueltos |
 | `.aegis-app/<org>/app/` | `repos/app/` — el esqueleto del repo de la app |
 | manifiestos de `k8s/organizations/org-<org>/` + jobs + borde | NO son de esta plantilla: los deriva `bin/aegis-org` DEL CONTRATO |
-| secretos `.enc.yaml` | tampoco: los crea `bin/aegis-secreto --todos` |
+| secretos `.enc.yaml` | tampoco: los crea `aegis secret create` |
 
 El esqueleto es Go con **cero dependencias externas** a propósito
 (caminos §5, presupuesto de podredumbre): un árbol de dependencias
@@ -36,7 +36,7 @@ Editando **el contrato**, que es la única verdad, y reaplicando:
 
     $EDITOR orgs/<org>.yaml          # sumar postgres, bucket, ai, otro servicio…
     bin/aegis-org aplicar orgs/<org>.yaml
-    bin/aegis-secreto --todos orgs/<org>.yaml   # si aparecieron secretos nuevos
+    aegis secret create orgs/<org>.yaml   # si aparecieron secretos nuevos
 
 (`bin/aegis-app nueva <org>` sin `--plantilla` corre exactamente esos
 dos pasos por vos.) El código de la app se personaliza en SU repo, como

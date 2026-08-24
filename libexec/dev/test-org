@@ -14,7 +14,7 @@ mismos objetos con los mismos campos. Si no salen, el modelo del
 protocolo no describe la realidad — y eso hay que saberlo ANTES de
 generar organizaciones nuevas con él.
 
-    bin/aegis-org-prueba orgs/portafolio.yaml
+    aegis dev test-org orgs/portafolio.yaml
 """
 import importlib.machinery
 import importlib.util

@@ -49,7 +49,7 @@ set -euo pipefail
 # /usr/local y el init no encontraría ni sus fases ni sus libs.
 # Si bin/aegis ya lo exportó, se respeta (no se recalcula seis veces).
 if [[ -z "${AEGIS_ROOT:-}" ]]; then
-    command -v readlink >/dev/null || { echo "aegis-init: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} init: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
     AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 fi
 export AEGIS_ROOT
@@ -143,7 +143,7 @@ PHASE_NAMES="$(basename -s .sh "${PHASES[@]}" | tr '\n' ' ')"
 [[ -z "$FROM_PHASE" ]] || phase_check_unique --from "$FROM_PHASE"
 [[ -z "$ONLY_PHASE" ]] || phase_check_unique --only "$ONLY_PHASE"
 
-log_info "aegis-init v2 — perfil=$PROFILE check=$CHECK_MODE"
+log_info "${AEGIS_CMD:-aegis} init — perfil=$PROFILE check=$CHECK_MODE"
 log_info "root=$AEGIS_ROOT"
 
 # ── estado re-derivable por fase (bug 5 corrida #2) ─────────────────
@@ -223,6 +223,6 @@ for p in "${PHASES[@]}"; do
     fi
 done
 
-log_ok "aegis-init: todas las fases solicitadas completas."
+log_ok "${AEGIS_CMD:-aegis} init: todas las fases solicitadas completas."
 log_info "Siguiente: validar gates finales (fase 80 los lista) y"
 log_info "archivar el resumen en docs/logbook del repo de plataforma."

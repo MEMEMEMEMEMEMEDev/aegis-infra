@@ -30,13 +30,13 @@ rojo=$'\033[31m'; verde=$'\033[32m'; gris=$'\033[90m'; fin=$'\033[0m'
 [[ -t 1 ]] || { rojo=""; verde=""; gris=""; fin=""; }
 
 if [[ $# -eq 0 ]]; then
-    echo "uso: aegis-sync <app> [<app> ...]" >&2
-    echo "     aegis-sync --fuera-de-linea    # todas las que no estén Synced" >&2
+    echo "uso: ${AEGIS_CMD:-aegis} sync <app> [<app> ...]" >&2
+    echo "     ${AEGIS_CMD:-aegis} sync --drifted    # todas las que no estén Synced" >&2
     exit 2
 fi
 
 apps=("$@")
-if [[ "${1:-}" == "--fuera-de-linea" ]]; then
+if [[ "${1:-}" == "--drifted" ]]; then
     mapfile -t apps < <(kubectl get applications -n argocd --no-headers \
         -o custom-columns='N:.metadata.name,S:.status.sync.status' \
         | awk '$2 != "Synced" {print $1}')
@@ -58,4 +58,4 @@ for app in "${apps[@]}"; do
         >/dev/null
     echo "  ${verde}→${fin} $app"
 done
-echo "${gris}disparado. El resultado tarda; mirá con: aegis-chequeo${fin}"
+echo "${gris}disparado. El resultado tarda; mirá con: ${AEGIS_CMD:-aegis} check${fin}"

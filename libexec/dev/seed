@@ -2,7 +2,7 @@
 # aegis-summary: Compara y trae cambios de la instancia a la semilla
 # aegis-group:   dev
 # aegis-hidden:  true
-"""aegis-semilla — comparar y traer cambios de la INSTANCIA a la SEMILLA.
+"""aegis dev seed — comparar y traer cambios de la INSTANCIA a la SEMILLA.
 
 Esta herramienta es para quien MANTIENE el producto, no para quien opera
 una instancia. Vive en la raíz del repo aegis-v2 y trabaja sobre dos
@@ -44,11 +44,11 @@ viene cazando: una señal que no distingue "pasó" de "no se evaluó").
 USO
 ===
 
-    bin/aegis-semilla diff                  qué difiere, agrupado
-    bin/aegis-semilla diff <ruta>           el diff textual de un archivo
-    bin/aegis-semilla traer <ruta>...       copia del vivo a la semilla,
+    aegis dev seed diff                  qué difiere, agrupado
+    aegis dev seed diff <ruta>           el diff textual de un archivo
+    aegis dev seed traer <ruta>...       copia del vivo a la semilla,
                                             des-renderizando en el camino
-    bin/aegis-semilla excluidos             la política, con motivos
+    aegis dev seed excluidos             la política, con motivos
 
 Las <ruta> son relativas a la raíz de cada árbol (`bin/aegis-org`, no
 `platform/bin/aegis-org`).
@@ -141,11 +141,11 @@ EXCLUSIONES = [
      "las organizaciones ANTERIORES al generador, a mano y a propósito. Es "
      "deuda de esta instancia (org-ecommerce sin contrato): una instancia "
      "nueva no hereda nada."),
-    ("bin/aegis-org-prueba",
+    ("aegis dev test-org",
      "compara la salida del generador contra los manifiestos escritos A MANO "
      "de org-portafolio, que son de ESTA instancia. En la semilla no tiene "
      "sujeto: se ejecutaría sobre nada y pasaría por vacío. La prueba que sí "
-     "viaja es bin/aegis-tipos-prueba, que es autocontenida."),
+     "viaja es aegis dev test-types, que es autocontenida."),
 ]
 
 
@@ -312,7 +312,7 @@ def leer_config() -> dict[str, str]:
             vals[m.group(1)] = m.group(2)
     faltan = [k for k in CLAVES_CONFIG if not vals.get(k)]
     if faltan:
-        morir(f"aegis-init.conf no define: {', '.join(faltan)}")
+        morir(f"{rutas.conf()} no define: {', '.join(faltan)}")
     return vals
 
 
@@ -408,7 +408,7 @@ def cmd_diff(argv: list[str]) -> int:
         morir("diferencias declaradas DELIBERADAS que ya no difieren: "
               + ", ".join(sin_efecto)
               + "\n  o la diferencia se perdió (y hay que enterarse), o la nota"
-                "\n  quedó vieja. Revisala en bin/aegis-semilla.")
+                "\n  quedó vieja. Revisala en aegis dev seed.")
     a_proposito = [r for r in declaradas if r in difiere or r in sobra or r in falta]
     falta = [f for f in falta if f not in declaradas]
     difiere = [f for f in difiere if f not in declaradas]
@@ -430,7 +430,7 @@ def cmd_diff(argv: list[str]) -> int:
     print(f"\n{GRIS}══ excluidos por política: {len(excluidos)} archivos "
           f"({len(EXCLUSIONES) + len(_organizaciones_de_la_instancia())} reglas, "
           f"{len(_organizaciones_de_la_instancia())} derivadas de los contratos). "
-          f"`aegis-semilla excluidos` los detalla ══{FIN}")
+          f"`aegis dev seed excluidos` los detalla ══{FIN}")
 
     total = len(falta) + len(difiere) + len(sobra)
     if total == 0:

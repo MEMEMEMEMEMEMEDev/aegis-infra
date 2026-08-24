@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 # aegis-summary: Captura y restaura los DATOS de los inquilinos
 # aegis-group:   backup
-"""aegis-respaldo — captura y restaura los DATOS de los inquilinos.
+# aegis-subcommands: backup list restore
+"""aegis-data — captura y restaura los DATOS de los inquilinos.
 
-Es la otra mitad de `init/aegis-backup.sh`. Aquél respalda el ESTADO de
+Es la otra mitad de `aegis state backup`. Aquél respalda el ESTADO de
 la plataforma —los secretos del store, la traza del init, el tfstate del
 borde—; éste respalda lo que los inquilinos GENERARON: sus bases y sus
 objetos. Ninguna de las dos mitades sirve sola: con el estado se levanta
 una plataforma vacía, con los datos se tiene un dump que no se sabe
 dónde poner.
 
-    bin/aegis-respaldo --capturar              # un bundle POR ORGANIZACIÓN
-    bin/aegis-respaldo --listar <bundle.age>   # qué hay adentro, sin restaurar
-    bin/aegis-respaldo --restaurar <bundle.age> --org ejemplo [--force]
+    aegis data --capturar              # un bundle POR ORGANIZACIÓN
+    aegis data --listar <bundle.age>   # qué hay adentro, sin restaurar
+    aegis data --restaurar <bundle.age> --org ejemplo [--force]
 
 ── UN BUNDLE POR ORGANIZACIÓN, EN SU PROPIA CARPETA ────────────────
 
     $AEGIS_RESPALDOS/
       .aegis-destino                       <- la marca del disco (ver abajo)
       plataforma/
-        aegis-estado-<ts>.age              <- lo escribe init/aegis-backup.sh
+        aegis-estado-<ts>.age              <- lo escribe aegis state backup
       org-ejemplo/
         aegis-datos-org-ejemplo-<ts>.age
       org-portafolio/
@@ -38,7 +39,7 @@ organización cambia tres cosas que importan:
 Esa última es la razón de fondo. Con un bundle único, una organización
 nueva que nunca se respaldó era INVISIBLE: el archivo existía, tenía
 fecha reciente, y adentro no estaba. Ahora la ausencia tiene forma de
-carpeta que falta, y `bin/aegis-chequeo` la enumera contra los
+carpeta que falta, y `aegis check` la enumera contra los
 contratos.
 
 ── LA MARCA DEL DISCO (.aegis-destino) ─────────────────────────────
@@ -134,7 +135,7 @@ except ImportError:
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
-from aegis import rutas                  # noqa: E402
+from aegis import cli, rutas             # noqa: E402
 
 # RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
 # En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
@@ -230,7 +231,7 @@ def kubectl(args, binario=False, entrada=None):
 
 # ── descubrimiento ──────────────────────────────────────────────────
 #
-# Igual que bin/aegis-registro y por el mismo motivo: la lista NO se
+# Igual que aegis registry y por el mismo motivo: la lista NO se
 # escribe. Sale de los contratos y se CONTRASTA contra el cluster. Una
 # fuente que está en un lado y no en el otro es exactamente la condición
 # que hace peligroso el respaldo —capturar de menos sin enterarse— así
@@ -565,7 +566,7 @@ def escribir_leeme(raiz, esperadas, hechas, sello):
         "# Respaldos de aegis — cómo está armado esto",
         "",
         f"Última captura: {sello} (sello de los bundles de esa corrida).",
-        "ESTE ARCHIVO LO ESCRIBE `bin/aegis-respaldo --capturar`. No lo edites:",
+        "ESTE ARCHIVO LO ESCRIBE `aegis data --capturar`. No lo edites:",
         "la próxima captura lo pisa.",
         "",
         "## Qué hay en cada carpeta",
@@ -577,7 +578,7 @@ def escribir_leeme(raiz, esperadas, hechas, sello):
         "                  escribir — sin eso el bundle caería en el mismo",
         "                  disco que tiene que sobrevivir.",
         "plataforma/       el ESTADO: secretos del store, traza del init,",
-        "                  tfstate del borde. Lo escribe init/aegis-backup.sh.",
+        "                  tfstate del borde. Lo escribe aegis state backup.",
         "org-<nombre>/     los DATOS de UNA organización: sus bases y sus",
         "                  objetos. Un bundle por organización, nunca",
         "                  compartido.",
@@ -599,7 +600,7 @@ def escribir_leeme(raiz, esperadas, hechas, sello):
     if faltan:
         lineas += ["",
                    "> Una organización que aparece acá y no tiene carpeta es una que",
-                   "> NUNCA se respaldó. `bin/aegis-chequeo` la enumera contra los",
+                   "> NUNCA se respaldó. `aegis check` la enumera contra los",
                    "> contratos justamente para que esa ausencia tenga forma."]
     lineas += [
         "",
@@ -638,8 +639,8 @@ def escribir_leeme(raiz, esperadas, hechas, sello):
         "propietario:",
         "",
         "```",
-        "bin/aegis-respaldo --listar    org-<org>/aegis-datos-org-<org>-<ts>.age",
-        "bin/aegis-respaldo --restaurar org-<org>/aegis-datos-org-<org>-<ts>.age --org <org>",
+        "aegis data --listar    org-<org>/aegis-datos-org-<org>-<ts>.age",
+        "aegis data --restaurar org-<org>/aegis-datos-org-<org>-<ts>.age --org <org>",
         "```",
         "",
         "`--listar` abre el bundle y dice qué trae sin restaurar nada.",
@@ -688,7 +689,7 @@ def capturar_org(org, bases, buckets, salida):
         with open(os.path.join(pay, "MANIFIESTO.json"), "w", encoding="utf-8") as f:
             json.dump(man, f, indent=2, ensure_ascii=False)
 
-        # GUARDA DURA, la misma que aegis-backup.sh: la age key jamás
+        # GUARDA DURA, la misma que aegis state backup: la age key jamás
         # entra al bundle. El huevo y la gallina no viajan juntos.
         for r_, _, fs in os.walk(pay):
             for x in fs:
@@ -973,24 +974,32 @@ def restaurar(bundle, org, force):
 
 
 def main():
-    ap = argparse.ArgumentParser(prog="aegis-respaldo")
-    g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--capturar", nargs="?", const="", metavar="DIRECTORIO",
-                   help=f"un bundle por organización bajo ese directorio "
-                        f"(default: {DESTINO_DEF})")
-    g.add_argument("--listar", metavar="BUNDLE.age", help="qué hay adentro")
-    g.add_argument("--restaurar", metavar="BUNDLE.age")
-    ap.add_argument("--org", help="organización a restaurar (obligatorio con --restaurar)")
-    ap.add_argument("--force", action="store_true",
+    # Regla 1: verbos, no flags. Y el mismo par de nombres que
+    # `aegis state`, porque son la misma operación sobre otra cosa:
+    # `state` es la MÁQUINA, `data` son los DATOS de los inquilinos.
+    ap = argparse.ArgumentParser(prog=cli.cmd("data"))
+    sub = ap.add_subparsers(dest="verbo", required=True)
+    s = sub.add_parser("backup", help=f"un bundle por organización (default: {DESTINO_DEF})")
+    s.add_argument("directorio", nargs="?", default="", metavar="DIRECTORIO")
+    s = sub.add_parser("list", help="qué hay adentro de un bundle, sin restaurar")
+    s.add_argument("bundle", metavar="BUNDLE.age")
+    s = sub.add_parser("restore", help="restaura los datos de UNA organización")
+    s.add_argument("bundle", metavar="BUNDLE.age")
+    s.add_argument("--org", required=True,
+                   help="restaurar TODO de una vez no es una operación que convenga hacer fácil")
+    s.add_argument("--force", action="store_true",
                     help="seguir aunque la credencial haya rotado desde la captura")
     a = ap.parse_args()
+    a.capturar  = a.directorio if a.verbo == "backup" else None
+    a.listar    = a.bundle if a.verbo == "list" else None
+    a.restaurar = a.bundle if a.verbo == "restore" else None
+    if a.verbo != "restore":
+        a.org = None
+        a.force = False
 
     if a.listar:
         return listar(a.listar)
     if a.restaurar:
-        if not a.org:
-            morir("--restaurar necesita --org: restaurar TODO de una vez no es una "
-                  "operación que convenga hacer fácil")
         return restaurar(a.restaurar, a.org, a.force)
 
     return capturar(a.capturar or DESTINO_DEF)

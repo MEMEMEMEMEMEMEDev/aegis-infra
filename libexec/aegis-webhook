@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # aegis-summary: Que un push llegue a Jenkins, en todos los repos
 # aegis-group:   infra
+# aegis-subcommands: check apply
 """aegis-webhook — que un push llegue a Jenkins, en todos los repos.
 
 EL PROBLEMA QUE RESUELVE
@@ -168,9 +169,14 @@ def asegurar(owner, repo, url, hmac, escribir):
 
 
 def main():
-    p = argparse.ArgumentParser(prog="aegis-webhook", description=__doc__.split("\n")[0])
-    p.add_argument("--aplicar", action="store_true",
-                   help="crea los que falten y re-sincroniza el HMAC de los que están")
+    p = argparse.ArgumentParser(prog=cli.cmd("webhook"), description=__doc__.split("\n")[0])
+    # Regla 2 del diseño: un solo modo «mirar sin tocar», y es un
+    # VERBO. `check` mide; `apply` crea los que falten y re-sincroniza
+    # el HMAC de los que están. Sin argumentos = check, que es lo que
+    # invoca la ronda.
+    sub = p.add_subparsers(dest="verbo")
+    sub.add_parser("check", help="mide: ¿todos los repos con job tienen webhook?")
+    sub.add_parser("apply", help="crea los que falten y re-sincroniza el HMAC")
     # El CONTRATO de salida (03 §3). Hasta hoy, quien quería saber si
     # este comando había CREADO algo —y no solo re-sincronizado— tenía
     # que leer la frase «webhook creado» en la narración: aegis-app:722
@@ -180,6 +186,7 @@ def main():
     p.add_argument("--json", action="store_true", dest="json_mode",
                    help="reemplaza la narración por el documento de estados")
     a = p.parse_args()
+    a.aplicar = (a.verbo == "apply")
     pasos = desenlaces.Pasos(json_mode=a.json_mode)
     narrar = not a.json_mode
 

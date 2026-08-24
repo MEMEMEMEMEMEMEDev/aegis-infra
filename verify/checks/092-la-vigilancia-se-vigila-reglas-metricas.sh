@@ -206,7 +206,7 @@ SIN_GUARDIA = {
     "ImagenSinEscaneo":
         "la ausencia es el día uno: una plataforma recién nacida no tiene builds. Un "
         "absent() acá gritaría desde el arranque hasta el primer build, que es el falso "
-        "rojo crónico. El caso «desplegada y sin medir» lo reporta bin/aegis-chequeo, "
+        "rojo crónico. El caso «desplegada y sin medir» lo reporta aegis check, "
         "que sabe cruzar contra lo que hay corriendo",
     "ImagenSinFirma": "misma razón que ImagenSinEscaneo",
 }

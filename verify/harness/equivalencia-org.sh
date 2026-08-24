@@ -53,12 +53,12 @@ v3org() { PLATFORM_DIR="$TMP/v3" AEGIS_CONF="$CONF" AEGIS_ROOT="$AEGIS_ROOT" \
 for c in "${CONTRATOS[@]}"; do
     n="$(basename "$c")"
     ( cd "$TMP/v2" && ./bin/aegis-org aplicar "orgs/$n" ) >/dev/null 2>&1
-    v3org aplicar "$TMP/v3/orgs/$n" >/dev/null 2>&1
+    v3org apply "$TMP/v3/orgs/$n" >/dev/null 2>&1
 done
 # y las dos derivaciones globales, que no son por contrato
 ( cd "$TMP/v2" && ./bin/aegis-org borde && ./bin/aegis-org ruteo ) >/dev/null 2>&1
-v3org borde >/dev/null 2>&1
-v3org ruteo >/dev/null 2>&1
+v3org edge >/dev/null 2>&1
+v3org routes >/dev/null 2>&1
 
 export LC_ALL=C
 
@@ -72,13 +72,19 @@ export LC_ALL=C
 # compara el CONTENIDO; que la huella cambie es la consecuencia
 # correcta, no una regresión.
 normalizar() {
-    sed -e '/^# hash: sha256:/d' \
-        -e 's#bin/aegis-org aplicar#aegis org apply#g' \
-        -e 's#bin/aegis-org#aegis org#g' \
-        -e 's#bin/aegis-secreto --todos#aegis secret create#g' \
-        -e 's#bin/aegis-secreto#aegis secret create#g' \
-        -e 's#bin/aegis-chequeo#aegis check#g' \
-        -e 's#bin/aegis-sync root#aegis sync root#g' "$1"
+    # OJO: acá se citan los nombres VIEJOS a propósito, y por eso van
+    # armados por partes. Un `sed -i` masivo de renombre pasó por este
+    # archivo y reescribió estas mismas reglas —dejando al harness sin
+    # poder reconocer la salida de v2—. El armado por concatenación es
+    # feo y es deliberado: que un renombre automático no lo toque.
+    local V="bin/aegis-"
+    sed -e "s#${V}org aplicar#aegis org apply#g" \
+        -e "s#${V}org#aegis org#g" \
+        -e "s#${V}secreto --todos#aegis secret create#g" \
+        -e "s#${V}secreto#aegis secret create#g" \
+        -e "s#${V}chequeo#aegis check#g" \
+        -e "s#${V}sync root#aegis sync root#g" \
+        -e '/^# hash: sha256:/d' "$1"
 }
 
 GEN=0 DISTINTOS=0

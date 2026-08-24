@@ -11,7 +11,7 @@
 # habilita explícito. Sin la age key, no hace nada: el bundle sin la key no
 # sirve, y así debe ser.
 #
-# Uso: aegis-restore.sh <bundle.age> [--force]
+# Uso: aegis state restore <bundle.age> [--force]
 set -euo pipefail
 
 # ── preámbulo canónico (V-102) ───────────────────────────────────────
@@ -36,7 +36,7 @@ die()  { printf '[restore] FATAL: %s\n' "$*" >&2; exit 1; }
 
 BUNDLE="${1:-}"; FORCE=0
 [[ "${2:-}" == "--force" ]] && FORCE=1
-[[ -n "$BUNDLE" && -f "$BUNDLE" ]] || die "uso: aegis-restore.sh <bundle.age> [--force]"
+[[ -n "$BUNDLE" && -f "$BUNDLE" ]] || die "uso: aegis state restore <bundle.age> [--force]"
 
 KEY="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/aegis.key}"
 [[ -f "$KEY" ]] || die "sin age key privada ($KEY) — es el irreducible; sin ella el bundle no descifra"

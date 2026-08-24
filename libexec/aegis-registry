@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # aegis-summary: Rota la credencial del registry interno, entera
 # aegis-group:   infra
-"""aegis-registro — rota la credencial del registry interno, ENTERA.
+# aegis-subcommands: check rotate
+"""aegis-registry — rota la credencial del registry interno, ENTERA.
 
 La contraseña del registry no vive en un lugar: vive en DIEZ. Un
 htpasswd (lo que el registry valida) y nueve dockerconfigjson (lo que
@@ -9,8 +10,8 @@ el kubelet presenta para pullear), uno por namespace, porque un Secret
 no cruza namespaces. Si esos diez se separan, el cluster deja de poder
 tirar imágenes.
 
-    bin/aegis-registro --revisar     # sin tocar nada: ¿están los diez alineados?
-    bin/aegis-registro --rotar       # genera material nuevo y reescribe los diez
+    aegis registry --revisar     # sin tocar nada: ¿están los diez alineados?
+    aegis registry --rotar       # genera material nuevo y reescribe los diez
 
 ── por qué existe este comando y no alcanza con el init ────────────
 
@@ -58,7 +59,7 @@ except ImportError:
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
-from aegis import rutas                  # noqa: E402
+from aegis import cli, rutas             # noqa: E402
 
 # RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
 # En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
@@ -248,12 +249,13 @@ def rotar(dests):
 
 
 def main():
-    p = argparse.ArgumentParser(prog="aegis-registro")
-    g = p.add_mutually_exclusive_group(required=True)
-    g.add_argument("--revisar", action="store_true",
-                   help="no toca nada: verifica que los diez estén alineados")
-    g.add_argument("--rotar", action="store_true",
-                   help="genera credencial nueva y reescribe los diez")
+    # Regla 1 del diseño: VERBOS, no flags. `--revisar/--rotar` eran
+    # dos modos excluyentes disfrazados de opciones; son dos cosas que
+    # el comando hace, y una de ellas destruye material.
+    p = argparse.ArgumentParser(prog=cli.cmd("registry"))
+    sub = p.add_subparsers(dest="verbo", required=True)
+    sub.add_parser("check", help="no toca nada: verifica que los diez estén alineados")
+    sub.add_parser("rotate", help="genera credencial nueva y reescribe los diez")
     a = p.parse_args()
 
     print(f"{gris}destinos (repo ∩ cluster):{fin}")
@@ -262,7 +264,7 @@ def main():
         print(f"  {gris}·{fin} {ns}/{name}  {gris}{ruta}{fin}")
     print()
 
-    if a.revisar:
+    if a.verbo == "check":
         revisar(dests)
         print(f"\n{verde}✓{fin} la credencial del registry es UNA sola en "
               f"{len(dests) + 1} lugares")

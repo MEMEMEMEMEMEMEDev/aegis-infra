@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# aegis-summary: Respalda y restaura los tres estados de esta máquina
+# aegis-group:   backup
+# aegis-subcommands: backup restore
+#
+# aegis-help:
+# Usage: aegis state backup [SALIDA]
+#        aegis state restore <BUNDLE.age> [--force]
+#
+# Los TRES estados que solo viven en esta máquina y que ningún git
+# tiene: el store cifrado (.state-secrets/), los markers de fases
+# (.init-state/) y el tfstate del borde. Perder cualquiera de los tres
+# obliga a rehacer la instalación a mano.
+#
+# `state` y no `data`: son cosas distintas y confundirlas se paga caro.
+# `aegis state` es la MÁQUINA (lo que hace falta para reconstruir la
+# instalación); `aegis data` son los DATOS de los inquilinos (lo que
+# hace falta para reconstruir la tienda). Un backup de uno no sirve
+# para restaurar el otro.
+set -euo pipefail
+
+# ── preámbulo canónico (V-102) ───────────────────────────────────────
+if [[ -z "${AEGIS_ROOT:-}" ]]; then
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} state: falta readlink" >&2; exit 2; }
+    AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+fi
+export AEGIS_ROOT
+# shellcheck source=../lib/paths.sh
+source "$AEGIS_ROOT/lib/paths.sh"
+
+uso() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/codigos-de-salida.txt"; }
+
+case "${1:-}" in
+    backup|restore) VERBO="$1"; shift ;;
+    -h|--help|"")   uso; exit 0 ;;
+    *) printf '%s state: «%s» no es un subcomando (backup | restore)\n' "${AEGIS_CMD:-aegis}" "$1" >&2
+       exit 3 ;;
+esac
+exec "$AEGIS_ROOT/libexec/state/$VERBO" "$@"

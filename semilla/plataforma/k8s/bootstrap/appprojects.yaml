@@ -29,7 +29,7 @@
 # 2026-08-05 se midió en el cluster que aegis-tenant-canary era el
 # único de los cuatro proyectos de tenant SIN `orphanedResources`
 # —quedó afuera cuando #31 lo agregó a los otros tres— así que la app
-# del canary no se evaluaba nunca y `bin/aegis-chequeo` la contaba
+# del canary no se evaluaba nunca y `aegis check` la contaba
 # dentro de "nada huérfano". Un bloque copiado tres veces se actualiza
 # dos. Se corrigió abajo, y de los derivados ya no puede volver a
 # pasar: son idénticos por construcción y no por disciplina.

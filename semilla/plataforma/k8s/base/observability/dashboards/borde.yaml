@@ -13,7 +13,7 @@ metadata:
 data:
   borde.json: |
     {
-      "uid": "aegis-borde",
+      "uid": "aegis-edge",
       "title": "Aegis · borde",
       "description": "El borde visto desde adentro: RPS, códigos y latencia por entrypoint de Traefik.",
       "schemaVersion": 39,

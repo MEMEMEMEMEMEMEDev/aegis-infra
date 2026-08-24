@@ -6,7 +6,10 @@ check() {
 # cifrado portable CON roundtrip verificado ("restauración probada", no
 # "tenemos backups" — Ley 21.719). Invariantes clavados:
 D80=""
-BK="$LIBEXEC/aegis-backup"; RS="$LIBEXEC/aegis-restore"
+# `aegis state backup|restore`: dos verbos de un comando, no dos
+# comandos sueltos. Son la misma operación en dos direcciones y el
+# operador los busca juntos.
+BK="$LIBEXEC/state/backup"; RS="$LIBEXEC/state/restore"
 for s in "$BK" "$RS"; do
     [[ -f "$s" ]] || { D80="$D80 falta $(basename "$s");"; continue; }
     bash -n "$s" 2>/dev/null || D80="$D80 $(basename "$s") no parsea;"
@@ -30,5 +33,5 @@ if [[ -f "$RS" ]]; then
     grep -q 'YA existe'    "$RS" || D80="$D80 restore no rechaza pisar un destino existente;"
 fi
 if [[ -n "$D80" ]]; then fail "backup-restore:$D80"
-else pass "aegis-backup/restore: 3 estados, age-cifrado, roundtrip probado, key excluida, restore con --force guard"; fi
+else pass "aegis state backup/restore: 3 estados, age-cifrado, roundtrip probado, key excluida, restore con --force guard"; fi
 }

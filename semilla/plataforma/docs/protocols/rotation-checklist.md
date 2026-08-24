@@ -53,9 +53,9 @@ El contrato viejo sigue andando (`aegis-rotate.sh [--yes] <name>...`), y
 |---|---|
 | `cosign_*` | invalida toda firma emitida; hay que re-firmar lo desplegado ANTES de que la pub nueva entre al ClusterPolicy → ítem 2 |
 | age key | es la raíz → `rotate-age-key.md`, escrito el 2026-08-12 (hasta ese día era una referencia colgada: el procedimiento del único irreducible no existía) |
-| `registry_pass` | vive en diez lugares; lo rota `bin/aegis-registro`, que descubre los destinos y se planta si no coinciden → ítem 4 |
+| `registry_pass` | vive en diez lugares; lo rota `aegis registry`, que descubre los destinos y se planta si no coinciden → ítem 4 |
 | `dk_app_rw` | rotarla RE-CREA la deploy key de escritura que #49 retiró; hay que arreglar la fase 15 primero (#83) |
-| commit y push | los da una persona, igual que en `aegis-registro` |
+| commit y push | los da una persona, igual que en `aegis-registry` |
 
 Y un check nuevo, el **89** de `verify-static`, impide que la tabla
 envejezca: toda credencial que el init genera tiene que tener receta. Una
@@ -85,7 +85,7 @@ esto:
    olvida:
 
    ```
-   bin/aegis-secreto --rotar k8s/base/platform/jenkins-secrets/secret-github-webhook-hmac.enc.yaml
+   aegis secret --rotar k8s/base/platform/jenkins-secrets/secret-github-webhook-hmac.enc.yaml
    git add ... && git commit && git push
    bin/aegis-sync jenkins-secrets
    bin/aegis-webhook --aplicar
@@ -93,7 +93,7 @@ esto:
 
    Sin restart: `secretText` se re-lee solo.
 
-   `aegis-secreto --rotar` reemplaza al `openssl rand` a mano que decía
+   `aegis-secret --rotar` reemplaza al `openssl rand` a mano que decía
    acá antes. La diferencia que importa no es la comodidad: ese Secret
    lleva la etiqueta `jenkins.io/credentials-type: secretText`, que es
    lo que hace que Jenkins lo TOME como credencial, y la herramienta
@@ -141,7 +141,7 @@ esto:
     las rotaba (#48, #49). Ya son un comando:
 
     ```
-    bin/aegis-secreto --rotar k8s/base/platform/argocd-secrets/secret-<app>-repo.enc.yaml
+    aegis secret --rotar k8s/base/platform/argocd-secrets/secret-<app>-repo.enc.yaml
     ```
 
     Imprime la pública para registrarla. **SIN "Allow write access"**:

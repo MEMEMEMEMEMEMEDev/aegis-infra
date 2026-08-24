@@ -680,6 +680,7 @@ _eventos_ingestados() {
     [[ "$filas" =~ ^[0-9]+$ ]] && (( filas >= N_GATES ))
 }
 gate_diag "obs-eventos-ingestados" \
+    `# clase-E-ok: source=aegis-init es la ETIQUETA del stream de VictoriaLogs (la pone el logger), no un comando que alguien teclee` \
     'printf "esperadas >= %s lineas con _stream source=aegis-init\n" "$N_GATES"' \
     poll 300 10 _eventos_ingestados
 

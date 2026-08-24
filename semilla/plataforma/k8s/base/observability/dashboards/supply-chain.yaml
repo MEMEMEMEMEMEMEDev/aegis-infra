@@ -312,7 +312,7 @@ data:
             },
             "overrides": []
           },
-          "description": "Cuánto vale lo que dicen los dos paneles de al lado. Los medió el último build: si fue hace un mes, describen esa imagen y no lo que se está desplegando hoy. Una imagen desplegada que no aparece acá no está en verde: está sin medir, y eso lo reporta bin/aegis-chequeo."
+          "description": "Cuánto vale lo que dicen los dos paneles de al lado. Los medió el último build: si fue hace un mes, describen esa imagen y no lo que se está desplegando hoy. Una imagen desplegada que no aparece acá no está en verde: está sin medir, y eso lo reporta aegis check."
         }
       ],
       "templating": {

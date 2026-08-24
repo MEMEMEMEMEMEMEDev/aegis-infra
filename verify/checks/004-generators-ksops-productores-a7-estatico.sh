@@ -5,14 +5,14 @@ check() {
 #
 # Este check nacía asumiendo que el único productor de secretos son las
 # fases del init. Dejó de ser cierto cuando #39/#41 trajeron
-# `platform/bin/aegis-secreto`, que crea los secretos DERIVADOS DE LOS
+# `platform/aegis secret`, que crea los secretos DERIVADOS DE LOS
 # CONTRATOS. Con el modelo viejo, seis archivos perfectamente producidos
 # salían como "sin productor" — y un check que grita por seis cosas
 # sanas es un check que se deja de leer, con lo cual las que sí están
 # rotas se pierden en el ruido.
 #
 #   1. fases del init        make_enc_secret, mención literal
-#   2. bin/aegis-secreto     derivado de orgs/*.yaml (mecanizado: el
+#   2. aegis secret     derivado de orgs/*.yaml (mecanizado: el
 #                            material no pasa por la terminal de nadie)
 #   3. protocolo MANUAL      declarado abajo, uno por uno, CON el
 #                            documento que lo explica — y se comprueba
@@ -79,17 +79,17 @@ try:
     for c_ruta in sorted((P/"orgs").glob("*.y*ml")):
         c = yaml.safe_load(c_ruta.open()) or {}
         for s in gen.secretos_de(c):
-            por_contrato[s] = f"aegis-secreto --todos orgs/{c_ruta.name}"
+            por_contrato[s] = f"aegis-secret --todos orgs/{c_ruta.name}"
         # La deploy key con la que ArgoCD lee el repo de la organización.
         # Vive en el namespace de ArgoCD pero es DE LA ORGANIZACIÓN: sale
         # de su `repo:`. La crea la misma pasada de --todos (#48).
         for nombre_app in gen.repos_de(c).values():
             por_contrato[f"secret-{nombre_app}-repo.enc.yaml"] = \
-                f"aegis-secreto --todos orgs/{c_ruta.name}"
+                f"aegis-secret --todos orgs/{c_ruta.name}"
     for org in gen.orgs_con_bucket():
-        por_contrato[f"secret-garage-{org}.enc.yaml"] = "aegis-secreto --reubicar"
-    # de plataforma, con receta propia en aegis-secreto:
-    por_contrato["secret-garage-credentials.enc.yaml"] = "aegis-secreto (receta de plataforma)"
+        por_contrato[f"secret-garage-{org}.enc.yaml"] = "aegis-secret --reubicar"
+    # de plataforma, con receta propia en aegis-secret:
+    por_contrato["secret-garage-credentials.enc.yaml"] = "aegis-secret (receta de plataforma)"
 except StopIteration:
     pass
 except Exception as e:

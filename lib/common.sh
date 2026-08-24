@@ -1019,8 +1019,8 @@ retry_net() {
 
 # aegis_exec <comando> [args...] — la regla 5.1 hecha función.
 #
-# El bug que la justifica tiene línea y fecha: aegis-chequeo:766,785
-# invocaba a aegis-borde y aegis-webhook por ruta relativa, y el `case`
+# El bug que la justifica tiene línea y fecha: aegis-check:766,785
+# invocaba a aegis-edge y aegis-webhook por ruta relativa, y el `case`
 # que clasificaba la salida no tenía rama para 127. Con el comando
 # ausente —renombrado, movido, sin permisos— la ronda no decía «no pude
 # mirar»: decía «sin fallos». Verde por ceguera es el peor desenlace

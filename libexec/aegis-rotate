@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # aegis-summary: El protocolo de rotación, ejecutable
 # aegis-group:   infra
+# aegis-subcommands: list check run continue
 # aegis-rotate — EL PROTOCOLO DE ROTACIÓN, EJECUTABLE.
 #
 # ── qué cambió y por qué ────────────────────────────────────────────
@@ -32,10 +33,10 @@
 #   make_repo_webhook     fase 15          PATCH del HMAC en el hook vivo
 #   _cf_call              fase 15          acuña tokens acotados de Cloudflare
 #   retry_net             lib/common.sh    backoff 5/15/45/90s
-#   aegis-registro        platform/bin     el registry entero, 10 destinos
+#   aegis-registry        platform/bin     el registry entero, 10 destinos
 #   aegis-webhook         platform/bin     reescribe el HMAC en todos los hooks
 #   aegis-sync            platform/bin     empuja el Secret al cluster
-#   aegis-chequeo         platform/bin     la verificación de rutina
+#   aegis-check         platform/bin     la verificación de rutina
 # Si algo de esto cambia, cambia allá. Acá solo se ordena.
 #
 # ── uso ─────────────────────────────────────────────────────────────
@@ -47,7 +48,7 @@
 #
 # NO commitea ni pushea. Deja los archivos escritos y coherentes e
 # imprime los pasos. Que el commit lo dé una persona es la misma
-# decisión que ya tomó aegis-registro.
+# decisión que ya tomó aegis-registry.
 set -euo pipefail
 
 # ── preámbulo canónico (V-102) ───────────────────────────────────────
@@ -56,7 +57,7 @@ set -euo pipefail
 # -f, AEGIS_ROOT sería /usr/local). Si bin/aegis ya lo exportó, se
 # respeta. La INSTANCIA la decide lib/paths.sh, nunca este archivo.
 if [[ -z "${AEGIS_ROOT:-}" ]]; then
-    command -v readlink >/dev/null || { echo "aegis-rotate: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} rotate: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
     AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 fi
 export AEGIS_ROOT
@@ -64,7 +65,13 @@ export AEGIS_ROOT
 source "$AEGIS_ROOT/lib/paths.sh"
 STATE_SECRETS="$AEGIS_HOME/.state-secrets"
 PREVIO="$STATE_SECRETS/.previo"
-PBIN="$PLATFORM_DIR/bin"
+# Los comandos viven en el PRODUCTO desde 02 §1. Esta línea decía
+# "$PLATFORM_DIR/bin", que era donde estaban en v2 — y con el código
+# mudado apuntaba a un directorio que ya no existe: las cuatro
+# invocaciones de abajo habrían caído en «no está» silencioso, que es
+# justo el modo de fallo que la regla 5.1 existe para matar. Se usa
+# aegis_exec, que distingue «no existe» de «no pudo» de «dijo que no».
+PBIN="$AEGIS_ROOT/libexec"
 DIARIO="$AEGIS_HOME/.init-state/rotacion"
 
 # common.sh aporta retry_net, log_*, die, mark_done/is_done. Pide
@@ -157,7 +164,7 @@ campo() { printf '%s' "$1" | cut -d'|' -f"$2"; }
 # ═══════════════════════════════════════════════════════════════════
 # Un .enc sin receta es una credencial que nadie sabe rotar, y no avisa.
 # Es el mismo principio que las tablas EXCLUSIONES/DELIBERADAS de
-# bin/aegis-semilla: una entrada que sobra o que falta es un ERROR, no
+# aegis dev seed: una entrada que sobra o que falta es un ERROR, no
 # un detalle. verify-static lo verifica también, en frío.
 huerfanos() {
     local n
@@ -649,12 +656,12 @@ ver_ntfy_operador() {
 }
 
 ver_registry() {
-    [[ -x "$PBIN/aegis-registro" ]] || return 3
-    if "$PBIN/aegis-registro" --revisar >/dev/null 2>&1; then
-        printf '    %saegis-registro --revisar: los destinos están alineados%s\n' "$gri" "$fin"
+    [[ -x "$PBIN/aegis-registry" ]] || return 3
+    if aegis_exec registry check >/dev/null 2>&1; then
+        printf '    %saegis registry check: los destinos están alineados%s\n' "$gri" "$fin"
         return 0
     fi
-    log_error "aegis-registro --revisar dice que los destinos NO están alineados"
+    log_error "${AEGIS_CMD:-aegis} registry check dice que los destinos NO están alineados"
     return 1
 }
 
@@ -725,7 +732,7 @@ reporte_cuatro_lugares() {   # <nombre> <app_sync> <tercero>
         printf '%s  │%s  cluster   %s¿?%s      es el que suele quedar atrás. Cerralo con:\n' \
             "$ama" "$fin" "$roj" "$fin"
         printf '%s  │%s              cd platform && git add -A && git commit && git push\n' "$ama" "$fin"
-        printf '%s  │%s              bin/aegis-sync %s\n' "$ama" "$fin" "$app"
+        printf '%s  │%s              %s sync %s\n' "$ama" "$fin" "${AEGIS_CMD:-aegis}" "$app"
     else
         printf '%s  │%s  cluster   %s¿?%s      esta credencial no va por GitOps — ver la fase %s\n' \
             "$ama" "$fin" "$roj" "$fin" "$n"
@@ -765,7 +772,7 @@ regenerar_con_fase() {   # <fase>
 aplicar_al_cluster() {   # <app|->
     local app="$1"
     [[ "$app" != "-" ]] || return 0
-    [[ -x "$PBIN/aegis-sync" ]] || { log_warn "no está $PBIN/aegis-sync — sincronizá a mano la app $app"; return 0; }
+    [[ -x "$PBIN/aegis-sync" ]] || { log_warn "no está ${AEGIS_CMD:-aegis} sync — sincronizá a mano la app $app"; return 0; }
     printf '  %s·%s el Secret nuevo tiene que estar COMMITEADO y PUSHEADO antes del sync\n' "$ama" "$fin"
     printf '    (esta herramienta no commitea: esa decisión es de una persona)\n'
 }
@@ -877,7 +884,7 @@ rotar_tunnel() {
 
     printf '\n  %sFalta lo que esta herramienta no hace sola:%s\n' "$ama" "$fin"
     printf '      cd platform && git add -A && git commit && git push\n'
-    printf '      bin/aegis-sync cloudflare-tunnel\n'
+    printf '      %s sync cloudflare-tunnel\n' "${AEGIS_CMD:-aegis}"
     printf '      kubectl -n infra-edge rollout restart deploy/cloudflared\n'
     printf '  %sY después: %s --verificar tunnel_token%s\n\n' "$gri" "$(basename "$0")" "$fin"
     mkdir -p "$DIARIO"; : > "$DIARIO/tunnel_token.parcial"
@@ -1009,9 +1016,9 @@ rotar_una() {   # <nombre>
       delegada)
         printf '\n%s%s tiene herramienta propia.%s\n' "$ama" "$n" "$fin"
         printf '  El registry vive en DIEZ lugares (un htpasswd + nueve dockerconfigjson).\n'
-        printf '  bin/aegis-registro descubre los destinos del repo, los contrasta contra\n'
+        printf '  aegis registry descubre los destinos del repo, los contrasta contra\n'
         printf '  el cluster y se planta si no coinciden. Correlo vos:\n\n'
-        printf '      cd platform && bin/aegis-registro --rotar\n\n'
+        printf '      cd platform && aegis registry --rotar\n\n'
         return 0 ;;
     esac
 
@@ -1147,7 +1154,7 @@ menu() {
 
     case "$op" in
       q|Q|"") exit 0 ;;
-      r|R) "$PBIN/aegis-chequeo" 2>/dev/null || log_warn "no pude correr aegis-chequeo"; exit 0 ;;
+      r|R) aegis_exec check 2>/dev/null || log_warn "no pude correr ${AEGIS_CMD:-aegis} check"; exit 0 ;;
       t|T)
         printf '\n  Vas a rotar %s credenciales:\n' "${#ROTABLES[@]}"
         printf '    %s\n' "${ROTABLES[*]}"
@@ -1206,8 +1213,8 @@ cierre() {   # <fallidas>
     fi
     printf '%sRotación completa.%s Falta lo que esta herramienta NO hace a propósito:\n\n' "$ver" "$fin"
     printf '    cd platform && git add -A && git commit && git push\n'
-    printf '    bin/aegis-sync --fuera-de-linea\n'
-    printf '    bin/aegis-chequeo          # el chequeo entero, sobre todo el sistema\n\n'
+    printf '    %s sync --drifted\n' "${AEGIS_CMD:-aegis}"
+    printf '    aegis check          # el chequeo entero, sobre todo el sistema\n\n'
     rm -rf "$DIARIO"
     exit 0
 }
@@ -1221,9 +1228,14 @@ YES=0; NAMES=(); CONTINUAR=0; VERIFICAR=0
 for a in "$@"; do
   case "$a" in
     --yes)       YES=1 ;;
-    --continuar) CONTINUAR=1 ;;
-    --revisar)   inventario; echo; exit 0 ;;
-    --verificar) VERIFICAR=1 ;;
+    # Regla 1: verbos. Los flags viejos (--revisar/--verificar/
+    # --continuar) eran modos disfrazados de opciones, y uno de ellos
+    # ROTA material — la diferencia entre mirar y romper no puede
+    # depender de una letra.
+    continue)    CONTINUAR=1 ;;
+    list)        inventario; echo; exit 0 ;;
+    check)       VERIFICAR=1 ;;
+    run)         : ;;
     -h|--help)   sed -n '1,50p' "$0"; exit 0 ;;
     -*)          die "flag desconocido: $a" ;;
     *)           NAMES+=("$a") ;;

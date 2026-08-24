@@ -10,7 +10,7 @@ Dar de alta una organización son tres comandos:
 $EDITOR orgs/mi-org.yaml            # el contrato
 bin/aegis-org plan orgs/mi-org.yaml # qué cambiaría, sin escribir nada
 bin/aegis-org aplicar orgs/mi-org.yaml
-bin/aegis-secreto --todos orgs/mi-org.yaml   # los que falten (nunca rota los que ya están)
+aegis secret create orgs/mi-org.yaml   # los que falten (nunca rota los que ya están)
 bin/aegis-sync root                 # root NO tiene automated (ADR-0012)
 ```
 

@@ -117,7 +117,7 @@ done
 # del protocolo). El apply del borde es un comando del operador. A
 # cambio, el chequeo de deriva NO usa el state: le pregunta a Cloudflare
 # qué hostnames existen y los compara con los derivados de los
-# contratos. Ver `bin/aegis-chequeo`.
+# contratos. Ver `aegis check`.
 ENV_ARG=""
 for a in "$@"; do
     case "$a" in -chdir=*) ENV_ARG="${a#-chdir=}" ;; esac
@@ -151,7 +151,7 @@ if [[ -n "$CIFRADO" && -f "$CIFRADO" ]]; then
         die "hay state cifrado en $(basename "$CIFRADO") pero SOPS_AGE_KEY_FILE no está exportada.
        El state NO se puede leer sin la age key, y eso es a propósito (#46).
        Si esto es CI: este job no puede aplicar el borde. El chequeo de
-       deriva que SÍ corre sin la age key está en bin/aegis-chequeo."
+       deriva que SÍ corre sin la age key está en aegis check."
     fi
     command -v sops >/dev/null || die "sops no está en PATH"
     # Descifra a un archivo 600 y NO por stdout: el stdout del wrapper es

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # aegis-summary: El alta de una organización: contrato primero, aplicar después
 # aegis-group:   apps
+# aegis-subcommands: new apply
 """aegis-app — el alta de una organización: `nueva` escribe archivos, `aplicar` toca GitHub.
 
 EL PROBLEMA QUE RESUELVE
@@ -9,8 +10,8 @@ Dar de alta una organización dejaba tres pasos que ninguna herramienta
 cerraba, y los tres son contra GitHub: crear el repo de la app,
 registrar la deploy key, y poner el webhook — los pasos 4, 6 y 8 del
 camino manual (caminos/design.md §3). aegis-org genera los archivos y
-aegis-secreto la credencial; de ahí en adelante el operador quedaba
-solo con `gh` y una lista mental. El paso que aegis-secreto imprime
+aegis-secret la credencial; de ahí en adelante el operador quedaba
+solo con `gh` y una lista mental. El paso que aegis-secret imprime
 como «FALTA UN PASO, y es a mano» —registrar la mitad pública en
 GitHub— era irreducible solo mientras nadie lo mecanizara: GitHub no
 acepta que la clave se registre sola, pero sí acepta `gh repo
@@ -49,7 +50,7 @@ organización no lo están, y esa diferencia es toda la regla.)
 QUIÉN GENERA Y QUIÉN EJECUTA
 ────────────────────────────
 aegis-org DERIVA (manifiestos, jobs, Jenkinsfiles al staging
-.aegis-app/) y aegis-secreto CREA la credencial cifrada; este comando
+.aegis-app/) y aegis-secret CREA la credencial cifrada; este comando
 EJECUTA esa derivación contra GitHub. La lista de repos sale de
 `repos_de()` del generador — la MISMA que decide las Applications, el
 sourceRepos del AppProject y las credenciales. Cuarta consumidora de
@@ -62,7 +63,7 @@ TRES DESENLACES POR PASO (doctrina de la casa)
 ──────────────────────────────────────────────
 hecho / ya estaba / NO SE PUDO EVALUAR. El tercero es un AVISO y jamás
 un visto bueno: no poder mirar no es lo mismo que estar bien (el rc 2
-de aegis-borde y aegis-webhook, por la misma enfermedad E). Re-correr
+de aegis-edge y aegis-webhook, por la misma enfermedad E). Re-correr
 con todo hecho termina en puro «ya estaba» — converger, no ejecutar
 (caminos/design.md §0.4). Vale para los dos subcomandos: `nueva`
 re-corrida con todo hecho también termina en puro «ya estaba».
@@ -99,7 +100,7 @@ except ImportError:
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
-from aegis import rutas                  # noqa: E402
+from aegis import cli, rutas             # noqa: E402
 
 # RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
 # En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
@@ -117,7 +118,7 @@ WEBHOOK = os.path.join(AQUI, "aegis-webhook")
 # pisarme con --force», y un repo de organización es exactamente lo
 # contrario de eso. El topic dice quién lo creó, nada más.
 TOPIC = "aegis-app"
-TITULO_KEY = "aegis-argocd-ro"   # el mismo que aegis-secreto manda a poner a mano
+TITULO_KEY = "aegis-argocd-ro"   # el mismo que aegis-secret manda a poner a mano
 
 REPO_URL = re.compile(
     r"^(?:git@github\.com:|https://github\.com/)([^/]+)/(.+?)(?:\.git)?/?$")
@@ -282,7 +283,7 @@ def _publica_de(nombre):
     """La mitad pública de la deploy key de la organización.
 
     La pública no está persistida en ningún lado, y es a propósito:
-    aegis-secreto la imprime UNA vez al crear el par y guarda solo la
+    aegis-secret la imprime UNA vez al crear el par y guarda solo la
     privada, cifrada. Así que acá se DERIVA — y se deriva del Secret
     VIVO en argocd, no del archivo cifrado, por la misma doctrina que
     el HMAC de aegis-webhook: la clave que importa es la que ArgoCD
@@ -290,7 +291,7 @@ def _publica_de(nombre):
     el cluster no necesita la age key; descifrar con sops sí.
 
     El material privado pasa por acá y por eso la receta es la MISMA
-    que _deploy_key de aegis-secreto: tmpfs (/dev/shm), directorio 700,
+    que _deploy_key de aegis-secret: tmpfs (/dev/shm), directorio 700,
     archivo 600, shred antes de borrar. `ssh-keygen -y` no sabe leer de
     stdin —necesita un -f— y esa es la única razón de que toque disco.
     La privada NO se imprime, no pasa por argv, no sale de tmpfs.
@@ -301,7 +302,7 @@ def _publica_de(nombre):
         capture_output=True, text=True)
     if r.returncode != 0 or not r.stdout.strip():
         raise Error(f"no pude leer el Secret argocd/{nombre}-repo "
-                    f"(¿kubectl configurado? ¿corrió bin/aegis-secreto --todos y "
+                    f"(¿kubectl configurado? ¿corrió aegis secret create y "
                     f"sincronizó argocd-secrets?)")
     privada = base64.b64decode(r.stdout.strip()).decode()
 
@@ -338,7 +339,7 @@ def _registrar_key(owner, repo, publica):
     Es el default de GitHub, pero acá va declarado igual: una deploy
     key con escritura en el repo de una app deja que quien tenga el
     cluster escriba en el repo, que es la dirección equivocada — la
-    misma advertencia que aegis-secreto imprime en rojo. El cuerpo
+    misma advertencia que aegis-secret imprime en rojo. El cuerpo
     entra por stdin por hábito de la casa, aunque la pública sea
     pública.
     """
@@ -354,7 +355,7 @@ def _registrar_key(owner, repo, publica):
 def _dir_plantillas():
     """Dónde viven las plantillas: `semilla/plantillas/` del PRODUCTO.
 
-    La resolución asume el layout de bin/aegis-semilla: platform/ (la
+    La resolución asume el layout de aegis dev seed: platform/ (la
     instancia, RAIZ de este script) vive ANIDADO en la raíz del repo
     producto (aegis-v2), con semilla/ al lado. O sea:
 
@@ -510,7 +511,7 @@ def _instanciar_esqueletos(org, dir_plantilla, valores, tot):
 
 
 def _derivar(ruta, tot):
-    """Pasos 4 y 5 de `nueva`: aegis-org aplicar + aegis-secreto --todos.
+    """Pasos 4 y 5 de `nueva`: aegis-org aplicar + aegis-secret --todos.
 
     Subprocesos con el MISMO python y la salida SIN capturar: los dos
     reportan su propia convergencia línea a línea y ese reporte es para
@@ -520,9 +521,9 @@ def _derivar(ruta, tot):
     """
     for paso, cmd in (
             ("derivaciones", [sys.executable, os.path.join(AQUI, "aegis-org"),
-                              "aplicar", ruta]),
-            ("secretos", [sys.executable, os.path.join(AQUI, "aegis-secreto"),
-                          "--todos", ruta])):
+                              "apply", ruta]),
+            ("secretos", [sys.executable, os.path.join(AQUI, "aegis-secret"),
+                          "create", ruta])):
         print(f"\n{gris}── {paso}: {' '.join(os.path.relpath(x, RAIZ) if os.path.isabs(x) else x for x in cmd[1:])} ──{fin}")
         sys.stdout.flush()
         rc = subprocess.run(cmd).returncode
@@ -581,7 +582,7 @@ def nueva(org, plantilla, tot):
           f"proyectos, credenciales (arriba)")
     print(f"\nsiguientes pasos, EN ORDEN (la pausa del medio es el diseño):")
     print(f"  1. revisá el diff: git status && git diff")
-    print(f"  2. bin/aegis-app aplicar {org} --check   {gris}(y sin --check cuando te guste){fin}")
+    print(f"  2. {cli.cmd('app apply')} {org} --check   {gris}(y sin --check cuando te guste){fin}")
     print(f"  3. commit+push de platform/  {gris}(acto de gobierno — humano a propósito){fin}")
     print(f"  4. tofu apply del borde (#46)  {gris}(tofu/envs/cloudflare-tunnel){fin}")
     return 0
@@ -706,7 +707,7 @@ def aplicar_webhooks(escribir, tot):
     que «existe» no prueba «sincronizado»; el PATCH idempotente es su
     manera de no adivinar.
     """
-    print(f"\nwebhooks  {gris}(delegado en bin/aegis-webhook — todos los repos con job){fin}")
+    print(f"\nwebhooks  {gris}(delegado en {cli.cmd('webhook')} — todos los repos con job){fin}")
     # flush ANTES de ceder el stdout: con la salida entubada python
     # bufferea y lo delegado aparecería arriba de su propio título.
     sys.stdout.flush()
@@ -737,22 +738,22 @@ def aplicar_webhooks(escribir, tot):
 
 
 def main():
-    p = argparse.ArgumentParser(prog="aegis-app", description=__doc__.split("\n")[0])
+    p = argparse.ArgumentParser(prog=cli.cmd("app"), description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     # Subcomandos y no flags: `nueva` (caminos §3, solo archivos) vive
     # al lado de `aplicar` (solo mundo), y la frontera de la casa es
     # precisamente esa línea — el orden del help la cuenta.
-    s = sub.add_parser("nueva",
+    s = sub.add_parser("new",
                        help="escribe TODO el alta en archivos: contrato desde "
                             "plantilla, esqueleto, derivaciones, secretos. "
                             "Jamás toca el mundo")
     s.add_argument("organizacion", metavar="ORG",
                    help="el nombre de la organización nueva")
-    s.add_argument("--plantilla", metavar="P",
+    s.add_argument("--template", metavar="P", dest="plantilla",
                    help="instancia contrato y esqueletos desde "
                         "semilla/plantillas/<P>/. Sin esto, modo artesano: el "
                         "contrato ya es tuyo y solo se re-deriva")
-    s = sub.add_parser("aplicar",
+    s = sub.add_parser("apply",
                        help="ejecuta los pasos de GitHub de cada contrato: "
                             "repo, esqueleto, deploy key, webhook")
     s.add_argument("contratos", nargs="+", metavar="CONTRATO",
@@ -761,7 +762,7 @@ def main():
                    help="muestra qué haría, sin tocar nada (cultura run_cmd del init)")
     a = p.parse_args()
 
-    if a.cmd == "nueva":
+    if a.cmd == "new":
         # Sin chequeo de gh A PROPÓSITO: este lado de la frontera no
         # habla con nadie, y exigir sesión para escribir archivos sería
         # mentir sobre lo que hace.
@@ -808,11 +809,11 @@ def main():
               f"resolvé la causa y re-corré{fin}")
         return 2
     if tot["haria"]:
-        print(f"  {gris}para hacerlos: bin/aegis-app aplicar {' '.join(a.contratos)}{fin}")
+        print(f"  {gris}para hacerlos: {cli.cmd('app apply')} {' '.join(a.contratos)}{fin}")
         return 1
     if escribir and tot["hecho"]:
         # Lo que queda es humano A PROPÓSITO (caminos/design.md §3):
-        print(f"  {gris}queda humano: commit+push de platform/ si aegis-org/aegis-secreto\n"
+        print(f"  {gris}queda humano: commit+push de platform/ si aegis-org/aegis-secret\n"
               f"  dejaron diff (acto de gobierno), y `tofu apply` del borde (#46).{fin}")
     return 0
 

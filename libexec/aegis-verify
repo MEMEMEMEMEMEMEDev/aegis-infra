@@ -30,7 +30,7 @@ set -u
 
 # ── preámbulo canónico (V-102) ───────────────────────────────────────
 if [[ -z "${AEGIS_ROOT:-}" ]]; then
-    command -v readlink >/dev/null || { echo "aegis-verify: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} verify: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
     AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 fi
 export AEGIS_ROOT
@@ -47,12 +47,12 @@ while (($#)); do case "$1" in
     --harness)      DO_HARNESS=true; shift ;;
     --list)         DO_LIST=true; shift ;;
     -h|--help)      sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; exit 0 ;;
-    *) echo "aegis-verify: flag desconocida: $1" >&2; exit 3 ;;
+    *) echo "${AEGIS_CMD:-aegis} verify: flag desconocida: $1" >&2; exit 3 ;;
 esac; done
 case "${PROFILES:=both}" in
     cloudflare|local) LISTA_PERFILES=("$PROFILES") ;;
     both)             LISTA_PERFILES=(cloudflare local) ;;
-    *) echo "aegis-verify: --profile debe ser cloudflare, local o both" >&2; exit 3 ;;
+    *) echo "${AEGIS_CMD:-aegis} verify: --profile debe ser cloudflare, local o both" >&2; exit 3 ;;
 esac
 export AEGIS_VERIFY_WITH_CHARTS="$WITH_CHARTS"
 
@@ -67,7 +67,7 @@ find "$AEGIS_ROOT" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/nul
 # del archivo y el orden del sort: no hay lista que mantener, y por lo
 # tanto no hay lista que se desactualice.
 mapfile -t TODOS < <(find "$VERIFY/checks" -maxdepth 1 -name '[0-9][0-9][0-9]*.sh' -type f 2>/dev/null | sort)
-[[ ${#TODOS[@]} -gt 0 ]] || { echo "aegis-verify: no hay checks en $VERIFY/checks — un verificador sin checks NO es verde" >&2; exit 3; }
+[[ ${#TODOS[@]} -gt 0 ]] || { echo "${AEGIS_CMD:-aegis} verify: no hay checks en $VERIFY/checks — un verificador sin checks NO es verde" >&2; exit 3; }
 
 numero_de() { local b; b="$(basename "$1")"; printf '%s\n' "${b%%-*}"; }
 titulo_de() { sed -n 's/^# titulo: //p' "$1" | head -1; }
@@ -98,7 +98,7 @@ seleccion() {
 }
 mapfile -t SELEC < <(seleccion)
 if [[ ${#SELEC[@]} -eq 0 ]]; then
-    echo "aegis-verify: --only no seleccionó ningún check (¿número inexistente?)" >&2; exit 3
+    echo "${AEGIS_CMD:-aegis} verify: --only no seleccionó ningún check (¿número inexistente?)" >&2; exit 3
 fi
 
 # ── correr UN check ──────────────────────────────────────────────────

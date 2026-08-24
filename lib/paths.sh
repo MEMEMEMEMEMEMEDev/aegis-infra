@@ -15,7 +15,7 @@
 #               aegis.conf.
 #
 # Cada comando de v2 recalculaba esto desde su propio __file__ (seis
-# copias de la misma línea: aegis-org:32, aegis-app:96, aegis-borde:45,
+# copias de la misma línea: aegis-org:32, aegis-app:96, aegis-edge:45,
 # aegis-destroy:26, aegis-backup:21, aegis-restore:15) y eran
 # exactamente el tipo de dependencia invisible a un grep que C1/C2 del
 # registro nombran. Acá hay una sola.

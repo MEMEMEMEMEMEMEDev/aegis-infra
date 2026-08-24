@@ -17,7 +17,7 @@
 # resguarda aparte, en su resguardo offline. Un backup que la metiera dejaría
 # el huevo y la gallina en el mismo canasto — el check 80 lo prohíbe.
 #
-# Uso: aegis-backup.sh [ruta-de-salida.age]
+# Uso: aegis state backup [ruta-de-salida.age]
 set -euo pipefail
 
 # ── preámbulo canónico (V-102) ───────────────────────────────────────
@@ -55,7 +55,7 @@ fi
 # no en la raíz del repo. Este bundle es el ESTADO de la plataforma —los
 # secretos del store, la traza del init, el tfstate del borde—, así que
 # no pertenece a ninguna organización: va en `plataforma/`, al lado de
-# las carpetas `org-*` que escribe platform/bin/aegis-respaldo.
+# las carpetas `org-*` que escribe platform/aegis data.
 #
 # Con un argumento explícito manda el argumento, para no romper a quien
 # ya lo invoque así.

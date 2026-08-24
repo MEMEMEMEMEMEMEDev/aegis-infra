@@ -1,8 +1,8 @@
 """Lo común de la línea de comandos: el parser y CÓMO se invoca a otro.
 
 `run()` es la regla 5.1 de la doctrina hecha función. El bug que la
-justifica está fechado: `aegis-chequeo:766,785` invocaba a
-`aegis-borde` y `aegis-webhook` por ruta relativa, y el `case` de
+justifica está fechado: `aegis-check:766,785` invocaba a
+`aegis-edge` y `aegis-webhook` por ruta relativa, y el `case` de
 salida no tenía rama para 127. Con el comando ausente, la ronda decía
 «sin fallos» — el peor desenlace posible: verde por no haber podido
 mirar.

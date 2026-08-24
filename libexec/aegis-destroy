@@ -31,7 +31,7 @@ set -euo pipefail
 # -f, AEGIS_ROOT sería /usr/local). Si bin/aegis ya lo exportó, se
 # respeta. La INSTANCIA la decide lib/paths.sh, nunca este archivo.
 if [[ -z "${AEGIS_ROOT:-}" ]]; then
-    command -v readlink >/dev/null || { echo "aegis-destroy: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} destroy: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
     AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 fi
 export AEGIS_ROOT
@@ -52,7 +52,7 @@ for a in "$@"; do
     --yes)            YES=1 ;;
     --purge-secrets)  PURGE_SECRETS=1 ;;
     --k3s)            K3S=1 ;;
-    *) die "flag desconocido: $a (uso: aegis-destroy.sh [--yes] [--purge-secrets] [--k3s])" ;;
+    *) die "flag desconocido: $a (uso: ${AEGIS_CMD:-aegis} destroy [--yes] [--purge-secrets] [--k3s])" ;;
   esac
 done
 
@@ -94,9 +94,9 @@ fi
 if [[ $PURGE_SECRETS -eq 1 ]]; then
   if [[ $YES -eq 1 ]]; then
     rm -rf "$STATE_SECRETS" "$INIT_STATE"
-    say "PURGADOS el store .state-secrets y .init-state (irrecuperables sin un aegis-backup previo)"
+    say "PURGADOS el store .state-secrets y .init-state (irrecuperables sin un `${AEGIS_CMD:-aegis} state backup` previo)"
   else
-    say "[DRY-RUN] --purge-secrets borraría $STATE_SECRETS y $INIT_STATE (hacé un aegis-backup ANTES)"
+    say "[DRY-RUN] --purge-secrets borraría $STATE_SECRETS y $INIT_STATE (hacé un `${AEGIS_CMD:-aegis} state backup` ANTES)"
   fi
 fi
 

@@ -62,7 +62,7 @@ cuando se mueve `init/.age-public`.
 ```bash
 export SOPS_AGE_KEY_FILE=$HOME/.config/sops/age/aegis.key
 export AEGIS_RESPALDOS=/mnt/e/aegis-respaldos   # montado (#85)
-init/aegis-backup.sh          # ROUNDTRIP verificado, no «tenemos backups»
+aegis state backup          # ROUNDTRIP verificado, no «tenemos backups»
 ```
 
 El bundle queda cifrado con la clave **vieja**. Es deliberado: mientras
@@ -273,7 +273,7 @@ rotación no alcanzó.
 abre con la clave que ahora tenés.
 
 ```bash
-init/aegis-backup.sh
+aegis state backup
 ```
 
 **C.5 — RETIRAR LA CLAVE VIEJA. Y retirar NO es destruir.**

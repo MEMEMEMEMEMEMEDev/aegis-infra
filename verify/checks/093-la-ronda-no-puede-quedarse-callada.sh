@@ -6,7 +6,7 @@ check() {
 # discutir; uno que no informa nada no lo cuenta nadie, y la línea final
 # —«sin fallos, N avisos»— sale igual de tranquila.
 #
-# Los tres silencios encontrados en bin/aegis-chequeo el 2026-08-22, que
+# Los tres silencios encontrados en aegis check el 2026-08-22, que
 # son las tres formas en que esto pasa:
 #
 #   1. el DESPACHO copiado. Los medidores grandes devuelven líneas con
@@ -36,9 +36,9 @@ check() {
 #      discreto y suma un aviso; este check exige que exista y que la
 #      diferencia entre las dos siga siendo real.
 D93=""
-CHQ="$LIBEXEC/aegis-chequeo"
+CHQ="$LIBEXEC/aegis-check"
 if [[ ! -f "$CHQ" ]]; then
-    D93="$D93 no existe bin/aegis-chequeo en la semilla (la ronda no viaja);"
+    D93="$D93 no existe aegis check en la semilla (la ronda no viaja);"
 else
     # 1) el protocolo, en un solo lugar.
     N_CASE="$(grep -c 'MAL:\*)' "$CHQ" || true)"
@@ -85,7 +85,7 @@ PY
     # degradación volvió a ser una nota gris y el archivo sigue teniendo
     # la función como coartada. Si algún día ninguna medición se degrada,
     # lo correcto es borrar degradado(), no dejarlo muerto — misma regla
-    # que las exclusiones de aegis-semilla.
+    # que las exclusiones de aegis dev seed.
     N_DEG="$(grep -cE '^\s*degradado ' "$CHQ" || true)"
     [[ "$N_DEG" -ge 1 ]] \
         || D93="$D93 degradado() existe y no lo llama nadie: o la degradación volvió a reportarse en gris, o la función sobra;"

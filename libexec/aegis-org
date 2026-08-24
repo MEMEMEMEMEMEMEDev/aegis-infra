@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # aegis-summary: Deriva del contrato todo lo que la organización necesita
 # aegis-group:   apps
+# aegis-subcommands: plan apply validate edge routes plan-delete delete migrate
 """aegis org — la línea de comandos sobre lib/aegis/org.py.
 
 El cuerpo (validación del contrato y las once derivaciones) vive en el
 PAQUETE, no acá. En v2 vivía en este archivo y los consumidores
-—aegis-app, aegis-secreto, aegis-org-prueba, aegis-tipos-prueba— lo
+—aegis-app, aegis-secret, aegis dev test-org, aegis dev test-types— lo
 cargaban con SourceFileLoader, es decir, importaban un EJECUTABLE por
 su ruta. Eso costaba tres cosas (docs/cli/inconsistencias.md C1):
 

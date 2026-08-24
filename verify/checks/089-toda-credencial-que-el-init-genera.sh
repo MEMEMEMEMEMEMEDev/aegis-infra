@@ -13,7 +13,7 @@ check() {
 # nada la nombra.
 #
 # Es el mismo principio que las tablas EXCLUSIONES/DELIBERADAS de
-# bin/aegis-semilla: una entrada que falta es un ERROR, no un detalle.
+# aegis dev seed: una entrada que falta es un ERROR, no un detalle.
 #
 # NO se mide contra init/.state-secrets/ a propósito. Ese directorio es
 # ESTADO de una instancia viva y puede no existir en un checkout limpio;

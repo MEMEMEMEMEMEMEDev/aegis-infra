@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # aegis-summary: ¿Los hostnames que los contratos declaran existen y responden?
 # aegis-group:   infra
-"""aegis-borde — ¿los hostnames que los contratos declaran EXISTEN?
+# aegis-subcommands: check
+"""aegis-edge — ¿los hostnames que los contratos declaran EXISTEN?
 
 POR QUÉ EXISTE. El modo de fallo del borde es el peor que hay: si un
 hostname no se aplicó, simplemente NO EXISTE. Sin error, sin alarma,
@@ -30,8 +31,8 @@ tunnel_id, que vive en el state. Está anotado como límite y no como
 no tenerlo.
 
 Uso:
-    bin/aegis-borde                 # compara y reporta
-    TF_VAR_cloudflare_api_token=... bin/aegis-borde    # modo CI
+    aegis edge                 # compara y reporta
+    TF_VAR_cloudflare_api_token=... aegis edge    # modo CI
 
 Salida: 0 todo declarado existe · 1 falta alguno · 2 no se pudo evaluar
 """
@@ -50,7 +51,7 @@ import urllib.request
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
-from aegis import rutas                  # noqa: E402
+from aegis import cli, rutas             # noqa: E402
 
 # RAIZ es la INSTANCIA (el checkout vivo de plataforma), no el producto.
 # En v2 esta línea era `dirname(dirname(__file__))` y funcionaba porque
@@ -149,6 +150,18 @@ def cnames_vivos(token, zona):
 
 
 def main():
+    # Un verbo, aunque hoy sea el único: `aegis edge check` dice lo que
+    # hace, y deja lugar para los que vengan (apply, por ejemplo) sin
+    # que el default cambie de significado a mitad de camino. Sin
+    # argumentos también funciona: es lo que la ronda invoca.
+    ap = cli.parser("edge", __doc__.split("\n")[0],
+                    protocolo="docs/protocols/edge.md")
+    sub = ap.add_subparsers(dest="verbo")
+    sub.add_parser("check", help="compara los hostnames vivos contra los que derivan de los contratos")
+    ap.add_argument("--json", action="store_true", dest="json_mode",
+                    help="el contrato de salida en vez de la narración")
+    ap.parse_args()
+
     g = generador()
     import yaml
     edge = yaml.safe_load(open(os.path.join(RAIZ, "edge.yaml"), encoding="utf-8"))

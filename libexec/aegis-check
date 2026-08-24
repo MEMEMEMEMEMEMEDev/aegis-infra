@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # aegis-summary: La ronda: mide la realidad contra lo declarado
 # aegis-group:   operate
-# aegis-chequeo — la ronda de rutina, la que se corre al volver de un
+# aegis-check — la ronda de rutina, la que se corre al volver de un
 # apagado o antes de empezar a tocar algo.
 #
 # NO ESCRIBE NADA. Todo lo que hace es leer y, en el caso del chequeo
@@ -36,6 +36,32 @@
 # namespaceSelector, este chequeo se pone rojo — sin importar qué diga
 # el YAML.
 set -uo pipefail
+
+# ── preámbulo canónico (V-102) ───────────────────────────────────────
+if [[ -z "${AEGIS_ROOT:-}" ]]; then
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} check: falta readlink" >&2; exit 2; }
+    AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+fi
+export AEGIS_ROOT
+# shellcheck source=../lib/paths.sh
+source "$AEGIS_ROOT/lib/paths.sh"
+# aegis_exec (regla 5.1) vive en common.sh. La ronda no necesita el
+# resto del init, pero sí necesita invocar a otros comandos SIN que un
+# comando ausente se convierta en «sin fallos».
+aegis_exec() {
+    local cmd="$1"; shift
+    local destino="$AEGIS_ROOT/libexec/aegis-$cmd"
+    if [[ ! -e "$destino" ]]; then
+        printf 'NO SE PUDO EVALUAR: el comando %s no existe (%s) — no es que no haya fallos: es que no se pudo mirar\n' \
+            "${AEGIS_CMD:-aegis} $cmd" "$destino" >&2
+        return 2
+    fi
+    [[ -x "$destino" ]] || { printf 'NO SE PUDO EVALUAR: %s no es ejecutable (chmod +x)\n' "$destino" >&2; return 2; }
+    "$destino" "$@"
+    local rc=$?
+    [[ $rc == 126 || $rc == 127 ]] && { printf 'NO SE PUDO EVALUAR: %s no se pudo ejecutar (rc %s)\n' "${AEGIS_CMD:-aegis} $cmd" "$rc" >&2; return 2; }
+    return $rc
+}
 
 # Imagen del sondeo: pública, ajena al registry interno y por lo tanto
 # jamás firmada con nuestra llave. PINNEADA a propósito (mismo criterio
@@ -513,7 +539,7 @@ despachar $? "$salida_trab" "las operaciones de sync trabadas"
 # values.yaml de Jenkins, igual que en aegis-webhook, así que un repo
 # nuevo entra solo.
 titulo "cuota de CI"
-salida_cuota=$(AEGIS_RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" python3 - <<'PYEOF'
+salida_cuota=$(AEGIS_RAIZ="$PLATFORM_DIR" python3 - <<'PYEOF'
 import json, os, re, subprocess, sys
 
 RAIZ = os.environ["AEGIS_RAIZ"]
@@ -760,16 +786,21 @@ fi
 # Le pregunta a Cloudflare qué hostnames EXISTEN y los compara con los
 # que derivan de los contratos. No mira el state de tofu a propósito:
 # el state dice lo que tofu cree, y la única razón de mirar es que
-# pueden diferir (ver bin/aegis-borde).
+# pueden diferir (ver aegis edge).
 #
 # Distingue tres resultados, no dos: existe / falta / NO SE PUDO
 # EVALUAR. El tercero es un aviso y no un visto bueno.
 titulo "borde"
-"$(dirname "${BASH_SOURCE[0]}")/aegis-borde"
+# Regla 5.1: por LIBEXEC y con guarda. Hasta hoy esto era una ruta
+# relativa y el `case` no tenía rama para 127 (A1 del registro): con el
+# comando ausente —renombrado, movido, sin permisos— la ronda no decía
+# «no pude mirar», decía «sin fallos». Verde por ceguera es el peor
+# desenlace de una herramienta de vigilancia: nadie investiga un verde.
+aegis_exec edge
 case $? in
     0) : ;;
     1) fallos=$((fallos + 1)) ;;
-    *) avisos=$((avisos + 1)) ;;
+    *) avisos=$((avisos + 1)) ;;   # aegis_exec ya dijo POR QUÉ
 esac
 
 # ── 6c. que un push llegue a Jenkins ──────────────────────────────
@@ -784,7 +815,7 @@ esac
 # (make_repo_webhook, fase 15); todo lo que se sumó después quedó
 # afuera (#32).
 titulo "webhooks de CI"
-"$(dirname "${BASH_SOURCE[0]}")/aegis-webhook"
+aegis_exec webhook
 case $? in
     0) : ;;
     1) fallos=$((fallos + 1)) ;;
@@ -819,7 +850,7 @@ esac
 # AEGIS_BUILD_GRACIA minutos todavía puede estar en cola, y marcarlo
 # sería un falso positivo cada vez que alguien empuja.
 titulo "todo push construyó"
-salida_push=$(AEGIS_RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" \
+salida_push=$(AEGIS_RAIZ="$PLATFORM_DIR" \
               GRACIA="${AEGIS_BUILD_GRACIA:-15}" python3 - <<'PYEOF'
 import json, os, re, subprocess, sys, datetime
 
@@ -917,7 +948,7 @@ fi
 #
 # NO mira si existe el mecanismo: mira si HAY BUNDLES y de cuándo son.
 #
-# La distinción es todo el punto. `init/aegis-backup.sh` existe desde el
+# La distinción es todo el punto. `aegis state backup` existe desde el
 # arranque, está documentado en OPERAR.md y en AGENTS.md, y el 2026-08-09
 # se descubrió que NUNCA se había ejecutado: cero archivos .age en toda
 # la máquina. Que el script exista no distingue "hay respaldo" de "nunca
@@ -936,7 +967,7 @@ fi
 # archivos frescos de las demás, y el verde saldría igual.
 #
 # Por eso las organizaciones se ENUMERAN desde los contratos (la misma
-# fuente que usa aegis-respaldo) y se exige un bundle por cada una. Con
+# fuente que usa aegis-data) y se exige un bundle por cada una. Con
 # un solo proyecto, un chequeo correcto y uno mentiroso dan el mismo
 # verde; con dos, el mentiroso empieza a mentir. Se escribe bien ahora.
 titulo "respaldos"
