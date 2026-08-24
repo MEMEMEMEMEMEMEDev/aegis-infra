@@ -20,7 +20,7 @@ seed/platform/k8s/base/observability/
                             # registry-system, se iguala al que funciona)
   kustomization.yaml        # namespace + crudos + generator ksops
   secret-generator.yaml     # A7 LISTA EXPLÍCITA: grafana-admin.enc.yaml,
-                            # ntfy-puente-token.enc.yaml (los cifra la 85)
+                            # ntfy-bridge-token.enc.yaml (los cifra la 85)
   ntfy.yaml                 # Deployment+Service+PVC 1Gi+ConfigMap (crudo)
   alertmanager.yaml         # Deployment+Service+ConfigMap (crudo)
   ntfy-bridge.yaml          # Deployment+Service del ntfy-alertmanager (crudo)
@@ -130,7 +130,7 @@ y cifra con `make_enc_secret`:
   Grafana queda tras Access PERO conserva su login: Access es la
   puerta, no la única cerradura (defensa en profundidad — la misma
   razón por la que argocd no quedó anónimo tras #76).
-- `ntfy_puente_token` → ntfy-puente-token.enc.yaml: el token con el
+- `ntfy_bridge_token` → ntfy-bridge-token.enc.yaml: el token con el
   que el puente PUBLICA en ntfy.
 - `ntfy_operador_pass`: credencial de la app del teléfono. NO va a
   Secret K8s (nadie en el cluster la consume — mismo razonamiento

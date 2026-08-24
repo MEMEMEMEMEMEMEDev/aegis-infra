@@ -16,7 +16,7 @@
 # bcrypt no es material reversible: mismo criterio que el htpasswd
 # del registry, pero acá el formato de ntfy lo pide en el config.
 # La credencial del puente EN CLARO solo vive en el Secret
-# ntfy-puente-token (ntfy-bridge.yaml); la del operador solo en el
+# ntfy-bridge-token (ntfy-bridge.yaml); la del operador solo en el
 # store + su teléfono (fase-85 §3: nadie en el cluster la consume).
 ---
 apiVersion: v1

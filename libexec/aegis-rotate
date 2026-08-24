@@ -119,7 +119,7 @@ cf_api_token|normal|15-terceros|jenkins-secrets|ver_cf_api|Cloudflare|tofu no pu
 cf_dns_token|normal|15-terceros|cert-manager-issuers|ver_cf_dns|Cloudflare|cert-manager no renueva certificados
 cf_access_token|normal|15-terceros|-|ver_cf_access|Cloudflare|tofu no puede gestionar Access: el plano de operador queda como esté
 grafana_admin_pass|normal|85-observability|observability-base|ver_grafana_admin|-|no se entra a Grafana con su login propio (Access sigue delante)
-ntfy_puente_token|normal|85-observability|observability-base|ver_ntfy_puente|-|las alertas dejan de llegar: el puente no puede publicar en ntfy
+ntfy_bridge_token|normal|85-observability|observability-base|ver_ntfy_bridge|-|las alertas dejan de llegar: el puente no puede publicar en ntfy
 ntfy_operador_pass|normal|85-observability|observability-base|ver_ntfy_operador|teléfono|la app del teléfono deja de leer las alertas hasta recargar la credencial nueva
 registry_pass|delegada|-|-|ver_registry|-|ningún pod puede tirar imágenes
 cosign_key|irreducible|-|-|-|-|invalida TODAS las firmas ya emitidas
@@ -588,7 +588,7 @@ ver_grafana_admin() {
     return 1
 }
 
-ver_ntfy_puente() {
+ver_ntfy_bridge() {
     # El consumidor real es el puente PUBLICANDO en el topic. El diente
     # doble: con la credencial del Secret vivo se publica (200) y sin
     # credencial se rechaza (403, deny-all). El positivo manda un
@@ -597,17 +597,17 @@ ver_ntfy_puente() {
     local p code_ok code_anon
     p="$(mktemp /dev/shm/aegis-verif.XXXXXX)"; chmod 600 "$p"
     # la credencial vive DENTRO del scfg del Secret (key `config`):
-    kubectl -n observability get secret ntfy-puente-token \
+    kubectl -n observability get secret ntfy-bridge-token \
         -o jsonpath='{.data.config}' 2>/dev/null | base64 -d \
         | awk '$1 == "password" {print $2; exit}' | tr -d '\n' > "$p" \
         || { rm -f "$p"; return 2; }
-    [[ -s "$p" ]] || { rm -f "$p"; log_warn "ntfy-puente-token sin línea 'password' en el scfg — ¿cambió el contrato de ntfy-bridge.yaml?"; return 3; }
+    [[ -s "$p" ]] || { rm -f "$p"; log_warn "ntfy-bridge-token sin línea 'password' en el scfg — ¿cambió el contrato de ntfy-bridge.yaml?"; return 3; }
     printf 'machine ntfy.%s login puente password %s\n' \
         "$ROOT_DOMAIN" "$(cat "$p")" > "$p.netrc"
     chmod 600 "$p.netrc"
     code_ok="$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
         --netrc-file "$p.netrc" \
-        -d 'prueba de rotacion del puente (aegis-rotate ver_ntfy_puente)' \
+        -d 'prueba de rotacion del puente (aegis-rotate ver_ntfy_bridge)' \
         "https://ntfy.$ROOT_DOMAIN/aegis-alertas" 2>/dev/null)"
     code_anon="$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
         -d 'prueba anonima (debe rechazarse)' \

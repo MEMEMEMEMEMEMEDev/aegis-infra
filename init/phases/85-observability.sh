@@ -142,11 +142,11 @@ make_enc_secret grafana-admin observability \
     "$OBS/grafana-admin.enc.yaml" \
     "admin-user=$GRAF_USER" "admin-password=$GRAF_PASS"
 
-# ntfy_puente_token → ntfy-puente-token.enc.yaml: el config scfg
+# ntfy_bridge_token → ntfy-bridge-token.enc.yaml: el config scfg
 # ENTERO del ntfy-alertmanager (key `config`) — lleva la credencial
 # con la que el puente PUBLICA en ntfy, por eso vive en Secret y no
 # en ConfigMap (contrato documentado en ntfy-bridge.yaml):
-PUEN_PASS="$(gen_or_restore ntfy_puente_token gen_password_b64)"
+PUEN_PASS="$(gen_or_restore ntfy_bridge_token gen_password_b64)"
 {
     printf 'http-address :8080\n'
     printf 'alert-mode single\n'
@@ -159,10 +159,10 @@ PUEN_PASS="$(gen_or_restore ntfy_puente_token gen_password_b64)"
     printf 'cache {\n'
     printf '    type memory\n'
     printf '}\n'
-} > "$SECRETS_TMP/ntfy-puente.scfg"
-make_enc_secret ntfy-puente-token observability \
-    "$OBS/ntfy-puente-token.enc.yaml" \
-    "config=$SECRETS_TMP/ntfy-puente.scfg"
+} > "$SECRETS_TMP/ntfy-bridge.scfg"
+make_enc_secret ntfy-bridge-token observability \
+    "$OBS/ntfy-bridge-token.enc.yaml" \
+    "config=$SECRETS_TMP/ntfy-bridge.scfg"
 
 # ntfy_operador_pass: credencial de la app del teléfono. NO va a
 # Secret K8s (nadie en el cluster la consume — mismo razonamiento que
@@ -188,10 +188,10 @@ yaml_lists_file "$GEN_OBS" grafana-admin.enc.yaml || \
     run_cmd _yaml_insert_after "$GEN_OBS" '^files:$' '  - grafana-admin.enc.yaml'
 gate "obs-grafana-admin-en-generator" \
     yaml_lists_file "$GEN_OBS" grafana-admin.enc.yaml
-yaml_lists_file "$GEN_OBS" ntfy-puente-token.enc.yaml || \
-    run_cmd _yaml_insert_after "$GEN_OBS" '^files:$' '  - ntfy-puente-token.enc.yaml'
-gate "obs-ntfy-puente-en-generator" \
-    yaml_lists_file "$GEN_OBS" ntfy-puente-token.enc.yaml
+yaml_lists_file "$GEN_OBS" ntfy-bridge-token.enc.yaml || \
+    run_cmd _yaml_insert_after "$GEN_OBS" '^files:$' '  - ntfy-bridge-token.enc.yaml'
+gate "obs-ntfy-bridge-en-generator" \
+    yaml_lists_file "$GEN_OBS" ntfy-bridge-token.enc.yaml
 
 # ── hashes bcrypt de ntfy (clase-GENERADO, dueño: esta fase) ───────
 # auth-users de ntfy pide `usuario:hash-bcrypt:rol` en el ConfigMap.
@@ -502,7 +502,7 @@ argo_secrets_gate observability-base 300 \
 # A7: validación post-sync SIEMPRE — Synced+Healthy no garantiza los
 # Secrets si el generator no corrió:
 gate "obs-secretos-vivos" poll 180 5 bash -c \
-  "kubectl -n observability get secret grafana-admin ntfy-puente-token >/dev/null 2>&1"
+  "kubectl -n observability get secret grafana-admin ntfy-bridge-token >/dev/null 2>&1"
 argo_sync vmsingle 600
 argo_sync vlogs 600
 argo_sync vlogs-events 600
@@ -743,7 +743,7 @@ _alerta_llego_a_ntfy() {
       | grep -qiE 'DeadmanAegis|latido'
 }
 gate_diag "obs-cadena-alerta-canal" \
-    'kubectl -n observability logs deploy/ntfy-puente --tail=15 2>/dev/null; kubectl -n observability logs deploy/alertmanager --tail=15 2>/dev/null; kubectl -n observability logs deploy/ntfy --tail=10 2>/dev/null' \
+    'kubectl -n observability logs deploy/ntfy-bridge --tail=15 2>/dev/null; kubectl -n observability logs deploy/alertmanager --tail=15 2>/dev/null; kubectl -n observability logs deploy/ntfy --tail=10 2>/dev/null' \
     poll 900 20 _alerta_llego_a_ntfy
 
 # (7) obs-grafana-provisionado: el provisioning desde git aterrizó —

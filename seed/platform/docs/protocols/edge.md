@@ -32,7 +32,7 @@ Ya se pagó dos veces:
 ```
 orgs/veterinaria.yaml           edge.yaml
   dominio: vet.ejemplo.com        plataforma: [aegis, argocd, jenkins, ai]
-         │                        dominio_raiz: ejemplo.com
+         │                        root_domain: ejemplo.com
          └────────────┬───────────────────┘
                       ▼
               bin/aegis-org aplicar
@@ -75,7 +75,7 @@ Reglas:
   borraría a los demás.
 - El contrato declara el **FQDN** (`vet.ejemplo.com`) porque es lo que un
   humano reconoce; tofu quiere la **etiqueta** (`vet`), y el generador
-  hace la resta contra `dominio_raiz`.
+  hace la resta contra `root_domain`.
 - Un dominio **fuera de la zona** es un error, no una entrada más: el
   borde solo puede crear CNAMEs dentro de su zona, y otra zona es una
   decisión, no un caso.

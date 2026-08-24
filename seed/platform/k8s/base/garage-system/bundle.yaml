@@ -241,5 +241,5 @@ spec:
           # impone cuota de disco. Esto limita el tamaño DECLARADO, no
           # el USADO: un tenant puede escribir más que su bucket hasta
           # llenar /. Es limitación del provisioner y está anotada
-          # también en planes.yaml.
+          # también en plans.yaml.
           requests: {storage: 20Gi}

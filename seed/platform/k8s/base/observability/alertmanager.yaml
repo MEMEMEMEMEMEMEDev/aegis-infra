@@ -34,7 +34,7 @@ data:
     receivers:
       - name: ntfy
         webhook_configs:
-          - url: http://ntfy-puente.observability.svc:8080
+          - url: http://ntfy-bridge.observability.svc:8080
             send_resolved: true
 ---
 apiVersion: v1
