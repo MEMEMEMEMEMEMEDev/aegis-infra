@@ -1,84 +1,87 @@
 #!/usr/bin/env bash
-# FASE 05 — host: instala el userland Linux PINNEADO, verifica el
-# lado Windows (checklist accionable, no automatización — 27 §3.3).
-# Salda H-1: el bootstrap viejo solo VERIFICABA binarios; este los
-# instala (el install-cli-tools.yml que el overview nombró y nunca
-# existió — overview.md:283).
+# PHASE 05 — host: installs the PINNED Linux userland, verifies the
+# Windows side (actionable checklist, not automation — 27 §3.3).
+# Settles H-1: the old bootstrap only VERIFIED binaries; this one
+# installs them (the install-cli-tools.yml the overview named and that
+# never existed — overview.md:283).
 set -euo pipefail
 
-# ── pins de userland (A12: literales, no channels) ──────────────────
-# La fuente de verdad de versiones es group_vars/all.yml del repo de
-# plataforma; acá se leen para no duplicar:
+# ── userland pins (A12: literals, not channels) ─────────────────────
+# The source of truth for versions is group_vars/all.yml in the
+# platform repo; we read them here so as not to duplicate:
 PINS_FILE="$PLATFORM_DIR/ansible/inventory/group_vars/all.yml"
 gate "pins-presentes" test -f "$PINS_FILE"
 
-read_pin() {  # python3+pyyaml, NO yq (regla C7)
-    # clave ausente = FALLO LIMPIO, no traceback (H1 validación #1:
-    # git/openssl faltaban y el KeyError crudo escondía el hueco —
-    # el fallback silencioso es peor que el fallo explícito):
+read_pin() {  # python3+pyyaml, NOT yq (rule C7)
+    # missing key = CLEAN FAILURE, not a traceback (H1 validation #1:
+    # git/openssl were missing and the raw KeyError hid the hole — a
+    # silent fallback is worse than an explicit failure):
     python3 -c "
 import sys, yaml
 pins = yaml.safe_load(open('$PINS_FILE'))['userland_pins']
 if '$1' not in pins:
     sys.exit(3)
-print(pins['$1'])" || die "pin faltante en userland_pins para '$1' \
-(agregarlo a group_vars/all.yml — 'apt' si lo gestiona apt)"
+print(pins['$1'])" || die "missing pin in userland_pins for '$1' \
+(add it to group_vars/all.yml — 'apt' if apt manages it)"
 }
 
-# ── apt con espera de lock (bug corrida #10) ────────────────────────
-# Al primer boot de una VM, unattended-upgrades tiene el lock de dpkg
-# → "could not get lock" y el userland quedaba a medias (htpasswd y
-# rsync no se instalaron; el gate userland-completo cazó el hueco).
-# apt trae espera NATIVA: DPkg::Lock::Timeout bloquea hasta N segundos
-# esperando el lock en vez de fallar. TODO apt-get de esta fase pasa
-# por acá (incluido el .deb local de sops — apt instala paths locales,
-# dpkg -i no espera locks).
+# ── apt with lock wait (bug run #10) ────────────────────────────────
+# On a VM's first boot, unattended-upgrades holds the dpkg lock →
+# "could not get lock" and the userland was left half-done (htpasswd
+# and rsync did not get installed; the userland-completo gate caught
+# the hole). apt has a NATIVE wait: DPkg::Lock::Timeout blocks for up
+# to N seconds waiting for the lock instead of failing. EVERY apt-get
+# in this phase goes through here (including the local sops .deb — apt
+# installs local paths, dpkg -i does not wait for locks).
 apt_locked() { sudo apt-get -o DPkg::Lock::Timeout=600 "$@"; }
 
-# ── instalación por herramienta (idempotente: si está y coincide el
-#    pin, skip; si está con OTRA versión, avisa y NO pisa sin ROJO) ─
-# tool_version: primera cadena x.y[.z] que emite el binario. Cada
-# tool imprime versión distinto; el regex es el mínimo común.
+# ── per-tool installation (idempotent: if present and the pin
+#    matches, skip; if present with ANOTHER version, warn and do NOT
+#    overwrite without a RED) ───────────────────────────────────────
+# tool_version: the first x.y[.z] string the binary emits. Every tool
+# prints its version differently; the regex is the common minimum.
 tool_version() {
     local tool="$1"
     case "$tool" in
         kubectl) kubectl version --client 2>/dev/null ;;
         *)       "$tool" --version 2>/dev/null || "$tool" version 2>/dev/null ;;
-    esac | grep -om1 '[0-9]\+\.[0-9]\+\(\.[0-9]\+\)\?' || echo desconocida
+    esac | grep -om1 '[0-9]\+\.[0-9]\+\(\.[0-9]\+\)\?' || echo unknown
 }
 
 install_tool() {
     local tool="$1" pin ver
     pin="$(read_pin "$tool")"
     if command -v "$tool" >/dev/null; then
-        # pin "apt" = SIN pin duro: la presencia basta, no hay
-        # versión que comparar (H2 validación #1: comparar la
-        # versión real contra el literal "apt" daba drift falso →
-        # ROJO en gh, que además es PREREQUISITO autenticado del
-        # operador — la fase 00 lo exige antes de que esta corra):
+        # pin "apt" = NO hard pin: presence is enough, there is no
+        # version to compare (H2 validation #1: comparing the real
+        # version against the literal "apt" gave a false drift → RED
+        # on gh, which is besides an authenticated operator
+        # PREREQUISITE — phase 00 demands it before this one runs):
         if [[ "$pin" == "apt" ]]; then
-            log_info "$tool presente (gestión apt, sin pin duro)"
+            log_info "$tool present (apt-managed, no hard pin)"
             return 0
         fi
         ver="$(tool_version "$tool")"
         if [[ "$ver" == "$pin"* ]]; then
-            log_info "$tool $ver ya presente == pin $pin"
+            log_info "$tool $ver already present == pin $pin"
         else
-            # drift: NO se pisa solo (puede ser deliberado del host);
-            # se avisa y el operador decide (A12: el pin manda en
-            # greenfield puro; en host con historia, criterio humano).
-            log_warn "$tool DRIFT: instalada $ver, pin $pin"
-            gate_red "seguir con $tool $ver (≠ pin $pin) — o abortá y alineá el pin/host"
+            # drift: it is NOT overwritten on its own (it may be a
+            # deliberate choice of the host); we warn and the operator
+            # decides (A12: the pin rules in pure greenfield; on a host
+            # with history, human judgement).
+            log_warn "$tool DRIFT: installed $ver, pin $pin"
+            gate_red "continue with $tool $ver (≠ pin $pin) — or abort and align the pin/host"
         fi
         return 0
     fi
-    # P1.10 auditoría 2026-07-18: (a) TODA descarga con retry_net —
-    # eran de UN intento contra la red móvil; (b) tofu instalaba
-    # LATEST vía curl|bash (el pin se leía y NO se usaba — corrida no
-    # reproducible): ahora va por el .deb VERSIONADO de releases,
-    # mismo patrón que sops. Checksums sha256 por artefacto: diferido
-    # (exige mantener hashes por versión en group_vars — anotado en
-    # VALIDACION §4; los .deb pasan por apt que valida su estructura).
+    # P1.10 audit 2026-07-18: (a) EVERY download with retry_net — they
+    # were single-attempt against the mobile network; (b) tofu was
+    # installing LATEST via curl|bash (the pin was read and NOT used —
+    # a non-reproducible run): now it goes through the VERSIONED .deb
+    # from releases, the same pattern as sops. Per-artifact sha256
+    # checksums: deferred (it requires maintaining per-version hashes
+    # in group_vars — noted in VALIDACION §4; the .debs go through apt,
+    # which validates their structure).
     case "$tool" in
         tofu)   run_cmd retry_net 3 bash -c "curl -fsSLo /tmp/tofu.deb https://github.com/opentofu/opentofu/releases/download/v${pin}/tofu_${pin}_amd64.deb && sudo apt-get -o DPkg::Lock::Timeout=600 install -y /tmp/tofu.deb" ;;
         sops)   run_cmd retry_net 3 bash -c "curl -fsSLo /tmp/sops.deb https://github.com/getsops/sops/releases/download/v${pin}/sops_${pin}_amd64.deb && sudo apt-get -o DPkg::Lock::Timeout=600 install -y /tmp/sops.deb" ;;
@@ -90,18 +93,18 @@ install_tool() {
         direnv) run_cmd retry_net 3 apt_locked install -y direnv ;;
         *)      run_cmd retry_net 3 apt_locked install -y "$tool" ;;
     esac
-    # verificación REAL post-install (capability real, no proxy):
+    # REAL post-install verification (real capability, not a proxy):
     gate "instalado-$tool" command -v "$tool"
 }
 
-log_info "Instalando userland pinneado…"
+log_info "Installing the pinned userland…"
 run_cmd retry_net 3 apt_locked update -qq
-# deps de apt ANTES del loop (P0.5 auditoría): read_pin usa pyyaml —
-# instalarlo DESPUÉS del loop era una carrera contra el Ubuntu
-# minimal (sin python3-yaml preinstalado, el primer read_pin moría
-# con un die engañoso de "pin faltante"). htpasswd en apache2-utils;
-# python3-venv para el venv de ansible de la fase 20 (bug 3
-# validación #3: Ubuntu minimal no trae ensurepip):
+# apt deps BEFORE the loop (P0.5 audit): read_pin uses pyyaml —
+# installing it AFTER the loop was a race against Ubuntu minimal
+# (without python3-yaml preinstalled, the first read_pin died with a
+# misleading "missing pin" die). htpasswd is in apache2-utils;
+# python3-venv for phase 20's ansible venv (bug 3 validation #3:
+# Ubuntu minimal does not ship ensurepip):
 run_cmd retry_net 3 apt_locked install -y \
     apache2-utils python3-yaml python3-venv rsync
 for t in jq git openssl direnv gh age sops tofu kubectl helm cosign; do
@@ -109,24 +112,24 @@ for t in jq git openssl direnv gh age sops tofu kubectl helm cosign; do
 done
 gate "userland-completo" check_binaries
 
-# ── direnv hook defensivo (A3) ──────────────────────────────────────
+# ── defensive direnv hook (A3) ──────────────────────────────────────
 if ! grep -q 'direnv hook bash' ~/.bashrc 2>/dev/null; then
     run_cmd bash -c \
       'echo '\''command -v direnv >/dev/null && eval "$(direnv hook bash)"'\'' >> ~/.bashrc'
-    log_ok "hook direnv agregado a .bashrc (defensivo)"
+    log_ok "direnv hook added to .bashrc (defensive)"
 fi
 
-# ── lado Windows: checklist verificada (NO automatizada) ───────────
+# ── Windows side: verified checklist (NOT automated) ───────────────
 if grep -qi microsoft /proc/version; then
-    human_step "Checklist lado Windows (.wslconfig)" \
-      "En %UserProfile%\\.wslconfig verificá:" \
+    human_step "Windows-side checklist (.wslconfig)" \
+      "In %UserProfile%\\.wslconfig check:" \
       "  [wsl2]" \
-      "  networkingMode=mirrored   (requerido por el stack)" \
-      "  memory=  (cap razonable; el host también vive)" \
-      "Y que el ext4.vhdx esté en el NVMe." \
-      "Si cambiaste algo: 'wsl --shutdown' y volvé a entrar" \
-      "(este init retoma con --from 05-host)."
+      "  networkingMode=mirrored   (required by the stack)" \
+      "  memory=  (a sane cap; the host has to live too)" \
+      "And that the ext4.vhdx sits on the NVMe." \
+      "If you changed anything: 'wsl --shutdown' and come back in" \
+      "(this init resumes with --from 05-host)."
     gate "wsl2-post-checklist" check_wsl2
 fi
 
-log_ok "Host listo: userland pinneado instalado y verificado"
+log_ok "Host ready: pinned userland installed and verified"

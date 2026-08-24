@@ -1,5 +1,6 @@
-# dientes del check 016 (sops de cifrado siempre con --config o --age)
-# Sin --age explícito, sops toma la clave de un .sops.yaml que puede no
-# ser el que uno cree — y el archivo queda cifrado para otro.
-red_1() { printf '\nsops -e /tmp/algo.yaml > /tmp/algo.enc.yaml\n' >> "$AEGIS_ROOT/lib/secrets.sh"; }
-control_1() { printf '\nsops -e --age "$AGE_PUBLIC" /tmp/algo.yaml > /tmp/algo.enc.yaml\n' >> "$AEGIS_ROOT/lib/secrets.sh"; }
+# teeth of check 016 (encrypting sops always with --config or --age)
+# Without an explicit --age, sops takes the key from a .sops.yaml that
+# may not be the one you think — and the file ends up encrypted for
+# somebody else.
+red_1() { printf '\nsops -e /tmp/something.yaml > /tmp/something.enc.yaml\n' >> "$AEGIS_ROOT/lib/secrets.sh"; }
+control_1() { printf '\nsops -e --age "$AGE_PUBLIC" /tmp/something.yaml > /tmp/something.enc.yaml\n' >> "$AEGIS_ROOT/lib/secrets.sh"; }

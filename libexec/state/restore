@@ -1,26 +1,29 @@
 #!/usr/bin/env bash
-# aegis-summary: Restaura los tres estados desde un bundle
+# aegis-summary: Restores the three states from a bundle
 # aegis-group:   backup
-# aegis-restore — restaura los 3 estados desde un bundle de aegis-backup
-# (W-09 / R4). El inverso exacto: descifra con la age key privada (el
-# irreducible del operador) y coloca cada estado en su sitio. Es la mitad
-# que hace verdadera la premisa "la age key recupera todo".
+# aegis state restore — restores the 3 states from a bundle produced by
+# `aegis state backup` (W-09 / R4). The exact inverse: it decrypts with the
+# private age key (the operator's irreducible) and puts each state back in
+# its place. It is the half that makes the premise "the age key recovers
+# everything" actually true.
 #
-# DESTRUCTIVO: sobreescribe estado vivo. Por defecto se NIEGA a pisar un
-# destino que ya existe (para no romper una VM a medio andar); --force lo
-# habilita explícito. Sin la age key, no hace nada: el bundle sin la key no
-# sirve, y así debe ser.
+# DESTRUCTIVE: it overwrites live state. By default it REFUSES to step on a
+# destination that already exists (so as not to break a machine that is
+# halfway through); --force enables that explicitly. Without the age key it
+# does nothing: the bundle without the key is useless, and that is how it
+# should be.
 #
-# Uso: aegis state restore <bundle.age> [--force]
+# Usage: aegis state restore <bundle.age> [--force]
 set -euo pipefail
 
-# ── preámbulo canónico (V-102) ───────────────────────────────────────
-# El PRODUCTO se resuelve desde el propio archivo, siguiendo symlinks
-# (la fase 05 instala /usr/local/bin/aegis como symlink: sin readlink
-# -f, AEGIS_ROOT sería /usr/local). Si bin/aegis ya lo exportó, se
-# respeta. La INSTANCIA la decide lib/paths.sh, nunca este archivo.
+# ── canonical preamble (V-102) ───────────────────────────────────────
+# The PRODUCT is resolved from this file itself, following symlinks
+# (phase 05 installs /usr/local/bin/aegis as a symlink: without
+# readlink -f, AEGIS_ROOT would be /usr/local). If bin/aegis already
+# exported it, that is respected. The INSTANCE is decided by
+# lib/paths.sh, never by this file.
 if [[ -z "${AEGIS_ROOT:-}" ]]; then
-    command -v readlink >/dev/null || { echo "aegis-restore: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
+    command -v readlink >/dev/null || { echo "aegis state restore: readlink is missing — I will not guess where the product lives" >&2; exit 2; }
     AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 fi
 export AEGIS_ROOT
@@ -36,38 +39,38 @@ die()  { printf '[restore] FATAL: %s\n' "$*" >&2; exit 1; }
 
 BUNDLE="${1:-}"; FORCE=0
 [[ "${2:-}" == "--force" ]] && FORCE=1
-[[ -n "$BUNDLE" && -f "$BUNDLE" ]] || die "uso: aegis state restore <bundle.age> [--force]"
+[[ -n "$BUNDLE" && -f "$BUNDLE" ]] || die "usage: aegis state restore <bundle.age> [--force]"
 
 KEY="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/aegis.key}"
-[[ -f "$KEY" ]] || die "sin age key privada ($KEY) — es el irreducible; sin ella el bundle no descifra"
+[[ -f "$KEY" ]] || die "no private age key ($KEY) — it is the irreducible; without it the bundle does not decrypt"
 
-# ── descifrar a un stage y mostrar el manifest ───────────────────────────
+# ── decrypt into a staging dir and show the manifest ─────────────────────
 umask 077
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 PAY="$TMP/payload"; mkdir -p "$PAY"
 age -d -i "$KEY" "$BUNDLE" | tar -C "$PAY" -xzf - \
-  || die "el bundle no descifra/desempaqueta con esta key — ¿key equivocada o bundle corrupto?"
-say "manifest del bundle:"
+  || die "the bundle does not decrypt/unpack with this key — wrong key, or a corrupt bundle?"
+say "the bundle's manifest:"
 sed 's/^/    /' "$PAY/MANIFEST.txt" 2>/dev/null || true
 
-# ── colocar cada estado, paso separado, sin pisar sin --force ────────────
-# El bundle guarda el CONTENIDO bajo <label>/ (simétrico a collect()). El
-# guard de existencia es el ARCHIVO/dir concreto que indicaría estado vivo
-# (para tfstate NO es el dir del tofu env — ese existe siempre en el seed —
-# sino el terraform.tfstate).
+# ── place each state, as a separate step, never overwriting without --force
+# The bundle stores the CONTENTS under <label>/ (symmetric to collect()).
+# The existence guard is the concrete FILE/dir that would indicate live
+# state (for tfstate it is NOT the tofu env dir — that one always exists in
+# the seed — but the terraform.tfstate itself).
 place() {  # place <label> <dest-dir> <guard-path>
   local label="$1" dest="$2" guard="$3"
   local src="$PAY/$label"
-  if [[ ! -d "$src" ]]; then say "$label: no está en el bundle — se omite"; return 0; fi
+  if [[ ! -d "$src" ]]; then say "$label: not in the bundle — skipped"; return 0; fi
   if [[ -e "$guard" && $FORCE -eq 0 ]]; then
-    die "$label: $guard YA existe — abortado (usá --force para pisar; no rompo estado vivo a ciegas)"
+    die "$label: $guard ALREADY exists — aborted (use --force to overwrite; I do not break live state blindly)"
   fi
   mkdir -p "$dest"
   cp -a "$src"/. "$dest"/
-  say "$label → $dest (restaurado)"
+  say "$label → $dest (restored)"
 }
 place state-secrets "$STATE_SECRETS" "$STATE_SECRETS"
 place init-state    "$INIT_STATE"    "$INIT_STATE"
 place tfstate       "$TUNNEL_ENV"     "$TUNNEL_ENV/terraform.tfstate"
 
-say "restauración completa. Siguiente: retomar el init si corresponde (aegis-init.sh --from <fase>)."
+say "restore complete. Next: resume the init if appropriate (aegis init --from <phase>)."

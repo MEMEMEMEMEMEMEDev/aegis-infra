@@ -1,8 +1,8 @@
-# dientes del check 096 — generados el 2026-08-23 y VERIFICADOS:
-# cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
+# teeth for check 096 — generated on 2026-08-23 and VERIFIED:
+# each red was applied to a copy of the tree and the check turned red.
 
-# saca del artefacto justo lo que el check dice medir
+# removes from the artifact exactly what the check says it measures
 red_1() {
-    grep -vE 'AEGIS_STATE_DIR' "$AEGIS_ROOT/libexec/aegis-init-log" > "$AEGIS_ROOT/libexec/aegis-init-log.diente" \
-        && mv "$AEGIS_ROOT/libexec/aegis-init-log.diente" "$AEGIS_ROOT/libexec/aegis-init-log"
+    grep -vE 'AEGIS_STATE_DIR' "$AEGIS_ROOT/libexec/aegis-init-log" > "$AEGIS_ROOT/libexec/aegis-init-log.tooth" \
+        && mv "$AEGIS_ROOT/libexec/aegis-init-log.tooth" "$AEGIS_ROOT/libexec/aegis-init-log"
 }

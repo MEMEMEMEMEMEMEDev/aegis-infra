@@ -1,27 +1,28 @@
-# dientes del meta-check 199 (todo check tiene diente ejecutable)
+# teeth for meta-check 199 (every check has an executable tooth)
 #
-# El 199 no mide el ARTEFACTO: mide al verificador. Su sujeto son los
-# archivos de verify/, así que quitarle un comando al producto —lo que
-# el diente generado hacía— no lo toca. Sus tres modos de fallo:
+# 199 does not measure the ARTIFACT: it measures the verifier. Its
+# subject is the files of verify/, so taking a command away from the
+# product —what the generated tooth used to do— does not touch it. Its
+# three failure modes:
 red_1() {
-    # un check nuevo sin diente
-    printf '# title: check sin diente\ncheck() { pass "nada"; }\n' \
-        > "$AEGIS_ROOT/verify/checks/997-sin-diente.sh"
+    # a new check without a tooth
+    printf '# title: check without a tooth\ncheck() { pass "nothing"; }\n' \
+        > "$AEGIS_ROOT/verify/checks/997-no-tooth.sh"
 }
 red_2() {
-    # la lista de deuda nombrando un check que no existe (una allowlist
-    # que envejece es una allowlist que tapa huecos nuevos)
+    # the debt list naming a check that does not exist (an allowlist
+    # that ages is an allowlist that covers up new holes)
     printf '998\n' > "$AEGIS_ROOT/verify/teeth/PENDIENTES"
 }
 red_3() {
-    # y la lista nombrando uno que SÍ tiene diente: si eso no fuera
-    # rojo, alguien podría meter ahí un check y desactivarlo sin que
-    # nada avise
+    # and the list naming one that DOES have a tooth: if that were not
+    # red, somebody could put a check in there and disable it without
+    # anything warning
     printf '001\n' > "$AEGIS_ROOT/verify/teeth/PENDIENTES"
 }
-# control: un check nuevo CON su diente no molesta a nadie
+# control: a new check WITH its tooth bothers nobody
 control_1() {
-    printf '# title: check con diente\ncheck() { pass "nada"; }\n' \
-        > "$AEGIS_ROOT/verify/checks/996-con-diente.sh"
+    printf '# title: check with a tooth\ncheck() { pass "nothing"; }\n' \
+        > "$AEGIS_ROOT/verify/checks/996-with-tooth.sh"
     printf 'red_1() { :; }\n' > "$AEGIS_ROOT/verify/teeth/996.sh"
 }

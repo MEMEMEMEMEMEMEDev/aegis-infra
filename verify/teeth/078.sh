@@ -1,5 +1,5 @@
-# dientes del check 078 — generados el 2026-08-23 y VERIFICADOS:
-# cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
+# teeth for check 078 — generated on 2026-08-23 and VERIFIED:
+# each red was applied to a copy of the tree and the check turned red.
 
-# el sujeto desaparece: si el check no lo nota, no lo estaba leyendo
+# the subject disappears: if the check does not notice, it was not reading it
 red_1() { rm -f "$AEGIS_ROOT/libexec/aegis-preflight"; }

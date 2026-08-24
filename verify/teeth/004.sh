@@ -1,33 +1,34 @@
-# dientes del check 004 — generados el 2026-08-23 y VERIFICADOS:
-# cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
+# teeth of check 004 — generated on 2026-08-23 and VERIFIED: every red
+# was applied over a copy of the tree and the check went red.
 
-# el sujeto desaparece: si el check no lo nota, no lo estaba leyendo
+# the subject disappears: if the check does not notice, it was not
+# reading it
 red_1() { rm -f "$AEGIS_ROOT/init/phases/85-observability.sh"; }
 
-# control: un cambio LEGÍTIMO no puede ponerlo rojo
-control_1() { printf '# comentario legitimo\n' >> "$AEGIS_ROOT/init/phases/85-observability.sh"; }
+# control: a LEGITIMATE change cannot turn it red
+control_1() { printf '# legitimate comment\n' >> "$AEGIS_ROOT/init/phases/85-observability.sh"; }
 
-# El diente de la SEGUNDA CATEGORÍA de productor, que hasta el
-# 2026-08-24 no existía porque la categoría estaba muerta: el check
-# buscaba el generador DENTRO de la semilla, donde en v3 ya no puede
-# estar (el código vive en el producto, 02 §1). Con esa rama muerta,
-# todo secreto derivado de contratos salía «sin productor» — y uno que
-# de verdad no tuviera productor se habría perdido en ese ruido.
+# The tooth of the SECOND CATEGORY of producer, which until 2026-08-24
+# did not exist because the category was dead: the check looked for the
+# generator INSIDE the seed, where in v3 it can no longer be (the code
+# lives in the product, 02 §1). With that branch dead, every secret
+# derived from contracts came out «with no producer» — and one that
+# really had no producer would have been lost in that noise.
 #
-# Este rojo saca al generador de donde el check lo busca ahora. Si el
-# check volviera a la forma vieja —«no está, entonces no aplica»—
-# pasaría en verde. Eso es lo que no puede volver a pasar.
+# This red takes the generator out of where the check now looks for it.
+# If the check went back to the old shape —«it is not there, so it does
+# not apply»— it would pass green. That is what cannot happen again.
 red_3() {
-    mv "$AEGIS_ROOT/lib/aegis/org.py" "$AEGIS_ROOT/lib/aegis/org.py.escondido"
+    mv "$AEGIS_ROOT/lib/aegis/org.py" "$AEGIS_ROOT/lib/aegis/org.py.hidden"
 }
 
-# control: documentar mejor una entry existente es el cambio más
-# legítimo que hay sobre un generator, y no puede ponerse rojo.
+# control: documenting an existing entry better is the most legitimate
+# change there is over a generator, and it cannot turn red.
 #
-# (La primera versión de este control AGREGABA una entry repetida y el
-#  check la mordió con razón: una entry duplicada mata a kustomize con
-#  «already registered id». El diente estaba mal, no el check.)
+# (The first version of this control ADDED a repeated entry and the
+#  check bit it, rightly: a duplicate entry kills kustomize with
+#  «already registered id». The tooth was wrong, not the check.)
 control_2() {
-    sed -i 's|^  - secret-garage-credentials\.enc\.yaml$|  # su rotacion con el cluster arriba deja al nodo sin hablarse a si mismo\n  - secret-garage-credentials.enc.yaml|' \
+    sed -i 's|^  - secret-garage-credentials\.enc\.yaml$|  # rotating it with the cluster up leaves the node unable to talk to itself\n  - secret-garage-credentials.enc.yaml|' \
         "$AEGIS_ROOT/seed/platform/k8s/base/garage-system/secret-generator.yaml"
 }

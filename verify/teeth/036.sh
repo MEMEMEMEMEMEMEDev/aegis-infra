@@ -1,8 +1,9 @@
-# dientes del check 036 — generados el 2026-08-23 y VERIFICADOS:
-# cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
+# teeth of check 036 — generated on 2026-08-23 and VERIFIED: every red
+# was applied over a copy of the tree and the check went red.
 
-# el sujeto desaparece: si el check no lo nota, no lo estaba leyendo
+# the subject disappears: if the check does not notice, it was not
+# reading it
 red_1() { rm -f "$AEGIS_ROOT/seed/platform/docs/protocols/templates/Jenkinsfile.app"; }
 
-# control: un cambio LEGÍTIMO no puede ponerlo rojo
-control_1() { printf '# comentario legitimo\n' >> "$AEGIS_ROOT/seed/platform/docs/protocols/templates/Jenkinsfile.app"; }
+# control: a LEGITIMATE change cannot turn it red
+control_1() { printf '# legitimate comment\n' >> "$AEGIS_ROOT/seed/platform/docs/protocols/templates/Jenkinsfile.app"; }

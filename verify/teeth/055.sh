@@ -1,15 +1,15 @@
-# dientes del check 055 (todo seed con Service declara su exposición)
-# CR-5: una app con Service y sin ruta nace invisible desde el borde.
-# Nadie la ve fallar — el manifiesto está perfecto y el tráfico no
-# llega. Es el defecto más caro de encontrar en producción y el más
-# barato de encontrar acá.
+# teeth for check 055 (every seed with a Service declares its exposure)
+# CR-5: an app with a Service and no route is born invisible from the
+# edge. Nobody sees it fail — the manifest is perfect and the traffic
+# does not arrive. It is the most expensive defect to find in production
+# and the cheapest to find here.
 red_1() {
     cat >> "$AEGIS_ROOT/seed/canary/k8s/base/deployment.yaml" <<'YAML'
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: servicio-sin-ruta
+  name: service-without-route
 spec:
   selector: {app: hello-aegis}
   ports: [{port: 8080}]

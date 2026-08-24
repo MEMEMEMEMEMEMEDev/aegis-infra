@@ -1,25 +1,26 @@
 #!/usr/bin/env bash
-# FASE 50 — CI: Jenkins con JOBS-AS-CODE desde el nacimiento (27
-# §1.3: el init copia un patrón probado; los jobs viven en values,
-# no en el PVC). Secrets ANTES del chart (regla 5.2, boot loop si
-# no). Cierra con la imagen de tooling CI construida y pusheada.
+# PHASE 50 — CI: Jenkins with JOBS-AS-CODE from birth (27 §1.3: the
+# init copies a proven pattern; the jobs live in values, not in the
+# PVC). Secrets BEFORE the chart (rule 5.2, a boot loop otherwise).
+# It closes with the CI tooling image built and pushed.
 set -euo pipefail
 CONF="$AEGIS_HOME/aegis.conf"; source "$CONF"
-# CR-6 reporte in-VM #14: esta fase MUTA el repo de plataforma — el
-# clone local puede estar detras del remoto (fix manual del operador
-# en GitHub durante un retome). Sincronizar ANTES de tocar nada:
+# CR-6 in-VM report #14: this phase MUTATES the platform repo — the
+# local clone may be behind the remote (a manual fix by the operator
+# on GitHub during a resume). Synchronize BEFORE touching anything:
 platform_repo_sync
 export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/aegis.key}"
 
-# argo_sync viene de lib/common.sh (bug C corrida #8: las defs
-# locales esperaban solo health — carrera con operationState en
-# re-runs; la canónica espera la fase TERMINAL de la operación).
+# argo_sync comes from lib/common.sh (bug C run #8: the local
+# definitions waited only for health — a race with operationState on
+# re-runs; the canonical one waits for the operation's TERMINAL
+# phase).
 
-# ── 50.0 jenkins-admin (T2-A random — C10 saldada por protocolo) ───
-# gen_or_restore + sin pausa de resguardo (D11): el password queda
-# cifrado en el store y en el Secret KSOPS — recuperable con la age
-# key. Para uso interactivo posterior: docs/protocols/
-# rotation-checklist.md explica cómo leerlo del store.
+# ── 50.0 jenkins-admin (T2-A random — C10 settled by protocol) ─────
+# gen_or_restore + no safekeeping pause (D11): the password is left
+# encrypted in the store and in the KSOPS Secret — recoverable with
+# the age key. For later interactive use: docs/protocols/
+# rotation-checklist.md explains how to read it from the store.
 secrets_workdir
 ADMIN_PASS="$(gen_or_restore jenkins_admin_pass gen_password_b64)"
 printf 'admin' > "$SECRETS_TMP/jenkins_admin_user"
@@ -28,66 +29,69 @@ make_enc_secret jenkins-admin jenkins-system \
     "username=$SECRETS_TMP/jenkins_admin_user" \
     "password=$ADMIN_PASS"
 
-# clase F auditoría: sin || true que trague un commit fallido real:
+# class F audit: no || true to swallow a real failed commit:
 git_commit_if_changes "$PLATFORM_DIR" "feat(jenkins): admin secret"
 git_push_verified "$PLATFORM_DIR"
 
-# ── 50.1 Secrets → chart (ORDEN: 5.2) ─────────────────────────────
+# ── 50.1 Secrets → chart (ORDER: 5.2) ─────────────────────────────
 argo_sync jenkins-secrets
-# F-B corrida #15: el sync murió por DNS transitorio y el gate pasó
-# con el Synced VIEJO — ahora exige la revisión RECIÉN pusheada:
+# F-B run #15: the sync died from transient DNS and the gate passed
+# with the OLD Synced — it now demands the JUST-pushed revision:
 argo_secrets_gate jenkins-secrets 300 \
     "$(git -C "$PLATFORM_DIR" rev-parse HEAD)"
 gate "los-6-secrets" poll 180 5 bash -c "kubectl -n jenkins-system get secret \
   jenkins-admin hello-aegis-repo regcred-internal github-token \
   ops-stack-repo-ro github-webhook-hmac >/dev/null 2>&1"
-# (D11: github-token + ops-stack-repo-ro reemplazan a la GitHub App.
-#  cosign-signing-key llega en fase 80; su entry NO está en el
-#  generator todavía — la fase 80 agrega archivo+entry en el mismo
-#  commit. Acá el generator lista exactamente los 6 que existen.)
+# (D11: github-token + ops-stack-repo-ro replace the GitHub App.
+#  cosign-signing-key arrives in phase 80; its entry is NOT in the
+#  generator yet — phase 80 adds file+entry in the same commit. Here
+#  the generator lists exactly the 6 that exist.)
 
 argo_sync jenkins 900
-# P1.4 auditoría 2026-07-18: el boot de Jenkins fue el paso MÁS LENTO
-# legítimo de la corrida real (~8 min: el init-container descarga los
-# plugins por la red del operador) y su gate era un rollout status
-# único y MUDO. wait_rollout: espera generosa con evidencia periódica
-# (E-1); al fallar, el diagnóstico trae los logs del init-container —
-# donde vive la causa (plugin truncado, red, mirror caído). Deuda
-# anotada (VALIDACION §4): pre-hornear los plugins en una imagen
-# propia mataría la descarga por completo:
+# P1.4 audit 2026-07-18: Jenkins' boot was the SLOWEST legitimate step
+# of the real run (~8 min: the init-container downloads the plugins
+# over the operator's network) and its gate was a single, MUTE rollout
+# status. wait_rollout: a generous wait with periodic evidence (E-1);
+# on failure the diagnostic brings the init-container's logs — where
+# the cause lives (a truncated plugin, the network, a dead mirror).
+# Debt noted (VALIDACION §4): pre-baking the plugins into an image of
+# our own would kill the download entirely:
 gate_diag "jenkins-ready" \
   'kubectl -n jenkins-system get pods;
    kubectl -n jenkins-system logs jenkins-0 -c init --tail=25 2>/dev/null;
    kubectl -n jenkins-system get events --sort-by=.lastTimestamp 2>/dev/null | tail -n 8' \
   wait_rollout jenkins-system sts/jenkins 1800
 
-# ── 50.2 jobs-as-code: el seed corrió? (verificación REAL) ─────────
-# Los jobs están en JCasC job-dsl dentro de values.yaml (D9). El
-# gate es que el job EXISTE vía API, no "el chart dice". Auth por
-# lib/jenkins.sh: netrc por stdin, password fuera de TODO argv (A27).
+# ── 50.2 jobs-as-code: did the seeding run? (REAL verification) ────
+# The jobs live in JCasC job-dsl inside values.yaml (D9). The gate is
+# that the job EXISTS via the API, not "the chart says so". Auth
+# through lib/jenkins.sh: netrc over stdin, password out of ALL argv
+# (A27).
 _job_exists() { jenkins_get "/job/$1/api/json" >/dev/null; }
 gate "job-hello-aegis-mb-existe" retry_net 5 _job_exists hello-aegis-mb
-# P1.9 auditoría: era single-shot al lado de su gate hermano con
-# retry — el seed del job-dsl corre async al boot:
+# P1.9 audit: it was single-shot next to its sibling gate that had a
+# retry — the job-dsl seeding runs async to the boot:
 gate "job-ci-images-existe" retry_net 5 _job_exists ci-images
 
-# ── 50.3 imagen de tooling CI (aegis-ci-cosign) ────────────────────
-# En v2 el build de la imagen NO es manual (doc 26 §16.9): es un
-# job jenkins 'ci-images' (también seed del job-dsl) que buildea
-# ci-images/cosign/Containerfile y pushea al registry. Trigger por
-# API (crumb CSRF en lib/jenkins.sh) + espera del resultado:
-log_info "disparando build ci-images (buildah→push: pull/push REAL del registry)"
-# F-C/F-D corrida #15: dos FAILURE seguidos MUDOS (la causa vivía en
-# el console, nunca impreso) y cada reintento costaba re-correr la
-# fase a mano. jenkins_build_retry: captura next ANTES del POST
-# (carrera #9), imprime la cola del console al fallar, y re-dispara
-# SOLO si el fallo tiene firma de RED transitoria (la red móvil):
+# ── 50.3 CI tooling image (aegis-ci-cosign) ────────────────────────
+# In v2 building the image is NOT manual (doc 26 §16.9): it is a
+# jenkins job 'ci-images' (also seeded by job-dsl) that builds
+# ci-images/cosign/Containerfile and pushes to the registry. Triggered
+# via the API (CSRF crumb in lib/jenkins.sh) + waiting for the result:
+log_info "firing the ci-images build (buildah→push: a REAL pull/push of the registry)"
+# F-C/F-D run #15: two consecutive MUTE FAILUREs (the cause lived in
+# the console, never printed) and every retry cost re-running the
+# phase by hand. jenkins_build_retry: it captures next BEFORE the POST
+# (race #9), prints the tail of the console on failure, and re-fires
+# ONLY if the failure has a transient NETWORK signature (the mobile
+# network):
 gate "ci-images-build-verde" jenkins_build_retry ci-images 1800 3
 
-# ── 50.4 gate definitorio: la imagen ESTÁ en el catálogo ───────────
-# lectura real del registry (registry_creds: netrc+CA en tmpfs, sin
-# mostrar valores). --resolve porque el host no resuelve .svc (A30).
-REG_HOST="$REGISTRY_HOST_INTERNAL"   # fuente única (P3 auditoría)
+# ── 50.4 the defining gate: the image IS in the catalogue ──────────
+# a real read of the registry (registry_creds: netrc+CA in tmpfs,
+# without showing values). --resolve because the host does not resolve
+# .svc (A30).
+REG_HOST="$REGISTRY_HOST_INTERNAL"   # single source (P3 audit)
 registry_creds "$REG_HOST" "$REGISTRY_CLUSTER_IP"
 gate "aegis-ci-cosign-en-catalogo" retry_net 3 bash -c \
   "curl -fsS --netrc-file '$SECRETS_TMP/registry.netrc' \
@@ -96,5 +100,5 @@ gate "aegis-ci-cosign-en-catalogo" retry_net 3 bash -c \
      'https://$REG_HOST/v2/aegis-ci-cosign/tags/list' \
    | jq -e '.tags | length > 0' >/dev/null"
 
-log_ok "Jenkins vivo con jobs-as-code (PVC descartable), admin \
-random en el store cifrado, tooling CI construido y verificado en el registry"
+log_ok "Jenkins alive with jobs-as-code (a disposable PVC), a random \
+admin in the encrypted store, CI tooling built and verified in the registry"

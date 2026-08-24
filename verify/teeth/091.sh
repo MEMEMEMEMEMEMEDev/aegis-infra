@@ -1,7 +1,7 @@
-# dientes del check 091 (ninguna ruta pública sin protección)
-# El canario es el único sitio escrito a mano, y por eso el más fácil
-# de dejar sin los tres middlewares — que es exactamente lo que pasó
-# en la semilla hasta el 2026-08-23.
+# teeth for check 091 (no public route left unprotected)
+# The canary is the only hand-written site, and therefore the easiest
+# one to leave without the three middlewares — which is exactly what
+# happened in the seed until 2026-08-23.
 red_1() {
     python3 - "$AEGIS_ROOT/seed/platform/k8s/organizations/org-canary/routes.yaml" <<'PY'
 import re, sys
@@ -10,4 +10,4 @@ t = re.sub(r'\n\s*- \{name: canary-ritmo\}', '', t, count=1)
 open(p, "w").write(t)
 PY
 }
-control_1() { printf '\n# comentario legitimo\n' >> "$AEGIS_ROOT/seed/platform/k8s/organizations/org-canary/routes.yaml"; }
+control_1() { printf '\n# legitimate comment\n' >> "$AEGIS_ROOT/seed/platform/k8s/organizations/org-canary/routes.yaml"; }

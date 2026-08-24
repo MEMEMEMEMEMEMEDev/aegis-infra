@@ -1,14 +1,15 @@
-# dientes del check 084 (todo destino de escritura sobrevive a un clone)
+# teeth for check 084 (every write destination survives a clone)
 #
-# El generador automático había elegido «borrar .git/index» como
-# mutación: el check se ponía rojo, sí, pero por haberle roto git al
-# árbol, no por el defecto que vigila. Un diente que muerde por la
-# razón equivocada es peor que no tener diente, porque da confianza.
+# The automatic generator had picked «delete .git/index» as the
+# mutation: the check did turn red, yes, but for having broken git on
+# the tree, not for the defect it watches. A tooth that bites for the
+# wrong reason is worse than no tooth at all, because it gives
+# confidence.
 #
-# El defecto real: una fase escribe en un directorio de platform/ que
-# la semilla no trae, así que en una máquina nueva —donde platform/
-# nace de un clone de la semilla— esa escritura falla.
+# The real defect: a phase writes into a directory of platform/ that
+# the seed does not ship, so on a new machine —where platform/ is born
+# from a clone of the seed— that write fails.
 red_1() {
-    printf '\ncp x "$PLATFORM_DIR/k8s/base/carpeta-que-la-semilla-no-trae/archivo.yaml"\n' \
+    printf '\ncp x "$PLATFORM_DIR/k8s/base/folder-the-seed-does-not-ship/file.yaml"\n' \
         >> "$AEGIS_ROOT/init/phases/85-observability.sh"
 }

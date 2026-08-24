@@ -248,7 +248,7 @@ arrastra.
 | # | contrato | acoplado con | riesgo |
 |---|---|---|---|
 | D1 | `.aegis-app/` (staging) en `platform/.gitignore:37` | `aegis-app:99` `DIR_STAGING`, y `aegis-org:55` usa el mismo | Renombrar el dir sin tocar el ignore = **commitear material generado** |
-| D2 | glob `aegis-estado-*.age` | escrito por `init/aegis-backup.sh:51`, leído por `aegis-chequeo:845` | El chequeo de respaldos no encuentra nada |
+| D2 | glob `aegis-state-*.age` | escrito por `init/aegis-backup.sh:51`, leído por `aegis-chequeo:845` | El chequeo de respaldos no encuentra nada |
 | D3 | glob `aegis-datos-org-<org>-*.age` | escrito por `aegis-respaldo:518`, leído por `aegis-chequeo:883` | ídem |
 | D4 | marca `.aegis-destino` | `aegis-respaldo:164` ↔ `aegis-chequeo:831` | |
 | D5 | `/etc/sudoers.d/010-aegis-init-nopasswd` | `aegis-preflight.sh:31-32`, `lib/common.sh:737,739,755`, `phases/00-preflight.sh:60` | 5 lugares |
@@ -421,7 +421,7 @@ por árbol: **`init/` tiende al inglés, `platform/bin/` al español**, con
 - Los cuatro dashboards: `bootstrap.yaml` + `supply-chain.yaml` (EN) junto a
   `borde.yaml` + `plataforma.yaml` (ES).
 - Las catorce fases del init: todas EN salvo `85-observability.sh` y
-  `15-terceros.sh`.
+  `15-third-parties.sh`.
 - Los cuatro contratos de organización: `blog`/`shop` (EN),
   `ejemplo`/`portafolio` (ES).
 - Tres engines: `engine-cpu`, `engine-llm` (EN), `engine-charla` (ES).

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# aegis-init lib/checks.sh — verificaciones de preflight y de entorno.
-# Todas READ-ONLY. Cada check devuelve 0/1 y loguea evidencia (los
-# gates exigen evidencia, no "parece que sí").
+# aegis-init lib/checks.sh — preflight and environment checks.
+# All of them READ-ONLY. Every check returns 0/1 and logs evidence
+# (gates demand evidence, not "looks like it").
 
 set -euo pipefail
 
-# ── binarios ────────────────────────────────────────────────────────
-# Pines de userland en platform/ansible/inventory/group_vars/all.yml
-# (A12: pins literales). check_binaries no instala — fase 05 instala.
+# ── binaries ────────────────────────────────────────────────────────
+# Userland pins in platform/ansible/inventory/group_vars/all.yml
+# (A12: literal pins). check_binaries does not install — phase 05 does.
 REQUIRED_BINS=(tofu sops age age-keygen kubectl helm jq direnv gh \
                python3 git openssl htpasswd ssh-keygen rsync cosign)
 
@@ -17,32 +17,32 @@ check_binaries() {
         command -v "$b" >/dev/null || missing+=("$b")
     done
     if ((${#missing[@]})); then
-        log_warn "faltan binarios: ${missing[*]}"
+        log_warn "missing binaries: ${missing[*]}"
         return 1
     fi
-    log_ok "userland completo (${#REQUIRED_BINS[@]} binarios)"
+    log_ok "userland complete (${#REQUIRED_BINS[@]} binaries)"
 }
 
-# yq NO se exige a propósito: la convención del host es python3+pyyaml
-# (regla C7); yq solo dentro de pods.
+# yq is deliberately NOT required: the host convention is python3+pyyaml
+# (rule C7); yq only inside pods.
 
 # ── kubeconfig / cluster target ─────────────────────────────────────
-# A11: el bache del kubeconfig ajeno casi despliega el tunnel en
-# infra de otro proyecto. Verificación POSITIVA del target siempre.
+# A11: the someone-else's-kubeconfig pothole almost deployed the tunnel
+# on another project's infra. POSITIVE verification of the target, always.
 check_kube_context() {
     local expected="$1"
     local current
     current="$(kubectl config current-context 2>/dev/null || echo NONE)"
     if [[ "$current" != "$expected" ]]; then
-        log_error "current-context='$current', esperado '$expected'"
+        log_error "current-context='$current', expected '$expected'"
         return 1
     fi
     kubectl get nodes -o name >/dev/null || return 1
-    log_ok "kubeconfig apunta a '$expected' y responde"
+    log_ok "kubeconfig points at '$expected' and answers"
 }
 
 check_default_storageclass() {
-    # 1.2c: sin default SC los PVC quedan Pending sin error claro.
+    # 1.2c: without a default SC the PVCs sit Pending with no clear error.
     kubectl get storageclass -o json | python3 -c '
 import sys, json
 scs = json.load(sys.stdin)["items"]
@@ -52,24 +52,25 @@ d = [s["metadata"]["name"] for s in scs
 sys.exit(0 if d else 1)'
 }
 
-# ── WSL2 / lado Windows (checklist verificada, no automatizada) ─────
+# ── WSL2 / the Windows side (verified checklist, not automated) ─────
 check_wsl2() {
     grep -qi microsoft /proc/version || {
-        log_info "no es WSL2 (perfil hetzner: OK)"; return 0; }
+        log_info "not WSL2 (hetzner profile: OK)"; return 0; }
     local issues=()
-    # systemd activo:
-    [[ "$(ps -p 1 -o comm=)" == "systemd" ]] || issues+=("systemd no es PID 1 (wsl.conf [boot] systemd=true)")
-    # networking mirrored (best effort: la señal es la IP compartida):
-    # NOTA caso-borde: no hay API limpia para leer .wslconfig desde
-    # adentro; esto VERIFICA síntomas y GUÍA, no configura (27 §3.3).
+    # systemd active:
+    [[ "$(ps -p 1 -o comm=)" == "systemd" ]] || issues+=("systemd is not PID 1 (wsl.conf [boot] systemd=true)")
+    # mirrored networking (best effort: the signal is the shared IP):
+    # CORNER-CASE NOTE: there is no clean API to read .wslconfig from
+    # the inside; this VERIFIES symptoms and GUIDES, it does not
+    # configure (27 §3.3).
     if ((${#issues[@]})); then
         printf '  - %s\n' "${issues[@]}"
         return 1
     fi
-    log_ok "WSL2: systemd OK (revisar .wslconfig manualmente si hay dudas de RAM/networking)"
+    log_ok "WSL2: systemd OK (check .wslconfig by hand if in doubt about RAM/networking)"
 }
 
-# ── precondiciones de cuenta (límites conocidos H4/H5) ──────────────
+# ── account preconditions (known limits H4/H5) ──────────────────────
 check_github_reachable() {
     retry_net 3 gh auth status >/dev/null 2>&1
 }
@@ -77,46 +78,47 @@ check_repo_clean_main() {
     local repo="$1"
     git -C "$repo" fetch origin main --quiet || return 1
     [[ -z "$(git -C "$repo" status --porcelain)" ]] || {
-        log_warn "repo $repo con cambios locales"; return 1; }
+        log_warn "repo $repo has local changes"; return 1; }
 }
 
 # ── age / SOPS ──────────────────────────────────────────────────────
 check_age_key_operational() {
-    # A2: la var explícita, no confiar en direnv en non-interactive.
+    # A2: the explicit var, do not trust direnv in non-interactive.
     [[ -n "${SOPS_AGE_KEY_FILE:-}" ]] || {
-        log_error "SOPS_AGE_KEY_FILE no exportada"; return 1; }
+        log_error "SOPS_AGE_KEY_FILE not exported"; return 1; }
     [[ -f "$SOPS_AGE_KEY_FILE" ]] || {
-        log_error "no existe $SOPS_AGE_KEY_FILE"; return 1; }
+        log_error "$SOPS_AGE_KEY_FILE does not exist"; return 1; }
     [[ "$(stat -c %a "$SOPS_AGE_KEY_FILE")" == "600" ]] || {
-        log_warn "permisos != 600 en la age key"; return 1; }
-    log_ok "age key operativa en \$SOPS_AGE_KEY_FILE (600)"
+        log_warn "permissions != 600 on the age key"; return 1; }
+    log_ok "age key operational at \$SOPS_AGE_KEY_FILE (600)"
 }
 
 check_sops_roundtrip() {
-    # roundtrip real contra un archivo del repo (no imprime valores).
-    # sops_env: re-deriva SOPS_AGE_KEY_FILE en el punto de uso (bug 5
-    # validación #3 — los gates corren en subshells y el export del
-    # camino --from tuvo huecos):
+    # a real roundtrip against a file in the repo (prints no values).
+    # sops_env: re-derives SOPS_AGE_KEY_FILE at the point of use (bug 5
+    # of validation #3 — the gates run in subshells and the export
+    # along the --from path had holes):
     local encfile="$1"
     sops_env
     sops -d "$encfile" | head -c1 >/dev/null
 }
 
-# ── host keys de GitHub (pin vs fuente oficial) ─────────────────────
-# Los host keys están PINNEADOS en jenkins/values.yaml (T1 declarativo,
-# tomados de api.github.com/meta 2026-07-06). Este check detecta
-# rotación de GitHub: cada key pinneada debe seguir en /meta. Falla =
-# actualizar el values ANTES de bootstrapear (A32: fuente oficial).
+# ── GitHub host keys (pin vs official source) ───────────────────────
+# The host keys are PINNED in jenkins/values.yaml (declarative T1,
+# taken from api.github.com/meta on 2026-07-06). This check detects a
+# GitHub rotation: every pinned key must still be in /meta. A failure =
+# update the values BEFORE bootstrapping (A32: official source).
 check_github_hostkeys_pin() {
     local values="$PLATFORM_DIR/k8s/base/platform/jenkins/values.yaml"
     local meta
     meta="$(mktemp)"
-    # gh api (AUTENTICADO, 5000 req/h) y no curl anónimo (60/h): en
-    # sesiones de validación iterativa el rate limit anónimo hacía
-    # fallar el gate con "(¿red?)" engañoso (bug 2 validación #3).
-    # gh ya está garantizado: el gate github-auth corre antes.
+    # gh api (AUTHENTICATED, 5000 req/h) and not anonymous curl (60/h):
+    # in iterative validation sessions the anonymous rate limit made
+    # the gate fail with a misleading "(network?)" (bug 2 of
+    # validation #3). gh is already guaranteed: the github-auth gate
+    # runs first.
     if ! retry_net 3 bash -c "gh api meta > '$meta'"; then
-        log_error "gh api meta falló — si el error de arriba dice 'rate limit' NO es red; si es timeout/DNS, revisar la red primero"
+        log_error "gh api meta failed — if the error above says 'rate limit' it is NOT the network; if it is timeout/DNS, check the network first"
         rm -f "$meta"; return 1
     fi
     python3 - "$values" "$meta" <<'EOF'
@@ -126,7 +128,7 @@ official = set(k.split()[1] for k in meta["ssh_keys"])
 pinned = set(re.findall(r'github\.com\s+\S+\s+(AAAA\S+)', values))
 stale = pinned - official
 if stale:
-    print("host keys pinneadas que YA NO están en /meta:", file=sys.stderr)
+    print("pinned host keys that are NO LONGER in /meta:", file=sys.stderr)
     for k in sorted(stale):
         print(f"  {k[:24]}...", file=sys.stderr)
     sys.exit(1)
@@ -134,20 +136,20 @@ sys.exit(0 if pinned else 1)
 EOF
     local rc=$?
     rm -f "$meta"
-    (( rc == 0 )) && log_ok "host keys pinneadas vigentes según api.github.com/meta"
+    (( rc == 0 )) && log_ok "pinned host keys still current according to api.github.com/meta"
     return "$rc"
 }
 
-# ── red / DNS (preflight-doctor — P0.5 auditoría 2026-07-18) ────────
-# La fase 00 no chequeaba NADA de lo que realmente mató corridas
-# (IPv6 roto, DNS por NIC apuntando a un resolver muerto, reloj sin
-# NTP) — los fallos aparecían a 30-40 min con 4+ fases de estado
-# escrito, y el operador los arregló A MANO en la corrida real. El
-# doctor verifica Y da la remediación exacta; no configura solo.
+# ── network / DNS (preflight doctor — P0.5 audit 2026-07-18) ────────
+# Phase 00 checked NOTHING of what actually killed runs (broken IPv6,
+# per-NIC DNS pointing at a dead resolver, a clock with no NTP) — the
+# failures showed up 30-40 min in, with 4+ phases of state written, and
+# the operator fixed them BY HAND in the real run. The doctor verifies
+# AND gives the exact remediation; it does not configure by itself.
 
-# binarios que el PROPIO preflight/wizard necesita (antes de que la
-# fase 05 instale el userland): sin esto, la 00 moría con un
-# "command not found" críptico en vez de una lista accionable:
+# binaries the preflight/wizard ITSELF needs (before phase 05 installs
+# the userland): without this, phase 00 died with a cryptic "command
+# not found" instead of an actionable list:
 check_bootstrap_bins() {
     local missing=() b
     for b in python3 curl git sudo jq; do
@@ -155,111 +157,111 @@ check_bootstrap_bins() {
     done
     python3 -c 'import yaml' 2>/dev/null || missing+=("python3-yaml")
     if ((${#missing[@]})); then
-        log_error "faltan para el preflight: ${missing[*]} — 'sudo apt install ${missing[*]}'"
+        log_error "missing for the preflight: ${missing[*]} — 'sudo apt install ${missing[*]}'"
         return 1
     fi
-    log_ok "binarios de bootstrap presentes (python3+yaml, curl, git, sudo, jq)"
+    log_ok "bootstrap binaries present (python3+yaml, curl, git, sudo, jq)"
 }
 
-# resolución REAL de los hosts que el init consume (getent = el
-# resolver efectivo del sistema, no un DNS arbitrario):
+# REAL resolution of the hosts the init consumes (getent = the system's
+# effective resolver, not an arbitrary DNS):
 check_egress_dns() {
     local h bad=()
     for h in github.com api.cloudflare.com get.k3s.io docker.io; do
         retry_net 3 bash -c "getent ahosts '$h' >/dev/null" || bad+=("$h")
     done
     if ((${#bad[@]})); then
-        log_error "no resuelven: ${bad[*]} — revisar el resolver POR INTERFAZ ('resolvectl status'): en la corrida real la NIC host-only apuntaba a un DNS muerto y el global tapaba el hueco a ratos"
+        log_error "do not resolve: ${bad[*]} — check the PER-INTERFACE resolver ('resolvectl status'): in the real run the host-only NIC pointed at a dead DNS and the global one covered the hole now and then"
         return 1
     fi
-    log_ok "DNS efectivo resuelve github/cloudflare/k3s/docker"
+    log_ok "the effective DNS resolves github/cloudflare/k3s/docker"
 }
 
-# trampa IPv6 (arreglada A MANO en la corrida real): el host anuncia
-# IPv6 pero el camino v6 está roto → curls que cuelgan/fallan según
-# a qué familia caiga el happy-eyeballs. Señal: v4 anda y dual falla:
+# IPv6 trap (fixed BY HAND in the real run): the host advertises IPv6
+# but the v6 path is broken → curls that hang/fail depending on which
+# family happy-eyeballs falls into. Signal: v4 works and dual fails:
 check_ipv6_trap() {
     if curl -fsS -m 15 -o /dev/null https://api.github.com/meta 2>/dev/null; then
-        log_ok "egress https OK (dual-stack)"
+        log_ok "https egress OK (dual-stack)"
         return 0
     fi
     if curl -4 -fsS -m 15 -o /dev/null https://api.github.com/meta 2>/dev/null; then
-        log_error "el egress FALLA dual-stack pero ANDA forzado a IPv4 — camino IPv6 roto (la trampa de la corrida real). Remediación: sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1 net.ipv6.conf.default.disable_ipv6=1 (persistir en /etc/sysctl.d/) o arreglar la ruta v6"
+        log_error "egress FAILS dual-stack but WORKS forced to IPv4 — broken IPv6 path (the trap from the real run). Remediation: sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1 net.ipv6.conf.default.disable_ipv6=1 (persist it in /etc/sysctl.d/) or fix the v6 route"
         return 1
     fi
-    log_error "el egress https no anda ni por IPv4 — ¿red caída? (reintentar cuando estabilice)"
+    log_error "https egress does not work over IPv4 either — network down? (retry once it settles)"
     return 1
 }
 
-# reloj — H1 corrida #15: la VM arrancó ~9h20m ATRASADA con NTP
-# "active". timedatectl NO es señal confiable con chrony instalado
-# (lee el flag de systemd, no chrony — miente en AMBAS direcciones),
-# y chrony corrige por slew: un salto grande tardaría semanas. La
-# señal REAL es el skew contra una fuente externa que el init YA
-# consume: el header Date de api.github.com. |skew|>60s = ROJO con
-# remediación (un reloj corrido hace que certs/tokens recién
-# emitidos parezcan not-yet-valid — fallos crípticos 5 fases después):
+# clock — H1 run #15: the VM booted ~9h20m BEHIND with NTP "active".
+# timedatectl is NOT a trustworthy signal with chrony installed (it
+# reads systemd's flag, not chrony — it lies in BOTH directions), and
+# chrony corrects by slew: a big jump would take weeks. The REAL signal
+# is the skew against an external source the init ALREADY consumes: the
+# Date header of api.github.com. |skew|>60s = RED with remediation (a
+# clock that has drifted makes freshly issued certs/tokens look
+# not-yet-valid — cryptic failures 5 phases later):
 check_clock_skew() {
     local hdr remote_ts local_ts skew
     hdr="$(retry_net 3 bash -c \
         "curl -fsSI -m 15 https://api.github.com/meta 2>/dev/null \
          | tr -d '\r' | awk 'tolower(\$1)==\"date:\"{ \$1=\"\"; print substr(\$0,2); exit }'")" \
-        || { log_warn "no pude leer el header Date de api.github.com — skew de reloj INCONCLUSO (red)"; return 0; }
-    [[ -n "$hdr" ]] || { log_warn "respuesta sin header Date — skew inconcluso"; return 0; }
+        || { log_warn "could not read the Date header of api.github.com — clock skew INCONCLUSIVE (network)"; return 0; }
+    [[ -n "$hdr" ]] || { log_warn "response with no Date header — skew inconclusive"; return 0; }
     remote_ts="$(date -ud "$hdr" +%s 2>/dev/null)" || \
-        { log_warn "no pude parsear el Date remoto ('$hdr') — skew inconcluso"; return 0; }
+        { log_warn "could not parse the remote Date ('$hdr') — skew inconclusive"; return 0; }
     local_ts="$(date -u +%s)"
     skew=$(( local_ts - remote_ts ))
     if (( skew > 60 || skew < -60 )); then
-        log_error "RELOJ DESINCRONIZADO: skew ${skew}s contra api.github.com (local $(date -u +%FT%TZ)). Remediación: con chrony 'sudo chronyc makestep'; con timesyncd 'sudo timedatectl set-ntp true && sudo systemctl restart systemd-timesyncd'. Verificar re-corriendo esta fase. OJO: 'timedatectl … synchronized' NO es confiable con chrony"
+        log_error "CLOCK OUT OF SYNC: skew ${skew}s against api.github.com (local $(date -u +%FT%TZ)). Remediation: with chrony 'sudo chronyc makestep'; with timesyncd 'sudo timedatectl set-ntp true && sudo systemctl restart systemd-timesyncd'. Verify by re-running this phase. WATCH OUT: 'timedatectl … synchronized' is NOT trustworthy with chrony"
         return 1
     fi
-    log_ok "reloj OK (skew ${skew}s vs api.github.com)"
+    log_ok "clock OK (skew ${skew}s vs api.github.com)"
 }
 
-# informativo residual (NO gate — H1: la señal es débil por diseño):
+# residual informational (NOT a gate — H1: the signal is weak by design):
 check_clock_ntp() {
     local sync
     sync="$(timedatectl show -p NTPSynchronized --value 2>/dev/null || echo unknown)"
-    log_info "timedatectl NTPSynchronized=$sync (señal DÉBIL — el veredicto real es el gate de skew)"
+    log_info "timedatectl NTPSynchronized=$sync (WEAK signal — the real verdict is the skew gate)"
     return 0
 }
 
-# tmpfs de secretos disponible (secrets_workdir lo asume):
+# secrets tmpfs available (secrets_workdir assumes it):
 check_dev_shm() {
     local t
     t="$(mktemp -d /dev/shm/aegis-preflight.XXXXXX 2>/dev/null)" || {
-        log_error "/dev/shm no escribible — el manejo de secretos (tmpfs+shred) no puede operar"
+        log_error "/dev/shm not writable — secret handling (tmpfs+shred) cannot operate"
         return 1; }
     rmdir "$t"
-    log_ok "/dev/shm operativo (tmpfs de secretos)"
+    log_ok "/dev/shm operational (secrets tmpfs)"
 }
 
 check_domain_on_cloudflare() {
-    # 0.6: NS del dominio apuntando a Cloudflare. El check viejo era
-    # un NO-OP (sys.exit(0) incondicional — auditoría 2026-07-18):
-    # pasaba verde con cualquier dominio y el error real explotaba en
-    # la fase 25 (tofu) o 35 (DNS público). Sin dig garantizado en el
-    # host: DNS-over-HTTPS contra 1.1.1.1 (curl+jq ya exigidos).
-    # FAIL solo con evidencia positiva de NS ajenos; sin respuesta
-    # concluyente (red rara) queda WARN — el check duro de la API CF
-    # sigue en la fase 25:
+    # 0.6: the domain's NS pointing at Cloudflare. The old check was a
+    # NO-OP (unconditional sys.exit(0) — audit 2026-07-18): it went
+    # green with any domain and the real error blew up in phase 25
+    # (tofu) or 35 (public DNS). With no dig guaranteed on the host:
+    # DNS-over-HTTPS against 1.1.1.1 (curl+jq already required).
+    # FAIL only on positive evidence of someone else's NS; with no
+    # conclusive answer (odd network) it stays WARN — the hard check
+    # against the CF API is still in phase 25:
     local domain="$1" ns_json ns_list
     ns_json="$(retry_net 3 curl -fsS -m 15 \
         -H 'accept: application/dns-json' \
         "https://1.1.1.1/dns-query?name=${domain}&type=NS" 2>/dev/null)" || {
-        log_warn "no pude consultar NS de $domain (DoH 1.1.1.1) — inconcluso; la fase 25 lo valida duro por API"
+        log_warn "could not query the NS of $domain (DoH 1.1.1.1) — inconclusive; phase 25 validates it the hard way via API"
         return 0; }
     ns_list="$(jq -r '.Answer[]?.data // empty' <<< "$ns_json" | tr -d ' ')"
     if [[ -z "$ns_list" ]]; then
-        log_warn "sin registros NS visibles para $domain — ¿zona recién creada? la fase 25 lo valida duro por API"
+        log_warn "no NS records visible for $domain — a freshly created zone? phase 25 validates it the hard way via API"
         return 0
     fi
     if grep -qi 'ns\.cloudflare\.com' <<< "$ns_list"; then
-        log_ok "NS de $domain apuntan a Cloudflare"
+        log_ok "the NS of $domain point at Cloudflare"
         return 0
     fi
     printf '%s\n' "$ns_list" >&2
-    log_error "los NS de $domain NO son de Cloudflare (arriba) — la zona debe estar activa en tu cuenta CF ANTES del init"
+    log_error "the NS of $domain are NOT Cloudflare's (above) — the zone must be active in your CF account BEFORE the init"
     return 1
 }

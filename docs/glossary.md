@@ -107,6 +107,8 @@ and that narration is the most valuable thing in this codebase.
 | `TRABAJOS` / `LISTA_PERFILES` / `AVISO_PERFIL` | `JOBS_LIST` / `PROFILE_LIST` / `PROFILE_NOTICE` | |
 | `es_local` | `is_local` | and `perfil()` → `profile()` |
 | `PARECIDOS` | `SIMILAR` | |
+| `canario` | `canary` | |
+| `edge_origen_responde` | `edge_origin_responds` | the probe that phases 35, 60 and 85 use — and check 090's load-bearing `grep -v` anchor moved with it |
 
 ## 3b. Being retired — in progress
 
@@ -120,7 +122,6 @@ than no ratchet at all.
 |---|---|
 | `semilla` | `seed` |
 | `plantilla` | `template` |
-| `canario` | `canary` |
 | `plataforma` | `platform` |
 | `ruteo` | `routes` |
 | `observabilidad` | `observability` |

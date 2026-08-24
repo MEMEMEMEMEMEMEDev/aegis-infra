@@ -1,23 +1,23 @@
-# dientes del check 111 (el trinquete del glosario)
+# teeth for check 111 (the glossary's ratchet)
 #
-# El riesgo real no es que alguien reescriba `paths.py` como `rutas.py`
-# a propósito: es que un archivo NUEVO nazca con la costumbre vieja y
-# nadie lo note, porque el árbol todavía está medio en español y una
-# palabra más no llama la atención.
+# The real risk is not that somebody rewrites `paths.py` as `rutas.py`
+# on purpose: it is that a NEW file is born out of the old habit and
+# nobody notices, because the tree is still half in Spanish and one
+# more word does not draw attention.
 red_1() {
-    printf '\nRUTAS_VIEJAS = "lib/aegis/rutas.py"\n' >> "$AEGIS_ROOT/lib/aegis/paths.py"
+    printf '\nOLD_PATHS = "lib/aegis/rutas.py"\n' >> "$AEGIS_ROOT/lib/aegis/paths.py"
 }
 
-# la misma vuelta por el lado del artefacto, que es donde más duele:
-# un manifiesto que vuelve a nombrar el archivo con su nombre retirado.
+# the same return by way of the artifact, which is where it hurts most:
+# a manifest that names the file by its retired name again.
 red_2() {
-    printf '\n# nada\nviejo: planes.yaml\n' \
+    printf '\n# nothing\nold: planes.yaml\n' \
         >> "$AEGIS_ROOT/seed/platform/k8s/bootstrap/appprojects.yaml"
 }
 
-# y el caso que prueba que la lista se DERIVA del documento y no está
-# escrita en el check: agregar una palabra al glosario tiene que
-# empezar a vigilarla de inmediato.
+# and the case that proves the list is DERIVED from the document and is
+# not written in the check: adding a word to the glossary has to start
+# watching it immediately.
 red_3() {
     sed -i 's|^| `dominio_raiz` | `root_domain` | contract and edge key |$|\0\n| `gris` | `gray` | |' \
         "$AEGIS_ROOT/docs/glossary.md" 2>/dev/null || \
@@ -25,16 +25,16 @@ red_3() {
 import sys
 p = sys.argv[1]
 s = open(p).read()
-ancla = "| `equivalencia-org.sh` | `org-equivalence.sh` | |\n"
-s = s.replace(ancla, ancla + "| `gris` | `gray` | |\n", 1)
+anchor = "| `equivalencia-org.sh` | `org-equivalence.sh` | |\n"
+s = s.replace(anchor, anchor + "| `gris` | `gray` | |\n", 1)
 open(p, "w").write(s)
 PY
 }
 
-# control: contar la historia en un COMENTARIO nombrando una palabra
-# retirada es legítimo, y es lo que hacen los checks 108 y 001. Si esto
-# se pusiera rojo, el trinquete estaría borrando la memoria del repo.
+# control: telling the story in a COMMENT that names a retired word is
+# legitimate, and it is what checks 108 and 001 do. If this turned red,
+# the ratchet would be erasing the repo's memory.
 control_1() {
-    printf '\n# historia: esto antes se llamaba rutas.py y planes.yaml\n' \
+    printf '\n# history: this used to be called rutas.py and planes.yaml\n' \
         >> "$AEGIS_ROOT/lib/aegis/paths.py"
 }

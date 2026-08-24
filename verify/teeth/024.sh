@@ -1,11 +1,11 @@
-# dientes del check 024 — generados el 2026-08-23 y VERIFICADOS:
-# cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
+# teeth of check 024 — generated on 2026-08-23 and VERIFIED: every red
+# was applied over a copy of the tree and the check went red.
 
-# saca del artefacto justo lo que el check dice medir
+# takes out of the artifact exactly what the check claims to measure
 red_1() {
-    grep -vE 'resolv-conf: /run/systemd/resolve/resolv.conf' "$AEGIS_ROOT/seed/platform/ansible/playbooks/bootstrap-host.yml" > "$AEGIS_ROOT/seed/platform/ansible/playbooks/bootstrap-host.yml.diente" \
-        && mv "$AEGIS_ROOT/seed/platform/ansible/playbooks/bootstrap-host.yml.diente" "$AEGIS_ROOT/seed/platform/ansible/playbooks/bootstrap-host.yml"
+    grep -vE 'resolv-conf: /run/systemd/resolve/resolv.conf' "$AEGIS_ROOT/seed/platform/ansible/playbooks/bootstrap-host.yml" > "$AEGIS_ROOT/seed/platform/ansible/playbooks/bootstrap-host.yml.tooth" \
+        && mv "$AEGIS_ROOT/seed/platform/ansible/playbooks/bootstrap-host.yml.tooth" "$AEGIS_ROOT/seed/platform/ansible/playbooks/bootstrap-host.yml"
 }
 
-# control: un cambio LEGÍTIMO no puede ponerlo rojo
-control_1() { printf '# comentario legitimo\n' >> "$AEGIS_ROOT/seed/platform/ansible/playbooks/bootstrap-host.yml"; }
+# control: a LEGITIMATE change cannot turn it red
+control_1() { printf '# legitimate comment\n' >> "$AEGIS_ROOT/seed/platform/ansible/playbooks/bootstrap-host.yml"; }

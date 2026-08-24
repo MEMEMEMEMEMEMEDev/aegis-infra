@@ -1,38 +1,39 @@
 #!/usr/bin/env python3
-"""Payload para acuñar el token CF de ACCESS (fase 15, #88).
+"""Payload to mint the CF token for ACCESS (phase 15, #88).
 
-POR QUÉ ES UN TOKEN APARTE y no un permiso más del token del túnel:
-el job `edge-apply` de Jenkins está diseñado para recibir SOLO el
-token del borde. Si ese token pudiera editar Access, un CI
-comprometido podría desprotegerse a sí mismo — quitar las políticas
-que lo tienen detrás de Access y quedar expuesto sin que nada avise.
-La separación es el mecanismo; este archivo es la mitad que faltaba
-para que una instancia NUEVA no naciera sin ella (#88).
+WHY IT IS A TOKEN OF ITS OWN and not one more permission on the
+tunnel's token: Jenkins' `edge-apply` job is designed to receive ONLY
+the edge token. If that token could edit Access, a compromised CI
+could un-protect itself — strip away the policies that keep it behind
+Access and end up exposed without anything raising an alarm. The
+separation is the mechanism; this file is the half that was missing
+so that a NEW instance would not be born without it (#88).
 
-Permisos:
-  - Access: Apps and Policies / Write   (las 4 aplicaciones + 3 políticas)
-  - Access: Service Tokens / Write      (el service token de la automatización)
+Permissions:
+  - Access: Apps and Policies / Write   (the 4 applications + 3 policies)
+  - Access: Service Tokens / Write      (the automation's service token)
 
-AMBOS de CUENTA, no de zona, y eso no es una decisión nuestra:
-Cloudflare Access es un recurso de cuenta. No se puede acotar más.
-Es la excepción declarada a D6, y por eso el token es exclusivo de
-Access: si su radio no se puede achicar, se achica lo que puede
-tocar.
+BOTH of them of ACCOUNT, not of zone, and that is not our decision:
+Cloudflare Access is an account resource. It cannot be narrowed any
+further. It is the declared exception to D6, and that is why the token
+is exclusive to Access: if its radius cannot be shrunk, what it can
+touch is.
 
-Los permission groups se matchean POR NOMBRE contra la lista viva de
-la API (argv[1]) — cero IDs de memoria. Si un nombre no matchea, sale
-1 LISTANDO lo disponible.
+The permission groups are matched BY NAME against the API's live list
+(argv[1]) — zero IDs from memory. If a name does not match, it exits 1
+LISTING what is available.
 
-NOTA HONESTA sobre los patrones de abajo. Los de cf-policy-tunnel.py
-y cf-policy-dns.py están CONFIRMADOS contra la cuenta (validación #3,
-2026-07-09). Estos dos NO: la maestra CF es efímera y muere en la
-fase 15, así que no había con qué listar los grupos al escribirlos.
-Los regex son deliberadamente anchos y el fallo es con evidencia — si
-no matchean, el operador ve la lista real y ajusta una línea. Eso es
-mejor que un ID de memoria que falla en silencio, pero peor que una
-medición, y se dice acá para que no se lea como confirmado.
+AN HONEST NOTE about the patterns below. The ones in
+cf-policy-tunnel.py and cf-policy-dns.py are CONFIRMED against the
+account (validation #3, 2026-07-09). These two are NOT: the CF master
+token is ephemeral and dies in phase 15, so there was nothing to list
+the groups with when they were written. The regexes are deliberately
+wide and the failure comes with evidence — if they do not match, the
+operator sees the real list and adjusts one line. That is better than
+an ID from memory that fails silently, but worse than a measurement,
+and it is said here so that it is not read as confirmed.
 
-Uso: cf-policy-access.py <pgroups.json> <token-name> <account-id> <zone-id>
+Usage: cf-policy-access.py <pgroups.json> <token-name> <account-id> <zone-id>
 """
 import json
 import re
@@ -48,7 +49,7 @@ def find(pattern, scope_hint):
         if rx.search(g["name"]) and any(scope_hint in s for s in
                                         g.get("scopes", []) or [scope_hint]):
             return {"id": g["id"], "name": g["name"]}
-    print(f"NO MATCH para /{pattern}/ (scope ~{scope_hint}). Disponibles:",
+    print(f"NO MATCH for /{pattern}/ (scope ~{scope_hint}). Available:",
           file=sys.stderr)
     for g in groups:
         print(f"  - {g['name']}  scopes={g.get('scopes')}", file=sys.stderr)

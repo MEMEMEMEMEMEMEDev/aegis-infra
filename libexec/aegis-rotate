@@ -108,16 +108,16 @@ gri=$'\033[90m'; neg=$'\033[1m'; fin=$'\033[0m'
 #
 # campos: nombre|clase|fase|app_sync|verificador|tercero|radio
 RECETAS=$(cat <<'TABLA'
-hmac_argocd|normal|15-terceros|argocd-secrets|ver_hmac_argocd|GitHub|ArgoCD deja de enterarse de los push
-hmac_jenkins|normal|15-terceros|jenkins-secrets|ver_hmac_jenkins|GitHub|los push dejan de construir
-dk_ops|normal|15-terceros|argocd-secrets|ver_dk_ops|GitHub|ArgoCD no puede leer el repo de plataforma
-dk_app_ro|normal|15-terceros|jenkins-secrets|ver_dk_app_ro|GitHub|Jenkins no puede clonar la app
-dk_app_argocd_ro|normal|15-terceros|argocd-secrets|ver_dk_app_argocd|GitHub|ArgoCD no puede leer el repo de la app
+hmac_argocd|normal|15-third-parties|argocd-secrets|ver_hmac_argocd|GitHub|ArgoCD deja de enterarse de los push
+hmac_jenkins|normal|15-third-parties|jenkins-secrets|ver_hmac_jenkins|GitHub|los push dejan de construir
+dk_ops|normal|15-third-parties|argocd-secrets|ver_dk_ops|GitHub|ArgoCD no puede leer el repo de plataforma
+dk_app_ro|normal|15-third-parties|jenkins-secrets|ver_dk_app_ro|GitHub|Jenkins no puede clonar la app
+dk_app_argocd_ro|normal|15-third-parties|argocd-secrets|ver_dk_app_argocd|GitHub|ArgoCD no puede leer el repo de la app
 jenkins_admin_pass|normal|50-jenkins|jenkins-secrets|ver_jenkins_admin|-|no se entra a Jenkins
 redis_auth|normal|30-argocd|-|ver_redis|-|ArgoCD deja de responder
-cf_api_token|normal|15-terceros|jenkins-secrets|ver_cf_api|Cloudflare|tofu no puede aplicar el borde
-cf_dns_token|normal|15-terceros|cert-manager-issuers|ver_cf_dns|Cloudflare|cert-manager no renueva certificados
-cf_access_token|normal|15-terceros|-|ver_cf_access|Cloudflare|tofu no puede gestionar Access: el plano de operador queda como esté
+cf_api_token|normal|15-third-parties|jenkins-secrets|ver_cf_api|Cloudflare|tofu no puede aplicar el borde
+cf_dns_token|normal|15-third-parties|cert-manager-issuers|ver_cf_dns|Cloudflare|cert-manager no renueva certificados
+cf_access_token|normal|15-third-parties|-|ver_cf_access|Cloudflare|tofu no puede gestionar Access: el plano de operador queda como esté
 grafana_admin_pass|normal|85-observability|observability-base|ver_grafana_admin|-|no se entra a Grafana con su login propio (Access sigue delante)
 ntfy_bridge_token|normal|85-observability|observability-base|ver_ntfy_bridge|-|las alertas dejan de llegar: el puente no puede publicar en ntfy
 ntfy_operador_pass|normal|85-observability|observability-base|ver_ntfy_operador|teléfono|la app del teléfono deja de leer las alertas hasta recargar la credencial nueva
@@ -237,7 +237,7 @@ preflight_red() {
 # ═══════════════════════════════════════════════════════════════════
 #  ATRAVESAR CLOUDFLARE ACCESS (#76)
 # ═══════════════════════════════════════════════════════════════════
-# _cf_access_config, curl_access y edge_origen_responde viven en
+# _cf_access_config, curl_access y edge_origin_responds viven en
 # lib/access.sh desde #87. Estaban acá, definidos inline, y la fase 35
 # y la 60 los necesitan igual: dos copias del mismo conocimiento es
 # como la checklist de rotación se desactualizó durante semanas.
@@ -521,7 +521,7 @@ ver_access_st() {
 
     # DIENTE 1 — CON el token se llega al ORIGEN.
     local rc=0
-    edge_origen_responde "$url" '^(200|404)$' || rc=$?
+    edge_origin_responds "$url" '^(200|404)$' || rc=$?
     case $rc in
       0) ;;
       2) return 2 ;;
@@ -955,7 +955,7 @@ rotar_access_st() {
     #    del store es el que acaba de nacer. Si no atraviesa, es ahora
     #    cuando hay que enterarse — no tres fases después.
     if [[ -n "$ROOT_DOMAIN" ]]; then
-        if edge_origen_responde "https://argocd.$ROOT_DOMAIN" '^(200|404)$'; then
+        if edge_origin_responds "https://argocd.$ROOT_DOMAIN" '^(200|404)$'; then
             printf '  %s·%s el token nuevo atraviesa Access y llega al ORIGEN\n' "$ver" "$fin"
         else
             log_error "el token nuevo NO atraviesa Access todavía. El store ya tiene el par nuevo (correcto); reintentá '--verificar' en un minuto por si es propagación."
@@ -1035,9 +1035,9 @@ rotar_una() {   # <nombre>
     # que #83 saque el --allow-write de la fase 15, este bloqueo
     # desaparece solo. Un guard que hay que acordarse de quitar es un
     # guard que se queda.
-    if [[ "$fase" == 15-terceros ]] && \
+    if [[ "$fase" == 15-third-parties ]] && \
        grep -qE '^\s*add_deploy_key .*--allow-write' \
-            "$AEGIS_ROOT/init/phases/15-terceros.sh"; then
+            "$AEGIS_ROOT/init/phases/15-third-parties.sh"; then
         printf '\n%s%s no se puede rotar todavía.%s\n' "$roj" "$n" "$fin"
         printf '  Se rota corriendo la fase 15, y la fase 15 todavía registra\n'
         printf '  la deploy key de ESCRITURA (add_deploy_key ... --allow-write).\n'

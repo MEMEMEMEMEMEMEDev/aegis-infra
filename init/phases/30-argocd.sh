@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# FASE 30 — ArgoCD: la ÚNICA instalación imperativa del stack (D6).
-# helm install con LOS MISMOS values que la Application self usará
-# (contrato de adopción: releaseName exacto + values idénticos —
-# patrón validado en Tanda 1b, 2026-06-17:62-103). Los Secrets de
-# bootstrap se crean por KUBECTL, byte-preserving — NUNCA tofu (D2:
-# la age key jamás toca un tfstate).
+# PHASE 30 — ArgoCD: the ONLY imperative installation in the stack
+# (D6). helm install with THE SAME values the self Application will
+# use (adoption contract: exact releaseName + identical values — a
+# pattern validated in Batch 1b, 2026-06-17:62-103). The bootstrap
+# Secrets are created with KUBECTL, byte-preserving — NEVER tofu (D2:
+# the age key never touches a tfstate).
 set -euo pipefail
 CONF="$AEGIS_HOME/aegis.conf"; source "$CONF"
 export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/aegis.key}"
@@ -13,55 +13,55 @@ gate "kube-context" check_kube_context "$KUBE_CONTEXT_EXPECTED"
 VALUES="$PLATFORM_DIR/k8s/base/platform/argocd/values.yaml"
 gate "values-presentes" test -f "$VALUES"
 
-# ── ns + Secrets de bootstrap (kubectl, no tofu) ───────────────────
+# ── ns + bootstrap Secrets (kubectl, not tofu) ─────────────────────
 run_cmd kubectl create namespace argocd --dry-run=client -o yaml \
     | run_cmd kubectl apply -f -
 
-# P2.6 auditoría 2026-07-18: el skip-if-exists dejaba material
-# ROTADO stale en el cluster (la fuente en disco/store cambió, el
-# Secret vivo no). kubectl apply del dry-run es idempotente Y
-# convergente: mismo material = no-op, material rotado = actualiza.
+# P2.6 audit 2026-07-18: skip-if-exists left ROTATED material stale in
+# the cluster (the source on disk/in the store changed, the live
+# Secret did not). A kubectl apply of the dry-run is idempotent AND
+# convergent: same material = no-op, rotated material = update.
 
-# 1) argocd-sops-age: la age key para KSOPS. --from-file (A6).
-#    El valor NUNCA se muestra. apply SIEMPRE (convergente):
+# 1) argocd-sops-age: the age key for KSOPS. --from-file (A6).
+#    The value is NEVER shown. apply ALWAYS (convergent):
 run_cmd bash -c \
   "kubectl -n argocd create secret generic argocd-sops-age \
      --from-file=keys.txt='$SOPS_AGE_KEY_FILE' \
      --dry-run=client -o yaml | kubectl apply -f -"
-log_ok "Secret argocd-sops-age convergido (kubectl, fuera de todo state)"
+log_ok "Secret argocd-sops-age converged (kubectl, outside every state)"
 
-# 2) ops-stack-repo (deploy key RO de plataforma): el .enc.yaml se
-#    cifró en fase 15; ArgoCD aún no existe para KSOPS-earlo, así
-#    que ESTE se aplica descifrando a un pipe (nunca a disco).
-#    apply SIEMPRE (misma razón):
+# 2) ops-stack-repo (the platform RO deploy key): the .enc.yaml was
+#    encrypted in phase 15; ArgoCD does not exist yet to KSOPS it, so
+#    THIS one is applied by decrypting into a pipe (never to disk).
+#    apply ALWAYS (same reason):
 run_cmd bash -c \
   "sops -d '$PLATFORM_DIR/k8s/base/platform/argocd-secrets/secret-ops-stack-repo.enc.yaml' \
    | kubectl apply -f -"
-log_ok "Secret ops-stack-repo convergido (pipe sops→kubectl, sin disco)"
+log_ok "Secret ops-stack-repo converged (sops→kubectl pipe, no disk)"
 
-# 3) argocd-redis: con redisSecretInit=false (values — el Job hook
-#    correría en cada sync de la App self) el chart NO crea este
-#    Secret, y el container redis lo referencia SIN optional →
-#    CreateContainerConfigError. VERIFICADO contra el render real
-#    del chart 9.5.20 (cierre final v2). v1 no lo vio porque su
-#    install original corrió el Job. Bootstrap Secret #3, mismo
-#    patrón D2 (random en tmpfs, kubectl, jamás mostrado):
-# P2.6: el password de redis sale del STORE (gen_or_restore) — el
-# apply siempre-convergente exige un origen estable entre corridas
-# (un random nuevo por corrida ROTARÍA el auth con redis ya vivo):
+# 3) argocd-redis: with redisSecretInit=false (values — the Job hook
+#    would run on every sync of the self App) the chart does NOT
+#    create this Secret, and the redis container references it
+#    WITHOUT optional → CreateContainerConfigError. VERIFIED against
+#    the real render of chart 9.5.20 (final v2 close-out). v1 never
+#    saw it because its original install ran the Job. Bootstrap Secret
+#    #3, same D2 pattern (random in tmpfs, kubectl, never shown):
+# P2.6: the redis password comes from the STORE (gen_or_restore) — an
+# always-convergent apply demands a stable origin across runs (a fresh
+# random per run would ROTATE the auth against an already-live redis):
 secrets_workdir
 REDIS_PASS="$(gen_or_restore redis_auth gen_password_b64)"
 run_cmd bash -c \
   "kubectl -n argocd create secret generic argocd-redis \
      --from-file=auth='$REDIS_PASS' \
      --dry-run=client -o yaml | kubectl apply -f -"
-log_ok "Secret argocd-redis convergido (el chart no lo crea con el Job off)"
+log_ok "Secret argocd-redis converged (the chart does not create it with the Job off)"
 
-# ── helm install: TODO el contrato de adopción DERIVADO de la App ──
-# Fuente única = k8s/argocd-apps/core.yaml (el manifest que ArgoCD
-# aplicará para siempre). El instalador one-shot lee de ahí chart,
-# versión, repo, releaseName y values — divergencia install-vs-App
-# imposible POR CONSTRUCCIÓN (no hay segundo lugar que editar).
+# ── helm install: the WHOLE adoption contract DERIVED from the App ─
+# Single source = k8s/argocd-apps/core.yaml (the manifest ArgoCD will
+# apply forever). The one-shot installer reads chart, version, repo,
+# releaseName and values from there — an install-vs-App divergence is
+# impossible BY CONSTRUCTION (there is no second place to edit).
 CORE="$PLATFORM_DIR/k8s/argocd-apps/core.yaml"
 readarray -t CONTRACT < <(python3 - "$CORE" <<'EOF'
 import sys, yaml
@@ -72,7 +72,7 @@ app = next(d for d in docs
 helm_src = next(s for s in app["spec"]["sources"] if "chart" in s)
 values = helm_src["helm"]["valueFiles"][0]
 prefix = "$values/"
-assert values.startswith(prefix), f"valueFiles sin ref $values: {values}"
+assert values.startswith(prefix), f"valueFiles without a $values ref: {values}"
 print(helm_src["repoURL"])
 print(helm_src["chart"])
 print(helm_src["targetRevision"])
@@ -83,34 +83,34 @@ EOF
 ARGO_REPO="${CONTRACT[0]}" ARGO_CHART="${CONTRACT[1]}"
 ARGO_VER="${CONTRACT[2]}"  ARGO_RELEASE="${CONTRACT[3]}"
 APP_VALUES="$PLATFORM_DIR/${CONTRACT[4]}"
-# el values de la App ES el values del install (mismo archivo real):
+# the App's values IS the install's values (the same real file):
 gate "contrato-values-coinciden" test "$APP_VALUES" -ef "$VALUES"
-log_info "contrato desde core.yaml: $ARGO_CHART@$ARGO_VER release=$ARGO_RELEASE"
+log_info "contract from core.yaml: $ARGO_CHART@$ARGO_VER release=$ARGO_RELEASE"
 
 run_cmd retry_net 3 helm repo add argo "$ARGO_REPO"
 run_cmd retry_net 3 helm repo update argo
-# P1.12 auditoría 2026-07-18: un release en pending-* (corrida
-# anterior muerta a mitad del install — broken pipe de la #15 es el
-# caso típico) TRABA el re-run: helm rechaza install Y upgrade sobre
-# pending. Detección + salida explícita del estado zombie (uninstall
-# en bootstrap greenfield es seguro: lo que sigue lo recrea entero):
+# P1.12 audit 2026-07-18: a release in pending-* (a previous run that
+# died mid-install — the broken pipe of #15 being the typical case)
+# JAMS the re-run: helm refuses both install AND upgrade over pending.
+# Detection + an explicit way out of the zombie state (an uninstall in
+# a greenfield bootstrap is safe: what follows recreates it whole):
 REL_STATUS="$(helm -n argocd status "$ARGO_RELEASE" -o json 2>/dev/null \
               | jq -r '.info.status // empty' || true)"
 if [[ "$REL_STATUS" == pending-* || "$REL_STATUS" == failed ]]; then
-    log_warn "release $ARGO_RELEASE en estado '$REL_STATUS' (corrida anterior muerta a mitad) — uninstall y reinstalación limpia"
+    log_warn "release $ARGO_RELEASE in state '$REL_STATUS' (a previous run died halfway) — uninstalling and reinstalling clean"
     run_cmd helm -n argocd uninstall "$ARGO_RELEASE" --wait || \
-        die "no pude desinstalar el release zombie '$ARGO_RELEASE' — revisar 'helm -n argocd status $ARGO_RELEASE' a mano"
+        die "could not uninstall the zombie release '$ARGO_RELEASE' — check 'helm -n argocd status $ARGO_RELEASE' by hand"
 fi
 if ! helm -n argocd status "$ARGO_RELEASE" >/dev/null 2>&1; then
     run_cmd helm install "$ARGO_RELEASE" "argo/$ARGO_CHART" -n argocd \
         --version "$ARGO_VER" -f "$VALUES" --wait --timeout 10m
 else
-    log_info "release $ARGO_RELEASE ya existe — helm upgrade idempotente"
+    log_info "release $ARGO_RELEASE already exists — idempotent helm upgrade"
     run_cmd helm upgrade "$ARGO_RELEASE" "argo/$ARGO_CHART" -n argocd \
         --version "$ARGO_VER" -f "$VALUES" --wait --timeout 10m
 fi
 
-# ── gates: KSOPS operativo DE VERDAD (no 'pod corriendo') ─────────
+# ── gates: KSOPS TRULY operational (not 'the pod is running') ─────
 gate "repo-server-ready" bash -c \
   "kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=300s >/dev/null"
 gate "ksops-binario" bash -c \
@@ -119,7 +119,7 @@ gate "ksops-binario" bash -c \
 gate "age-montada" bash -c \
   "kubectl -n argocd exec deploy/argocd-repo-server -c repo-server -- \
      sh -c 'test -s /.config/sops/age/keys.txt'"
-# nota: el gate FUNCIONAL de KSOPS (descifrado real) es el sync de
-# argocd-secrets en la fase 35 — ese es el test cliente→servidor.
+# note: the FUNCTIONAL gate for KSOPS (a real decryption) is the sync
+# of argocd-secrets in phase 35 — that is the client→server test.
 
-log_ok "ArgoCD vivo con KSOPS; Secrets de bootstrap fuera de tofu"
+log_ok "ArgoCD alive with KSOPS; bootstrap Secrets outside tofu"

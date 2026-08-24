@@ -1,55 +1,56 @@
 #!/usr/bin/env bash
-# aegis-summary: Levanta la plataforma entera, fase por fase
+# aegis-summary: Brings up the whole platform, phase by phase
 # aegis-group:   setup
-# aegis-init — orquestador del bootstrap completo de aegis (v2).
+# aegis-init — the orchestrator of aegis' whole bootstrap.
 #
-# USO:
-#   ./aegis-init.sh [--profile greenfield|hetzner] [--from FASE]
-#                   [--only FASE] [--check] [--configure] [--list]
-#                   [--reset-state] [--non-interactive]
+# USAGE:
+#   aegis init [--profile greenfield|hetzner] [--from PHASE]
+#              [--only PHASE] [--check] [--configure] [--list]
+#              [--reset-state] [--non-interactive]
 #
-# --non-interactive (P0 auditoría 2026-07-18): corrida SIN operador
-# (VM desechable / CI del init). human_step y gate_red se
-# auto-confirman (logueado); los secretos de entrada van por archivo:
-#   CF_MASTER_FILE        credencial maestra CF (tmpfs, se consume)
-#   AEGIS_AGE_BACKUP_FILE destino del resguardo de la age key (tmpfs
-#                         del OPERADOR — el init la escribe ahí en
-#                         vez de mostrarla; moverla a resguardo real
-#                         es responsabilidad de quien lanzó la corrida)
-# Requiere aegis-init.conf pre-hecho (el wizard no corre sin TTY) y
-# sudo NOPASSWD ya configurado (la fase 00 lo verifica temprano).
+# --non-interactive (P0 of the 2026-07-18 audit): a run with NO operator
+# (throwaway VM / the init's own CI). human_step and gate_red
+# auto-confirm (and it is logged); input secrets arrive by file:
+#   CF_MASTER_FILE        the CF master credential (tmpfs, consumed)
+#   AEGIS_AGE_BACKUP_FILE where the age key backup goes (the OPERATOR's
+#                         tmpfs — the init writes it there instead of
+#                         showing it; moving it to real safekeeping is
+#                         the responsibility of whoever launched the run)
+# Requires a pre-made aegis-init.conf (the wizard does not run without a
+# TTY) and sudo NOPASSWD already configured (phase 00 checks that early).
 #
-# CONFIG: guiada e interactiva (el wizard pregunta campo por campo
-# con defaults y validación — lib/config.sh). Corre sola la primera
-# vez (fase 00) o con --configure; un aegis-init.conf pre-hecho se
-# respeta (re-corridas/automatización). El operador NUNCA "completa
-# un archivo en blanco".
+# CONFIG: guided and interactive (the wizard asks field by field, with
+# defaults and validation — lib/config.sh). It runs by itself the first
+# time (phase 00) or with --configure; a pre-made aegis-init.conf is
+# respected (re-runs / automation). The operator NEVER "fills in a blank
+# file".
 #
-# DISEÑO (ver platform/docs/architecture/bootstrap.md):
-#  - Fases numeradas idempotentes en phases/NN-nombre.sh, ejecutadas
-#    en orden lexicográfico ESTRICTO (no saltar: el orden es el
-#    contrato — dependencias reales, doc 26 Parte V).
-#  - Estado en .init-state/ (un marker por fase completa): --from
-#    retoma tras cualquier corte (pausas humanas incluidas — son el
-#    caso normal, no la excepción).
-#  - --check: dry-run (muta nada; las LECTURAS sí corren).
-#  - Perfiles: greenfield (default) | hetzner (deltas: cilium,
-#    registries.yaml por nodo, storageclass, réplicas). El perfil
-#    re-bootstrap NO está implementado en v1 (límite conocido:
-#    import de recursos vivos sin procedimiento — 27 §2.4/H5).
+# DESIGN (see seed/platform/docs/architecture/bootstrap.md):
+#  - Numbered idempotent phases in phases/NN-name.sh, executed in
+#    STRICT lexicographic order (do not skip: the order IS the contract
+#    — they are real dependencies, doc 26 Part V).
+#  - State in .init-state/ (one marker per completed phase): --from
+#    resumes after any interruption (human pauses included — those are
+#    the normal case, not the exception).
+#  - --check: dry run (mutates nothing; the READS do run).
+#  - Profiles: greenfield (default) | hetzner (deltas: cilium, a
+#    per-node registries.yaml, storageclass, replicas). The re-bootstrap
+#    profile is NOT implemented in v1 (a known limit: importing live
+#    resources has no procedure — 27 §2.4/H5).
 #
-# ESTADO ARTEFACTO: estructura y detalle completos (E1-E10); queda
-# la validación en entorno virgen (ver PROGRESO.md / bootstrap.md).
+# ARTIFACT STATUS: structure and detail complete (E1-E10); what remains
+# is validation on a virgin environment (see bootstrap.md).
 
 set -euo pipefail
 
-# El PRODUCTO: este archivo vive en $AEGIS_ROOT/libexec/. readlink -f
-# y no dirname a secas porque la fase 05 instala /usr/local/bin/aegis
-# como SYMLINK al producto (03 §7): sin resolverlo, AEGIS_ROOT sería
-# /usr/local y el init no encontraría ni sus fases ni sus libs.
-# Si bin/aegis ya lo exportó, se respeta (no se recalcula seis veces).
+# The PRODUCT: this file lives in $AEGIS_ROOT/libexec/. readlink -f and
+# not a plain dirname, because phase 05 installs /usr/local/bin/aegis as
+# a SYMLINK to the product (03 §7): without resolving it, AEGIS_ROOT
+# would be /usr/local and the init would find neither its phases nor its
+# libs. If bin/aegis already exported it, that is respected (it is not
+# recomputed six times).
 if [[ -z "${AEGIS_ROOT:-}" ]]; then
-    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} init: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} init: readlink is missing — I will not guess where the product lives" >&2; exit 2; }
     AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 fi
 export AEGIS_ROOT
@@ -67,11 +68,11 @@ while (($#)); do case "$1" in
     --list)        DO_LIST=true; shift ;;
     --reset-state) DO_RESET=true; shift ;;
     --non-interactive) AEGIS_NONINTERACTIVE=true; shift ;;
-    *) echo "flag desconocida: $1" >&2; exit 2 ;;
+    *) echo "unknown flag: $1" >&2; exit 2 ;;
 esac; done
 
 case "$PROFILE" in greenfield|hetzner) ;; *)
-    echo "perfil '$PROFILE' no soportado en v1 (greenfield|hetzner)" >&2
+    echo "profile '$PROFILE' is not supported in v1 (greenfield|hetzner)" >&2
     exit 2 ;;
 esac
 
@@ -85,30 +86,30 @@ source "$AEGIS_ROOT/lib/secrets.sh"
 source "$AEGIS_ROOT/lib/jenkins.sh"
 # shellcheck source=lib/config.sh
 source "$AEGIS_ROOT/lib/config.sh"
-# access.sh aporta edge_origen_responde/curl_access: desde #76 los
-# hostnames del plano de operador están detrás de Cloudflare Access, y
-# las fases 35 y 60 los sondean. Sin esto, esas sondas miden el borde
-# de Cloudflare y no el cluster (#87).
+# access.sh provides edge_origin_responds/curl_access: since #76 the
+# operator-plane hostnames sit behind Cloudflare Access, and phases 35
+# and 60 probe them. Without this, those probes measure Cloudflare's
+# edge and not the cluster (#87).
 # shellcheck source=lib/access.sh
 source "$AEGIS_ROOT/lib/access.sh"
 
-$DO_RESET && { clear_state; log_ok "estado reseteado"; }
+$DO_RESET && { clear_state; log_ok "state reset"; }
 
-# ── guard temprano de TTY (P0 auditoría 2026-07-18) ─────────────────
-# Sin TTY y sin --non-interactive, la corrida iba a morir en el
-# PRIMER read (EOF) — a veces a 30 min de camino. Morir ACÁ, con la
-# remediación en el mensaje:
+# ── early TTY guard (P0 of the 2026-07-18 audit) ────────────────────
+# With no TTY and no --non-interactive, the run was going to die at the
+# FIRST read (EOF) — sometimes thirty minutes in. Die HERE, with the
+# remedy in the message:
 if ! ni_mode && [[ "$CHECK_MODE" != "true" && ! -t 0 ]] \
    && ! $DO_LIST; then
-    die "sin terminal (stdin no es TTY) y sin --non-interactive — para corridas desatendidas: --non-interactive + aegis-init.conf pre-hecho + CF_MASTER_FILE/AEGIS_AGE_BACKUP_FILE"
+    die "no terminal (stdin is not a TTY) and no --non-interactive — for unattended runs: --non-interactive + a pre-made aegis-init.conf + CF_MASTER_FILE/AEGIS_AGE_BACKUP_FILE"
 fi
 
 mapfile -t PHASES < <(find "$AEGIS_ROOT/init/phases" -name '[0-9][0-9]-*.sh' \
                       | sort)
-# P3 auditoría: phases/ vacío caía al log final "todas las fases
-# solicitadas completas" con exit 0 — un falso TODO-OK estructural:
+# P3 of the audit: an empty phases/ fell through to the final log "all
+# requested phases complete" with exit 0 — a structural false ALL-OK:
 (( ${#PHASES[@]} > 0 )) || \
-    die "no hay fases en $AEGIS_ROOT/init/phases (¿artefacto a medias?) — nada que ejecutar NO es éxito"
+    die "there are no phases in $AEGIS_ROOT/init/phases (a half-built artifact?) — nothing to execute is NOT success"
 
 if $DO_LIST; then
     for p in "${PHASES[@]}"; do
@@ -120,14 +121,14 @@ if $DO_LIST; then
     exit 0
 fi
 
-# ── validar nombres de fase ANTES del loop (bug corrida #10) ────────
-# --from con un nombre inexistente (p.ej. "30-helm" cuando la fase se
-# llama "30-argocd") hacía que el loop skipeara TODO y reportara
-# "todas las fases solicitadas completas" — un falso "todo listo".
-# Nombre desconocido = error duro, con la lista real a mano.
-# P3 auditoría: el match por prefijo aceptaba AMBIGÜEDAD en silencio
-# (--from 1 matcheaba 10/12/15 y arrancaba en la 10 sin aviso). Un
-# prefijo vale SOLO si identifica exactamente UNA fase:
+# ── validate phase names BEFORE the loop (bug from run #10) ─────────
+# --from with a name that does not exist (say "30-helm" when the phase
+# is called "30-argocd") made the loop skip EVERYTHING and report "all
+# requested phases complete" — a false "all done".
+# An unknown name is a hard error, with the real list at hand.
+# P3 of the audit: prefix matching accepted AMBIGUITY in silence
+# (--from 1 matched 10/12/15 and started at 10 with no warning). A
+# prefix counts ONLY if it identifies exactly ONE phase:
 phase_check_unique() {   # <flag> <query>
     local flag="$1" q="$2" p matches=()
     for p in "${PHASES[@]}"; do
@@ -135,34 +136,34 @@ phase_check_unique() {   # <flag> <query>
     done
     (( ${#matches[@]} == 1 )) && return 0
     if (( ${#matches[@]} == 0 )); then
-        die "fase desconocida en $flag: '$q' — fases: $PHASE_NAMES"
+        die "unknown phase in $flag: '$q' — phases: $PHASE_NAMES"
     fi
-    die "$flag '$q' es AMBIGUO — matchea: ${matches[*]} (usar el prefijo numérico completo)"
+    die "$flag '$q' is AMBIGUOUS — it matches: ${matches[*]} (use the full numeric prefix)"
 }
 PHASE_NAMES="$(basename -s .sh "${PHASES[@]}" | tr '\n' ' ')"
 [[ -z "$FROM_PHASE" ]] || phase_check_unique --from "$FROM_PHASE"
 [[ -z "$ONLY_PHASE" ]] || phase_check_unique --only "$ONLY_PHASE"
 
-log_info "${AEGIS_CMD:-aegis} init — perfil=$PROFILE check=$CHECK_MODE"
+log_info "${AEGIS_CMD:-aegis} init — profile=$PROFILE check=$CHECK_MODE"
 log_info "root=$AEGIS_ROOT"
 
-# ── estado re-derivable por fase (bug 5 corrida #2) ─────────────────
-# NINGUNA fase depende del export de una fase anterior: todo estado
-# necesario se RE-DERIVA acá desde su fuente en disco, antes de CADA
-# fase. Misma familia que el bug AGE_PUBLIC: estado que muere en el
-# límite de proceso — el fix es derivar, no acarrear.
+# ── per-phase re-derivable state (bug 5 of run #2) ──────────────────
+# NO phase depends on a previous phase's export: every piece of state it
+# needs is RE-DERIVED here from its source on disk, before EACH phase.
+# Same family as the AGE_PUBLIC bug: state that dies at the process
+# boundary — the fix is to derive, not to carry.
 phase_env() {
     local age_ops="$HOME/.config/sops/age/aegis.key"
     [[ -f "$age_ops" ]] && export SOPS_AGE_KEY_FILE="$age_ops"
     [[ -f "$AEGIS_HOME/.age-public" ]] && \
         AGE_PUBLIC="$(cat "$AEGIS_HOME/.age-public")" && \
         export AGE_PUBLIC
-    # bug 5 validación #3: aun con esto, el entorno tuvo huecos en el
-    # camino --from. La red de seguridad REAL es sops_env() en cada
-    # función de lib/secrets.sh que use sops (derivación en el punto
-    # de uso). Esto queda como primera capa + aviso temprano:
+    # bug 5, validation #3: even with this, the environment had holes on
+    # the --from path. The REAL safety net is sops_env() in every
+    # function of lib/secrets.sh that uses sops (derivation at the point
+    # of use). This stays as a first layer plus an early warning:
     [[ -f "$age_ops" || ! -f "$AEGIS_HOME/.age-public" ]] || \
-        log_warn "hay .age-public pero NO la age key en $age_ops — los sops van a fallar (¿fase 10 incompleta en esta máquina?)"
+        log_warn "there is an .age-public but NOT the age key at $age_ops — the sops calls will fail (is phase 10 incomplete on this machine?)"
     return 0
 }
 
@@ -170,13 +171,13 @@ started=false
 for p in "${PHASES[@]}"; do
     name="$(basename "$p" .sh)"
 
-    # bug corrida #11: --from 15 con marker previo SALTABA la fase que
-    # el operador pidió por nombre — y el recurso externo que esa fase
-    # garantiza (el webhook, borrado fuera del init) nunca se recreó.
-    # Pedir una fase explícita ES pedir que corra: la fase nombrada en
-    # --from se re-ejecuta aunque tenga marker (las fases son
-    # idempotentes por diseño; --only ya se comportaba así). Las
-    # POSTERIORES siguen respetando sus markers.
+    # bug from run #11: --from 15 with a previous marker SKIPPED the
+    # phase the operator asked for by name — and the external resource
+    # that phase guarantees (the webhook, deleted outside the init) was
+    # never recreated. Asking for a phase explicitly IS asking for it to
+    # run: the phase named in --from re-executes even if it has a marker
+    # (the phases are idempotent by design; --only already behaved this
+    # way). The LATER ones keep respecting their markers.
     force_run=false
     if [[ -n "$ONLY_PHASE" ]]; then
         [[ "$name" == "$ONLY_PHASE"* ]] || continue
@@ -187,42 +188,44 @@ for p in "${PHASES[@]}"; do
     fi
 
     if is_done "$name" && [[ -z "$ONLY_PHASE" ]] && ! $force_run; then
-        log_info "fase $name ya completa — skip (marker en .init-state)"
+        log_info "phase $name already complete — skipping (marker in .init-state)"
         continue
     fi
 
-    printf '\n\033[1m════════ FASE %s ════════\033[0m\n' "$name"
-    # para el registro máquina-legible de gates (P2.13 reporte in-VM):
+    printf '\n\033[1m════════ PHASE %s ════════\033[0m\n' "$name"
+    # for the machine-readable gate record (P2.13, the in-VM report):
     export AEGIS_PHASE="$name"
     phase_env
-    # subshell: una fase no contamina el entorno de la siguiente.
-    # F-A corrida #15 (RESUELVE el misterio abierto desde la #9 "por
-    # qué set -e no cortó"): el patrón anterior era
-    # `if ( source fase )` — bash IGNORA errexit en TODO lo que corre
-    # dentro de la condición de un if (semántica documentada), y el
-    # `set -euo pipefail` interno de la fase queda IMPOTENTE en ese
-    # contexto → ningún fallo no-gate cortó jamás (en vivo #15:
-    # argo_sync terminó Error y la fase siguió; #9: push caído que
-    # siguió de largo). La fase corre como comando PLANO — errexit
-    # VIVO adentro — y el rc se captura con errexit del padre off:
+    # subshell: one phase does not contaminate the next one's
+    # environment.
+    # F-A of run #15 (this RESOLVES the mystery open since #9, "why did
+    # set -e not stop it"): the previous pattern was
+    # `if ( source phase )` — bash IGNORES errexit in EVERYTHING that
+    # runs inside an if's condition (documented semantics), and the
+    # phase's own `set -euo pipefail` is POWERLESS in that context → no
+    # non-gate failure ever stopped anything (live in #15: argo_sync
+    # ended in Error and the phase carried on; #9: a failed push that
+    # went straight past). The phase now runs as a PLAIN command —
+    # errexit ALIVE inside it — and the rc is captured with the parent's
+    # errexit off:
     set +e
     ( source "$p" )
     _phase_rc=$?
     set -e
     if (( _phase_rc == 0 )); then
         [[ "$CHECK_MODE" == "true" ]] || mark_done "$name"
-        log_ok "fase $name completa"
+        log_ok "phase $name complete"
     else
-        log_error "fase $name FALLÓ."
-        # Hallazgo C v1.1: el comando de retome era RELATIVO y el
-        # operador lo copió tal cual desde otro directorio → "No such
-        # file or directory". Un comando que se imprime para
-        # copiar-pegar se imprime ABSOLUTO, siempre:
+        log_error "phase $name FAILED."
+        # Finding C v1.1: the resume command was RELATIVE and the
+        # operator pasted it verbatim from another directory → "No such
+        # file or directory". A command printed to be copy-pasted is
+        # printed ABSOLUTE, always:
         log_error "Resume: ${AEGIS_CMD:-aegis} init --profile $PROFILE --from $name"
         exit 1
     fi
 done
 
-log_ok "${AEGIS_CMD:-aegis} init: todas las fases solicitadas completas."
-log_info "Siguiente: validar gates finales (fase 80 los lista) y"
-log_info "archivar el resumen en docs/logbook del repo de plataforma."
+log_ok "${AEGIS_CMD:-aegis} init: all requested phases complete."
+log_info "Next: validate the final gates (phase 80 lists them) and"
+log_info "archive the summary in docs/logbook of the platform repo."

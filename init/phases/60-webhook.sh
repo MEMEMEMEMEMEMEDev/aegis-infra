@@ -1,79 +1,83 @@
 #!/usr/bin/env bash
-# FASE 60 — webhook GitHub App → Jenkins, end-to-end. La App y el
-# HMAC ya existen (fase 15); el receptor bootea en la 50 con los
-# Secrets YA en el cluster (orden verificado: jenkins-secrets sync +
-# gate ANTES del sts — el plugin carga el HMAC al boot, lección #12).
+# PHASE 60 — GitHub App → Jenkins webhook, end-to-end. The App and the
+# HMAC already exist (phase 15); the receiver boots in phase 50 with
+# the Secrets ALREADY in the cluster (a verified order: jenkins-secrets
+# sync + gate BEFORE the sts — the plugin loads the HMAC at boot,
+# lesson #12).
 #
-# REESCRITA post-#14 (Patrón B del reporte in-VM, en su peor forma):
-# el gate único push→build acoplaba CUATRO eslabones — edge,
-# delivery+HMAC, scan, build — y al fallar moría MUDO con el
-# diagnóstico en un comentario (mención ≠ uso, H7). Historia de esta
-# fase: #10 HMAC desincronizado (hook sobreviviente), #11 hook
-# borrado por diagnóstico erróneo + quota, #12 HMAC con \n. Todas
-# distintas; todas el MISMO síntoma con el gate acoplado. Ahora cada
-# eslabón tiene su gate y su evidencia:
-#   60.1 el edge responde para jenkins.<dominio>     (tunnel/traefik)
-#   60.2 hook registrado + push probe                (GitHub)
-#   60.3 la delivery del push quedó 2xx              (HMAC/plugin)
-#   60.4 el build EXISTE                             (scan/credencial)
-#   60.5 el build queda VERDE                        (pipeline/quota)
+# REWRITTEN after #14 (Pattern B of the in-VM report, in its worst
+# form): the single push→build gate coupled FOUR links — edge,
+# delivery+HMAC, scan, build — and on failure it died MUTE with the
+# diagnostic in a comment (mention ≠ use, H7). This phase's history:
+# #10 desynchronized HMAC (a surviving hook), #11 hook deleted from a
+# wrong diagnosis + quota, #12 HMAC with a \n. All different; all the
+# SAME symptom with the coupled gate. Now each link has its gate and
+# its evidence:
+#   60.1 the edge answers for jenkins.<domain>       (tunnel/traefik)
+#   60.2 hook registered + push probe                (GitHub)
+#   60.3 the push's delivery ended 2xx               (HMAC/plugin)
+#   60.4 the build EXISTS                            (scan/credential)
+#   60.5 the build ends GREEN                        (pipeline/quota)
 set -euo pipefail
 CONF="$AEGIS_HOME/aegis.conf"; source "$CONF"
-secrets_workdir   # lib/jenkins.sh materializa el netrc en tmpfs
+secrets_workdir   # lib/jenkins.sh materializes the netrc in tmpfs
 
-# ── 60.1 el edge responde para el host de Jenkins ──────────────────
-# /login es público (200) — descarta tunnel caído (la red móvil del
-# operador — E-1), traefik sin la IngressRoute, DNS público.
+# ── 60.1 the edge answers for Jenkins' host ────────────────────────
+# /login is public (200) — it rules out a dead tunnel (the operator's
+# mobile network — E-1), traefik without the IngressRoute, public DNS.
 #
-# #87 (2026-08-13): desde que Access está delante de jenkins.<dom>
-# (#76), un curl desnudo recibe 302 al login de Cloudflare. Este gate
-# exigía `^(200|403)$`, así que fallaba en ROJO y paraba la fase — el
-# fallo espejado del de la 35, y el barato de los dos: rompe fuerte y
-# a la vista. edge_origen_responde atraviesa Access con el service
-# token de la fase 25 y, si NO puede, lo dice como lo que es (el
-# origen no se midió) en vez de como «Jenkins no responde».
+# #87 (2026-08-13): since Access sits in front of jenkins.<dom> (#76),
+# a bare curl receives a 302 to Cloudflare's login. This gate demanded
+# `^(200|403)$`, so it failed RED and stopped the phase — the mirror
+# image of phase 35's failure, and the cheap one of the two: it breaks
+# loudly and in plain sight. edge_origin_responds traverses Access with
+# phase 25's service token and, if it CANNOT, says so for what it is
+# (the origin was not measured) instead of as "Jenkins is not
+# answering".
 gate_diag "edge-jenkins-responde" \
   'kubectl -n infra-edge get pods 2>/dev/null | tail -n 3;
    kubectl -n jenkins-system get pods 2>/dev/null | tail -n 3' \
-  retry_net 6 edge_origen_responde "https://jenkins.$ROOT_DOMAIN/login" '^(200|403)$'
+  retry_net 6 edge_origin_responds "https://jenkins.$ROOT_DOMAIN/login" '^(200|403)$'
 
-# ── 60.2 hook registrado + push probe ──────────────────────────────
+# ── 60.2 hook registered + push probe ──────────────────────────────
 WEBHOOK_URL="https://jenkins.$ROOT_DOMAIN/github-webhook/"
-# retry_net: con errexit VIVO (F-A #15) un parpadeo de gh mataría la fase:
+# retry_net: with errexit ALIVE (F-A #15) a blink from gh would kill
+# the phase:
 HOOK_ID="$(retry_net 3 gh api "repos/$GH_OWNER/$APP_REPO/hooks" \
     --jq ".[] | select(.config.url==\"$WEBHOOK_URL\") | .id" | head -n1)"
 gate "hook-jenkins-registrado" test -n "$HOOK_ID"
-# P1.16 auditoría 2026-07-18: el branch indexing del multibranch es
-# ASÍNCRONO — en fresh, el job main puede no existir todavía y el
-# jenkins_next_build de abajo moría sin gate propio. Esperarlo con
-# evidencia (el log del scan trae la causa si no aparece):
-_job_main_existe() { jenkins_get "/job/hello-aegis-mb/job/main/api/json" >/dev/null 2>&1; }
+# P1.16 audit 2026-07-18: the multibranch's branch indexing is
+# ASYNCHRONOUS — on a fresh instance the main job may not exist yet
+# and the jenkins_next_build below died with no gate of its own. Wait
+# for it with evidence (the scan's log carries the cause if it does
+# not appear):
+_main_job_indexed() { jenkins_get "/job/hello-aegis-mb/job/main/api/json" >/dev/null 2>&1; }
 gate_diag "job-main-indexado" \
   'kubectl -n jenkins-system logs sts/jenkins -c jenkins --since=10m 2>/dev/null | grep -iE "branch indexing|scan|hello-aegis" | tail -n 10' \
-  poll 300 10 _job_main_existe
-# el número del build se captura ANTES del push (carrera lastBuild
-# #9, clase bug C); retry_net en el push (red móvil):
+  poll 300 10 _main_job_indexed
+# the build number is captured BEFORE the push (the lastBuild race
+# #9, bug class C); retry_net on the push (mobile network):
 NEXT_MB="$(jenkins_next_build hello-aegis-mb/job/main)"
-log_info "e2e: push al repo de la app → delivery del hook → build #$NEXT_MB"
+log_info "e2e: push to the app's repo → hook delivery → build #$NEXT_MB"
 run_cmd retry_net 3 bash -c "cd \$(mktemp -d) && \
   git clone --depth 1 https://github.com/$GH_OWNER/$APP_REPO.git app && \
   cd app && git commit --allow-empty -m 'ci: webhook e2e probe' && \
   git push"
 
-# ── 60.3 la delivery del push quedó 2xx DEL LADO GITHUB ────────────
-# ESTE es el gate que aísla HMAC/plugin (el equivalente del
-# webhook-redeliver-2xx que la 35 ya tenía para argocd y esta fase
-# nunca tuvo). 400 acá con edge verde = receptor rechazando la
-# firma: HMAC desincronizado (¿store regenerado con Jenkins ya
-# arriba? el plugin carga el HMAC AL BOOT — restart del sts) o
-# binding JCasC. La evidencia: últimas deliveries con status + log
-# del receptor:
-# P1.5 auditoría 2026-07-18: GitHub NO re-entrega solo — si el push
-# cayó en un 530 del tunnel (la red móvil se fue justo ahí), el poll
-# viejo releía la MISMA delivery muerta 300s. Ahora, con el edge ya
-# verde (60.1), una delivery fallida se RE-ENTREGA (redeliver) cada
-# ~60s dentro de la espera; una delivery en vuelo (status null) solo
-# se espera:
+# ── 60.3 the push's delivery ended 2xx ON GITHUB'S SIDE ────────────
+# THIS is the gate that isolates HMAC/plugin (the equivalent of the
+# webhook-redeliver-2xx that phase 35 already had for argocd and this
+# phase never had). A 400 here with a green edge = the receiver is
+# rejecting the signature: a desynchronized HMAC (was the store
+# regenerated with Jenkins already up? the plugin loads the HMAC AT
+# BOOT — restart the sts) or a JCasC binding. The evidence: the last
+# deliveries with their status + the receiver's log:
+# P1.5 audit 2026-07-18: GitHub does NOT re-deliver on its own — if
+# the push landed on a 530 from the tunnel (the mobile network dropped
+# right there), the old poll re-read the SAME dead delivery for 300s.
+# Now, with the edge already green (60.1), a failed delivery is
+# RE-DELIVERED (redeliver) every ~60s within the wait; a delivery in
+# flight (status null) is merely waited for:
 _delivery_wait_2xx() {
     local timeout=300 t0=$SECONDS did code line redelivered=0
     while :; do
@@ -86,11 +90,11 @@ _delivery_wait_2xx() {
         if [[ -n "$did" && "$did" != "null" && "$code" =~ ^[0-9]+$ ]] \
            && (( (SECONDS - t0) / 60 >= redelivered )); then
             redelivered=$(( redelivered + 1 ))
-            log_warn "delivery push status=$code — redeliver #$redelivered (un 530/timeout del edge NO se re-entrega solo)"
+            log_warn "push delivery status=$code — redeliver #$redelivered (a 530/timeout from the edge is NOT re-delivered on its own)"
             if ! gh api -X POST \
                  "repos/$GH_OWNER/$APP_REPO/hooks/$HOOK_ID/deliveries/$did/attempts" \
                  >/dev/null 2>&1; then
-                log_warn "el redeliver falló (gh/red) — se reintenta en la próxima vuelta"
+                log_warn "the redeliver failed (gh/network) — it is retried on the next lap"
             fi
         fi
         sleep 10
@@ -99,26 +103,26 @@ _delivery_wait_2xx() {
 gate_diag "delivery-push-2xx" \
   'gh api "repos/$GH_OWNER/$APP_REPO/hooks/$HOOK_ID/deliveries" \
      --jq ".[0:5][] | \"\(.delivered_at) event=\(.event) status_code=\(.status_code) \(.status)\"" 2>/dev/null;
-   log_warn "si status_code=400 con edge verde: HMAC desincronizado — el plugin carga el HMAC AL BOOT (lección #12): si el store regeneró hmac_jenkins con Jenkins ya arriba, kubectl -n jenkins-system rollout restart sts/jenkins y re-correr con --from 60";
+   log_warn "if status_code=400 with a green edge: desynchronized HMAC — the plugin loads the HMAC AT BOOT (lesson #12): if the store regenerated hmac_jenkins with Jenkins already up, kubectl -n jenkins-system rollout restart sts/jenkins and re-run with --from 60";
    kubectl -n jenkins-system logs sts/jenkins -c jenkins --since=10m 2>/dev/null | grep -iE "webhook|github" | tail -n 8' \
   _delivery_wait_2xx
 
-# ── 60.4 el webhook CREÓ el build (scan multibranch) ───────────────
-# delivery 2xx pero sin build = el eslabón del SCAN (credencial
-# github-token del scan, quiet period, el job): evidencia separada
-# de la del HMAC:
-_build_disparado() {
+# ── 60.4 the webhook CREATED the build (multibranch scan) ──────────
+# a 2xx delivery but no build = the SCAN link (the scan's github-token
+# credential, quiet period, the job): evidence separate from the
+# HMAC's:
+_build_triggered() {
     jenkins_get "/job/hello-aegis-mb/job/main/$NEXT_MB/api/json" \
         >/dev/null 2>&1
 }
 gate_diag "build-disparado-por-webhook" \
   'jenkins_get "/job/hello-aegis-mb/job/main/api/json" 2>/dev/null | jq "{nextBuildNumber, inQueue: (.inQueueItem != null)}";
    kubectl -n jenkins-system logs sts/jenkins -c jenkins --since=10m 2>/dev/null | grep -iE "scan|branch indexing|hello-aegis" | tail -n 8' \
-  poll 300 10 _build_disparado
+  poll 300 10 _build_triggered
 
-# ── 60.5 el build queda VERDE (el wait de la lib ya diagnostica la
-#     quota en cada vuelta — corrida #11) ───────────────────────────
+# ── 60.5 the build ends GREEN (the lib's wait already diagnoses the
+#     quota on every lap — run #11) ──────────────────────────────────
 gate "build-webhook-verde" jenkins_wait_build hello-aegis-mb/job/main 1800 "$NEXT_MB"
 
-log_ok "Webhook end-to-end verificado por ESLABONES: edge → delivery \
-2xx → scan → build verde"
+log_ok "Webhook verified end-to-end by LINKS: edge → 2xx delivery \
+→ scan → green build"

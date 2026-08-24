@@ -1,32 +1,35 @@
 #!/usr/bin/env bash
-# aegis-summary: Respalda los tres estados que solo viven en esta máquina
+# aegis-summary: Backs up the three states that live only on this machine
 # aegis-group:   backup
-# aegis-backup — DR de los 3 estados que SÓLO viven en la VM y que la age
-# key sola NO recupera (W-09 / R4). Produce UN bundle age-cifrado, portable
-# (cualquier sink offsite/offline sirve) y con el
-# roundtrip VERIFICADO en el momento del backup ("restauración probada", no
-# "tenemos backups" — la Ley 21.719 exige lo primero, LEY-24/28).
+# aegis state backup — disaster recovery for the 3 states that live ONLY
+# on the machine and that the age key alone does NOT recover (W-09 / R4).
+# It produces ONE age-encrypted bundle, portable (any offsite/offline sink
+# works), with the roundtrip VERIFIED at backup time ("a proven restore",
+# not "we have backups" — Chile's Ley 21.719 requires the former,
+# LEY-24/28).
 #
-# Los 3 estados (fuentes de verdad = las libs; si cambian allá, cambiar acá):
-#   .state-secrets  secrets.sh    17 secretos YA cifrados con SOPS+age
-#   .init-state     common.sh     gates.jsonl (traza de auditoría) + estado
-#   tfstate         25-edge-tofu  TUNNEL_TOKEN/tunnel_secret EN CLARO → el
-#                                 age del bundle es lo que los protege
+# The 3 states (sources of truth = the libs; if they change there, change
+# them here):
+#   .state-secrets  secrets.sh    17 secrets ALREADY encrypted with SOPS+age
+#   .init-state     common.sh     gates.jsonl (the audit trail) + state
+#   tfstate         25-edge-tofu  TUNNEL_TOKEN/tunnel_secret IN THE CLEAR →
+#                                 the bundle's age layer is what protects them
 #
-# NUNCA incluye la age key: es el único irreducible que el operador
-# resguarda aparte, en su resguardo offline. Un backup que la metiera dejaría
-# el huevo y la gallina en el mismo canasto — el check 80 lo prohíbe.
+# It NEVER includes the age key: that is the one irreducible thing the
+# operator keeps separately, in offline safekeeping. A backup that put it in
+# would leave the egg and the hen in the same basket — check 80 forbids it.
 #
-# Uso: aegis state backup [ruta-de-salida.age]
+# Usage: aegis state backup [output-path.age]
 set -euo pipefail
 
-# ── preámbulo canónico (V-102) ───────────────────────────────────────
-# El PRODUCTO se resuelve desde el propio archivo, siguiendo symlinks
-# (la fase 05 instala /usr/local/bin/aegis como symlink: sin readlink
-# -f, AEGIS_ROOT sería /usr/local). Si bin/aegis ya lo exportó, se
-# respeta. La INSTANCIA la decide lib/paths.sh, nunca este archivo.
+# ── canonical preamble (V-102) ───────────────────────────────────────
+# The PRODUCT is resolved from this file itself, following symlinks
+# (phase 05 installs /usr/local/bin/aegis as a symlink: without
+# readlink -f, AEGIS_ROOT would be /usr/local). If bin/aegis already
+# exported it, that is respected. The INSTANCE is decided by
+# lib/paths.sh, never by this file.
 if [[ -z "${AEGIS_ROOT:-}" ]]; then
-    command -v readlink >/dev/null || { echo "aegis-backup: falta readlink — no adivino dónde vive el producto" >&2; exit 2; }
+    command -v readlink >/dev/null || { echo "aegis state backup: readlink is missing — I will not guess where the product lives" >&2; exit 2; }
     AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 fi
 export AEGIS_ROOT
@@ -40,36 +43,36 @@ TUNNEL_ENV="$AEGIS_HOME/platform/tofu/envs/cloudflare-tunnel"
 say()  { printf '[backup] %s\n' "$*"; }
 die()  { printf '[backup] FATAL: %s\n' "$*" >&2; exit 1; }
 
-# ── recipient age (pubkey) — para CIFRAR; la privada NO se usa para esto ──
+# ── age recipient (pubkey) — to ENCRYPT; the private key is NOT used here ──
 AGE_PUBLIC="${AGE_PUBLIC:-}"
 if [[ -z "$AGE_PUBLIC" && -f "$AEGIS_HOME/.age-public" ]]; then
   AGE_PUBLIC="$(cat "$AEGIS_HOME/.age-public")"
 fi
 KEY="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/aegis.key}"
 if [[ -z "$AGE_PUBLIC" && -f "$KEY" ]]; then
-  AGE_PUBLIC="$(age-keygen -y "$KEY")"     # derivar del privado (secrets.sh:254)
+  AGE_PUBLIC="$(age-keygen -y "$KEY")"     # derive it from the private key (secrets.sh:254)
 fi
-[[ -n "$AGE_PUBLIC" ]] || die "sin AGE_PUBLIC (ni init/.age-public ni la key privada en $KEY)"
+[[ -n "$AGE_PUBLIC" ]] || die "no AGE_PUBLIC (neither .age-public nor the private key at $KEY)"
 
-# Por default escribe en el árbol de respaldos, junto al de los datos, y
-# no en la raíz del repo. Este bundle es el ESTADO de la plataforma —los
-# secretos del store, la traza del init, el tfstate del borde—, así que
-# no pertenece a ninguna organización: va en `plataforma/`, al lado de
-# las carpetas `org-*` que escribe platform/aegis data.
+# By default it writes into the backups tree, beside the data one, and
+# not into the repo root. This bundle is the platform's STATE — the
+# store's secrets, the init's trail, the edge's tfstate — so it belongs
+# to no organization: it goes in `platform/`, next to the `org-*`
+# folders that `aegis data` writes.
 #
-# Con un argumento explícito manda el argumento, para no romper a quien
-# ya lo invoque así.
-RESPALDOS="${AEGIS_RESPALDOS:-$HOME/aegis-respaldos}"
-OUT="${1:-$RESPALDOS/plataforma/aegis-estado-$(date +%Y%m%d-%H%M%S).age}"
+# With an explicit argument, the argument wins, so as not to break
+# anyone already invoking it that way.
+BACKUPS="${AEGIS_BACKUPS:-$HOME/aegis-backups}"
+OUT="${1:-$BACKUPS/platform/aegis-state-$(date +%Y%m%d-%H%M%S).age}"
 mkdir -p "$(dirname "$OUT")"
 
-# ── recolectar SÓLO lo que existe (un backup pre-fase-25 no tiene tfstate) ─
+# ── collect ONLY what exists (a pre-phase-25 backup has no tfstate) ──
 STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 umask 077
 PAY="$STAGE/payload"; mkdir -p "$PAY"
 MANIFEST="$PAY/MANIFEST.txt"; : > "$MANIFEST"
 
-collect() {  # collect <label> <src...>  — copia CONTENIDO (dir/.) o el file
+collect() {  # collect <label> <src...>  — copies CONTENTS (dir/.) or the file
   local label="$1"; shift; local got=0 p
   mkdir -p "$PAY/$label"
   for p in "$@"; do
@@ -79,55 +82,57 @@ collect() {  # collect <label> <src...>  — copia CONTENIDO (dir/.) o el file
   done
   [[ $got == 1 ]] || rmdir "$PAY/$label" 2>/dev/null || true
   printf '%s: %s\n' "$label" "$([[ $got == 1 ]] && echo present || echo MISSING)" >> "$MANIFEST"
-  say "$label: $([[ $got == 1 ]] && echo incluido || echo 'ausente (se omite)')"
+  say "$label: $([[ $got == 1 ]] && echo included || echo 'absent (skipped)')"
 }
 collect state-secrets "$STATE_SECRETS"
 collect init-state    "$INIT_STATE"
 collect tfstate       "$TUNNEL_ENV/terraform.tfstate" "$TUNNEL_ENV/terraform.tfstate.backup"
 
-# GUARDA DURA: la age key JAMÁS entra al bundle (el irreducible va aparte).
+# HARD GUARD: the age key NEVER enters the bundle (the irreducible goes apart).
 if find "$PAY" -type f \( -name 'aegis.key' -o -name '*.agekey' \) \
       -o -path '*/sops/age/*' 2>/dev/null | grep -q .; then
-  die "el payload contiene material de la age key — abortado (nunca se respalda la key)"
+  die "the payload contains age key material — aborted (the key is never backed up)"
 fi
 
-# ── tar + age: UN ciphertext portable ────────────────────────────────────
+# ── tar + age: ONE portable ciphertext ───────────────────────────────────
 tar -C "$PAY" -czf "$STAGE/bundle.tgz" .
 age -r "$AGE_PUBLIC" -o "$OUT" "$STAGE/bundle.tgz"
 chmod 600 "$OUT"
-say "bundle age-cifrado → $OUT ($(wc -c <"$OUT") bytes)"
+say "age-encrypted bundle → $OUT ($(wc -c <"$OUT") bytes)"
 
-# ── ROUNDTRIP VERIFICADO: descifrar con la privada y comparar byte-a-byte ─
-# Sin esto es "tenemos backups", no DR. Si no está la key, se PRODUCE el
-# bundle pero se marca NO-VERIFICADO (loud) — el gate de W-09 exige verify.
+# ── VERIFIED ROUNDTRIP: decrypt with the private key and compare byte for
+# byte. Without this it is "we have backups", not disaster recovery. If the
+# key is absent the bundle is still PRODUCED but marked NOT-VERIFIED, loudly
+# — W-09's gate requires the verification.
 if [[ -f "$KEY" ]]; then
   VER="$(mktemp -d)"; VPAY="$VER/payload"; mkdir -p "$VPAY"
   age -d -i "$KEY" "$OUT" | tar -C "$VPAY" -xzf -
   if diff -r "$PAY" "$VPAY" >/dev/null 2>&1; then
-    say "ROUNDTRIP OK — el bundle descifra y reproduce los estados byte-a-byte (restauración probada)"
+    say "ROUNDTRIP OK — the bundle decrypts and reproduces the states byte for byte (a proven restore)"
   else
-    rm -rf "$VER"; die "ROUNDTRIP FALLÓ — el bundle NO reproduce los estados; NO confiar en este backup"
+    rm -rf "$VER"; die "ROUNDTRIP FAILED — the bundle does NOT reproduce the states; do NOT trust this backup"
   fi
   rm -rf "$VER"
 else
-  say "WARN: sin age key privada ($KEY) — bundle producido pero NO VERIFICADO (DR sin prueba de restauración)"
+  say "WARN: no private age key ($KEY) — bundle produced but NOT VERIFIED (recovery with no proof of restore)"
 fi
 
-# ── SINK (offsite): agnóstico. Un backup que nunca sale de la VM no
-# sobrevive a perderla. Si AEGIS_BACKUP_SINK está configurado, se ejecuta
-# con el bundle como $1 para empujarlo offsite. NO se hardcodea proveedor
-# ("cero cloud pagado" + portable): el stack sugiere rclone crypt→Drive,
-# pero cualquier comando sirve (rclone / scp / cp a un montaje / etc).
-#   ej: export AEGIS_BACKUP_SINK='rclone copy "$1" gdrive-crypt:aegis/'
-# El bundle YA es age-ciphertext, así que el sink no necesita ser confiable.
+# ── SINK (offsite): provider-agnostic. A backup that never leaves the
+# machine does not survive losing it. If AEGIS_BACKUP_SINK is set, it is
+# executed with the bundle as $1 to push it offsite. No provider is
+# hardcoded ("zero paid cloud" plus portability): the stack suggests
+# rclone crypt→Drive, but any command works (rclone / scp / cp to a
+# mount / …).
+#   e.g.: export AEGIS_BACKUP_SINK='rclone copy "$1" gdrive-crypt:aegis/'
+# The bundle is ALREADY age ciphertext, so the sink need not be trusted.
 if [[ -n "${AEGIS_BACKUP_SINK:-}" ]]; then
-  say "sink configurado — enviando el bundle offsite…"
+  say "sink configured — sending the bundle offsite…"
   if AEGIS_BACKUP_BUNDLE="$OUT" bash -c "$AEGIS_BACKUP_SINK" aegis-sink "$OUT"; then
-    say "sink OK — bundle enviado offsite"
+    say "sink OK — bundle sent offsite"
   else
-    die "sink FALLÓ — el bundle existe en $OUT pero NO salió de la VM (resguardalo a mano)"
+    die "sink FAILED — the bundle exists at $OUT but did NOT leave the machine (put it somewhere safe by hand)"
   fi
 else
-  say "sin AEGIS_BACKUP_SINK — el bundle queda LOCAL en $OUT; resguardalo offsite (o configurá el sink)."
+  say "no AEGIS_BACKUP_SINK — the bundle stays LOCAL at $OUT; put it offsite (or configure the sink)."
 fi
 

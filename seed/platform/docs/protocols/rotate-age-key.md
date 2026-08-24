@@ -61,7 +61,7 @@ cuando se mueve `init/.age-public`.
 
 ```bash
 export SOPS_AGE_KEY_FILE=$HOME/.config/sops/age/aegis.key
-export AEGIS_RESPALDOS=/mnt/e/aegis-respaldos   # montado (#85)
+export AEGIS_BACKUPS=/mnt/e/aegis-backups   # montado (#85)
 aegis state backup          # ROUNDTRIP verificado, no «tenemos backups»
 ```
 
@@ -294,7 +294,7 @@ dejar por ahí una clave capaz de abrir material del sistema.
 
 ```bash
 VIEJA=~/.config/sops/age/aegis.key.vieja
-for b in "$AEGIS_RESPALDOS"/*/*.age; do
+for b in "$AEGIS_BACKUPS"/*/*.age; do
   age -d -i "$VIEJA" "$b" | age -r "$PUB_NUEVA" -o "$b.nuevo" || { echo "FALLÓ: $b"; continue; }
   # roundtrip ANTES del mv: no se declara re-cifrado sin volver a abrirlo
   if age -d -i ~/.config/sops/age/aegis.key "$b.nuevo" >/dev/null 2>&1; then

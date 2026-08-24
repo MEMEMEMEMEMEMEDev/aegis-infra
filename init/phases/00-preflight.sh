@@ -1,107 +1,110 @@
 #!/usr/bin/env bash
-# FASE 00 — preflight: precondiciones y límites conocidos.
-# El contrato del init es explícito: si una precondición no se
-# cumple, se ABORTA ACÁ, no en la fase 40 con medio cluster armado.
-# (27 §2.4: los límites H4/H5 se convierten en preflight verificado.)
+# PHASE 00 — preflight: preconditions and known limits.
+# The init contract is explicit: if a precondition is not met, we
+# ABORT HERE, not in phase 40 with half a cluster already built.
+# (27 §2.4: the H4/H5 limits become a verified preflight.)
 set -euo pipefail
 
-log_info "Preflight — perfil: $PROFILE"
+log_info "Preflight — profile: $PROFILE"
 
-# ── límites conocidos de v1 (se muestran SIEMPRE) ───────────────────
+# ── known v1 limits (ALWAYS shown) ──────────────────────────────────
 cat <<'EOF'
-LÍMITES CONOCIDOS DE ESTE INIT (v1):
- - NO cubre pérdida total de GitHub (el bootstrap arranca con clone).
- - NO importa recursos Cloudflare/GitHub vivos: perfil greenfield
-   RECREA (tunnel nuevo => token nuevo). El perfil re-bootstrap con
-   import NO existe todavía.
- - El lado Windows (WSL2/.wslconfig) se VERIFICA y GUÍA, no se
-   configura automáticamente.
+KNOWN LIMITS OF THIS INIT (v1):
+ - Does NOT cover total loss of GitHub (bootstrap starts with a clone).
+ - Does NOT import live Cloudflare/GitHub resources: the greenfield
+   profile RECREATES (new tunnel => new token). The re-bootstrap
+   profile with import does NOT exist yet.
+ - The Windows side (WSL2/.wslconfig) is VERIFIED and GUIDED, not
+   configured automatically.
 EOF
 
-# ── precondiciones duras ────────────────────────────────────────────
-# 1. Config: GUIADA. Sin conf → el wizard pregunta campo por campo
-#    (explicación + default + validación) y lo escribe; con conf
-#    válido → sigue de largo (re-corridas). El operador responde
-#    preguntas, no edita archivos (misión del operador; mismo
-#    principio que los secretos: generar+guiar).
-ensure_config    # define y valida todas las vars (lib/config.sh)
+# ── hard preconditions ──────────────────────────────────────────────
+# 1. Config: GUIDED. No conf → the wizard asks field by field
+#    (explanation + default + validation) and writes it; with a valid
+#    conf → it goes straight through (re-runs). The operator answers
+#    questions, they do not edit files (operator's mission; same
+#    principle as the secrets: generate+guide).
+ensure_config    # defines and validates every var (lib/config.sh)
 
-# 1b. DOCTOR de host/red (P0.4/P0.5 auditoría 2026-07-18): TODO lo
-#     que en corridas reales mató fases a 30-40 min de camino se
-#     verifica ACÁ, con la remediación en el mensaje. El doctor
-#     diagnostica y guía; no reconfigura el host solo.
-# H3 corrida #15: jq frenó la 00 en una VM limpia (prerequisito no
-# documentado ni instalado — la 05 instala DESPUÉS de que la 00 lo
-# exige). Si hay sudo NOPASSWD, se instala ACÁ, logueado; si no, el
-# gate de abajo frena con el comando exacto (como en la #15):
+# 1b. host/network DOCTOR (P0.4/P0.5 audit 2026-07-18): EVERYTHING
+#     that killed phases 30-40 minutes into real runs is verified
+#     HERE, with the remediation in the message. The doctor diagnoses
+#     and guides; it does not reconfigure the host on its own.
+# H3 run #15: jq stopped phase 00 on a clean VM (a prerequisite
+# neither documented nor installed — phase 05 installs it AFTER
+# phase 00 demands it). If sudo NOPASSWD is available, we install it
+# HERE, logged; if not, the gate below stops with the exact command
+# (as in #15):
 if ! command -v jq >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-    log_warn "jq ausente — lo instalo (sudo NOPASSWD disponible; H3 #15)"
+    log_warn "jq missing — installing it (sudo NOPASSWD available; H3 #15)"
     retry_net 3 sudo apt-get -o DPkg::Lock::Timeout=600 install -y jq || \
-        log_warn "no pude instalar jq solo — el gate de abajo trae el comando manual"
+        log_warn "could not install jq on my own — the gate below carries the manual command"
 fi
 gate "bootstrap-bins" check_bootstrap_bins
 gate "dev-shm" check_dev_shm
 gate "egress-ipv6" check_ipv6_trap
 gate "dns-efectivo" check_egress_dns
-# H1 corrida #15: el veredicto del reloj es el SKEW REAL contra una
-# fuente externa (gate duro); timedatectl queda solo informativo:
+# H1 run #15: the clock's verdict is the REAL SKEW against an
+# external source (hard gate); timedatectl stays informational only:
 gate "reloj-sin-skew" check_clock_skew
-check_clock_ntp   # informativo (señal débil con chrony — H1)
+check_clock_ntp   # informational (weak signal with chrony — H1)
 gate "ns-en-cloudflare" check_domain_on_cloudflare "$ROOT_DOMAIN"
 
-# 1c. sudo TEMPRANO (P0.4): sin NOPASSWD ni operador, la corrida
-#     moría en la fase 20 (~30 min). -K purga el cache (el falso
-#     positivo de la corrida #5). En interactivo solo avisa (la fase
-#     20 va a pedir el password UNA vez); en desatendido es duro:
-sudo -K 2>/dev/null || log_info "(sin cache de sudo que purgar)"
+# 1c. sudo EARLY (P0.4): with neither NOPASSWD nor an operator, the
+#     run died in phase 20 (~30 min). -K purges the cache (the false
+#     positive of run #5). Interactively it only warns (phase 20 will
+#     ask for the password ONCE); unattended it is hard:
+sudo -K 2>/dev/null || log_info "(no sudo cache to purge)"
 if sudo -n true 2>/dev/null; then
-    log_ok "sudo NOPASSWD activo — las fases 20/40 corren sin prompt"
+    log_ok "sudo NOPASSWD active — phases 20/40 run without a prompt"
 elif ni_mode; then
-    die "sudo sin NOPASSWD en --non-interactive — instalar ANTES: printf '%s ALL=(ALL) NOPASSWD:ALL\n' \"\$(id -un)\" | sudo tee /etc/sudoers.d/010-aegis-init-nopasswd && sudo chmod 0440 /etc/sudoers.d/010-aegis-init-nopasswd"
+    die "sudo without NOPASSWD under --non-interactive — install it BEFORE: printf '%s ALL=(ALL) NOPASSWD:ALL\n' \"\$(id -un)\" | sudo tee /etc/sudoers.d/010-aegis-init-nopasswd && sudo chmod 0440 /etc/sudoers.d/010-aegis-init-nopasswd"
 else
-    log_warn "sudo va a pedir password en la fase 20 (o instalá NOPASSWD ahora para no estar presente: drop-in en /etc/sudoers.d)"
+    log_warn "sudo will ask for a password in phase 20 (or install NOPASSWD now so you don't have to be present: drop-in in /etc/sudoers.d)"
 fi
 
-# 2. Host soportado (diseñado sobre Ubuntu 24.04; 26.04 tolerado
-#    con aviso — los checks son version-agnósticos, pero el dato
-#    queda a la vista si algo raro aparece después):
+# 2. Supported host (designed on Ubuntu 24.04; 26.04 tolerated with
+#    a warning — the checks are version-agnostic, but the fact stays
+#    in plain sight in case something odd shows up later):
 gate "wsl2-o-linux" check_wsl2
 if [[ -r /etc/os-release ]]; then
     . /etc/os-release
-    log_info "OS detectado: ${PRETTY_NAME:-desconocido}"
+    log_info "OS detected: ${PRETTY_NAME:-unknown}"
     case "${VERSION_ID:-}" in
         24.04|26.04) ;;
-        *) log_warn "Ubuntu ${VERSION_ID:-?} no está en la lista probada (24.04/26.04)" ;;
+        *) log_warn "Ubuntu ${VERSION_ID:-?} is not on the tested list (24.04/26.04)" ;;
     esac
 fi
 
-# 3. gh es PREREQUISITO del operador (instalado + autenticado ANTES
-#    del init): es LA credencial GitHub de todo el flujo (D10 — crea
-#    repos, settings, webhooks; no hay PAT). Si falta:
-#    apt install gh && gh auth login  (scopes: repo + admin de repo)
+# 3. gh is an operator PREREQUISITE (installed + authenticated
+#    BEFORE init): it is THE GitHub credential for the whole flow
+#    (D10 — it creates repos, settings, webhooks; there is no PAT).
+#    If it is missing:
+#    apt install gh && gh auth login  (scopes: repo + repo admin)
 gate "github-auth" check_github_reachable
 
-# 3b. Host keys de GitHub pinneadas siguen vigentes (A32 — detecta
-#     rotación de GitHub ANTES de hornear el values en el cluster):
+# 3b. GitHub's pinned host keys are still current (A32 — detects a
+#     GitHub rotation BEFORE baking the values into the cluster):
 gate "github-hostkeys-vigentes" check_github_hostkeys_pin
 
-# 4. Espacio en disco (registry+jenkins+trivy PVCs; umbral 20G):
+# 4. Disk space (registry+jenkins+trivy PVCs; threshold 20G):
 gate "disco-20G" bash -c \
     '[[ $(df --output=avail -BG / | tail -1 | tr -dc 0-9) -ge 20 ]]'
 
-# 5. Greenfield sobre host con kubeconfig previo: confirmar que no
-#    se pisa nada vivo (A11 invertido: acá el peligro es PISAR).
+# 5. Greenfield on a host with a previous kubeconfig: confirm that
+#    nothing live is being stepped on (A11 inverted: here the danger
+#    is TRAMPLING).
 if kubectl config current-context >/dev/null 2>&1; then
-    log_warn "kubeconfig activo: $(kubectl config current-context)"
-    gate_red "greenfield con kubeconfig existente — confirmá que ese cluster NO importa"
+    log_warn "active kubeconfig: $(kubectl config current-context)"
+    gate_red "greenfield with an existing kubeconfig — confirm that cluster does NOT matter"
 fi
 
-# 6. resguardo a mano (agnóstico — el init no asume gestor):
-human_step "Resguardo listo" \
-  "La fase 10 te va a mostrar la age key UNA vez para que la" \
-  "guardes donde guardes tus secretos (gestor, papel, pendrive)." \
-  "Es EL ÚNICO valor que vas a resguardar a mano en todo el init" \
-  "(el resto se persiste cifrado y se recupera con esa key)." \
-  "Tené tu lugar de resguardo accesible AHORA."
+# 6. safekeeping by hand (agnostic — init assumes no password manager):
+human_step "Safekeeping ready" \
+  "Phase 10 will show you the age key ONCE so you can store it" \
+  "wherever you keep your secrets (manager, paper, USB stick)." \
+  "It is THE ONLY value you will store by hand in the whole init" \
+  "(everything else is persisted encrypted and recovered with that key)." \
+  "Have your safekeeping place reachable NOW."
 
-log_ok "Preflight completo — límites aceptados, precondiciones OK"
+log_ok "Preflight complete — limits accepted, preconditions OK"

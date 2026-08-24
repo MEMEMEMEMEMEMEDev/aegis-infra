@@ -1,127 +1,129 @@
 #!/usr/bin/env bash
-# FASE 10 — ceremonia de la clave age (la raíz de confianza).
-# Generaliza rotate-age-key.md §A: generación + 3 resguardos +
-# VALIDACIÓN POR ROUNDTRIP REAL (no confirmación verbal) + workspace
-# operativo (path custom ADR-0003 + direnv + .envrc).
-# ROJO por diseño: es la única fase que MUESTRA un secreto (una vez,
-# para resguardo del operador — principio secreto-al-operador).
+# PHASE 10 — the age key ceremony (the root of trust).
+# Generalizes rotate-age-key.md §A: generation + 3 backups + REAL
+# ROUNDTRIP VALIDATION (not a verbal confirmation) + an operational
+# workspace (custom path ADR-0003 + direnv + .envrc).
+# RED by design: it is the only phase that SHOWS a secret (once, for
+# the operator's safekeeping — the secret-to-the-operator principle).
 set -euo pipefail
 
-AGE_OPS_PATH="$HOME/.config/sops/age/aegis.key"   # ADR-0003: JAMÁS keys.txt
+AGE_OPS_PATH="$HOME/.config/sops/age/aegis.key"   # ADR-0003: NEVER keys.txt
 CONF="$AEGIS_HOME/aegis.conf"; source "$CONF"
 
-# ── re-bootstrap corto-circuito: si ya hay key operativa, validar y
-#    salir (idempotencia; el greenfield puro sigue de largo) ────────
+# ── re-bootstrap short-circuit: if there is already an operational
+#    key, validate and leave (idempotence; pure greenfield goes
+#    straight through) ──────────────────────────────────────────────
 if [[ -f "$AGE_OPS_PATH" ]]; then
-    log_warn "Ya existe $AGE_OPS_PATH — modo 'key existente'"
+    log_warn "$AGE_OPS_PATH already exists — 'existing key' mode"
     export SOPS_AGE_KEY_FILE="$AGE_OPS_PATH"
     gate "age-existente-operativa" check_age_key_operational
-    # P3 auditoría 2026-07-18: este atajo SALTABA el render — un
-    # re-run tras muerte parcial (key instalada, render no corrido)
-    # dejaba __GH_OWNER__/__ROOT_DOMAIN__ VIVOS para las fases 12+.
-    # El atajo exime lo IRREPETIBLE (generar/mostrar la key); la
-    # parte idempotente corre SIEMPRE:
+    # P3 audit 2026-07-18: this shortcut SKIPPED the render — a re-run
+    # after a partial death (key installed, render not run) left
+    # __GH_OWNER__/__ROOT_DOMAIN__ ALIVE for phases 12+. The shortcut
+    # exempts what is UNREPEATABLE (generating/showing the key); the
+    # idempotent part runs ALWAYS:
     AGE_PUBLIC="$(age-keygen -y "$AGE_OPS_PATH")"
     gate "age-public-derivada" bash -c "[[ '$AGE_PUBLIC' == age1* ]]"
     echo "$AGE_PUBLIC" > "$AEGIS_HOME/.age-public"
     if [[ -f "$PLATFORM_DIR/.sops.yaml.tpl" && ! -f "$PLATFORM_DIR/.sops.yaml" ]]; then
         run_cmd bash -c "sed 's/__AGE_PUBLIC__/$AGE_PUBLIC/' \
             '$PLATFORM_DIR/.sops.yaml.tpl' > '$PLATFORM_DIR/.sops.yaml'"
-        log_ok ".sops.yaml regenerado (faltaba — muerte parcial previa)"
+        log_ok ".sops.yaml regenerated (it was missing — a previous partial death)"
     fi
-    render_platform_placeholders   # idempotente: sin vivos es no-op
-    log_ok "age key existente validada; fase 10 completa (sin generar; render verificado)"
+    render_platform_placeholders   # idempotent: with none alive it is a no-op
+    log_ok "existing age key validated; phase 10 complete (nothing generated; render verified)"
     return 0 2>/dev/null || exit 0
 fi
 
-# ── A6/A5 aplican después; acá: generar + ceremonia ────────────────
+# ── A6/A5 apply later; here: generate + ceremony ──────────────────
 secrets_workdir
-AGE_TMP="$(gen_age_key)"     # stdout = SOLO el path (H4)
+AGE_TMP="$(gen_age_key)"     # stdout = ONLY the path (H4)
 gate "age-key-generada" test -s "$AGE_TMP"
 
-# la pública (T1) se deriva DEL ARCHIVO con la herramienta oficial
-# — sobrevive cualquier subshell por construcción (H4: setearla
-# dentro de gen_age_key moría en el $()):
+# the public part (T1) is derived FROM THE FILE with the official
+# tool — it survives any subshell by construction (H4: setting it
+# inside gen_age_key died in the $()):
 AGE_PUBLIC="$(age-keygen -y "$AGE_TMP")"
 gate "age-public-derivada" bash -c "[[ '$AGE_PUBLIC' == age1* ]]"
-log_info "pública: $AGE_PUBLIC"
+log_info "public: $AGE_PUBLIC"
 
-# guardar la pública para el resto del init (T1, sin secreto):
+# store the public part for the rest of the init (T1, no secret):
 echo "$AGE_PUBLIC" > "$AEGIS_HOME/.age-public"
 
-# ── ceremonia: mostrar UNA vez + resguardos + roundtrip ────────────
-ceremony_backup "age key (IRREEMPLAZABLE — pierde esto y se pierde \
-TODO lo cifrado)" "$AGE_TMP" validate_age_backup \
-    "pendrive offline 'aegis-offline' + /aegis/secrets-offline/"
+# ── ceremony: show ONCE + backups + roundtrip ─────────────────────
+ceremony_backup "age key (IRREPLACEABLE — lose this and EVERYTHING \
+encrypted is lost)" "$AGE_TMP" validate_age_backup \
+    "offline USB stick 'aegis-offline' + /aegis/secrets-offline/"
 
-# ── instalar la copia operativa (600) ──────────────────────────────
+# ── install the operational copy (600) ────────────────────────────
 run_cmd install -D -m 600 "$AGE_TMP" "$AGE_OPS_PATH"
 export SOPS_AGE_KEY_FILE="$AGE_OPS_PATH"
 gate "age-operativa" check_age_key_operational
 
-# ── workspace: .envrc + direnv allow (A2/A3) ───────────────────────
-# El init NO depende de direnv (exporta explícito — A2); el .envrc es
-# para el trabajo interactivo posterior del operador.
+# ── workspace: .envrc + direnv allow (A2/A3) ──────────────────────
+# The init does NOT depend on direnv (it exports explicitly — A2); the
+# .envrc is for the operator's later interactive work.
 WORKSPACE="${AEGIS_WORKSPACE:-$HOME/aegis}"
 if [[ -d "$WORKSPACE" ]]; then
     if [[ ! -f "$WORKSPACE/.envrc" ]]; then
         run_cmd bash -c "printf 'export SOPS_AGE_KEY_FILE=%q\n' \
             '$AGE_OPS_PATH' > '$WORKSPACE/.envrc'"
         run_cmd direnv allow "$WORKSPACE"
-        log_ok ".envrc creado + direnv allow en $WORKSPACE"
+        log_ok ".envrc created + direnv allow in $WORKSPACE"
     fi
 fi
 
-# ── SEMBRAR platform/ DESDE LA SEED ─────────────────────────────
+# ── SEED platform/ FROM THE SEED ────────────────────────────────
 #
-# Hasta el 2026-08-05 no hacía falta: `platform/` era a la vez la
-# semilla (trackeada por el repo del producto) y el directorio de
-# trabajo de la instancia. Dos repos sobre una misma carpeta.
+# Until 2026-08-05 this was not needed: `platform/` was at once the
+# seed (tracked by the product's repo) and the instance's working
+# directory. Two repos over a single folder.
 #
-# Eso tenía dos consecuencias, las dos medidas:
-#   - La semilla se congeló. La instancia viva avanzó una semana y
-#     nada de eso volvió, porque devolverlo exige DES-renderizar los
-#     placeholders que esta misma fase resuelve más abajo.
-#   - Trabajar la semilla era peligroso: un `git checkout -- platform/`
-#     distraído pisaba los archivos de la instancia CORRIENDO.
+# That had two consequences, both measured:
+#   - The seed froze. The live instance moved on for a week and none
+#     of it came back, because bringing it back requires UN-rendering
+#     the placeholders this very phase resolves further down.
+#   - Working on the seed was dangerous: a distracted
+#     `git checkout -- platform/` trampled the files of the RUNNING
+#     instance.
 #
-# Ahora la semilla vive en seed/platform/ (sin renderizar) y se
-# COPIA acá. El render de abajo sigue operando sobre platform/, o sea
-# sobre la copia, y la semilla nunca queda con valores de una
-# instancia adentro.
+# Now the seed lives in seed/platform/ (unrendered) and is COPIED
+# here. The render below still operates on platform/, that is, on the
+# copy, and the seed is never left with one instance's values inside.
 #
-# LA GUARDA ES LO IMPORTANTE: si platform/ ya tiene .git, esto NO es
-# un arranque virgen — es una instancia con historia propia, y su
-# working tree es la verdad. Copiar la semilla encima la destruiría.
-SEMILLA_PLATAFORMA="$AEGIS_ROOT/seed/platform"
-[[ -d "$SEMILLA_PLATAFORMA" ]] || die "falta seed/platform/ — el artefacto está incompleto"
+# THE GUARD IS THE IMPORTANT PART: if platform/ already has .git, this
+# is NOT a virgin start — it is an instance with a history of its own,
+# and its working tree is the truth. Copying the seed on top would
+# destroy it.
+PLATFORM_SEED="$AEGIS_ROOT/seed/platform"
+[[ -d "$PLATFORM_SEED" ]] || die "seed/platform/ is missing — the artifact is incomplete"
 if [[ -d "$PLATFORM_DIR/.git" ]]; then
-    log_info "platform/ ya es una instancia (tiene .git): NO se siembra desde la semilla"
+    log_info "platform/ is already an instance (it has .git): NOT seeding from the seed"
 else
     run_cmd mkdir -p "$PLATFORM_DIR"
-    # -a preserva modos (bin/ tiene ejecutables); el `.` copia también
-    # los ocultos, que incluyen .sops.yaml.tpl y .gitignore.
-    run_cmd cp -a "$SEMILLA_PLATAFORMA/." "$PLATFORM_DIR/"
-    log_ok "platform/ sembrado desde seed/platform/ ($(find "$SEMILLA_PLATAFORMA" -type f | wc -l) archivos)"
+    # -a preserves modes (bin/ has executables); the `.` also copies
+    # the hidden files, which include .sops.yaml.tpl and .gitignore.
+    run_cmd cp -a "$PLATFORM_SEED/." "$PLATFORM_DIR/"
+    log_ok "platform/ seeded from seed/platform/ ($(find "$PLATFORM_SEED" -type f | wc -l) files)"
 fi
 
-# ── .sops.yaml del repo de plataforma: recipient = la pública ──────
-# (en greenfield el repo v2 se inicializa con ESTA pública; el
-#  placeholder se reemplaza acá — ver seed/platform/.sops.yaml.tpl)
+# ── the platform repo's .sops.yaml: recipient = the public key ─────
+# (in greenfield the v2 repo is initialized with THIS public key; the
+#  placeholder is replaced here — see seed/platform/.sops.yaml.tpl)
 SOPS_TPL="$PLATFORM_DIR/.sops.yaml.tpl"
 if [[ -f "$SOPS_TPL" ]]; then
     run_cmd bash -c "sed 's/__AGE_PUBLIC__/$AGE_PUBLIC/' '$SOPS_TPL' \
         > '$PLATFORM_DIR/.sops.yaml'"
-    log_ok ".sops.yaml del repo generado con el recipient nuevo"
+    log_ok "the repo's .sops.yaml generated with the new recipient"
 fi
 
-# ── render ÚNICO de placeholders de clase-config (dueño: esta fase) ─
-# Todos los __GH_OWNER__/__ROOT_DOMAIN__/etc. de platform/ se
-# resuelven acá, ANTES de que ninguna fase consuma un manifest.
-# (los de clase-generado quedan: __COSIGN_PUB__/__AEGIS_CA_PEM__
-#  son de la fase 80 — ver render_platform_placeholders en common.sh)
+# ── SINGLE render of config-class placeholders (owner: this phase) ─
+# Every __GH_OWNER__/__ROOT_DOMAIN__/etc. in platform/ is resolved
+# here, BEFORE any phase consumes a manifest.
+# (the generated-class ones stay: __COSIGN_PUB__/__AEGIS_CA_PEM__
+#  belong to phase 80 — see render_platform_placeholders in common.sh)
 render_platform_placeholders
-log_ok "platform/ renderizado desde aegis-init.conf (un solo paso)"
+log_ok "platform/ rendered from aegis-init.conf (a single step)"
 
-log_ok "Ceremonia age completa: 3 resguardos validados, copia \
-operativa 600, workspace configurado"
+log_ok "age ceremony complete: 3 backups validated, operational copy \
+600, workspace configured"

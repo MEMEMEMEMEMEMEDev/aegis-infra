@@ -17,10 +17,10 @@ dónde poner.
 
 ── UN BUNDLE POR ORGANIZACIÓN, EN SU PROPIA CARPETA ────────────────
 
-    $AEGIS_RESPALDOS/
+    $AEGIS_BACKUPS/
       .aegis-destino                       <- la marca del disco (ver abajo)
       plataforma/
-        aegis-estado-<ts>.age              <- lo escribe aegis state backup
+        aegis-state-<ts>.age              <- lo escribe aegis state backup
       org-ejemplo/
         aegis-datos-org-ejemplo-<ts>.age
       org-portafolio/
@@ -146,7 +146,7 @@ RAIZ = str(paths.platform_dir())
 DIR_ORGS = os.path.join(RAIZ, "orgs")
 SERVICIOS = os.path.join(RAIZ, "services.yaml")
 DESTINO_DEF = os.environ.get(
-    "AEGIS_RESPALDOS", os.path.join(os.path.expanduser("~"), "aegis-respaldos"))
+    "AEGIS_BACKUPS", os.path.join(os.path.expanduser("~"), "aegis-backups"))
 
 rojo = "\033[31m"; verde = "\033[32m"; ama = "\033[33m"; gris = "\033[90m"; fin = "\033[0m"
 if not sys.stdout.isatty():

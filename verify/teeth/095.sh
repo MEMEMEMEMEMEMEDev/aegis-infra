@@ -1,8 +1,8 @@
-# dientes del check 095 — generados el 2026-08-23 y VERIFICADOS:
-# cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
+# teeth for check 095 — generated on 2026-08-23 and VERIFIED:
+# each red was applied to a copy of the tree and the check turned red.
 
-# saca del artefacto justo lo que el check dice medir
+# removes from the artifact exactly what the check says it measures
 red_1() {
-    grep -vE 'cd "\$RAIZ/tofu" && "\$WRAPPER"' "$AEGIS_ROOT/libexec/aegis-vps" > "$AEGIS_ROOT/libexec/aegis-vps.diente" \
-        && mv "$AEGIS_ROOT/libexec/aegis-vps.diente" "$AEGIS_ROOT/libexec/aegis-vps"
+    grep -vE 'cd "\$RAIZ/tofu" && "\$WRAPPER"' "$AEGIS_ROOT/libexec/aegis-vps" > "$AEGIS_ROOT/libexec/aegis-vps.tooth" \
+        && mv "$AEGIS_ROOT/libexec/aegis-vps.tooth" "$AEGIS_ROOT/libexec/aegis-vps"
 }

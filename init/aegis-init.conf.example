@@ -1,24 +1,24 @@
-# aegis-init.conf.example — SOLO REFERENCIA para automatización.
-# EL CAMINO NORMAL NO ES ESTE ARCHIVO: el init corre un wizard
-# guiado (pregunta campo por campo, con defaults y validación) y
-# escribe aegis-init.conf solo. Usá este example únicamente para
-# pre-armar una re-corrida no interactiva.
-# Regenerar interactivo: ./aegis-init.sh --configure
+# aegis-init.conf.example — REFERENCE ONLY, for automation.
+# THE NORMAL PATH IS NOT THIS FILE: init runs a guided wizard
+# (it asks field by field, with defaults and validation) and
+# writes aegis-init.conf by itself. Use this example only to
+# pre-arm a non-interactive re-run.
+# Regenerate interactively: ./aegis-init.sh --configure
 #
-# Todo T1: dominios, nombres, IDs públicos. CERO secretos.
+# All T1: domains, names, public IDs. ZERO secrets.
 GH_OWNER="mi-org"
-# AISLAMIENTO: repos de trabajo DESECHABLES del v2 — el init los
-# CREA y les escribe (commits, tags, settings, webhooks). JAMÁS
-# apuntar a los repos reales del v1 (ops-stack / hello-aegis):
+# ISOLATION: DISPOSABLE v2 work repos — init CREATES them and
+# writes to them (commits, tags, settings, webhooks). NEVER
+# point at the real v1 repos (ops-stack / hello-aegis):
 PLATFORM_REPO="ops-stack-v2"
 APP_REPO="hello-aegis-v2"
-ROOT_DOMAIN="example.com"                # zona activa en Cloudflare
-ACME_EMAIL="operador@example.com"        # registro Let's Encrypt
+ROOT_DOMAIN="example.com"                # zone active in Cloudflare
+ACME_EMAIL="operador@example.com"        # Let's Encrypt registration
 KUBE_CONTEXT_EXPECTED="default"          # k3s default context
-REGISTRY_CLUSTER_IP="10.43.179.123"      # en 10.43.0.0/16; pareada
-                                         # con SAN del cert
+REGISTRY_CLUSTER_IP="10.43.179.123"      # in 10.43.0.0/16; paired
+                                         # with the cert's SAN
 AEGIS_WORKSPACE="$HOME/aegis"
-# IDs Cloudflare (públicos, 32 hex): dash.cloudflare.com → tu zona
-# → Overview → columna derecha, sección "API":
+# Cloudflare IDs (public, 32 hex): dash.cloudflare.com → your zone
+# → Overview → right-hand column, "API" section:
 CF_ACCOUNT_ID=""
 CF_ZONE_ID=""

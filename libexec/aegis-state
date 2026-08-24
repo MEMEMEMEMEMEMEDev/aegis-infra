@@ -1,39 +1,38 @@
 #!/usr/bin/env bash
-# aegis-summary: Respalda y restaura los tres estados de esta máquina
+# aegis-summary: Backs up and restores the three states of this machine
 # aegis-group:   backup
 # aegis-subcommands: backup restore
 #
 # aegis-help:
-# Usage: aegis state backup [SALIDA]
+# Usage: aegis state backup [OUTPUT]
 #        aegis state restore <BUNDLE.age> [--force]
 #
-# Los TRES estados que solo viven en esta máquina y que ningún git
-# tiene: el store cifrado (.state-secrets/), los markers de fases
-# (.init-state/) y el tfstate del borde. Perder cualquiera de los tres
-# obliga a rehacer la instalación a mano.
+# The THREE pieces of state that live only on this machine and that no
+# git holds: the encrypted store (.state-secrets/), the phase markers
+# (.init-state/) and the edge's tfstate. Losing any of the three forces
+# redoing the installation by hand.
 #
-# `state` y no `data`: son cosas distintas y confundirlas se paga caro.
-# `aegis state` es la MÁQUINA (lo que hace falta para reconstruir la
-# instalación); `aegis data` son los DATOS de los inquilinos (lo que
-# hace falta para reconstruir la tienda). Un backup de uno no sirve
-# para restaurar el otro.
+# `state` and not `data`: they are different things and confusing them
+# is expensive. `aegis state` is the MACHINE (what it takes to rebuild
+# the installation); `aegis data` is the TENANTS' data (what it takes to
+# rebuild the shop). A backup of one is no use for restoring the other.
 set -euo pipefail
 
-# ── preámbulo canónico (V-102) ───────────────────────────────────────
+# ── canonical preamble (V-102) ───────────────────────────────────────
 if [[ -z "${AEGIS_ROOT:-}" ]]; then
-    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} state: falta readlink" >&2; exit 2; }
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} state: readlink is missing" >&2; exit 2; }
     AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 fi
 export AEGIS_ROOT
 # shellcheck source=../lib/paths.sh
 source "$AEGIS_ROOT/lib/paths.sh"
 
-uso() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
+usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
 
 case "${1:-}" in
-    backup|restore) VERBO="$1"; shift ;;
-    -h|--help|"")   uso; exit 0 ;;
-    *) printf '%s state: «%s» no es un subcomando (backup | restore)\n' "${AEGIS_CMD:-aegis}" "$1" >&2
+    backup|restore) VERB="$1"; shift ;;
+    -h|--help|"")   usage; exit 0 ;;
+    *) printf '%s state: «%s» is not a subcommand (backup | restore)\n' "${AEGIS_CMD:-aegis}" "$1" >&2
        exit 3 ;;
 esac
-exec "$AEGIS_ROOT/libexec/state/$VERBO" "$@"
+exec "$AEGIS_ROOT/libexec/state/$VERB" "$@"

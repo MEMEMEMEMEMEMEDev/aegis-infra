@@ -1,21 +1,21 @@
-# dientes del check 088 (el alcance de la firma se declara por ETIQUETA)
+# teeth for check 088 (the signature's scope is declared by LABEL)
 #
-# El incidente del 2026-07-27: el ClusterPolicy scopeaba
-# `namespaces: [org-personal]`. Se creó org-portafolio, se desplegó
-# ahí, y esa organización nació FUERA de la verificación de firma. No
-# hubo error ni aviso: la política simplemente no la miraba, y se
-# admitió una imagen pública sin firmar con todo el tablero en verde.
+# The incident of 2026-07-27: the ClusterPolicy scoped
+# `namespaces: [org-personal]`. org-portafolio was created, something
+# was deployed there, and that organization was born OUTSIDE signature
+# verification. There was no error and no warning: the policy simply
+# was not looking at it, and an unsigned public image was admitted with
+# the whole board green.
 #
-# Una lista solo puede nombrar lo que ya existe; la etiqueta la lleva
-# el bundle de cada inquilino, así que la cobertura llega con la
-# organización.
+# A list can only name what already exists; the label is carried by
+# each tenant's bundle, so the coverage arrives with the organization.
 red_1() {
     python3 - "$AEGIS_ROOT/seed/platform/k8s/base/kyverno-policies/clusterpolicy-require-aegis-signature.yaml" <<'PY'
 import re, sys
 p = sys.argv[1]
 t = open(p).read()
-# se reemplaza el selector por etiqueta por la lista de namespaces que
-# el incidente probó insuficiente
+# the label selector is replaced by the namespace list that the
+# incident proved insufficient
 t = re.sub(r'(?m)^(\s*)namespaceSelector:\n(?:\1  .*\n)+',
            lambda m: f"{m.group(1)}namespaces: [org-canary]\n", t, count=1)
 open(p, "w").write(t)

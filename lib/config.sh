@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
-# aegis-init lib/config.sh — configuración GUIADA (misión del
-# operador: "el init pregunta y hace; el operador decide y
-# confirma — nunca 'completá este archivo'"). Mismo principio que
-# los secretos (generar+guiar), aplicado a la config T1.
+# aegis-init lib/config.sh — GUIDED configuration (the operator's
+# mission: "the init asks and does; the operator decides and
+# confirms — never 'fill in this file'"). Same principle as the
+# secrets (generate+guide), applied to the T1 config.
 #
-# Flujo: ensure_config()
-#   - conf válido presente  → source y seguir (re-corridas y
-#     automatización: el .conf pre-hecho SIGUE siendo soportado).
-#   - sin conf (o --configure) → wizard: pregunta campo por campo
-#     con explicación + default inferido + validación inmediata,
-#     muestra el resumen, confirma, y ESCRIBE el .conf.
+# Flow: ensure_config()
+#   - valid conf present  → source it and carry on (re-runs and
+#     automation: the pre-made .conf IS STILL supported).
+#   - no conf (or --configure) → wizard: asks field by field with an
+#     explanation + inferred default + immediate validation, shows the
+#     summary, confirms, and WRITES the .conf.
 set -euo pipefail
 
 CONF_FILE="$AEGIS_HOME/aegis.conf"
 
-# ── validadores (uno por tipo de campo; evidencia inmediata) ────────
+# ── validators (one per field type; immediate evidence) ─────────────
 _v_domain()  { [[ "$1" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]]; }
 _v_email()   { [[ "$1" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]; }
 _v_reponame(){ [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]]; }
 _v_hex32()   { [[ "$1" =~ ^[0-9a-f]{32}$ ]]; }
 _v_nonempty(){ [[ -n "$1" ]]; }
 _v_path()    { [[ "$1" == /* || "$1" == "\$HOME"* || "$1" == "$HOME"* ]]; }
-_v_svc_ip()  {  # dentro del service CIDR default de k3s (10.43/16)
+_v_svc_ip()  {  # inside k3s's default service CIDR (10.43/16)
     python3 -c "
 import ipaddress, sys
 try:
@@ -31,101 +31,102 @@ except ValueError:
     sys.exit(1)"
 }
 
-# ── ask <var> <default> <validador> <explicación...> ────────────────
-# Pregunta con default entre corchetes (enter = aceptar), valida en
-# el momento, reintenta hasta valor válido.
+# ── ask <var> <default> <validator> <explanation...> ────────────────
+# Asks with the default in brackets (enter = accept), validates on the
+# spot, retries until the value is valid.
 ask() {
     local var="$1" def="$2" validator="$3"; shift 3
     printf '\n\033[1;36m── %s ──\033[0m\n' "$var"
     printf '%s\n' "$@"
-    # P0.2 auditoría: con stdin cerrado, read fallaba, ans quedaba
-    # vacío, el validador fallaba y el while : reintentaba PARA
-    # SIEMPRE (busy-loop infinito — el errexit está suprimido por el
-    # contexto || del caller). read || die corta el EOF; el tope de
-    # intentos corta el valor persistentemente inválido:
+    # P0.2 audit: with stdin closed, read failed, ans stayed empty, the
+    # validator failed and the `while :` retried FOREVER (infinite
+    # busy-loop — errexit is suppressed by the caller's || context).
+    # `read || die` cuts the EOF short; the cap on attempts cuts short
+    # the persistently invalid value:
     local ans tries=0
     while :; do
         if [[ -n "$def" ]]; then
             read -rp "  ${var} [${def}]: " ans || \
-                die "stdin cerrado en el wizard — para corridas desatendidas: aegis-init.conf pre-hecho + --non-interactive"
+                die "stdin closed in the wizard — for unattended runs: a pre-made aegis-init.conf + --non-interactive"
             ans="${ans:-$def}"
         else
             read -rp "  ${var}: " ans || \
-                die "stdin cerrado en el wizard — para corridas desatendidas: aegis-init.conf pre-hecho + --non-interactive"
+                die "stdin closed in the wizard — for unattended runs: a pre-made aegis-init.conf + --non-interactive"
         fi
         if "$validator" "$ans"; then break; fi
         tries=$(( tries + 1 ))
-        (( tries >= 3 )) && die "3 valores inválidos seguidos para $var — abortando el wizard (revisar el formato pedido arriba)"
-        log_warn "valor inválido para $var — de nuevo ($tries/3)"
+        (( tries >= 3 )) && die "3 invalid values in a row for $var — aborting the wizard (check the format asked for above)"
+        log_warn "invalid value for $var — again ($tries/3)"
     done
     printf -v "$var" '%s' "$ans"
 }
 
-# ── el wizard ───────────────────────────────────────────────────────
+# ── the wizard ──────────────────────────────────────────────────────
 config_wizard() {
-    printf '\n\033[1m════ CONFIGURACIÓN GUIADA DE AEGIS v2 ════\033[0m\n'
-    printf 'Todo lo de acá es T1 (público/conocido) — CERO secretos.\n'
-    printf 'Enter acepta el default entre corchetes.\n'
+    printf '\n\033[1m════ GUIDED CONFIGURATION OF AEGIS v2 ════\033[0m\n'
+    printf 'Everything here is T1 (public/known) — ZERO secrets.\n'
+    printf 'Enter accepts the default in brackets.\n'
 
-    # GH_OWNER: inferido de la sesión gh ya autenticada (gate de
-    # fase 00 la exige; acá puede no haber corrido aún → best effort)
+    # GH_OWNER: inferred from the already-authenticated gh session (the
+    # phase 00 gate demands it; here it may not have run yet → best
+    # effort)
     local gh_user=""
     gh_user="$(gh api user --jq .login 2>/dev/null || true)"
     ask GH_OWNER "$gh_user" _v_reponame \
-      "Owner de GitHub (usuario u org) dueño de los repos de trabajo." \
-      "$( [[ -n "$gh_user" ]] && echo '  (inferido de tu sesión gh)' )"
+      "GitHub owner (user or org) that owns the working repos." \
+      "$( [[ -n "$gh_user" ]] && echo '  (inferred from your gh session)' )"
 
     ask PLATFORM_REPO "ops-stack-v2" _v_reponame \
-      "Repo de PLATAFORMA que el init CREA y usa (GitOps lee de acá)." \
-      "AISLAMIENTO: es un repo de prueba DESECHABLE del v2 — NO" \
-      "apuntes al ops-stack real: el init le escribe commits, tags" \
-      "y settings. El default separa v2 de v1 a propósito."
+      "PLATFORM repo that the init CREATES and uses (GitOps reads from here)." \
+      "ISOLATION: it is a DISPOSABLE v2 test repo — do NOT point it" \
+      "at the real ops-stack: the init writes commits, tags and" \
+      "settings to it. The default separates v2 from v1 on purpose."
 
     ask APP_REPO "hello-aegis-v2" _v_reponame \
-      "Repo de la APP canary que el init CREA y siembra (el CI le" \
-      "escribe builds y le commitea el digest de cada despliegue)." \
-      "Mismo aislamiento: NO apuntes al hello-aegis real."
+      "Repo of the canary APP that the init CREATES and seeds (CI" \
+      "writes builds to it and commits the digest of every deploy)." \
+      "Same isolation: do NOT point it at the real hello-aegis."
 
     ask ROOT_DOMAIN "" _v_domain \
-      "Dominio raíz (ej: midominio.com). DEBE ser una zona activa" \
-      "en tu cuenta de Cloudflare (el tunnel y el DNS viven ahí)." \
-      "Subdominios que el init va a usar: argocd.<dominio>," \
-      "jenkins.<dominio>."
+      "Root domain (e.g. mydomain.com). It MUST be an active zone" \
+      "in your Cloudflare account (the tunnel and the DNS live there)." \
+      "Subdomains the init is going to use: argocd.<domain>," \
+      "jenkins.<domain>."
 
     local git_email=""
     git_email="$(git config --global user.email 2>/dev/null || true)"
     ask ACME_EMAIL "$git_email" _v_email \
-      "Email para el registro ACME de Let's Encrypt (avisos de" \
-      "expiración de certificados)."
+      "Email for the Let's Encrypt ACME registration (certificate" \
+      "expiry notices)."
 
     ask KUBE_CONTEXT_EXPECTED "default" _v_nonempty \
-      "Nombre del context de kubectl que el init EXIGE antes de" \
-      "tocar el cluster (A11: el bache del kubeconfig ajeno). k3s" \
-      "recién instalado se llama 'default'."
+      "Name of the kubectl context that the init DEMANDS before" \
+      "touching the cluster (A11: the someone-else's-kubeconfig" \
+      "pothole). A freshly installed k3s is called 'default'."
 
     ask REGISTRY_CLUSTER_IP "10.43.179.123" _v_svc_ip \
-      "ClusterIP FIJA del registry interno. Debe caer en el service" \
-      "CIDR de k3s (default 10.43.0.0/16) y va pareada con la SAN" \
-      "del certificado TLS del registry (el kubelet no resuelve" \
-      ".svc — la confianza del host es por esta IP). Se valida el" \
-      "rango en el momento."
+      "FIXED ClusterIP of the internal registry. It must fall inside" \
+      "k3s's service CIDR (default 10.43.0.0/16) and it is paired" \
+      "with the SAN of the registry's TLS certificate (the kubelet" \
+      "does not resolve .svc — the host's trust goes through this" \
+      "IP). The range is validated on the spot."
 
     ask AEGIS_WORKSPACE "\$HOME/aegis" _v_path \
-      "Workspace del operador (para el .envrc de direnv post-init)." \
-      "En una VM de validación el default está bien."
+      "The operator's workspace (for direnv's .envrc after the init)." \
+      "On a validation VM the default is fine."
 
-    printf '\nLos DOS IDs de Cloudflare son públicos pero hay que\n'
-    printf 'buscarlos: dash.cloudflare.com → clic en tu zona (%s)\n' \
+    printf '\nThe TWO Cloudflare IDs are public, but you have to go\n'
+    printf 'looking for them: dash.cloudflare.com → click your zone (%s)\n' \
         "${ROOT_DOMAIN}"
-    printf '→ pestaña Overview → columna derecha, sección "API":\n'
-    printf '  - Zone ID\n  - Account ID\nAmbos son 32 hex.\n'
+    printf '→ Overview tab → right-hand column, "API" section:\n'
+    printf '  - Zone ID\n  - Account ID\nBoth are 32 hex.\n'
     ask CF_ACCOUNT_ID "" _v_hex32 \
-      "Account ID de Cloudflare (32 hex, sección API del Overview)."
+      "Cloudflare Account ID (32 hex, API section of the Overview)."
     ask CF_ZONE_ID "" _v_hex32 \
-      "Zone ID de la zona ${ROOT_DOMAIN} (32 hex, misma sección)."
+      "Zone ID of the ${ROOT_DOMAIN} zone (32 hex, same section)."
 
-    # ── resumen + confirmación ──────────────────────────────────────
-    printf '\n\033[1m════ RESUMEN ════\033[0m\n'
+    # ── summary + confirmation ──────────────────────────────────────
+    printf '\n\033[1m════ SUMMARY ════\033[0m\n'
     local v
     for v in GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN ACME_EMAIL \
              KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP AEGIS_WORKSPACE \
@@ -133,30 +134,30 @@ config_wizard() {
         printf '  %-22s = %s\n' "$v" "${!v}"
     done
     local ok
-    read -rp $'\n¿Escribo esta config? [S/n] ' ok || \
-        die "stdin cerrado en la confirmación del wizard"
-    [[ "${ok:-S}" =~ ^[SsYy]?$ ]] || { log_warn "wizard cancelado"; return 1; }
+    read -rp $'\nShall I write this config? [Y/n] ' ok || \
+        die "stdin closed at the wizard's confirmation"
+    [[ "${ok:-Y}" =~ ^[SsYy]?$ ]] || { log_warn "wizard cancelled"; return 1; }
 
-    # ── escritura atómica del .conf ─────────────────────────────────
+    # ── atomic write of the .conf ───────────────────────────────────
     local tmp; tmp="$(mktemp)"
     {
-        echo "# aegis-init.conf — GENERADO por el wizard ($(date -u +%F))."
-        echo "# Editar a mano solo para automatización/re-corridas;"
-        echo "# regenerar con: $AEGIS_ROOT/init/aegis-init.sh --configure"
+        echo "# aegis-init.conf — GENERATED by the wizard ($(date -u +%F))."
+        echo "# Edit by hand only for automation/re-runs;"
+        echo "# regenerate with: $AEGIS_ROOT/init/aegis-init.sh --configure"
         for v in GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN ACME_EMAIL \
                  KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP \
                  CF_ACCOUNT_ID CF_ZONE_ID; do
             printf '%s="%s"\n' "$v" "${!v}"
         done
-        # AEGIS_WORKSPACE puede contener $HOME a propósito (sin quote
-        # dura — se expande al sourcear):
+        # AEGIS_WORKSPACE may contain $HOME on purpose (no hard
+        # quoting — it expands when sourced):
         printf 'AEGIS_WORKSPACE="%s"\n' "$AEGIS_WORKSPACE"
     } > "$tmp"
     mv "$tmp" "$CONF_FILE"
-    log_ok "config escrita en $CONF_FILE"
+    log_ok "config written to $CONF_FILE"
 }
 
-# ── validación de un conf existente (para re-corridas) ──────────────
+# ── validation of an existing conf (for re-runs) ────────────────────
 config_validate() {
     # shellcheck source=/dev/null
     source "$CONF_FILE"
@@ -167,29 +168,29 @@ config_validate() {
         [[ -n "${!v:-}" ]] || missing+=("$v")
     done
     if ((${#missing[@]})); then
-        log_warn "conf incompleto — faltan: ${missing[*]}"
+        log_warn "incomplete conf — missing: ${missing[*]}"
         return 1
     fi
-    _v_domain "$ROOT_DOMAIN" || { log_warn "ROOT_DOMAIN inválido"; return 1; }
+    _v_domain "$ROOT_DOMAIN" || { log_warn "invalid ROOT_DOMAIN"; return 1; }
     _v_svc_ip "$REGISTRY_CLUSTER_IP" || {
-        log_warn "REGISTRY_CLUSTER_IP fuera de 10.43.0.0/16"; return 1; }
+        log_warn "REGISTRY_CLUSTER_IP outside 10.43.0.0/16"; return 1; }
     return 0
 }
 
 # ── entrypoint ──────────────────────────────────────────────────────
 ensure_config() {
     if [[ "${FORCE_CONFIGURE:-false}" == "true" || ! -f "$CONF_FILE" ]]; then
-        # P0.1 auditoría: el wizard necesita a alguien que conteste —
-        # en desatendido el .conf es PRERREQUISITO, y esto se dice acá:
-        ni_mode && die "--non-interactive sin $CONF_FILE — el wizard no corre desatendido; pre-crear el conf (correr una vez '$AEGIS_ROOT/init/aegis-init.sh --configure' con terminal, o escribirlo a mano del template)"
-        [[ -f "$CONF_FILE" ]] && log_info "regenerando config (--configure)"
-        config_wizard || die "sin config no se puede seguir"
+        # P0.1 audit: the wizard needs somebody to answer — unattended,
+        # the .conf is a PREREQUISITE, and this is where that is said:
+        ni_mode && die "--non-interactive without $CONF_FILE — the wizard does not run unattended; pre-create the conf (run '$AEGIS_ROOT/init/aegis-init.sh --configure' once with a terminal, or write it by hand from the template)"
+        [[ -f "$CONF_FILE" ]] && log_info "regenerating config (--configure)"
+        config_wizard || die "without a config there is no going on"
     fi
     config_validate || {
-        log_warn "el conf existente no valida — corriendo el wizard"
-        config_wizard || die "sin config válida no se puede seguir"
-        config_validate || die "config sigue inválida tras el wizard"
+        log_warn "the existing conf does not validate — running the wizard"
+        config_wizard || die "without a valid config there is no going on"
+        config_validate || die "config is still invalid after the wizard"
     }
-    log_ok "config válida: dominio=$ROOT_DOMAIN owner=$GH_OWNER \
-repos=$PLATFORM_REPO/$APP_REPO (desechables)"
+    log_ok "valid config: domain=$ROOT_DOMAIN owner=$GH_OWNER \
+repos=$PLATFORM_REPO/$APP_REPO (disposable)"
 }

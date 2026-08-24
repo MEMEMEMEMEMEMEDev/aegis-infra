@@ -1,17 +1,17 @@
-# dientes del check 086 (la semilla no lleva instancia horneada)
-# Ya se fugó dos veces. Una instancia dentro del artefacto significa
-# que la próxima instalación nace apuntando a la máquina de otro.
+# teeth for check 086 (the seed carries no baked-in instance)
+# It has already leaked twice. An instance inside the artifact means
+# the next installation is born pointing at somebody else's machine.
 #
-# El rojo va por el sub-check que SIEMPRE está activo (el dueño de
-# repo literal). El de contrastar contra el conf de la máquina solo
-# corre si hay instancia — y descubrir que en v3 ya no la encontraba
-# fue mérito de este diente.
+# The red goes through the sub-check that is ALWAYS active (the literal
+# repo owner). The one that contrasts against the machine's conf only
+# runs if there is an instance — and discovering that in v3 it no
+# longer found it was this tooth's doing.
 red_1() {
-    printf '\n# el repo: git@github.com:ejemplo-org/ops-stack-v2.git\n' \
+    printf '\n# the repo: git@github.com:ejemplo-org/ops-stack-v2.git\n' \
         >> "$AEGIS_ROOT/seed/platform/edge.yaml"
 }
-# control: la forma CORRECTA de nombrar lo mismo en el artefacto
+# control: the CORRECT way of naming the same thing in the artifact
 control_1() {
-    printf '\n# el repo: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git\n' \
+    printf '\n# the repo: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git\n' \
         >> "$AEGIS_ROOT/seed/platform/edge.yaml"
 }

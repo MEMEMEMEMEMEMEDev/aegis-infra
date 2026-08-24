@@ -1,19 +1,19 @@
-# dientes del check 018 (acoplamiento temporal: entries ↔ fase de sync)
+# teeth of check 018 (temporal coupling: entries ↔ sync phase)
 #
-# Corrida #4, el bug que frenó la fase 35: un entry estático cuyo
-# .enc.yaml se genera en una fase POSTERIOR al primer sync de su App
-# rompe el build ATÓMICO de kustomize, y entonces NINGÚN secret de esa
-# App se crea — ni los que sí existen. El síntoma aparece lejos de la
-# causa, en otra fase y con otro nombre.
+# Run #4, the bug that stopped phase 35: a static entry whose .enc.yaml
+# is generated in a phase LATER than the first sync of its App breaks
+# kustomize's ATOMIC build, and then NO secret of that App is created —
+# not even the ones that do exist. The symptom shows up far from the
+# cause, in another phase and under another name.
 #
-# Invariante: fase-productora(entry) ≤ fase-del-primer-argo_sync(App).
-# Para violarlo hacen falta LAS DOS MITADES: el entry en el generator
-# Y un productor tardío. Con el entry solo, el check lo trata como
-# «lo produce el camino de contratos» y sigue — que es correcto, y por
-# eso el primer intento de este diente no mordía.
+# Invariant: producing-phase(entry) ≤ phase-of-the-first-argo_sync(App).
+# Violating it takes BOTH HALVES: the entry in the generator AND a late
+# producer. With the entry alone, the check treats it as «the contract
+# path produces it» and moves on — which is correct, and that is why
+# the first attempt at this tooth did not bite.
 red_1() {
-    sed -i 's|^  - secret-github-webhook.enc.yaml.*|  - secret-tardio.enc.yaml\n&|' \
+    sed -i 's|^  - secret-github-webhook.enc.yaml.*|  - secret-late.enc.yaml\n&|' \
         "$AEGIS_ROOT/seed/platform/k8s/base/platform/argocd-secrets/secret-generator.yaml"
-    printf '\nmake_enc_secret "$PLATFORM_DIR/k8s/base/platform/argocd-secrets/secret-tardio.enc.yaml"\n' \
+    printf '\nmake_enc_secret "$PLATFORM_DIR/k8s/base/platform/argocd-secrets/secret-late.enc.yaml"\n' \
         >> "$AEGIS_ROOT/init/phases/80-supply-chain.sh"
 }

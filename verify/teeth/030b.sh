@@ -1,4 +1,4 @@
-# dientes del check 030b (el cleanup de secretos no usa rmdir)
-# rmdir falla con subdirectorios (docker/): la fase queda FALLIDA con
-# el trabajo hecho, que es el peor desenlace.
-red_1() { printf '\n_limpieza_mala() { rmdir "$TMPDIR"; }\n' >> "$AEGIS_ROOT/lib/secrets.sh"; }
+# teeth of check 030b (the secrets cleanup does not use rmdir)
+# rmdir fails with subdirectories (docker/): the phase ends up FAILED
+# with the work done, which is the worst outcome.
+red_1() { printf '\n_bad_cleanup() { rmdir "$TMPDIR"; }\n' >> "$AEGIS_ROOT/lib/secrets.sh"; }

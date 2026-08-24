@@ -1,8 +1,8 @@
-# dientes del check 005 (los paths de git de las Applications existen)
-# Una App apuntando a un directorio que no está en el repo queda
-# «Unknown» para siempre, y el motivo no aparece en ninguna alerta.
+# teeth of check 005 (the git paths of the Applications exist)
+# An App pointing at a directory that is not in the repo stays
+# «Unknown» forever, and the reason shows up in no alert.
 red_1() {
-    sed -i '0,/^    path: /s|^    path: .*|    path: k8s/base/directorio-que-no-existe|' \
+    sed -i '0,/^    path: /s|^    path: .*|    path: k8s/base/directory-that-does-not-exist|' \
         "$AEGIS_ROOT/seed/platform/k8s/argocd-apps/ci-supply-tenants.yaml"
 }
-control_1() { printf '\n# comentario legitimo\n' >> "$AEGIS_ROOT/seed/platform/k8s/argocd-apps/ci-supply-tenants.yaml"; }
+control_1() { printf '\n# legitimate comment\n' >> "$AEGIS_ROOT/seed/platform/k8s/argocd-apps/ci-supply-tenants.yaml"; }

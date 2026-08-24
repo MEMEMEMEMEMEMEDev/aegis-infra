@@ -1,9 +1,9 @@
-# dientes del check 109 (ninguna etapa escribe en un subsistema ausente)
+# teeth for check 109 (no stage writes into an absent subsystem)
 #
-# La mutación correcta es la REGRESIÓN, no un parecido: sacarle la
-# guarda a la etapa y dejarla como estaba el 2026-08-24, cuando `aegis
-# org apply` moría con FileNotFoundError después de haber escrito seis
-# manifiestos.
+# The correct mutation is the REGRESSION, not something like it: take
+# the guard off the stage and leave it as it was on 2026-08-24, when
+# `aegis org apply` died with FileNotFoundError after having written
+# six manifests.
 red_1() {
     python3 - "$AEGIS_ROOT/lib/aegis/org.py" <<'PY'
 import sys
@@ -18,7 +18,7 @@ open(p, "w").write(s)
 PY
 }
 
-# la otra etapa, porque son dos y el check tiene que ver las dos
+# the other stage, because there are two and the check has to see both
 red_2() {
     python3 - "$AEGIS_ROOT/lib/aegis/org.py" <<'PY'
 import sys
@@ -33,36 +33,36 @@ open(p, "w").write(s)
 PY
 }
 
-# una etapa NUEVA que escribe a ciegas en un subsistema que no está:
-# el check tiene que morder lo que venga, no solo las dos que ya
-# conoce. Es la diferencia entre vigilar la clase y vigilar el caso.
+# a NEW stage that writes blind into a subsystem that is not there: the
+# check has to bite whatever comes, not only the two it already knows.
+# That is the difference between watching the class and watching the case.
 red_3() {
     cat >> "$AEGIS_ROOT/lib/aegis/org.py" <<'PY'
 
 
-FUTURO_K8S = os.path.join(RAIZ, "k8s", "base", "subsistema-futuro", "algo.yaml")
+FUTURE_K8S = os.path.join(RAIZ, "k8s", "base", "future-subsystem", "something.yaml")
 
 
-def aplicar_futuro(escribir):
+def aplicar_future(escribir):
     if escribir:
-        open(FUTURO_K8S, "w", encoding="utf-8").write("x")
+        open(FUTURE_K8S, "w", encoding="utf-8").write("x")
     return 0
 PY
 }
 
-# control: una etapa nueva que escribe donde el artefacto SÍ tiene
-# carpeta no necesita guarda ninguna, y ponerse rojo con eso sería
-# morder de más.
+# control: a new stage that writes where the artifact DOES have a
+# folder needs no guard at all, and turning red on that would be biting
+# too much.
 control_1() {
     cat >> "$AEGIS_ROOT/lib/aegis/org.py" <<'PY'
 
 
-LEGITIMO_K8S = os.path.join(RAIZ, "k8s", "bootstrap", "legitimo.yaml")
+LEGITIMATE_K8S = os.path.join(RAIZ, "k8s", "bootstrap", "legitimate.yaml")
 
 
-def aplicar_legitimo(escribir):
+def aplicar_legitimate(escribir):
     if escribir:
-        open(LEGITIMO_K8S, "w", encoding="utf-8").write("x")
+        open(LEGITIMATE_K8S, "w", encoding="utf-8").write("x")
     return 0
 PY
 }

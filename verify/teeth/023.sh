@@ -1,14 +1,14 @@
-# dientes del check 023 (cada namespace destino lo crea alguien confiable)
-# Corrida #7, bug A: la App registry tenía CreateNamespace=true pero es
-# kustomize/KSOPS, y el sync falló con «namespaces registry-system not
-# found». CreateNamespace no es confiable para apps kustomize.
+# teeth of check 023 (every target namespace is created by somebody trustworthy)
+# Run #7, bug A: the registry App had CreateNamespace=true but it is
+# kustomize/KSOPS, and the sync failed with «namespaces registry-system
+# not found». CreateNamespace is not trustworthy for kustomize apps.
 red_1() {
     cat >> "$AEGIS_ROOT/seed/platform/k8s/argocd-apps/ci-supply-tenants.yaml" <<'YAML'
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: app-sin-namespace
+  name: app-without-namespace
   namespace: argocd
 spec:
   project: plataforma
@@ -18,6 +18,6 @@ spec:
     targetRevision: main
   destination:
     server: https://kubernetes.default.svc
-    namespace: namespace-que-nadie-crea
+    namespace: namespace-that-nobody-creates
 YAML
 }

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# lib/access.sh — atravesar Cloudflare Access, con UNA implementación
-# para el init y para aegis-rotate.
+# lib/access.sh — crossing Cloudflare Access, with ONE implementation
+# for the init and for aegis-rotate.
 #
-# ═══ POR QUÉ EXISTE (#87) ══════════════════════════════════════════
+# ═══ WHY IT EXISTS (#87) ═══════════════════════════════════════════
 #
-# Desde #76, Access está delante de argocd.<dom> y jenkins.<dom>. A
-# partir de ahí, TODA sonda del init contra esos hostnames dejó de
-# medir lo que cree medir. Medido el 2026-08-13:
+# Since #76, Access sits in front of argocd.<dom> and jenkins.<dom>.
+# From that moment on, EVERY init probe against those hostnames
+# stopped measuring what it believes it measures. Measured on
+# 2026-08-13:
 #
 #   $ curl -sI https://argocd.<dom>/
 #   HTTP/2 302
@@ -14,46 +15,51 @@
 #   server: cloudflare
 #   cf-ray: a2a8aeae4ee814b1-GIG
 #
-# Ese 302 lo sirve el BORDE DE CLOUDFLARE. No entró al túnel, no tocó
-# traefik, no vio a argocd-server. Y el gate de la fase 35 lo aceptaba:
+# That 302 is served by the CLOUDFLARE EDGE. It never entered the
+# tunnel, never touched traefik, never saw argocd-server. And the
+# phase 35 gate accepted it:
 #
 #   gate "edge-responde" ... | grep -qE '200|404|30[12]'
 #                                            ^^^^^^^
 #
-# Un gate llamado «edge-responde» que queda VERDE con el cluster
-# entero apagado. Es la enfermedad E en su forma más cara, porque no
-# es un gate ausente —esos se ven— sino un gate presente que dice
-# PASS. La fase 60 tiene el fallo espejado y menos peligroso: acepta
-# `^(200|403)$`, así que bajo Access falla en ROJO y para el init.
+# A gate named «edge-responde» that stays GREEN with the entire
+# cluster switched off. This is disease E in its most expensive form,
+# because it is not an absent gate —those are visible— but a gate
+# that is present and says PASS. Phase 60 has the mirrored, less
+# dangerous flaw: it accepts `^(200|403)$`, so under Access it fails
+# RED and stops the init.
 #
-# ═══ LA SALIDA ═════════════════════════════════════════════════════
+# ═══ THE WAY OUT ═══════════════════════════════════════════════════
 #
-# NO es dejar de medir el camino público. Ese camino ES el que
-# importa: es por donde entra un humano, y es el único que ejercita
-# DNS + túnel + traefik + la app de punta a punta. Medirlo por dentro
-# (kubectl port-forward) probaría otra cosa.
+# It is NOT to stop measuring the public path. That path IS the one
+# that matters: it is where a human comes in, and it is the only one
+# that exercises DNS + tunnel + traefik + the app end to end.
+# Measuring it from the inside (kubectl port-forward) would prove
+# something else.
 #
-# La salida es el service token que tofu acuñó junto con las
-# aplicaciones de Access (`module.access`, outputs
-# access_service_token_client_id/_secret), que la fase 25 persiste al
-# store como access_st_id / access_st_secret.
+# The way out is the service token that tofu minted together with the
+# Access applications (`module.access`, outputs
+# access_service_token_client_id/_secret), which phase 25 persists to
+# the store as access_st_id / access_st_secret.
 #
-# Y sobre todo: distinguir «el origen respondió» de «Access
-# interceptó». Son dos hechos distintos y hasta hoy daban la misma
-# señal.
+# And above all: telling «the origin responded» apart from «Access
+# intercepted». They are two different facts and until today they gave
+# the same signal.
 #
 # ═══ A27 ═══════════════════════════════════════════════════════════
 #
-# El secreto no va por argv (/proc/PID/cmdline es legible). curl no
-# soporta `--header @archivo`, pero sí `--config archivo`, que lee las
-# cabeceras de disco. El config vive en tmpfs, 600, y se borra.
+# The secret does not travel through argv (/proc/PID/cmdline is
+# readable). curl does not support `--header @file`, but it does
+# support `--config file`, which reads the headers from disk. The
+# config lives in tmpfs, 600, and is deleted.
 
-# _cf_access_config — imprime la ruta de un config de curl con las dos
-# cabeceras del service token, o NADA si no hay token en el store.
+# _cf_access_config — prints the path of a curl config carrying the
+# two service-token headers, or NOTHING if there is no token in the
+# store.
 #
-# Devolver vacío no es un error: una instancia sin Access (o una
-# corrida anterior a la fase 25) tiene que seguir funcionando por el
-# mismo camino, sin ramas especiales.
+# Returning empty is not an error: an instance without Access (or a
+# run earlier than phase 25) has to keep working along the same path,
+# with no special branches.
 _cf_access_config() {
     local id sec cfg
     [[ -n "${STATE_SECRETS:-}" ]] || return 0
@@ -70,8 +76,8 @@ _cf_access_config() {
     printf '%s' "$cfg"
 }
 
-# curl_access <args...> — curl que atraviesa Access si hay service
-# token. Si no lo hay, corre igual.
+# curl_access <args...> — curl that crosses Access when there is a
+# service token. If there is none, it runs all the same.
 curl_access() {
     local cfg rc=0
     cfg="$(_cf_access_config)"
@@ -84,24 +90,25 @@ curl_access() {
     return $rc
 }
 
-# edge_origen_responde <url> <regex-de-codigos-aceptables>
+# edge_origin_responds <url> <regex-of-acceptable-codes>
 #
-# Verdadero SOLO si respondió el ORIGEN con un código aceptable. Los
-# tres desenlaces se distinguen a propósito, porque son tres causas
-# distintas y antes daban una sola señal:
+# True ONLY if the ORIGIN responded with an acceptable code. The three
+# outcomes are told apart on purpose, because they are three different
+# causes and used to give one single signal:
 #
-#   0  el origen respondió y el código está en el patrón
-#   1  VEREDICTO negativo — o Access interceptó (y entonces el origen
-#      NO se midió), o el origen contestó algo fuera del patrón
-#   2  TRANSPORTE — ni siquiera hubo respuesta (DNS, TLS, timeout)
+#   0  the origin responded and the code is in the pattern
+#   1  negative VERDICT — either Access intercepted (and then the
+#      origin was NOT measured), or the origin answered something
+#      outside the pattern
+#   2  TRANSPORT — there was not even a response (DNS, TLS, timeout)
 #
-# El discriminante de «Access interceptó» es estructural, no el
-# código: un 302 es un 302 lo sirva quien lo sirva. Lo que delata a
-# Access es a DÓNDE redirige — *.cloudflareaccess.com. Comparar
-# códigos acá sería C15 otra vez: atar el chequeo a un valor que
-# cambia cuando la cosa se mueve.
-edge_origen_responde() {
-    local url="$1" aceptables="$2"
+# The discriminant for «Access intercepted» is structural, not the
+# code: a 302 is a 302 no matter who serves it. What gives Access away
+# is WHERE it redirects to — *.cloudflareaccess.com. Comparing codes
+# here would be C15 all over again: tying the check to a value that
+# changes when the thing moves.
+edge_origin_responds() {
+    local url="$1" acceptable="$2"
     local cfg out code loc rc=0
     local args=(-sS -m 20 -o /dev/null -w '%{http_code} %{redirect_url}')
 
@@ -112,21 +119,21 @@ edge_origen_responde() {
     [[ -n "$cfg" ]] && rm -f "$cfg"
 
     if (( rc != 0 )); then
-        printf 'TRANSPORTE: curl rc=%d contra %s — no hubo respuesta\n' \
+        printf 'TRANSPORT: curl rc=%d against %s — there was no response\n' \
             "$rc" "$url" >&2
         return 2
     fi
 
     code="${out%% *}"; loc="${out#* }"
     if [[ "$loc" == *cloudflareaccess.com* ]]; then
-        printf 'ACCESS INTERCEPTÓ %s (%s → cloudflareaccess.com): el ORIGEN no se midió.\n' \
+        printf 'ACCESS INTERCEPTED %s (%s → cloudflareaccess.com): the ORIGIN was not measured.\n' \
             "$url" "$code" >&2
-        printf '  falta/no sirve el service token del store (access_st_id, access_st_secret).\n' >&2
+        printf '  the store service token is missing or not working (access_st_id, access_st_secret).\n' >&2
         return 1
     fi
 
-    grep -qE "$aceptables" <<<"$code" && return 0
-    printf 'el ORIGEN respondió %s contra %s (esperado ~ %s)\n' \
-        "$code" "$url" "$aceptables" >&2
+    grep -qE "$acceptable" <<<"$code" && return 0
+    printf 'the ORIGIN answered %s against %s (expected ~ %s)\n' \
+        "$code" "$url" "$acceptable" >&2
     return 1
 }

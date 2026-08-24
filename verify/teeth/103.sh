@@ -1,11 +1,11 @@
-# dientes del check 103 (ningún mensaje nombra un comando literal)
-# La Clase E: ~155 strings con el nombre de un comando a mano. El día
-# que el comando se llama distinto, el operador teclea lo que le
-# dijeron y no existe.
-red_1() { printf '\nlog_info "corré aegis-check para ver el estado"\n' >> "$AEGIS_ROOT/init/phases/20-k3s.sh"; }
-red_2() { printf '\necho "usá bin/aegis-sync para forzarlo"\n' >> "$AEGIS_ROOT/libexec/aegis-init"; }
-# control: la forma DERIVADA no puede morder — si mordiera, la regla
-# sería imposible de cumplir y el check se volvería ruido.
-control_1() { printf '\nlog_info "corré ${AEGIS_CMD:-aegis} check para ver el estado"\n' >> "$AEGIS_ROOT/init/phases/20-k3s.sh"; }
-# control: y la excepción declarada tampoco
-control_2() { printf '\n# clase-E-ok: etiqueta de stream\nlog_info "source=aegis-init"\n' >> "$AEGIS_ROOT/init/phases/20-k3s.sh"; }
+# teeth for check 103 (no message names a command literally)
+# Class E: ~155 strings with a command's name written by hand. The day
+# the command is called something else, the operator types what they
+# were told and it does not exist.
+red_1() { printf '\nlog_info "run aegis-check to see the state"\n' >> "$AEGIS_ROOT/init/phases/20-k3s.sh"; }
+red_2() { printf '\necho "use bin/aegis-sync to force it"\n' >> "$AEGIS_ROOT/libexec/aegis-init"; }
+# control: the DERIVED form must not bite — if it did, the rule would be
+# impossible to satisfy and the check would become noise.
+control_1() { printf '\nlog_info "run ${AEGIS_CMD:-aegis} check to see the state"\n' >> "$AEGIS_ROOT/init/phases/20-k3s.sh"; }
+# control: and neither must the declared exception
+control_2() { printf '\n# clase-E-ok: log stream label\nlog_info "source=aegis-init"\n' >> "$AEGIS_ROOT/init/phases/20-k3s.sh"; }

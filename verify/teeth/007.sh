@@ -1,7 +1,8 @@
-# dientes del check 007 (los resources de las kustomizations existen)
-# kustomize es ATÓMICO: un resource inexistente rompe el build entero y
-# NINGÚN objeto de esa App se aplica, ni los que sí estaban bien.
+# teeth of check 007 (the resources of the kustomizations exist)
+# kustomize is ATOMIC: a nonexistent resource breaks the whole build
+# and NO object of that App is applied, not even the ones that were
+# fine.
 red_1() {
-    printf '  - archivo-que-no-existe.yaml\n' >> \
+    printf '  - file-that-does-not-exist.yaml\n' >> \
         "$AEGIS_ROOT/seed/platform/k8s/base/platform/jenkins/kustomization.yaml"
 }

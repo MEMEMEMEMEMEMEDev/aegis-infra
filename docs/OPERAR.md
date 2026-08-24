@@ -151,7 +151,7 @@ init/aegis-backup.sh     # bundle age-cifrado de los 3 estados
                          # (.state-secrets, .init-state, tfstate) con
                          # ROUNDTRIP verificado. La age key JAMÁS va
                          # en el bundle (guard activo).
-                         # Escribe en $AEGIS_RESPALDOS/plataforma/.
+                         # Escribe en $AEGIS_BACKUPS/plataforma/.
 init/aegis-restore.sh <bundle>   # inverso; se niega a pisar estado
                                  # existente sin --force
 init/aegis-rotate.sh             # SIN argumentos: el menú de rotación
@@ -272,7 +272,7 @@ inquilinos. Con el estado solo se levanta una plataforma vacía; con los
 datos solos se tiene un dump que no se sabe dónde poner.
 
 ```bash
-export AEGIS_RESPALDOS=/ruta/en/OTRO/disco/aegis-respaldos
+export AEGIS_BACKUPS=/ruta/en/OTRO/disco/aegis-backups
 
 init/aegis-backup.sh                       # el estado -> plataforma/
 platform/bin/aegis-respaldo --capturar     # los datos -> uno por organización
@@ -283,9 +283,9 @@ platform/bin/aegis-respaldo --restaurar <bundle.age> --org <org>
 El árbol que producen:
 
 ```
-$AEGIS_RESPALDOS/
+$AEGIS_BACKUPS/
   .aegis-destino                     el UUID del filesystem, anotado
-  plataforma/aegis-estado-<ts>.age
+  plataforma/aegis-state-<ts>.age
   org-<nombre>/aegis-datos-org-<nombre>-<ts>.age
 ```
 

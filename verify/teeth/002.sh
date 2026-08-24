@@ -1,28 +1,30 @@
-# dientes del check 002 (los YAML parsean)
+# teeth of check 002 (the YAML parse)
 #
-# Hay que romper el PARSEO, no la existencia: borrar un archivo deja al
-# check contando uno menos y siguiendo verde.
+# What has to break is the PARSING, not the existence: deleting a file
+# leaves the check counting one less and staying green.
 #
-# Nota de método: el primer rojo que probé —una lista con sangría
-# despareja— resultaba YAML VÁLIDO. El diente no mordía y el culpable
-# era el diente. Por eso el runner los corre: un diente que se escribe
-# y no se ejecuta es exactamente la promesa sin prueba que este
-# mecanismo existe para impedir.
+# Note on method: the first red I tried —a list with ragged indentation—
+# turned out to be VALID YAML. The tooth did not bite and the culprit
+# was the tooth. That is why the runner runs them: a tooth that is
+# written and never executed is exactly the promise without proof that
+# this mechanism exists to prevent.
 
-# un flujo abierto: [uno, dos  sin cerrar el corchete
+# an open flow: [one, two  with the bracket never closed
 red_1() {
-    printf '\nclave_rota: [uno, dos\n' >> "$AEGIS_ROOT/seed/platform/edge.yaml"
+    printf '\nbroken_key: [one, two\n' >> "$AEGIS_ROOT/seed/platform/edge.yaml"
 }
 
-# un alias a un ancla que no existe, en el SEGUNDO documento: prueba
-# de paso que el check usa safe_load_all y no safe_load (los
-# manifiestos de k8s son multi-doc y con safe_load se leería solo el
-# primero — el resto entraría al cluster sin que nadie los mirara).
-# (El rojo anterior era una clave duplicada: PyYAML la acepta y pisa el
-# valor. Otro diente que no mordía por culpa del diente.)
+# an alias to an anchor that does not exist, in the SECOND document: it
+# proves in passing that the check uses safe_load_all and not safe_load
+# (the k8s manifests are multi-doc and with safe_load only the first
+# would be read — the rest would enter the cluster with nobody looking
+# at them).
+# (The previous red was a duplicate key: PyYAML accepts it and
+# overwrites the value. Another tooth that did not bite because of the
+# tooth.)
 red_2() {
-    printf '\n---\nreferencia: *ancla_que_no_existe\n' >> "$AEGIS_ROOT/seed/platform/services.yaml"
+    printf '\n---\nreference: *anchor_that_does_not_exist\n' >> "$AEGIS_ROOT/seed/platform/services.yaml"
 }
 
-# control: un comentario en un YAML sigue siendo YAML válido
-control_1() { printf '\n# comentario legitimo\n' >> "$AEGIS_ROOT/seed/platform/edge.yaml"; }
+# control: a comment in a YAML is still valid YAML
+control_1() { printf '\n# legitimate comment\n' >> "$AEGIS_ROOT/seed/platform/edge.yaml"; }

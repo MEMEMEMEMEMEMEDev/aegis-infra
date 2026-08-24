@@ -1,9 +1,10 @@
-# dientes del check 107 (el camino de error no puede reventar)
+# teeth for check 107 (the error path cannot blow up)
 #
-# El defecto que este check impide: el operador pide auxilio y en vez
-# del motivo recibe un traceback sobre la línea que iba a dárselo.
+# The defect this check prevents: the operator asks for help and
+# instead of the reason receives a traceback about the very line that
+# was going to give it to them.
 
-# el defecto exacto que tenía `aegis dev seed` hasta el 2026-08-24
+# the exact defect `aegis dev seed` had until 2026-08-24
 red_1() {
     python3 - "$AEGIS_ROOT/libexec/dev/seed" <<'PY'
 import sys, pathlib
@@ -13,25 +14,25 @@ p.write_text(s.replace('morir(f"no existe {CONF}: sin los valores de esta "',
 PY
 }
 
-# y en un raise, que es la otra forma de salir por la mala
+# and in a raise, which is the other way of leaving through the bad door
 red_2() {
     python3 - "$AEGIS_ROOT/lib/aegis/org.py" <<'PY'
 import sys, pathlib, re
 p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
 i = s.index("\ndef ", s.index("\n"))
-s = s[:i] + '\ndef _diente_107(x, raiz):\n    raise Error(f"{x.relative_to(raiz)} no sirve")\n' + s[i:]
+s = s[:i] + '\ndef _tooth_107(x, root):\n    raise Error(f"{x.relative_to(root)} is no good")\n' + s[i:]
 p.write_text(s, encoding="utf-8")
 PY
 }
 
-# control: un relative_to FUERA del camino de error es legítimo (así se
-# muestran las rutas del producto) y no puede ponerlo rojo.
+# control: a relative_to OUTSIDE the error path is legitimate (that is
+# how the product's paths are shown) and cannot turn it red.
 control_1() {
     python3 - "$AEGIS_ROOT/lib/aegis/org.py" <<'PY'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
 i = s.index("\ndef ", s.index("\n"))
-s = s[:i] + '\ndef _diente_107(x, raiz):\n    return str(x.relative_to(raiz))\n' + s[i:]
+s = s[:i] + '\ndef _tooth_107(x, root):\n    return str(x.relative_to(root))\n' + s[i:]
 p.write_text(s, encoding="utf-8")
 PY
 }

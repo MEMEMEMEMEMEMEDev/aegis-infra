@@ -1,40 +1,40 @@
-# dientes del check 003 (todo placeholder tiene dueño declarado)
+# teeth of check 003 (every placeholder has a declared owner)
 #
-# El defecto que este check impide: un __LO_QUE_SEA__ que nadie rellena
-# viaja al cluster tal cual y aparece como un hostname literal
-# "__ROOT_DOMAIN__" en producción.
+# The defect this check prevents: a __WHATEVER__ that nobody fills in
+# travels to the cluster as-is and shows up as a literal hostname
+# "__ROOT_DOMAIN__" in production.
 
-# un placeholder huérfano en un manifiesto del artefacto
+# an orphan placeholder in a manifest of the artifact
 red_1() {
-    printf '\n# __PLACEHOLDER_SIN_DUENO__\n' >> "$AEGIS_ROOT/seed/platform/edge.yaml"
+    printf '\n# __PLACEHOLDER_WITH_NO_OWNER__\n' >> "$AEGIS_ROOT/seed/platform/edge.yaml"
 }
 
-# y en un .tf, que es la otra extensión que el check barre
+# and in a .tf, which is the other extension the check sweeps
 red_2() {
-    printf '\n# __OTRO_HUERFANO__\n' >> "$AEGIS_ROOT/seed/platform/tofu/modules/cloudflare-access/main.tf"
+    printf '\n# __ANOTHER_ORPHAN__\n' >> "$AEGIS_ROOT/seed/platform/tofu/modules/cloudflare-access/main.tf"
 }
 
-# control: un placeholder que SÍ tiene dueño no puede ponerlo rojo —
-# si lo hace, el check no está leyendo la allowlist sino gritando por
-# cualquier __X__, que es lo que lo volvería inútil.
+# control: a placeholder that DOES have an owner cannot turn it red —
+# if it does, the check is not reading the allowlist but shouting at
+# any __X__, which is what would make it useless.
 control_1() {
     printf '\n# __ROOT_DOMAIN__\n' >> "$AEGIS_ROOT/seed/platform/edge.yaml"
 }
 
-# un huérfano en seed/templates/, que hasta el 2026-08-24 este
-# check no barría: de ahí nace el repo de cada app del operador.
+# an orphan in seed/templates/, which until 2026-08-24 this check did
+# not sweep: each of the operator's app repos is born from there.
 red_3() {
-    printf '\n// __HUERFANO_EN_PLANTILLA__\n' >> "$AEGIS_ROOT/seed/templates/base/repos/app/main.go"
+    printf '\n// __ORPHAN_IN_TEMPLATE__\n' >> "$AEGIS_ROOT/seed/templates/base/repos/app/main.go"
 }
 
-# un huérfano en un .md del artefacto: la ceguera por extensión.
+# an orphan in a .md of the artifact: blindness by extension.
 red_4() {
-    printf '\n<!-- __HUERFANO_SIN_EXTENSION__ -->\n' \
+    printf '\n<!-- __ORPHAN_WITHOUT_EXTENSION__ -->\n' \
         >> "$AEGIS_ROOT/seed/platform/docs/protocols/organization.md"
 }
 
-# control: un placeholder de clase-plantilla (dueño: aegis app) no
-# puede ponerlo rojo — si lo hace, el check no derivó la clase.
+# control: a template-class placeholder (owner: aegis app) cannot turn
+# it red — if it does, the check did not derive the class.
 control_2() {
     printf '\n// __ORG__\n' >> "$AEGIS_ROOT/seed/templates/base/repos/app/main.go"
 }

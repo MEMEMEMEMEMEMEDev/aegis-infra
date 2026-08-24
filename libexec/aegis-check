@@ -971,7 +971,7 @@ fi
 # un solo proyecto, un chequeo correcto y uno mentiroso dan el mismo
 # verde; con dos, el mentiroso empieza a mentir. Se escribe bien ahora.
 titulo "respaldos"
-RESP="${AEGIS_RESPALDOS:-$HOME/aegis-respaldos}"
+RESP="${AEGIS_BACKUPS:-$HOME/aegis-backups}"
 UMBRAL_H=${AEGIS_RESPALDO_HORAS:-48}
 RAIZ_P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -1005,7 +1005,7 @@ else
     fi
 
     # (b) el ESTADO de la plataforma: uno solo, no es de nadie en particular.
-    if lectura=$(edad_bundle "$RESP/plataforma/aegis-estado-*.age"); then
+    if lectura=$(edad_bundle "$RESP/platform/aegis-state-*.age"); then
         read -r e_h e_b e_n <<<"$lectura"
         if (( e_h > UMBRAL_H )); then
             aviso "plataforma/estado: ${e_h}h (umbral ${UMBRAL_H}h) — $e_n"
@@ -1013,7 +1013,7 @@ else
             ok "plataforma/estado: ${e_h}h, ${e_b} bytes · $e_n"
         fi
     else
-        mal "sin bundle de ESTADO en $RESP/plataforma/ — con solo los datos se tiene un dump que no se sabe dónde poner"
+        mal "sin bundle de ESTADO en $RESP/platform/ — con solo los datos se tiene un dump que no se sabe dónde poner"
     fi
 
     # (c) y una por organización, ENUMERADAS desde los contratos.

@@ -1,11 +1,11 @@
-# dientes del check 048 — generados el 2026-08-23 y VERIFICADOS:
-# cada rojo se aplicó sobre una copia del árbol y el check se puso rojo.
+# teeth of check 048 — generated on 2026-08-23 and VERIFIED: every red
+# was applied over a copy of the tree and the check went red.
 
-# saca del artefacto justo lo que el check dice medir
+# takes out of the artifact exactly what the check claims to measure
 red_1() {
-    grep -vE 'ca-inyectado-en-kyverno' "$AEGIS_ROOT/init/phases/80-supply-chain.sh" > "$AEGIS_ROOT/init/phases/80-supply-chain.sh.diente" \
-        && mv "$AEGIS_ROOT/init/phases/80-supply-chain.sh.diente" "$AEGIS_ROOT/init/phases/80-supply-chain.sh"
+    grep -vE 'ca-inyectado-en-kyverno' "$AEGIS_ROOT/init/phases/80-supply-chain.sh" > "$AEGIS_ROOT/init/phases/80-supply-chain.sh.tooth" \
+        && mv "$AEGIS_ROOT/init/phases/80-supply-chain.sh.tooth" "$AEGIS_ROOT/init/phases/80-supply-chain.sh"
 }
 
-# control: un cambio LEGÍTIMO no puede ponerlo rojo
-control_1() { printf '# comentario legitimo\n' >> "$AEGIS_ROOT/init/phases/80-supply-chain.sh"; }
+# control: a LEGITIMATE change cannot turn it red
+control_1() { printf '# legitimate comment\n' >> "$AEGIS_ROOT/init/phases/80-supply-chain.sh"; }
