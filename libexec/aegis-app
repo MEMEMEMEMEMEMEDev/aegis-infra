@@ -393,7 +393,14 @@ def _plantilla(nombre):
     return d
 
 
-PLACEHOLDER = re.compile(r"__[A-Z]+__")
+# [A-Z0-9_] y no [A-Z]: hasta el 2026-08-24 este patrón era
+# `__[A-Z]+__`, que NO reconoce ningún placeholder con guion bajo
+# adentro — o sea ni __ROOT_DOMAIN__ ni __GH_OWNER__ ni
+# __PLATFORM_REPO__, que son 83 de las 130 apariciones de la
+# semilla. El guard de _render_tpl existe para que una plantilla
+# que pide algo que no sé derivar frene acá; con el patrón viejo
+# entregaba el repo de la app con el literal adentro.
+PLACEHOLDER = re.compile(r"__[A-Z0-9_]+__")
 
 
 def _valores_de(org):

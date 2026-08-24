@@ -303,7 +303,12 @@ def leer_config() -> dict[str, str]:
     con aspecto de estar bien. Por eso falta de config es fatal.
     """
     if not CONF.exists():
-        morir(f"no existe {CONF.relative_to(RAIZ)}: sin los valores de esta "
+        # Ruta ENTERA, no relativa a RAIZ: el conf vive en la INSTANCIA
+        # y la instancia puede estar en cualquier parte. Este
+        # `relative_to(RAIZ)` venía de cuando producto e instancia eran
+        # la misma carpeta, y hacía reventar con un traceback justo el
+        # camino que existe para explicar por qué no se puede seguir.
+        morir(f"no existe {CONF}: sin los valores de esta "
               "instancia no hay des-renderizado posible")
     vals: dict[str, str] = {}
     for linea in CONF.read_text().splitlines():
