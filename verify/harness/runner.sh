@@ -111,4 +111,18 @@ SAL="$(V --only 007 --teeth --profile cloudflare 2>&1)"; RC=$?
     && ok "un control que se pone rojo se denuncia" \
     || mal "un check que muerde de más pasó (rc=$RC)"
 
+# 11. el perfil que NO existe todavía: rc 2, no un rojo y no un verde
+cat > "$TMP/verify/checks/008-perfil.sh" <<'C'
+# titulo: check cualquiera
+check() { pass "nada"; }
+C
+mkdir -p "$TMP/semilla"
+V --only 008 --profile local >/dev/null 2>&1
+[[ $? == 2 ]] && ok "un perfil que el artefacto todavía no tiene = rc 2" \
+    || mal "--profile local sin perfil local en el árbol NO dio rc 2"
+printf '__EDGE_MODO__\n' > "$TMP/semilla/marca-perfil.yaml"
+V --only 008 --profile local >/dev/null 2>&1
+[[ $? == 0 ]] && ok "con el perfil presente en el artefacto, corre" \
+    || mal "--profile local NO corrió con el perfil presente"
+
 exit $FALLOS
