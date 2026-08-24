@@ -13,11 +13,19 @@ KPK="$P/k8s/base/kyverno-policies/kustomization.yaml"
 if [[ ! -f "$KPK" ]]; then
     D39="$D39 kustomization.yaml is missing (directory-app applies the WHOLE dir);"
 else
-    KPK_RES="$(python3 -c "
+    # The rc of the reader is INSPECTED. Until 2026-08-24 it was not:
+    # if the python failed —a malformed kustomization, a missing pyyaml—
+    # KPK_RES came back empty, the `grep -q` found nothing, and this
+    # sub-check reported healthy. Silence as success, which is the exact
+    # shape `not-evaluable` exists to kill. A sub-check that cannot run
+    # has to SAY it could not run.
+    if ! KPK_RES="$(python3 -c "
 import yaml,sys
-print(' '.join((yaml.safe_load(open('$KPK')) or {}).get('resources') or []))")"
-    grep -q 'clusterpolicy' <<< "$KPK_RES" \
-        && D39="$D39 the ClusterPolicy is listed STATICALLY (it goes live pre-80);"
+print(' '.join((yaml.safe_load(open('$KPK')) or {}).get('resources') or []))" 2>/dev/null)"; then
+        D39="$D39 could not READ $KPK (malformed kustomization, or no pyyaml) — this sub-check did not run;"
+    elif grep -q 'clusterpolicy' <<< "$KPK_RES"; then
+        D39="$D39 the ClusterPolicy is listed STATICALLY (it goes live pre-80);"
+    fi
 fi
 F80_NC="$(nc "$PHASES/80-supply-chain.sh")"
 echo "$F80_NC" | grep -q 'kyverno-policies/kustomization.yaml' \

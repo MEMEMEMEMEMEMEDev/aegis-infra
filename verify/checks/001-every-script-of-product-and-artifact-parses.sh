@@ -18,6 +18,15 @@ check() {
 # parser: `bash -n` does not see a broken python command, and in v2
 # nobody saw it.
 D1="" ; n_bash=0 ; n_py=0
+# The scratch file is PER RUN, not a fixed path. It used to be
+# $SYN_ERR, an absolute path OUTSIDE the tree — and `--teeth`
+# runs up to N mutations in parallel, each in its own copy in /dev/shm
+# but all of them sharing that one /tmp name. The verdict could not
+# flip (it is driven by bash -n's rc, read immediately) but the error
+# TEXT reported could come from another job's file, and one job's
+# `rm -f` raced every other job's write. A diagnostic that can report
+# another run's error is a diagnostic that sends you to the wrong file.
+SYN_ERR="$(mktemp)"
 while IFS= read -r f; do
     # TWO signals, in order, and neither of them optional.
     #
@@ -52,12 +61,12 @@ while IFS= read -r f; do
     esac
     case "$lang" in
         bash)
-            if bash -n "$f" 2>/tmp/aegis-syn.err; then n_bash=$((n_bash+1))
-            else D1="$D1 bash: $f: $(head -1 /tmp/aegis-syn.err);"; fi ;;
+            if bash -n "$f" 2>$SYN_ERR; then n_bash=$((n_bash+1))
+            else D1="$D1 bash: $f: $(head -1 $SYN_ERR);"; fi ;;
         python)
-            if python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$f" 2>/tmp/aegis-syn.err
+            if python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$f" 2>$SYN_ERR
             then n_py=$((n_py+1))
-            else D1="$D1 python: $f: $(tail -1 /tmp/aegis-syn.err);"; fi ;;
+            else D1="$D1 python: $f: $(tail -1 $SYN_ERR);"; fi ;;
         *)  D1="$D1 no derivable language (neither shebang nor extension): $f;" ;;
     esac
 done < <(find "$AEGIS_ROOT/init" "$LIBS" "$LIBEXEC" "$AEGIS_ROOT/verify" "$P" \
@@ -69,7 +78,7 @@ done < <(find "$AEGIS_ROOT/init" "$LIBS" "$LIBEXEC" "$AEGIS_ROOT/verify" "$P" \
 # since the extension became a signal in its own right that loop
 # counted them TWICE: 228 duplicated files out of a total of 523.
 # Checking twice breaks nothing; a number that lies does.
-rm -f /tmp/aegis-syn.err
+rm -f "$SYN_ERR"
 printf '    %s bash · %s python\n' "$n_bash" "$n_py"
 if [[ -n "$D1" ]]; then fail "syntax:$D1"
 else pass "every script parses: $n_bash of bash, $n_py of python (language derived from the shebang; the extension backs up what legitimately carries none)"; fi

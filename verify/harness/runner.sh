@@ -111,6 +111,32 @@ OUT="$(V --only 007 --teeth --profile cloudflare 2>&1)"; RC=$?
     && ok "a control that turns red gets reported" \
     || bad "a check that bites too much passed (rc=$RC)"
 
+# 10b. --teeth with a number that selects nothing is NOT success.
+# Found on 2026-08-24: the filter compared the number as a STRING, so
+# `--teeth 39` never matched check 039 (only a leading "00" was
+# stripped, so 039 stayed 039). Nothing ran, and the caller announced
+# "TEETH: they all bite". A selection that matches nothing reported as
+# green is the disease the verifier exists to kill, living inside the
+# verifier.
+OUT="$(V --only 007 --teeth 999 --profile cloudflare 2>&1)"; RC=$?
+[[ $RC != 0 ]] && grep -q 'selected no mutation' <<<"$OUT" \
+    && ok "--teeth with a number that selects nothing is an error, not a green" \
+    || bad "--teeth 999 came out green (rc=$RC)"
+
+# and the number is matched NUMERICALLY: a two-digit query has to find
+# the three-digit filename.
+mv "$TMP/verify/checks/007-with-tooth.sh" "$TMP/verify/checks/039-with-tooth.sh"
+mv "$TMP/verify/teeth/007.sh" "$TMP/verify/teeth/039.sh"
+cat > "$TMP/verify/teeth/039.sh" <<'C'
+red_1()     { sed -i 's/sentinel/something-else/' "$AEGIS_ROOT/verify/mark.txt"; }
+control_1() { printf 'a new comment\n' >> "$AEGIS_ROOT/verify/mark.txt"; }
+C
+echo "sentinel" > "$TMP/verify/mark.txt"
+OUT="$(V --only 039 --teeth 39 --profile cloudflare 2>&1)"; RC=$?
+[[ $RC == 0 ]] && grep -q '1/1 bite' <<<"$OUT" \
+    && ok "--teeth 39 finds check 039 (numeric match, not string)" \
+    || bad "--teeth 39 did NOT select check 039 (rc=$RC)"
+
 # 11. the profile that does NOT exist yet: rc 2, not a red and not a green
 cat > "$TMP/verify/checks/008-profile.sh" <<'C'
 # title: any old check

@@ -422,7 +422,27 @@ EOF
 #     GitHub after registering it and the init compares.
 # gate_red ALWAYS before showing (RED: deliberate exposure).
 ceremony_backup() {
-    local label="$1" file="$2" validate_fn="$3"
+    local label="$1" file="$2" validate_fn="$3" destination="${4:-}"
+    # $4 — WHERE to keep it — was silently dropped until 2026-08-24.
+    # Phase 10 has always passed it ("offline USB stick 'aegis-offline'
+    # + /aegis/secrets-offline/"), and the function declared three
+    # parameters. So the one ceremony whose entire purpose is that the
+    # backup ACTUALLY HAPPENS told the operator the generic "wherever
+    # you keep your secrets" while the caller had a specific place to
+    # name. Silent argument loss, on the irreplaceable key.
+    #
+    # The gate's name is a SLUG, derived. `gate` records to
+    # gates.jsonl with a plain printf, and _gate_record documents that
+    # names are "fixed slugs (no quotes, no backslashes) — a plain
+    # printf is enough, no serialiser needed". The label is free text
+    # with spaces, parentheses and an em dash: it produced valid JSON
+    # only by luck, and one apostrophe-free rewording containing a
+    # quote would have emitted a corrupt line — silently, because the
+    # record is `2>/dev/null || true`.
+    local slug
+    slug="$(printf '%s' "$label" | tr '[:upper:]' '[:lower:]' \
+            | sed -e 's/[^a-z0-9]\+/-/g' -e 's/^-//' -e 's/-$//' | cut -c1-40)"
+    [[ -n "$slug" ]] || slug="sin-nombre"
     # P0.3 audit 2026-07-18 — the UNATTENDED path: there is no operator
     # watching the screen. The backup goes to AEGIS_AGE_BACKUP_FILE
     # (a path the LAUNCHER chose, ideally its own tmpfs); moving it to
@@ -434,8 +454,8 @@ ceremony_backup() {
         [[ "$AEGIS_AGE_BACKUP_FILE" == /dev/shm/* ]] || \
             log_warn "AEGIS_AGE_BACKUP_FILE outside /dev/shm — it is going to touch persistent disk; move it to a backup and delete it with shred"
         run_cmd install -m 600 "$file" "$AEGIS_AGE_BACKUP_FILE"
-        log_warn "backup of ${label} WRITTEN to $AEGIS_AGE_BACKUP_FILE — move it to your real backup and destroy the copy NOW"
-        gate "resguardo-${label}" "$validate_fn"
+        log_warn "backup of ${label} WRITTEN to $AEGIS_AGE_BACKUP_FILE — move it to your real backup and destroy the copy NOW${destination:+ (the intended place: $destination)}"
+        gate "resguardo-$slug" "$validate_fn"
         return 0
     fi
     # W-01 / EV-01 (2026-07-21): the key is NEVER printed to the pane.
@@ -453,13 +473,12 @@ ceremony_backup() {
     human_step "Backup of ${label} (HOW, step by step)" \
         "1. Open ANOTHER terminal on this host (NOT this init pane)." \
         "2. Run there:  cat $shm_out" \
-        "3. Save the value wherever you keep your secrets (a manager," \
-        "   paper, a USB stick — the init assumes none of them)." \
+        "3. Save the value ${destination:-wherever you keep your secrets (a manager, paper, a USB stick — the init assumes none of them)}." \
         "4. Next, the init ASKS YOU FOR IT AGAIN from your copy in" \
         "   order to validate the backup for real (roundtrip)." \
         "5. The init destroys the /dev/shm copy as soon as you validate."
     # REAL validation of the backup — the operator uses THEIR COPY:
-    gate "resguardo-${label}" "$validate_fn"
+    gate "resguardo-$slug" "$validate_fn"
     run_cmd rm -f "$shm_out"   # tmpfs: rm frees it; shred is cosmetic (M1.11)
 }
 

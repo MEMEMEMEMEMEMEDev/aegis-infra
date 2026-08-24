@@ -9,3 +9,12 @@ red_1() {
 
 # control: a LEGITIMATE change cannot turn it red
 control_1() { printf '# legitimate comment\n' >> "$AEGIS_ROOT/init/phases/80-supply-chain.sh"; }
+
+# The sub-check that could not run must SAY it could not run. Until
+# 2026-08-24 the reader's rc was ignored: a malformed kustomization
+# made the python fail, the variable came back empty, the grep found
+# nothing, and the sub-check reported healthy. Silence as success.
+red_9() {
+    printf '\nthis: is: not: valid: yaml:\n' \
+        >> "$AEGIS_ROOT/seed/platform/k8s/base/kyverno-policies/kustomization.yaml"
+}

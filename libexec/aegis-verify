@@ -210,7 +210,26 @@ run_teeth() {
     local -a JOBS_LIST=()
     for chk in "${SELECTED[@]}"; do
         num="$(number_of "$chk")"; td="$VERIFY/teeth/$num.sh"
-        [[ -n "$TEETH_ONLY" && "$num" != "$TEETH_ONLY" && "${num#00}" != "$TEETH_ONLY" ]] && continue
+        # The number is compared NUMERICALLY, the same way --only does
+        # it. It used to be a string comparison against "$num" and
+        # "${num#00}", which works for 007 (-> 7) and breaks for 039:
+        # `${num#00}` only strips a leading "00", so 039 stayed 039 and
+        # never matched a typed 39. `--teeth 39` then selected nothing,
+        # printed "no teeth to run in this selection", and the caller
+        # announced "TEETH: they all bite".
+        #
+        # A selection that matches nothing reported as success is the
+        # disease this whole verifier exists to kill, and it was living
+        # inside the verifier. Found on 2026-08-24 by typing `--teeth 39`
+        # and getting a green from a check whose tooth had just been
+        # written to fail.
+        if [[ -n "$TEETH_ONLY" ]]; then
+            local n_num="${num%%[!0-9]*}" o_num="${TEETH_ONLY%%[!0-9]*}"
+            local n_suf="${num#"$n_num"}" o_suf="${TEETH_ONLY#"$o_num"}"
+            [[ -n "$o_num" ]] || { echo "${AEGIS_CMD:-aegis} verify: --teeth '$TEETH_ONLY' is not a check number" >&2; return 3; }
+            (( 10#$n_num == 10#$o_num )) || continue
+            [[ -z "$o_suf" || "$o_suf" == "$n_suf" ]] || continue
+        fi
         [[ -f "$td" ]] || continue          # check 199 is the one that claims it
         for k in $(grep -oE '^red_[0-9]+' "$td" | sed 's/red_//' | sort -n); do
             JOBS_LIST+=("$num red $k $td")
@@ -219,7 +238,18 @@ run_teeth() {
             JOBS_LIST+=("$num control $k $td")
         done
     done
-    [[ ${#JOBS_LIST[@]} -gt 0 ]] || { echo "no teeth to run in this selection"; return 0; }
+    # An empty selection is NOT success. If the operator asked for a
+    # specific check's teeth and nothing was selected, that is a typo or
+    # a check with no tooth — either way it is a question that went
+    # unanswered, and answering it with green is how the verifier would
+    # lie about itself.
+    if [[ ${#JOBS_LIST[@]} -eq 0 ]]; then
+        if [[ -n "$TEETH_ONLY" ]]; then
+            echo "${AEGIS_CMD:-aegis} verify: --teeth $TEETH_ONLY selected no mutation (nonexistent check, or one with no tooth — check 199 tracks those)" >&2
+            return 3
+        fi
+        echo "no teeth to run in this selection"; return 0
+    fi
 
     local RES; RES="$(mktemp)"
     local N=${#JOBS_LIST[@]} done_n=0

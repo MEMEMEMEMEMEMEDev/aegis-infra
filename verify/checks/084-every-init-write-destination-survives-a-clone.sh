@@ -36,8 +36,15 @@ D84=""
 _OUT84="$(python3 - "$AEGIS_ROOT" <<'PY84' 2>&1
 import os, re, sys, glob
 root = sys.argv[1]
+# CORRECTED on 2026-08-24: the second glob pointed at `init/lib/`, a
+# directory that does not exist in v3 — the libs moved to `lib/` when
+# the product and the instance were separated (02 §1). The glob matched
+# nothing and nobody noticed, so every write destination whose path
+# variable is assigned inside a lib was INVISIBLE to this check. That is
+# precisely the narrowness this file's own comment says it was rewritten
+# to prevent: "a narrow check is a check that LIES". It was lying.
 files = sorted(glob.glob(os.path.join(root, "init/phases/*.sh")) +
-               glob.glob(os.path.join(root, "init/lib/*.sh")))
+               glob.glob(os.path.join(root, "lib/*.sh")))
 text = {f: open(f, encoding="utf-8", errors="replace").read() for f in files}
 # 1) map of variables -> path relative to the repo, resolving chains
 # $PLATFORM_DIR is the instance's WORKING directory, which since

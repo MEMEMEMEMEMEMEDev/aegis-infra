@@ -111,7 +111,7 @@ _sourcerepos_ok() {
 gate "obs-sourcerepos-en-appproject" _sourcerepos_ok
 
 # grafana and ntfy under `plataforma:` in edge.yaml — the list from
-# which `bin/aegis-org borde` DERIVES public_hostnames (nobody edits
+# which `aegis org edge` DERIVES public_hostnames (nobody edits
 # main.tf by hand; the lesson of ai.__ROOT_DOMAIN__):
 EDGE_YAML="$PLATFORM_DIR/edge.yaml"
 yaml_lists_file "$EDGE_YAML" grafana || \
@@ -297,13 +297,31 @@ gate "obs-sourcerepos-aplicados" bash -c \
      | jq -e '.spec.sourceRepos | contains([\"https://victoriametrics.github.io/helm-charts\",\"https://helm.vector.dev\",\"https://grafana.github.io/helm-charts\"])' >/dev/null"
 
 # ── 85.6 the edge: DERIVED hostnames + tofu apply ──────────────────
-# `aegis-org borde` derives public_hostnames from edge.yaml +
+# `aegis org edge` derives public_hostnames from edge.yaml + the
 # contracts (nobody edits main.tf by hand); the apply creates the
 # CNAMEs, the tunnel's ingress and grafana's Access App (grafana.tf).
 # The RESULT gate is the two edge gates of §8 at the end; here only
-# the derivation is verified (cheap and with a clear cause if
-# edge.yaml diverged):
-run_cmd bash -c "cd '$PLATFORM_DIR' && bin/aegis-org borde"
+# the derivation is verified (cheap, and with a clear cause if
+# edge.yaml diverged).
+#
+# CORRECTED on 2026-08-24 — this line was dead in TWO ways at once and
+# would have killed the phase at step 85.6:
+#
+#   1. it invoked `bin/aegis-org` inside $PLATFORM_DIR, and the code no
+#      longer lives in the instance. It moved to the PRODUCT (02 §1),
+#      and check 134 now enforces that the seed carries no executables
+#      at all — so that path cannot exist by construction;
+#   2. the subcommand was renamed `borde` -> `edge` when the CLI surface
+#      went English (docs/cli/design.md §4).
+#
+# Either one alone was fatal. Together they are the C3 finding already
+# logged in plan/06 §91 and docs/cli/inconsistencies.md — logged, and
+# still live in the code until now. It is the same class the whole of
+# v3 is ordered around: a caller that names a thing by where it USED to
+# be. The dispatcher is on PATH from phase 05, so the invocation no
+# longer needs a directory at all — which is what makes it stop being
+# breakable this way.
+run_cmd "${AEGIS_CMD:-aegis}" org edge
 gate "obs-borde-derivado" bash -c \
   "grep -E 'public_hostnames *= *\[' '$TUNNEL_ENV/main.tf' | grep -q '\"grafana\"' \
    && grep -E 'public_hostnames *= *\[' '$TUNNEL_ENV/main.tf' | grep -q '\"ntfy\"'"
