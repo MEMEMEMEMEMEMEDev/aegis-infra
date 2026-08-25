@@ -181,10 +181,14 @@ def prepare_root(root):
     """
     root = os.path.abspath(os.path.expanduser(root))
     os.makedirs(root, exist_ok=True)
-    # `.aegis-destino` and its fields are the on-disk FORMAT: aegis-check
-    # reads this same file to tell whether the disk is the one that was
-    # noted down. Renaming them is a coordinated change between the two
+    # `.aegis-destino` and the `uuid` field are the on-disk FORMAT:
+    # aegis-check reads this same file to tell whether the disk is the
+    # one that was noted down (it reads `uuid` and nothing else).
+    # Renaming THOSE TWO is a coordinated change between the two
     # commands and every disk already in use, not a translation.
+    # The other two fields are for whoever opens the file with an
+    # editor the day something does not add up, so they are prose and
+    # they are written in the same language as the rest of the product.
     mark = os.path.join(root, ".aegis-destino")
     current = uuid_of(root)
     if current is None:
@@ -211,10 +215,11 @@ def prepare_root(root):
     else:
         json.dump({
             "uuid": current,
-            "anotado": datetime.datetime.now(datetime.timezone.utc)
+            "noted_at": datetime.datetime.now(datetime.timezone.utc)
                         .strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "porque": "si este UUID no coincide, el disco de respaldos no está "
-                      "montado y el bundle caería en el disco que debe sobrevivir",
+            "why": "if this UUID does not match, the backups disk is not "
+                   "mounted and the bundle would land on the very disk it "
+                   "has to survive",
         }, open(mark, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
         ok(f"destination noted down: {root} (fs {current})")
     if uuid_of("/") == current:
