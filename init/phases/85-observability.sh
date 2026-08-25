@@ -110,7 +110,7 @@ _sourcerepos_ok() {
 }
 gate "obs-sourcerepos-en-appproject" _sourcerepos_ok
 
-# grafana and ntfy under `plataforma:` in edge.yaml — the list from
+# grafana and ntfy under `platform:` in edge.yaml — the list from
 # which `aegis org edge` DERIVES public_hostnames (nobody edits
 # main.tf by hand; the lesson of ai.__ROOT_DOMAIN__):
 EDGE_YAML="$PLATFORM_DIR/edge.yaml"

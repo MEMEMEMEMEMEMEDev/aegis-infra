@@ -291,8 +291,8 @@ spec:
                 printf '%s\\n' "$EVENTO" \
                   | curl -fsS --max-time 15 \
                       -H 'Content-Type: application/stream+json' --data-binary @- \
-                      'http://vlogs-eventos.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \
-                  || echo 'AVISO: el evento no se pudo registrar en vlogs-eventos (el espejo NO falla por esto)'
+                      'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \
+                  || echo 'AVISO: el evento no se pudo registrar en vlogs-events (el espejo NO falla por esto)'
                 IMG="${DST%%:*}"
                 {
                   printf 'aegis_build_scan_skipped{image="%s"} 0\\n' "$IMG"

@@ -121,6 +121,14 @@ controller:
                   }
                 }
               }
+          # --- DERIVED by aegis-org (tenant jobs): do not edit by hand ---
+          # Un job multibranch por repo declarado en un contrato de
+          # orgs/. El nombre del job es el de su Application: un repo,
+          # un job, una App — la misma clave en Jenkins y en ArgoCD.
+          # Este bloque se rederiva ENTERO en cada corrida de
+          # aegis org: lo que se edite entre las marcas no
+          # sobrevive a la próxima.
+          # --- END DERIVED ---
 
 rbac:
   readSecrets: true    # kubernetes-credentials-provider lee el ns

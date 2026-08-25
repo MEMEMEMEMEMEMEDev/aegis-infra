@@ -184,6 +184,12 @@ run_check() {
 # so the parallelism is free except for RAM.
 current_profile() { printf '%s\n' "${AEGIS_VERIFY_PROFILE:-cloudflare}"; }
 
+# mode + kind + path for every entry, which is what `diff -rq` does NOT
+# look at: it compares content and nothing else.
+_tree_modes() {
+    ( cd "$1" 2>/dev/null && find . -path ./.git -prune -o -printf '%m %y %P\n' | sort )
+}
+
 # one job = one mutation. Runs isolated and leaves its verdict in a file;
 # the parent is the one that aggregates.
 _one_tooth() {
@@ -193,6 +199,28 @@ _one_tooth() {
     cp -a "$AEGIS_ROOT/." "$tmp/" 2>/dev/null
     if ! ( set -u; AEGIS_ROOT="$tmp"; source "$td"; "${kind}_$k" ) >/dev/null 2>&1; then
         printf '%s\t%s\t%s\tBROKEN\n' "$num" "$kind" "$k" >> "$res"
+        rm -rf "$tmp"; return
+    fi
+    # A mutation that leaves the tree IDENTICAL tests nothing, and until
+    # 2026-08-25 it was reported as «the check does not bite» — pointing
+    # at the innocent party. It happened twice: tooth 007 searched for a
+    # file that did not exist, and tooth 113's red_1 for an anchor its
+    # target file did not carry. Both times the message sent somebody to
+    # harden a check that was fine.
+    #
+    # They are different faults and they need different fixes: a blind
+    # check has to be rewritten, an inert mutation has to be re-aimed.
+    # Telling them apart is the same rule as everywhere else here — a
+    # test that did not run is not a test that passed.
+    # CONTENT *and* MODE. The first version of this compared only
+    # content with `diff -rq`, and the very first full run reported
+    # tooth 101's red_3 —a plain `chmod -x`— as inert. A mutation that
+    # takes the executable bit off a command mutates plenty; the
+    # instrument was the blind one. An instrument that misses a whole
+    # class of change is worse than none, because it accuses by name.
+    if diff -rq --exclude=.git "$AEGIS_ROOT" "$tmp" >/dev/null 2>&1 \
+       && [[ "$(_tree_modes "$AEGIS_ROOT")" == "$(_tree_modes "$tmp")" ]]; then
+        printf '%s\t%s\t%s\tINERT\n' "$num" "$kind" "$k" >> "$res"
         rm -rf "$tmp"; return
     fi
     AEGIS_ROOT="$tmp" "$tmp/libexec/aegis-verify" --only "$num" --profile "$(current_profile)" >/dev/null 2>&1
@@ -279,6 +307,7 @@ run_teeth() {
                     1) biting=$((biting+1)) ;;
                     0) printf '  \033[1;31mred_%s DOES NOT BITE\033[0m (mutation applied and check %s stayed green)\n' "$kk" "$num" ;;
                     BROKEN) printf '  \033[1;35mred_%s could not be applied\033[0m (the tooth is broken, not the check)\n' "$kk" ;;
+                    INERT) printf '  \033[1;35mred_%s left the tree UNCHANGED\033[0m (the tooth mutates nothing — re-aim the mutation; the check is not the one at fault)\n' "$kk" ;;
                     *) printf '  \033[1;35mred_%s broke check %s (exit %s)\033[0m — a bug in the verifier is not a defence\n' "$kk" "$num" "$rc" ;;
                 esac
             else
@@ -286,6 +315,7 @@ run_teeth() {
                 case "$rc" in
                     0) healthy=$((healthy+1)) ;;
                     BROKEN) printf '  \033[1;35mcontrol_%s could not be applied\033[0m\n' "$kk" ;;
+                    INERT) printf '  \033[1;35mcontrol_%s left the tree UNCHANGED\033[0m (a control that changes nothing proves nothing: it would pass even against a check that bites everything)\n' "$kk" ;;
                     *) printf '  \033[1;31mcontrol_%s turned RED\033[0m (check %s bites a legitimate change)\n' "$kk" "$num" ;;
                 esac
             fi

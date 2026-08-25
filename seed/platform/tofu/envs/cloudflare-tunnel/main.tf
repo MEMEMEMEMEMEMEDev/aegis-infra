@@ -75,7 +75,7 @@ module "tunnel" {
   #   `dominio:` de cada contrato en orgs/. Agregar un hostname a mano
   #   acá funciona hasta el próximo `aegis-org aplicar`, que lo va a
   #   borrar sin avisar porque no sale de ningún contrato.
-  public_hostnames = ["aegis", "argocd", "jenkins"]
+  public_hostnames = ["aegis", "argocd", "jenkins", "grafana", "ntfy"]
 }
 
 output "tunnel_token" {

@@ -1,6 +1,6 @@
 # Exposición de grafana y ntfy — en observability-base (patrón
 # argocd: la exposición vive junto al expuesto; fase-85 §5). Los
-# hostnames los declara edge.yaml (`plataforma:`) y de ahí DERIVA
+# hostnames los declara edge.yaml (`platform:`) y de ahí DERIVA
 # tofu los CNAMEs y el ingress del túnel — nadie edita main.tf a
 # mano (la lección de ai.__ROOT_DOMAIN__).
 #

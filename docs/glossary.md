@@ -129,6 +129,20 @@ than no ratchet at all.
 | `eventos` | `events` |
 | `borde` in a dashboard filename | `edge` |
 | `consumo` in a dashboard filename | `usage` |
+| `bin/aegis-org` (the v2 path) | `aegis org` |
+| `aegis-org aplicar` | `aegis org apply` |
+| `aegis-app nueva … --plantilla` | `aegis app new` |
+| `plan-borrar` · `borrar` · `migrar --a` | `plan-delete` · `delete` · `migrate --to` |
+
+Four of these rows are COMMAND FORMS, not file names, and they are the
+ones that rot in silence: `bin/aegis-org aplicar` names both a path
+that no longer exists (the code lives in `libexec/`, reached through
+the dispatcher) and a subcommand that was renamed. Check 106 does not
+see them — it validates citations of the form `aegis <cmd> <sub>`, and
+these carry neither the `aegis ` prefix nor an existing subcommand. On
+2026-08-25 there were 20 of them across `seed/`, every one inside
+prose. They come out with the translation, and only then do they
+graduate to §3.
 
 ## 4. Rules for new names
 

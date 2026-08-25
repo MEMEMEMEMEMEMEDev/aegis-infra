@@ -225,6 +225,11 @@ config:
         - target_label: __address__
           replacement: blackbox.observability.svc:9115
     # --- DERIVED by aegis-org (tenant probes): do not edit by hand ---
+    # Un probe por organización con dominio y ruta pública. Mide el
+    # camino COMPLETO que recorre un cliente: DNS, borde, túnel,
+    # traefik, middlewares y la app. Todo lo demás mide piezas.
+    # Este bloque se rederiva ENTERO en cada aegis org apply.
+    # (ninguna organización declara dominio con ruta pública)
     # --- END DERIVED ---
 
 resources:                      # fase-85 §10

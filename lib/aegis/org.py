@@ -1684,7 +1684,7 @@ def render_ai_registry():
     h = hashlib.sha256(body.encode()).hexdigest()[:16]
     indented = "\n".join("    " + l if l.strip() else ""
                          for l in body.rstrip("\n").split("\n"))
-    return f"""# GENERADO por {CMD_ORG} — no editar a mano.
+    return f"""{markers.BANNER}
 # hash: {h}
 #
 # Sale de `ai.tareas` de cada contrato en orgs/ (nombre, capacidad,
@@ -1732,7 +1732,7 @@ def render_routes_k8s():
     body = routes_json()
     h = hashlib.sha256(body.encode()).hexdigest()[:16]
     indented = "\n".join("    " + l if l.strip() else "" for l in body.rstrip("\n").split("\n"))
-    return f"""# GENERADO por {CMD_ORG} — no editar a mano.
+    return f"""{markers.BANNER}
 # hash: {h}
 #
 # Sale de ai/routes.yaml (capacidades) + plans.yaml (planes) + el
