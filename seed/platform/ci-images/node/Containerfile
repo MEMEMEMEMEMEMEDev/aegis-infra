@@ -1,31 +1,33 @@
-# aegis-ci-node — node con git, para compilar sitios cuyas dependencias
-# viven en repos git privados.
+# aegis-ci-node — node with git, for building sites whose dependencies
+# live in private git repos.
 #
-# La imagen oficial `node:*-alpine` NO trae git ni cliente ssh. El
-# portafolio consume @ahroi/foundation (el design system, repo
-# aegis-canvas) como DEPENDENCIA DE GIT, y sin git `npm ci` ni siquiera
-# llega a clonar: falla en la resolución.
+# The official `node:*-alpine` image ships neither git nor an ssh
+# client. The portfolio consumes @ahroi/foundation (the design system,
+# repo aegis-canvas) as a GIT DEPENDENCY, and without git `npm ci` does
+# not even get as far as cloning: it fails at resolution.
 #
-# La alternativa obvia era un `apk add git` dentro del pipeline. Se
-# descartó, y no por elegancia: baja un paquete SIN PIN en cada build,
-# contra una red que se puede caer y contra un repo que puede mover la
-# versión abajo de los pies. Un build reproducible no puede depender de
-# eso. Acá el pin es el FROM, y el tag de la imagen resultante se DERIVA
-# de él — mismo contrato que aegis-ci-cosign y aegis-ci-crane, sin un
-# segundo lugar donde editar la versión.
+# The obvious alternative was an `apk add git` inside the pipeline. It
+# was discarded, and not out of elegance: it pulls an UNPINNED package
+# on every build, against a network that can go down and against a repo
+# that can move the version out from under our feet. A reproducible
+# build cannot depend on that. Here the pin is the FROM, and the tag of
+# the resulting image is DERIVED from it — same contract as
+# aegis-ci-cosign and aegis-ci-crane, with no second place to edit the
+# version.
 #
-# git y NO openssh-client, a propósito: el pipeline reescribe las URLs
-# ssh:// a https:// con un token de corta vida, así que no hace falta
-# cliente ssh, ni llave montada, ni verificación de host key.
+# git and NOT openssh-client, on purpose: the pipeline rewrites the
+# ssh:// URLs to https:// with a short-lived token, so there is no need
+# for an ssh client, a mounted key, or host key verification.
 #
-# A diferencia de cosign y crane —que son distroless y hay que extraer
-# sobre alpine— node:alpine ya trae shell, así que se le agrega git y
-# nada más.
+# Unlike cosign and crane —which are distroless and have to be extracted
+# onto alpine— node:alpine already ships a shell, so git is added to it
+# and nothing else.
 FROM node:22.23.1-alpine
 
-# Los `--version` no son adorno: si el apk deja la imagen sin git, el
-# build de ESTA imagen falla acá y no seis meses después dentro del
-# pipeline de una app, que es donde el error sale disfrazado.
+# The `--version` calls are not decoration: if the apk leaves the image
+# without git, the build of THIS image fails right here and not six
+# months later inside some app pipeline, which is where the error comes
+# out in disguise.
 RUN apk add --no-cache git \
  && git --version \
  && node --version \

@@ -1,39 +1,41 @@
-# aegis-ci-tofu — OpenTofu para el job edge-apply.
+# aegis-ci-tofu — OpenTofu for the edge-apply job.
 #
-# NO se hereda de ghcr.io/opentofu/opentofu, aunque sea lo obvio: desde
-# 1.10 esa imagen trae un ONBUILD que FALLA A PROPÓSITO cuando alguien la
-# usa como base ("this is no longer supported as of OpenTofu 1.10" —
-# opentofu#1931). El build muere con exit 1 y el motivo aparece en
-# amarillo entre cientos de líneas de kaniko, así que queda escrito acá
-# para que nadie lo redescubra.
+# It does NOT inherit from ghcr.io/opentofu/opentofu, obvious as that
+# would be: since 1.10 that image carries an ONBUILD that FAILS ON
+# PURPOSE when somebody uses it as a base ("this is no longer supported
+# as of OpenTofu 1.10" — opentofu#1931). The build dies with exit 1 and
+# the reason shows up in yellow among hundreds of kaniko lines, so it
+# is written down here for nobody to have to rediscover it.
 #
-# En su lugar se baja el release oficial y se VERIFICA SU SHA256. Bajarlo
-# sin verificar sería una dependencia sin pin en cada build, que es justo
-# lo que el resto de este directorio evita (A43/A49). El pin es deuda
-# vigilada: subir de versión son DOS líneas que cambian juntas, y si se
-# cambia solo una el build falla ruidoso en el sha256sum -c.
+# Instead, the official release is downloaded and ITS SHA256 IS
+# VERIFIED. Downloading it unverified would be an unpinned dependency on
+# every build, which is exactly what the rest of this directory avoids
+# (A43/A49). The pin is watched debt: bumping the version is TWO lines
+# that change together, and if only one of them is changed the build
+# fails loudly at the sha256sum -c.
 #
-# NO TRAE SOPS, a propósito y para siempre. Este contenedor solo debe
-# poder hablarle a Cloudflare con un token inyectado por el pipeline. Si
-# algún día alguien necesita sops acá, la pregunta correcta es por qué CI
-# está descifrando algo, no cómo agregarle la herramienta. Ver
+# IT DOES NOT SHIP SOPS, on purpose and for good. This container must
+# only be able to talk to Cloudflare with a token injected by the
+# pipeline. If some day somebody needs sops here, the right question is
+# why CI is decrypting anything, not how to add the tool to it. See
 # docs/protocols/edge.md §4.
 FROM alpine:3.22
 
 ARG TOFU_VERSION=1.10.7
 ARG TOFU_SHA256=765a7374aeafcad15fe8da5359de76ce11ba0fd3cb6c2dc85d3b390e6362cae5
 
-# bash porque tofu-apply.sh lo pide en el shebang y usa arrays y [[ ]];
-# alpine trae ash y el job moria con "env: can.t execute bash" (127).
-# python3 + py3-yaml los usa tofu-apply.sh para leer la config (C7:
-# python3, no yq). git lo necesita tofu si algún módulo viene de git.
-# curl se instala y se BORRA: no hace falta en runtime y es superficie.
+# bash because tofu-apply.sh asks for it in the shebang and uses arrays
+# and [[ ]]; alpine ships ash and the job died with "env: can.t execute
+# bash" (127). python3 + py3-yaml are used by tofu-apply.sh to read the
+# config (C7: python3, not yq). git is needed by tofu in case some
+# module comes from git. curl is installed and then DELETED: it is not
+# needed at runtime and it is surface.
 RUN apk add --no-cache bash python3 py3-yaml git ca-certificates \
- && apk add --no-cache --virtual .baja curl \
+ && apk add --no-cache --virtual .build-deps curl \
  && curl -fsSL -o /tmp/tofu.tgz \
       "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.tar.gz" \
  && echo "${TOFU_SHA256}  /tmp/tofu.tgz" | sha256sum -c - \
  && tar -xzf /tmp/tofu.tgz -C /usr/local/bin tofu \
  && rm /tmp/tofu.tgz \
- && apk del .baja \
+ && apk del .build-deps \
  && tofu version

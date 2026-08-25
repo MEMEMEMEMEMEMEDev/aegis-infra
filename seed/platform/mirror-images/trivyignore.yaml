@@ -1,27 +1,28 @@
-# Excepciones del scan para imagenes ESPEJADAS de terceros.
-# Se pasa a trivy con --ignorefile desde mirror-images/Jenkinsfile.
-# NO lo usa Jenkinsfile.app: el codigo propio no tiene excepciones.
+# Scan exceptions for MIRRORED third-party images.
+# Passed to trivy with --ignorefile from mirror-images/Jenkinsfile.
+# Jenkinsfile.app does NOT use it: our own code has no exceptions.
 #
 # ============================================================
-# gosu en las imagenes oficiales de postgres — 15 CVEs de la
-# stdlib de Go que NO ESTAN en el binario
+# gosu in the official postgres images — 15 CVEs of the Go
+# stdlib that ARE NOT IN THE BINARY
 # ============================================================
 #
-# QUE ES gosu
-# Un binario Go de 1,7 MB que la imagen oficial de postgres trae para
-# bajar privilegios de root al usuario postgres en el arranque: lee
-# argv, hace setuid/setgid, exec, y muere. No es un paquete apk (no
-# figura en /lib/apk/db/installed) — el Dockerfile de postgres lo baja
-# de GitHub releases y lo copia. Ningun apk upgrade lo alcanza.
+# WHAT gosu IS
+# A 1.7 MB Go binary that the official postgres image ships in order to
+# drop privileges from root to the postgres user at startup: it reads
+# argv, does setuid/setgid, exec, and dies. It is not an apk package (it
+# does not appear in /lib/apk/db/installed) — the postgres Dockerfile
+# downloads it from GitHub releases and copies it in. No apk upgrade
+# ever reaches it.
 #
-# POR QUE TRIVY REPORTA 15 CVEs
-# Para binarios Go, trivy matchea contra la VERSION DEL COMPILADOR
-# embebida (aca go1.24.6), no contra los paquetes efectivamente
-# enlazados. Si esa version de Go tiene CVEs en la stdlib, los lista
-# todos — aunque el linker haya eliminado ese codigo por no usarse.
+# WHY TRIVY REPORTS 15 CVEs
+# For Go binaries, trivy matches against the embedded COMPILER VERSION
+# (here go1.24.6), not against the packages actually linked in. If that
+# Go version has stdlib CVEs, it lists them all — even when the linker
+# stripped that code out because nothing used it.
 #
-# LA MEDICION (2026-07-26, sobre postgres:17.10-alpine)
-# Se extrajo el binario y se buscaron simbolos de funcion reales:
+# THE MEASUREMENT (2026-07-26, on postgres:17.10-alpine)
+# The binary was extracted and searched for real function symbols:
 #
 #   crypto/tls.*   -> 0     syscall.Setuid -> 2
 #   crypto/x509.*  -> 0     syscall.Setgid -> 2
@@ -32,97 +33,98 @@
 #   os.OpenRoot    -> 0
 #   net.Dial       -> 0
 #
-# Cero funciones de TODOS los paquetes acusados. No es que sean
-# inalcanzables: no estan compiladas dentro. Lo unico que aparecia en
-# una primera pasada por substring eran fragmentos del blob de cadenas
-# del runtime ("...crypto/rsacrypto/tlswinsymlinkx509..."), strings
-# cortas empaquetadas pegadas — no simbolos. Un paquete realmente
-# enlazado se ve como os/exec.LookPath, os/exec.Error, etc.
+# Zero functions from EVERY accused package. It is not that they are
+# unreachable: they are not compiled in. The only thing a first
+# substring pass turned up were fragments of the runtime string blob
+# ("...crypto/rsacrypto/tlswinsymlinkx509..."), short packed strings
+# glued together — not symbols. A package that is really linked in shows
+# up as os/exec.LookPath, os/exec.Error, and so on.
 #
-# POR QUE NO SE ARREGLA "ACTUALIZANDO"
-# La columna Fixed Version (1.24.13, 1.25.7, ...) son versiones del
-# COMPILADOR. El arreglo es recompilar gosu, cosa que hace quien
-# construye la imagen. Construir una imagen derivada propia solo para
-# esto no mejoraria la seguridad en nada —el codigo vulnerable no esta
-# presente de todas formas— y agregaria el mantenimiento de una imagen
-# de base de datos propia. Cuando upstream rebuildee con un Go nuevo,
-# estas entradas quedan inertes solas.
+# WHY THIS IS NOT FIXED BY "UPGRADING"
+# The Fixed Version column (1.24.13, 1.25.7, ...) lists COMPILER
+# versions. The fix is to rebuild gosu, which is the job of whoever
+# builds the image. Building a derived image of our own just for this
+# would not improve security at all —the vulnerable code is not present
+# either way— and would add the upkeep of a home-grown database image.
+# Once upstream rebuilds with a newer Go, these entries go inert on
+# their own.
 #
-# POR QUE UNA POR UNA Y NO UN WILDCARD
-# Es lo que hace que la excepcion no crezca sola. Si aparece un CVE 16
-# en gosu, el build ROMPE y alguien tiene que repetir la medicion. Un
-# comodin por ruta silenciaria para siempre todo lo que caiga ahi,
-# incluido algo que si importe.
+# WHY ONE BY ONE AND NOT A WILDCARD
+# That is what keeps the exception from growing by itself. If a 16th CVE
+# shows up in gosu, the build BREAKS and somebody has to redo the
+# measurement. A path wildcard would silence forever everything that
+# lands there, including something that does matter.
 #
-# VENCIMIENTO: 2027-01-31. El analisis vale para ESTE binario compilado
-# ASI. Si algun dia gosu se rebuildea enlazando red, deja de valer.
-# Al vencer, trivy vuelve a reportar y hay que rehacer la medicion.
+# EXPIRY: 2027-01-31. The analysis holds for THIS binary compiled THIS
+# way. If some day gosu is rebuilt linking in the network stack, it
+# stops holding. On expiry, trivy reports again and the measurement has
+# to be redone.
 #
-# Alternativas evaluadas y descartadas el 2026-07-26:
-#   postgres:18.2-alpine  -> mismo gosu + 20 CVEs de la base
-#   postgres:18.2 debian  -> mismo gosu + 32 CVEs de la base
-#   cloudnative-pg:17.10  -> sin gosu, pero 4 CVEs en urllib3, que SI
-#                            se ejecuta si se usa barman-cloud. Menos
-#                            hallazgos, mas riesgo residual.
+# Alternatives evaluated and discarded on 2026-07-26:
+#   postgres:18.2-alpine  -> same gosu + 20 CVEs from the base
+#   postgres:18.2 debian  -> same gosu + 32 CVEs from the base
+#   cloudnative-pg:17.10  -> no gosu, but 4 CVEs in urllib3, which DOES
+#                            execute if barman-cloud is used. Fewer
+#                            findings, more residual risk.
 
 vulnerabilities:
-  - id: CVE-2025-68121   # CRITICAL — crypto/tls: validacion de certificado en resumption
+  - id: CVE-2025-68121   # CRITICAL — crypto/tls: certificate validation on resumption
     paths: ["usr/local/bin/gosu"]
-    statement: "crypto/tls no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    statement: "crypto/tls is not linked into the binary (0 symbols). Measured 2026-07-26."
     expired_at: 2027-01-31
-  - id: CVE-2025-61726   # net/url: agotamiento de memoria parseando query params
+  - id: CVE-2025-61726   # net/url: memory exhaustion parsing query params
     paths: ["usr/local/bin/gosu"]
-    statement: "net/url no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    statement: "net/url is not linked into the binary (0 symbols). Measured 2026-07-26."
     expired_at: 2027-01-31
-  - id: CVE-2025-61729   # crypto/x509: DoS por consumo excesivo de recursos
+  - id: CVE-2025-61729   # crypto/x509: DoS through excessive resource consumption
     paths: ["usr/local/bin/gosu"]
-    statement: "crypto/x509 no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    statement: "crypto/x509 is not linked into the binary (0 symbols). Measured 2026-07-26."
     expired_at: 2027-01-31
-  - id: CVE-2026-25679   # net/url: parseo incorrecto de literales IPv6
+  - id: CVE-2026-25679   # net/url: incorrect parsing of IPv6 literals
     paths: ["usr/local/bin/gosu"]
-    statement: "net/url no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    statement: "net/url is not linked into the binary (0 symbols). Measured 2026-07-26."
     expired_at: 2027-01-31
-  - id: CVE-2026-27145   # crypto/x509: DoS procesando nombres DNS
+  - id: CVE-2026-27145   # crypto/x509: DoS processing DNS names
     paths: ["usr/local/bin/gosu"]
-    statement: "crypto/x509 no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    statement: "crypto/x509 is not linked into the binary (0 symbols). Measured 2026-07-26."
     expired_at: 2027-01-31
-  - id: CVE-2026-32280   # crypto/x509: DoS construyendo cadena de certificados
+  - id: CVE-2026-32280   # crypto/x509: DoS building a certificate chain
     paths: ["usr/local/bin/gosu"]
-    statement: "crypto/x509 no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    statement: "crypto/x509 is not linked into the binary (0 symbols). Measured 2026-07-26."
     expired_at: 2027-01-31
-  - id: CVE-2026-32281   # crypto/x509: DoS validando cadena de certificados
+  - id: CVE-2026-32281   # crypto/x509: DoS validating a certificate chain
     paths: ["usr/local/bin/gosu"]
-    statement: "crypto/x509 no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    statement: "crypto/x509 is not linked into the binary (0 symbols). Measured 2026-07-26."
     expired_at: 2027-01-31
-  - id: CVE-2026-32283   # crypto/tls: DoS con multiples claves TLS 1.3
+  - id: CVE-2026-32283   # crypto/tls: DoS with multiple TLS 1.3 keys
     paths: ["usr/local/bin/gosu"]
-    statement: "crypto/tls no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    statement: "crypto/tls is not linked into the binary (0 symbols). Measured 2026-07-26."
     expired_at: 2027-01-31
-  - id: CVE-2026-33811   # net: DoS por respuesta CNAME larga
+  - id: CVE-2026-33811   # net: DoS through a long CNAME response
     paths: ["usr/local/bin/gosu"]
-    statement: "net.Dial no esta enlazado; el binario no abre sockets. Medido 2026-07-26."
+    statement: "net.Dial is not linked in; the binary opens no sockets. Measured 2026-07-26."
     expired_at: 2027-01-31
-  - id: CVE-2026-33814   # net/http2: DoS por frame SETTINGS malformado
+  - id: CVE-2026-33814   # net/http2: DoS through a malformed SETTINGS frame
     paths: ["usr/local/bin/gosu"]
-    statement: "net/http no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    statement: "net/http is not linked into the binary (0 symbols). Measured 2026-07-26."
     expired_at: 2027-01-31
-  - id: CVE-2026-39820   # net/mail: DoS con entradas de email preparadas
+  - id: CVE-2026-39820   # net/mail: DoS with crafted email input
     paths: ["usr/local/bin/gosu"]
-    statement: "net/mail no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    statement: "net/mail is not linked into the binary (0 symbols). Measured 2026-07-26."
     expired_at: 2027-01-31
-  - id: CVE-2026-39822   # os.Root: traversal por seguimiento de symlinks
+  - id: CVE-2026-39822   # os.Root: traversal by following symlinks
     paths: ["usr/local/bin/gosu"]
-    statement: "os.OpenRoot no esta presente (0 ocurrencias); gosu no usa la API os.Root. El unico no-red de la lista, verificado aparte. Medido 2026-07-26."
+    statement: "os.OpenRoot is not present (0 occurrences); gosu does not use the os.Root API. The only non-network one on the list, verified separately. Measured 2026-07-26."
     expired_at: 2027-01-31
-  - id: CVE-2026-39836   # actualizacion agregada de seguridad de golang
+  - id: CVE-2026-39836   # aggregate golang security update
     paths: ["usr/local/bin/gosu"]
-    statement: "Agregado de CVEs de stdlib ya cubiertos individualmente; ninguno de los paquetes afectados esta enlazado. Medido 2026-07-26."
+    statement: "Aggregate of stdlib CVEs already covered individually; none of the affected packages is linked in. Measured 2026-07-26."
     expired_at: 2027-01-31
-  - id: CVE-2026-42499   # net/mail: DoS parseando direcciones patologicas
+  - id: CVE-2026-42499   # net/mail: DoS parsing pathological addresses
     paths: ["usr/local/bin/gosu"]
-    statement: "net/mail no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    statement: "net/mail is not linked into the binary (0 symbols). Measured 2026-07-26."
     expired_at: 2027-01-31
-  - id: CVE-2026-42504   # mime: DoS por cabecera MIME maliciosa
+  - id: CVE-2026-42504   # mime: DoS through a malicious MIME header
     paths: ["usr/local/bin/gosu"]
-    statement: "mime no esta enlazado en el binario (0 simbolos). Medido 2026-07-26."
+    statement: "mime is not linked into the binary (0 symbols). Measured 2026-07-26."
     expired_at: 2027-01-31

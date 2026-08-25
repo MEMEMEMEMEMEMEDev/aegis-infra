@@ -1,214 +1,215 @@
-# mirror-images — imágenes de TERCEROS que la plataforma espeja al
-# registry interno y firma con la llave de aegis.
+# mirror-images — THIRD-PARTY images that the platform mirrors into the
+# internal registry and signs with the aegis key.
 #
-# POR QUÉ EXISTE ESTE ARCHIVO
-# La ClusterPolicy require-aegis-signature exige firma propia para todo
-# Pod de un namespace de tenant (imageReferences '*'). Una imagen
-# pública NO puede correr ahí: no está firmada con nuestra llave y no
-# vamos a debilitar la política por comodidad. La salida correcta es
-# traerla, ESCANEARLA y firmarla nosotros — que es exactamente lo que
-# hace el job mirror-images. El resultado es que todo lo que corre en un
-# tenant pasó por el mismo control, sea código nuestro o de terceros.
+# WHY THIS FILE EXISTS
+# The require-aegis-signature ClusterPolicy demands our own signature for
+# every Pod in a tenant namespace (imageReferences '*'). A public image
+# CANNOT run there: it is not signed with our key, and we are not going
+# to weaken the policy for convenience. The correct way out is to pull
+# it, SCAN it and sign it ourselves — which is exactly what the
+# mirror-images job does. The result is that everything running in a
+# tenant went through the same control, ours or third-party alike.
 #
-# FORMATO
-#   <origen>@<digest>   <destino>:<tag>
+# FORMAT
+#   <source>@<digest>   <destination>:<tag>
 #
-# El origen se pinnea POR DIGEST, no por tag. Un tag es un puntero
-# mutable: quien controla el registry de origen puede reapuntarlo a otro
-# contenido sin que nos enteremos. El digest es el contenido. El tag se
-# deja en el comentario para que un humano sepa qué está leyendo.
+# The source is pinned BY DIGEST, not by tag. A tag is a mutable
+# pointer: whoever controls the source registry can repoint it at other
+# content without us noticing. The digest is the content. The tag stays
+# in the comment so a human knows what they are reading.
 #
-# CÓMO ACTUALIZAR UNA IMAGEN
-#   1. crane digest <origen>:<tag-nuevo>
-#   2. editar la línea acá (digest Y tag del destino)
-#   3. commit + push  →  correr el job mirror-images
-#   4. bumpear la referencia en el manifiesto que la consume
-# El paso 4 es aparte a propósito: espejar no despliega. Traer una
-# imagen nueva y ponerla en producción son dos decisiones distintas.
+# HOW TO UPDATE AN IMAGE
+#   1. crane digest <source>:<new-tag>
+#   2. edit the line here (digest AND destination tag)
+#   3. commit + push  →  run the mirror-images job
+#   4. bump the reference in the manifest that consumes it
+# Step 4 is separate on purpose: mirroring does not deploy. Pulling a
+# new image and putting it in production are two distinct decisions.
 #
-# Líneas vacías y las que empiezan con # se ignoran.
+# Empty lines and lines starting with # are ignored.
 
-# --- almacenamiento -------------------------------------------------
-# Garage v2.3.0 — S3 self-hosted (Deuxfleurs, cooperativa francesa con
-# financiamiento NGI; releases cada 3-4 meses y dos ramas en paralelo).
+# --- storage --------------------------------------------------------
+# Garage v2.3.0 — self-hosted S3 (Deuxfleurs, a French cooperative with
+# NGI funding; releases every 3-4 months and two parallel branches).
 #
-# Elegido sobre MinIO, que NO publica un release desde 2025-09-07: un
-# servidor de almacenamiento sin parches durante 10 meses no es una
-# opcion para datos de terceros. Tambien sobre SeaweedFS, que es el mas
-# activo pero son master+volume+filer+gateway: mucha mas maquinaria de la
-# que hacen falta para unas pocas apps.
+# Chosen over MinIO, which has NOT published a release since 2025-09-07:
+# a storage server left unpatched for 10 months is not an option for
+# third-party data. Also over SeaweedFS, the most active of the three,
+# but built as master+volume+filer+gateway: far more machinery than a
+# handful of apps need.
 #
-# EL FILESYSTEM DE ESTA IMAGEN SON DOS ENTRADAS: el directorio raiz y un
-# binario estatico de 71 MB. No hay shell, ni gestor de paquetes, ni
-# libc, ni utilidades. Si alguien encuentra una RCE no tiene con que
-# encadenar nada: no hay sh, ni curl, ni apk. Y como el binario es
-# r-xr-xr-x, corre con cualquier UID => runAsNonRoot aunque la imagen
-# declare root.
+# THIS IMAGE'S FILESYSTEM IS TWO ENTRIES: the root directory and a 71 MB
+# static binary. No shell, no package manager, no libc, no utilities. If
+# somebody finds an RCE there is nothing to chain it to: no sh, no curl,
+# no apk. And because the binary is r-xr-xr-x, it runs under any UID =>
+# runAsNonRoot even though the image declares root.
 #
-# LIMITACIONES CONOCIDAS, que condicionan como se usa:
-#   - SIN versionado de objetos ni object-lock. Lo que se borra o se
-#     sobrescribe, se fue. Un backup inmutable NO se puede apoyar aca.
-#   - SIN cifrado del lado del servidor. Los objetos quedan en texto
-#     plano sobre el disco, que ademas no esta cifrado (pendiente #1 de
-#     la instancia). Para datos de clientes hay que resolverlo antes.
-#   - Permisos por clave-y-bucket en vez de IAM. Menos poder y menos con
-#     que equivocarse.
+# KNOWN LIMITATIONS, which shape how it is used:
+#   - NO object versioning and no object lock. Whatever is deleted or
+#     overwritten is gone. An immutable backup CANNOT rest on this.
+#   - NO server-side encryption. Objects sit in plain text on the disk,
+#     which is not encrypted either (pending item #1 of the instance).
+#     For customer data that has to be solved first.
+#   - Permissions per key-and-bucket instead of IAM. Less power, and
+#     less to get wrong with.
 docker.io/dxflrs/garage@sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690	garage:v2.3.0
 
-# --- datos ----------------------------------------------------------
+# --- data -----------------------------------------------------------
 # redis:8.6.4-alpine
 public.ecr.aws/docker/library/redis@sha256:2cc044fc5a07c9b701f8f1255a309ae9ad7856e694ac03513bf3648c01e40763	redis:8.6.4-alpine
 
-# postgres:17.10-alpine — mayor 17 a propósito (más tiempo de campo que
-# la 18; soporte upstream hasta noviembre de 2029).
+# postgres:17.10-alpine — major 17 on purpose (more field time than 18;
+# upstream support until November 2029).
 public.ecr.aws/docker/library/postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193	postgres:17.10-alpine
 
-# --- toolchains de CI -----------------------------------------------
-# golang:1.26.5-alpine — compila el ai-gateway en el pipeline.
+# --- CI toolchains --------------------------------------------------
+# golang:1.26.6-alpine — compiles the ai-gateway in the pipeline.
 #
-# POR QUÉ ACÁ Y NO UNA aegis-ci-go EN ci-images/. Las imágenes aegis-ci-*
-# existen cuando hay que AGREGARLE algo a la oficial: aegis-ci-node lleva
-# git porque el portafolio consume una dependencia de repo privado; las
-# de cosign y crane existen porque las oficiales son distroless y el
-# `container(){ sh }` de Jenkins necesita shell. Para Go no hace falta
-# nada: el módulo del gateway no tiene una sola dependencia externa
-# (`GOPROXY=off` en el pipeline lo hace cumplir), así que ni siquiera
-# necesita red ni git. Una imagen derivada que no agrega nada sería un
-# eslabón más en la cadena de suministro a cambio de cero beneficio.
+# WHY HERE AND NOT AN aegis-ci-go IN ci-images/. The aegis-ci-* images
+# exist when something has to be ADDED to the official one: aegis-ci-node
+# carries git because the portfolio consumes a dependency from a private
+# repo; the cosign and crane ones exist because the official images are
+# distroless and Jenkins' `container(){ sh }` needs a shell. For Go
+# nothing has to be added: the gateway module does not have a single
+# external dependency (`GOPROXY=off` in the pipeline enforces it), so it
+# needs neither network nor git. A derived image that adds nothing would
+# be one more link in the supply chain for zero benefit.
 #
-# ACOPLE DECLARADO: el tag de destino DEBE coincidir con el `image` del
-# container `go` en ai-gateway/Jenkinsfile. Es inter-repo y no derivable
-# en runtime; si divergen, el síntoma es ImagePullBackOff — visible, no
-# silencioso.
+# DECLARED COUPLING: the destination tag MUST match the `image` of the
+# `go` container in ai-gateway/Jenkinsfile. It is inter-repo and not
+# derivable at runtime; if the two diverge, the symptom is
+# ImagePullBackOff — visible, not silent.
 #
-# La versión sigue a la del toolchain de la máquina del operador,
-# para que "compila en mi máquina" y "compila en CI" no puedan
-# significar cosas distintas.
+# The version follows the toolchain on the operator's machine, so that
+# "it builds on my machine" and "it builds in CI" cannot mean two
+# different things.
 #
-# 1.26.5 -> 1.26.6 el 2026-08-17, y no por gusto: el build 12 del
-# gateway BLOQUEÓ en el scan con 8 HIGH de la stdlib de 1.26.5
-# (CVE-2026-33818 y compañía: asn1, net/http HTTP/2, html/template,
-# encoding/xml, net/url, crypto/tls — todos corregidos en 1.26.6).
-# Trivy lee el buildinfo del ELF, así que el parche es del COMPILADOR:
-# no hay línea de código del gateway que pueda arreglar esto.
+# 1.26.5 -> 1.26.6 on 2026-08-17, and not out of taste: build 12 of the
+# gateway BLOCKED at the scan with 8 HIGH from the 1.26.5 stdlib
+# (CVE-2026-33818 and company: asn1, net/http HTTP/2, html/template,
+# encoding/xml, net/url, crypto/tls — all fixed in 1.26.6). Trivy reads
+# the buildinfo of the ELF, so the patch belongs to the COMPILER: no
+# line of gateway code can fix this.
 public.ecr.aws/docker/library/golang@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83	golang:1.26.6-alpine
 
-# --- runtimes de aplicación ------------------------------------------
-# python:3.12-slim — base del engine-cpu (#26), build Y runtime.
+# --- application runtimes -------------------------------------------
+# python:3.12-slim — base of the engine-cpu (#26), build AND runtime.
 #
-# POR QUÉ 3.12 Y NO LA ÚLTIMA: onnxruntime y ctranslate2 publican
-# ruedas hasta 3.13; con más nuevo, pip compila desde fuente o falla
-# con un error que no se parece en nada a "esa versión es muy nueva".
-# Es el MISMO pin que el requires-python del pyproject del módulo —
-# si divergen, el build del Containerfile falla fuerte en el kaniko.
+# WHY 3.12 AND NOT THE LATEST: onnxruntime and ctranslate2 publish
+# wheels up to 3.13; with anything newer, pip builds from source or
+# fails with an error that looks nothing like "that version is too new".
+# It is the SAME pin as the requires-python of the module's pyproject —
+# if they diverge, the Containerfile build fails hard inside kaniko.
 #
-# POR QUÉ slim Y NO distroless, que es el criterio del BFF: acá el
-# Containerfile tiene un RUN (pip install de ruedas nativas) y el
-# runtime necesita la libstdc++/libgomp que esas ruedas enlazan. Una
-# distroless obligaría a un multi-stage copiando site-packages y sus
-# .so a mano — más superficie de equivocarse que la que se saca. Lo
-# que el pod no necesita lo quita el Deployment: sin root, sin
-# escalada, filesystem raíz de solo lectura.
+# WHY slim AND NOT distroless, which is the criterion for the BFF: here
+# the Containerfile has a RUN (pip install of native wheels) and the
+# runtime needs the libstdc++/libgomp those wheels link against. A
+# distroless would force a multi-stage copying site-packages and its
+# .so files by hand — more surface to get wrong than it removes. What
+# the pod does not need is stripped by the Deployment: no root, no
+# escalation, read-only root filesystem.
 #
-# El digest de origen es el MISMO en public.ecr.aws que en Docker Hub;
-# medido con las dos APIs el 2026-08-17 antes de elegir, como con
-# nginx-unprivileged.
+# The source digest is the SAME on public.ecr.aws as on Docker Hub;
+# measured with both APIs on 2026-08-17 before choosing, as was done
+# with nginx-unprivileged.
 public.ecr.aws/docker/library/python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a	python:3.12-slim
-# nodejs22 distroless — runtime del BFF del portafolio.
+# nodejs22 distroless — runtime of the portfolio BFF.
 #
-# POR QUÉ DISTROLESS Y NO node:22-alpine. Se intentó con la oficial el
-# 2026-08-02 y Trivy la BLOQUEÓ, con razón: node:22.23.1-alpine trae npm
-# instalado, y las dependencias empaquetadas DE NPM traían un CRITICAL
-# (CVE-2026-59873, gzip bomb en node-tar) más varios HIGH (sigstore,
-# picomatch, brace-expansion). Ninguna de esas se ejecuta jamás en
-# producción: el BFF corre `node src/server.js` y sus dependencias se
-# instalan en CI con `npm ci`, no en el pod.
+# WHY DISTROLESS AND NOT node:22-alpine. The official one was tried on
+# 2026-08-02 and Trivy BLOCKED it, rightly so: node:22.23.1-alpine ships
+# npm installed, and the dependencies bundled WITH NPM carried a CRITICAL
+# (CVE-2026-59873, gzip bomb in node-tar) plus several HIGH (sigstore,
+# picomatch, brace-expansion). None of those ever execute in production:
+# the BFF runs `node src/server.js` and its dependencies are installed
+# in CI with `npm ci`, not in the pod.
 #
-# O sea: el scan bloqueó por un gestor de paquetes que el runtime no
-# usa. La salida NO es una excepción de Trivy — es sacar el gestor de
-# paquetes. Mismo criterio que con /usr/bin/pebble en la imagen del
-# engine: extirpar antes que excepcionar. Y el mismo criterio con el
-# que se eligió garage, que se elogia en este archivo justamente por no
-# tener shell ni gestor de paquetes.
+# In other words: the scan blocked because of a package manager the
+# runtime does not use. The way out is NOT a Trivy exception — it is
+# removing the package manager. Same criterion as with /usr/bin/pebble
+# in the engine image: excise rather than except. And the same criterion
+# that picked garage, praised in this very file precisely for having
+# neither shell nor package manager.
 #
-# Esta imagen es node y nada más: sin npm, sin shell, sin apt, sin
-# coreutils. ENTRYPOINT ya es /nodejs/bin/node y el usuario es 65532,
-# así que el Containerfile del BFF solo pone WORKDIR, COPY y el CMD con
-# la ruta del script.
+# This image is node and nothing else: no npm, no shell, no apt, no
+# coreutils. ENTRYPOINT is already /nodejs/bin/node and the user is
+# 65532, so the BFF Containerfile only sets WORKDIR, COPY and the CMD
+# with the path to the script.
 #
-# POR QUÉ debian13 Y NO debian12. El primer intento con distroless fue
-# sobre debian12 y Trivy TAMBIÉN lo bloqueó — pero esta vez con razón y
-# sobre algo que node SÍ usa: libssl3 3.0.18 con un CRITICAL
-# (CVE-2026-31789, heap overflow en OpenSSL) y cinco HIGH, todos con
-# parche disponible en 3.0.19. Debian tenía el arreglo; distroless
-# todavía no había reconstruido esa base.
+# WHY debian13 AND NOT debian12. The first attempt with distroless was
+# on debian12 and Trivy blocked it TOO — but this time rightly, and over
+# something node DOES use: libssl3 3.0.18 with a CRITICAL
+# (CVE-2026-31789, heap overflow in OpenSSL) and five HIGH, all with a
+# fix available in 3.0.19. Debian had the fix; distroless had not yet
+# rebuilt that base.
 #
-# La diferencia entre los dos bloqueos importa y conviene no
-# confundirla: el de node-alpine era ruido (CVEs de un gestor de
-# paquetes que el runtime no ejecuta) y se resolvió sacando el gestor;
-# el de debian12 era una vulnerabilidad real en la biblioteca de TLS
-# del proceso, y se resolvió moviéndose a una base parcheada. Mismo
-# veredicto del scanner, dos causas distintas.
+# The difference between the two blocks matters and is worth not
+# confusing: the node-alpine one was noise (CVEs in a package manager
+# the runtime never executes) and was solved by removing the manager;
+# the debian12 one was a real vulnerability in the TLS library of the
+# process, and was solved by moving to a patched base. Same verdict from
+# the scanner, two different causes.
 #
-# debian13 (trixie) escaneó con CERO hallazgos. Se verificó ANTES de
-# volver a correr este job, con un Job de trivy de un solo uso contra
-# el mismo servidor: dos corridas fallidas seguidas por una conexión
-# lenta son caras.
+# debian13 (trixie) scanned with ZERO findings. That was verified BEFORE
+# running this job again, with a single-use trivy Job against the same
+# server: two failed runs in a row over a slow link are expensive.
 #
-# OJO CON LA CONFUSIÓN FÁCIL: aegis-ci-node (ci-images/) NO sirve para
-# esto y esta NO sirve para aquello. La de CI necesita npm y git para
-# construir, y el job ci-images no escanea ni firma; org-portafolio está
-# en la zona de enforce de Kyverno y exige firma. Son dos imágenes
-# distintas para dos trabajos distintos: una construye, la otra ejecuta.
+# BEWARE THE EASY CONFUSION: aegis-ci-node (ci-images/) does NOT serve
+# this purpose and this one does NOT serve that. The CI image needs npm
+# and git in order to build, and the ci-images job neither scans nor
+# signs; org-portafolio sits in Kyverno's enforce zone and demands a
+# signature. Two different images for two different jobs: one builds,
+# the other runs.
 gcr.io/distroless/nodejs22-debian13@sha256:a2723a2817c5b01b8e7b98d567bc8b5a6b0e713e25bfb0a82b6ade4b9db06f50	nodejs-distroless:22
 
-# nginx-unprivileged 1.31.3-alpine — base de los TRES fronts estáticos:
-# portafolio, blog y ejemplo.
+# nginx-unprivileged 1.31.3-alpine — base of the THREE static fronts:
+# portafolio, blog and ejemplo.
 #
-# POR QUÉ LA VARIANTE unprivileged Y NO nginx A SECAS. Dos razones, y las
-# dos son obligatorias en esta plataforma:
+# WHY THE unprivileged VARIANT AND NOT PLAIN nginx. Two reasons, and
+# both are mandatory on this platform:
 #
-#   1. Escucha en 8080. La NetworkPolicy de un inquilino sólo permite
-#      entrada del borde al 8080; con el nginx normal (puerto 80) el pod
-#      arranca bien y NO recibe tráfico nunca. Es la peor clase de fallo:
-#      silencioso.
-#   2. Corre como UID 101, no root. Los namespaces de inquilino están en
-#      Pod Security Standards `restricted`: un contenedor que pida root
-#      es RECHAZADO en admisión y el pod no llega a existir.
+#   1. It listens on 8080. A tenant's NetworkPolicy only allows ingress
+#      from the edge to 8080; with regular nginx (port 80) the pod
+#      starts up fine and NEVER receives traffic. That is the worst
+#      class of failure: the silent one.
+#   2. It runs as UID 101, not root. Tenant namespaces sit under the
+#      `restricted` Pod Security Standards: a container that asks for
+#      root is REJECTED at admission and the pod never comes to exist.
 #
-# POR QUÉ SE ESPEJA RECIÉN AHORA, que es lo que de verdad hay que contar.
+# WHY IT IS ONLY BEING MIRRORED NOW, which is the part really worth
+# telling.
 #
-# No estaba acá. Los tres fronts la traían de Docker Hub EN CADA BUILD.
-# Se descubrió el 2026-08-09 porque la build 38 del portafolio murió así:
+# It was not here. The three fronts pulled it from Docker Hub ON EVERY
+# BUILD. It surfaced on 2026-08-09, when build 38 of the portfolio died
+# like this:
 #
 #   Retrieving image nginxinc/nginx-unprivileged from index.docker.io
 #   error building image: Get "https://index.docker.io/v2/": ...
 #
-# Y el fallo del build es la consecuencia menor. La mayor es que
-# firmábamos con cosign el artefacto RESULTANTE mientras la base sobre la
-# que se construyó no la había verificado nadie, y encima por TAG. La
-# política de firma hacía exactamente lo que promete —verificar lo que
-# nosotros firmamos— y aun así había terreno sin verificar debajo. Es
-# justo el agujero que este archivo existe para cerrar.
+# And the failed build is the lesser consequence. The greater one is
+# that we were signing the RESULTING artifact with cosign while nobody
+# had verified the base it was built on — and by TAG, no less. The
+# signature policy was doing exactly what it promises —verifying what we
+# sign— and even so there was unverified ground underneath. That is
+# precisely the hole this file exists to close.
 #
-# El digest de origen es el MISMO en public.ecr.aws que en Docker Hub;
-# se midió con `crane digest` contra los dos antes de elegir. Así que
-# usar ECR no cuesta nada y esquiva los límites de tasa del Hub.
+# The source digest is the SAME on public.ecr.aws as on Docker Hub; it
+# was measured with `crane digest` against both before choosing. So
+# using ECR costs nothing and dodges the Hub's rate limits.
 public.ecr.aws/nginx/nginx-unprivileged@sha256:334d92979f15aaecd5dd50af5105e1230e2bb70765d45b1e2f964e7c5eda81c3	nginx-unprivileged:1.31.3-alpine
 
-# alpine 3.21 — runtime del canario hello-aegis.
+# alpine 3.21 — runtime of the hello-aegis canary.
 #
-# Misma historia que la de arriba y encontrada en la misma revisión: el
-# canario tiraba `docker.io/library/alpine:3.21` y
-# `docker.io/library/golang:1.26-alpine` directo de internet.
+# Same story as the one above, and found in the same review: the canary
+# pulled `docker.io/library/alpine:3.21` and
+# `docker.io/library/golang:1.26-alpine` straight off the internet.
 #
-# EL golang NO SE AGREGA ACÁ, y es deliberado: la plataforma YA espeja
-# `golang:1.26.5-alpine` para compilar el ai-gateway. Sumar un segundo
-# golang sería duplicar una cadena de herramientas y, sobre todo,
-# duplicar el lugar donde hay que acordarse de parchear. El canario pasa
-# a usar el que ya existe.
+# THE golang IS NOT ADDED HERE, and that is deliberate: the platform
+# ALREADY mirrors `golang:1.26.6-alpine` to compile the ai-gateway.
+# Adding a second golang would duplicate a toolchain and, above all,
+# duplicate the place where somebody has to remember to patch. The
+# canary moves to the one that already exists.
 #
-# Que el canario sea el ÚLTIMO en salir de internet tiene su ironía:
-# existe para ejercitar el camino que los demás recorren, así que era
-# también el último lugar donde el agujero podía esconderse.
+# That the canary was the LAST thing to stop reaching the internet has
+# its irony: it exists to exercise the path everything else walks, so it
+# was also the last place where the hole could hide.
 public.ecr.aws/docker/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d	alpine:3.21

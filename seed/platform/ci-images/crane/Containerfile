@@ -1,9 +1,9 @@
-# aegis-ci-crane — crane (go-containerregistry) es DISTROLESS (sin
-# shell): Jenkins container(){ sh } no puede usarlo => extraer el binario
-# oficial pinneado sobre alpine (patrón aegis-ci-cosign, A43/A49). Se usa
-# para PUSHEAR el tar YA escaneado (scan-antes-de-push) en el build sin
-# privilegios (W-05). Build: job 'ci-images' (jobs-as-code), NO manual.
-# Pin = deuda vigilada por el scan.
+# aegis-ci-crane — crane (go-containerregistry) is DISTROLESS (no
+# shell): Jenkins container(){ sh } cannot use it => extract the pinned
+# official binary onto alpine (the aegis-ci-cosign pattern, A43/A49). It
+# is used to PUSH the ALREADY scanned tar (scan-before-push) in the
+# unprivileged build (W-05). Build: job 'ci-images' (jobs-as-code), NOT
+# by hand. Pin = debt watched by the scan.
 FROM gcr.io/go-containerregistry/crane:v0.20.3 AS crane
 FROM alpine:3.22
 COPY --from=crane /ko-app/crane /usr/local/bin/crane

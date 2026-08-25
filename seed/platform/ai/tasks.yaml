@@ -1,32 +1,33 @@
-# tasks.yaml — LOS NÚMEROS DE CADA TAREA DE AI, del lado de la
-# plataforma.
+# tasks.yaml — THE NUMBERS FOR EVERY AI TASK, from the platform side.
 #
-# Mismo criterio que plans.yaml y services.yaml: el contrato de una
-# organización nombra la tarea y su CAPACIDAD, nunca cuántos tokens puede
-# gastar. Los topes los pone la plataforma, y por eso se pueden reajustar
-# para todas a la vez sin tocar treinta contratos.
+# Same criterion as plans.yaml and services.yaml: an organization's
+# contract names the task and its CAPABILITY, never how many tokens it
+# may spend. The caps are set by the platform, which is why they can be
+# readjusted for all of them at once without touching thirty contracts.
 #
-# QUÉ SALE DEL CONTRATO Y QUÉ SALE DE ACÁ, que es la división que importa:
+# WHAT COMES FROM THE CONTRACT AND WHAT COMES FROM HERE, which is the
+# division that matters:
 #
-#   del contrato   nombre, capacidad, prompt, y —lo que de verdad
-#                  importaba derivar— el TENANT autorizado
-#   de acá         clase y los topes numéricos
+#   from the contract   name, capability, prompt, and —the thing that
+#                       really mattered to derive— the authorized TENANT
+#   from here           class and the numeric caps
 #
-# El tenant era el acoplamiento peligroso. Hasta #60 había que acordarse
-# de escribirlo a mano en el registro, y si faltaba el gateway respondía
-# 403 `tarea_prohibida` con la organización teniendo clave, red y plan en
-# orden: nada del lado del contrato se ponía rojo. Ahora lo deriva el
-# generador de `ai.tareas` del contrato, así que no puede discrepar.
+# The tenant was the dangerous coupling. Until #60 somebody had to
+# remember to write it into the registry by hand, and when it was
+# missing the gateway answered 403 `tarea_prohibida` while the
+# organization had key, network and plan in order: nothing on the
+# contract side turned red. Now the generator derives it from the
+# `ai.tareas` of the contract, so the two cannot disagree.
 #
-# Los números NO se derivan y es deliberado: son ajuste fino por tarea
-# —cuánta salida tolera, cuánta entrada acepta, qué tan determinista
-# quiere ser— y el contrato no tiene forma honesta de expresarlos sin
-# volverse un archivo de configuración.
+# The numbers are NOT derived, and that is deliberate: they are per-task
+# fine tuning —how much output it tolerates, how much input it accepts,
+# how deterministic it wants to be— and the contract has no honest way
+# to express that without turning into a configuration file.
 version: 1
 
-# Los valores por CLASE. Una tarea que no dice nada hereda éstos.
+# The values per CLASS. A task that says nothing inherits these.
 clases:
-  # Conversacional: alguien escribe y espera una respuesta corta.
+  # Conversational: somebody types and waits for a short answer.
   interactive:
     max_output_tokens: 220
     max_context_tokens: 1500
@@ -34,26 +35,27 @@ clases:
     temperature: 0.6
     peso: 1
 
-# Y los apartamientos, uno por tarea, con el motivo al lado. Si esta
-# sección crece mucho es señal de que falta una clase, no de que haya que
-# seguir agregando excepciones.
-# VACÍO EN LA SEED, y no es un olvido. Una tarea de AI existe porque
-# alguna organización la declaró en su contrato (`ai.tareas`), y una
-# instancia recién arrancada no tiene contratos todavía. Las entradas de
-# acá son el ajuste FINO de tareas que ya existen: heredarlas de otra
-# instancia sería traer los stop-tokens de un NPC que nadie escribió.
+# And the departures, one per task, with the reason beside each. If this
+# section grows a lot it is a sign that a class is missing, not that more
+# exceptions should be added.
+# EMPTY IN THE SEED, and that is not an oversight. An AI task exists
+# because some organization declared it in its contract (`ai.tareas`),
+# and a freshly started instance has no contracts yet. The entries here
+# are the FINE tuning of tasks that already exist: inheriting them from
+# another instance would mean importing the stop-tokens of an NPC that
+# nobody ever wrote.
 #
-# La clase `interactive` de arriba SÍ viaja: es el default que hace que
-# una tarea nueva funcione sin escribir un solo número.
+# The `interactive` class above DOES travel: it is the default that
+# makes a new task work without writing a single number.
 #
-# Cuando una organización declare su primera tarea, aparece acá con su
-# clase, y solo se le agregan números si se aparta del default. Ejemplo
-# de una instancia real:
+# When an organization declares its first task, it shows up here with
+# its class, and numbers are added only if it departs from the default.
+# Example from a real instance:
 #
 #   tareas:
 #     blog.chat.bibliotecaria:
 #       clase: interactive
-#       max_context_tokens: 2200   # el navegador manda qué artículo lee
-#       temperature: 0.5           # recomienda artículos que EXISTEN
+#       max_context_tokens: 2200   # the browser sends the article read
+#       temperature: 0.5           # recommends articles that DO EXIST
 #       stop: ["\nLector:", "\nBibliotecaria:"]
 tareas: {}

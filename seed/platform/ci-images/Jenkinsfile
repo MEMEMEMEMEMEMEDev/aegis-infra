@@ -1,14 +1,16 @@
-// ci-images — buildea y pushea las imágenes de tooling CI al registry
-// interno. Job en JCasC job-dsl (D9).
+// ci-images — builds and pushes the CI tooling images to the internal
+// registry. Job defined in JCasC job-dsl (D9).
 //
-// W-05: build SIN privilegios. kaniko (upstream, unprivileged) reemplaza
-// a buildah privileged+vfs+/dev/fuse. kaniko extrae capas al FS directo
-// (NO hace los mounts que mataron a buildah rootless en Ubuntu 24.04);
-// corre root en el container pero NO privileged => no escapa al nodo.
-// Los tools oficiales (cosign, crane) son distroless (sin shell) => se
-// extraen sobre alpine (patrón aegis-ci-*). Acá NO hay scan, así que
-// kaniko buildea Y pushea directo. El pod declara EXPLÍCITO lo que el
-// push necesita (regcred + CA). RQ estricta: todo container con limits.
+// W-05: unprivileged build. kaniko (upstream, unprivileged) replaces
+// buildah with its privileged mode, its vfs driver and its fuse device.
+// kaniko extracts layers straight onto the FS (it does NOT perform the
+// mounts that killed rootless buildah on Ubuntu 24.04); it runs as root
+// inside the container, but the container is not a privileged one => it
+// cannot escape to the node. The official tools (cosign, crane) are
+// distroless (no shell) => they are extracted onto alpine (the
+// aegis-ci-* pattern). There is NO scan here, so kaniko builds AND
+// pushes directly. The pod declares EXPLICITLY what the push needs
+// (regcred + CA). Strict RQ: every container carries limits.
 pipeline {
   agent {
     kubernetes {
@@ -22,9 +24,10 @@ spec:
     resources:
       requests: { cpu: 500m, memory: 512Mi }
       limits:   { cpu: 1000m, memory: 1Gi }
-  # kaniko SIN privilegios (W-05). Auth: regcred en la config docker de
-  # kaniko; CA propio del registry por --registry-certificate. -debug
-  # trae shell (container(){ sh }). Sin /dev/fuse, sin vfs, sin privileged.
+  # kaniko, unprivileged (W-05). Auth: regcred in kaniko's docker
+  # config; the registry's own CA through --registry-certificate. -debug
+  # ships a shell (container(){ sh }). No fuse device, no vfs, no
+  # elevated privileges.
   - name: kaniko
     image: gcr.io/kaniko-project/executor:v1.23.2-debug
     command: ['sleep', 'infinity']
@@ -60,15 +63,15 @@ spec:
     stage('build+push tooling images') {
       steps {
         sh '''
-          # FUENTE ÚNICA del pin: el FROM de cada Containerfile → el tag
-          # de la imagen resultante se DERIVA de ahí (sin segundo lugar
-          # que editar — la lección del pin duplicado).
-          build_push() {   # <subdir> <nombre> <patron-FROM>
+          # SINGLE SOURCE of the pin: the FROM of each Containerfile →
+          # the tag of the resulting image is DERIVED from it (no second
+          # place to edit — the lesson of the duplicated pin).
+          build_push() {   # <subdir> <name> <FROM-pattern>
             local dir="ci-images/$1" name="$2" pat="$3" tag
             tag="$(sed -n "s/^FROM .*${pat}:\\(v[0-9][0-9.]*\\).*/\\1/p" \
                    "$dir/Containerfile" | head -1)"
             test -n "$tag"
-            echo "== ${name}:${tag} (kaniko, sin privilegios) =="
+            echo "== ${name}:${tag} (kaniko, unprivileged) =="
             /kaniko/executor \
               --context="dir://${WORKSPACE}/${dir}" \
               --dockerfile=Containerfile \
