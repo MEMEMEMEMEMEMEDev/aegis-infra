@@ -1,8 +1,8 @@
-# RETIRADO — D11 (2026-07-07)
+# WITHDRAWN — D11 (2026-07-07)
 
-La GitHub App fue REEMPLAZADA: crearla sin navegador no existe
-(manifest flow = redirect web obligatorio) y el rediseño de
-automatización total (cero navegador) la eliminó del flujo.
+The GitHub App was REPLACED: creating one without a browser does not
+exist (the manifest flow requires a web redirect), and the redesign
+towards total automation (zero browser) removed it from the flow.
 
-- La credencial actual y su modelo: `github-credential.md`.
-- El upgrade path de vuelta a una App (producción): ídem, §final.
+- The current credential and its model: `github-credential.md`.
+- The upgrade path back to an App (production): likewise, §final.

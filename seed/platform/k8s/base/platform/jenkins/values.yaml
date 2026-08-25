@@ -1,26 +1,26 @@
-# values del chart jenkins 5.9.29 — v2 CON JOBS-AS-CODE de
-# nacimiento (D9): los jobs viven en JCasC job-dsl, el PVC es
-# descartable. Reglas horneadas: A28 (cleanup del plugin-dir),
-# A29 (limits en TODO container), A30 (JCasC solo keys nuevas),
-# A32 (host keys declarativas), A34 (shapes de credenciales),
-# A37 (PSS privileged para buildah — lo fija el ns, no el chart).
+# values of the jenkins 5.9.29 chart — v2 WITH JOBS-AS-CODE from
+# birth (D9): the jobs live in JCasC job-dsl, the PVC is
+# disposable. Baked-in rules: A28 (plugin-dir cleanup),
+# A29 (limits on EVERY container), A30 (JCasC only new keys),
+# A32 (declarative host keys), A34 (credential shapes),
+# A37 (privileged PSS for buildah — set by the ns, not the chart).
 
 controller:
   image:
-    tag: ""            # el del chart 5.9.29 (pin del chart manda)
+    tag: ""            # the chart 5.9.29 one (the chart pin rules)
   admin:
-    existingSecret: jenkins-admin        # KSOPS (fase 50)
+    existingSecret: jenkins-admin        # KSOPS (phase 50)
     userKey: username
     passwordKey: password
   jenkinsUrl: https://jenkins.__ROOT_DOMAIN__/
 
-  # A29: limits explícitos en controller y sidecar:
+  # A29: explicit limits on controller and sidecar:
   resources:
     requests: {cpu: 500m, memory: 1Gi}
     limits: {cpu: "2", memory: 2Gi}
 
-  # A28: el init del chart hace `cp -i` (bug upstream #85) — un
-  # emptyDir contaminado post-reboot = CrashLoop. Cleanup SIEMPRE:
+  # A28: the chart's init does `cp -i` (upstream bug #85) — an
+  # emptyDir polluted after a reboot = CrashLoop. ALWAYS clean up:
   customInitContainers:
     - name: plugin-dir-cleanup
       image: busybox:1.36
@@ -34,7 +34,7 @@ controller:
 
   sidecars:
     configAutoReload:
-      resources:                          # A29: el RQ muerde sidecars
+      resources:                          # A29: the RQ bites sidecars
         requests: {cpu: 50m, memory: 64Mi}
         limits: {cpu: 200m, memory: 256Mi}
 
@@ -46,20 +46,21 @@ controller:
     - kubernetes-credentials-provider
     - github-branch-source
     - job-dsl
-    # métricas (hooks.md / fase-85 §7): `prometheus` expone /prometheus
-    # scrapeable SIN API key; el plugin `metrics` a secas exige clave por
-    # query param — hostil a scrape. En instancia viva lo agrega la fase
-    # 85 (guard estructural) y el sync reinicia el controller (una vez):
+    # metrics (hooks.md / phase-85 §7): `prometheus` exposes a
+    # /prometheus that is scrapeable WITHOUT an API key; the plain
+    # `metrics` plugin demands a key as a query param — hostile to
+    # scraping. On a live instance phase 85 adds it (structural guard)
+    # and the sync restarts the controller (once):
     - prometheus
 
-  # JCasC: SOLO keys nuevas (A30 — ErrorOnConflict aborta el boot si
-  # dos sources declaran la misma key; NO cambiar merge strategy).
+  # JCasC: ONLY new keys (A30 — ErrorOnConflict aborts the boot if
+  # two sources declare the same key; do NOT change merge strategy).
   JCasC:
     defaultConfig: true
     configScripts:
       aegis-system: |
         jenkins:
-          systemMessage: "aegis v2 — jobs-as-code; el PVC es descartable."
+          systemMessage: "aegis — jobs-as-code; the PVC is disposable."
       aegis-webhook-hmac: |
         unclassified:
           gitHubPluginConfig:
@@ -71,15 +72,15 @@ controller:
             sshHostKeyVerificationStrategy:
               manuallyProvidedKeyVerificationStrategy:
                 approvedHostKeys: |-
-                  # TIPO 1 declarativo (A32) — valores REALES tomados
-                  # de https://api.github.com/meta el 2026-07-06.
-                  # Rotación de GitHub = actualizar acá (git blame da
-                  # la fecha del pin). El init re-verifica en fase 00.
+                  # Declarative TYPE 1 (A32) — REAL values taken
+                  # from https://api.github.com/meta on 2026-07-06.
+                  # A GitHub rotation = update here (git blame gives
+                  # the date of the pin). The init re-checks in phase 00.
                   github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
                   github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=
                   github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=
-      # D9 — JOBS-AS-CODE: seed job-dsl. Sintaxis VERIFICADA en
-      # 3.B.3 (scanCredentialsId + traits vía configure{}):
+      # D9 — JOBS-AS-CODE: seed job-dsl. Syntax VERIFIED in
+      # 3.B.3 (scanCredentialsId + traits via configure{}):
       aegis-jobs: |
         jobs:
           - script: >
@@ -122,27 +123,27 @@ controller:
                 }
               }
           # --- DERIVED by aegis-org (tenant jobs): do not edit by hand ---
-          # Un job multibranch por repo declarado en un contrato de
-          # orgs/. El nombre del job es el de su Application: un repo,
-          # un job, una App — la misma clave en Jenkins y en ArgoCD.
-          # Este bloque se rederiva ENTERO en cada corrida de
-          # aegis org: lo que se edite entre las marcas no
-          # sobrevive a la próxima.
+          # One multibranch job per repo declared in a contract in
+          # orgs/. The job's name is its Application's: one repo, one
+          # job, one App — the same key in Jenkins and in ArgoCD.
+          # This block is re-derived WHOLE on every run of
+          # aegis org: whatever is edited between the markers does
+          # not survive the next one.
           # --- END DERIVED ---
 
 rbac:
-  readSecrets: true    # kubernetes-credentials-provider lee el ns
+  readSecrets: true    # kubernetes-credentials-provider reads the ns
 
 persistence:
   enabled: true
   size: 8Gi
-  # NOTA v2: con jobs-as-code el PVC guarda solo build history y
-  # workspace cache — DESCARTABLE por diseño (D9). Recrearlo no
-  # pierde configuración.
+  # v2 NOTE: with jobs-as-code the PVC stores only build history and
+  # workspace cache — DISPOSABLE by design (D9). Recreating it loses
+  # no configuration.
 
 agent:
-  # A29: el podTemplate default trae limits; los pipelines NUNCA
-  # los pisan con `yaml ''` (regla en el Jenkinsfile template).
+  # A29: the default podTemplate carries limits; the pipelines NEVER
+  # override them with `yaml ''` (a rule in the Jenkinsfile template).
   resources:
     requests: {cpu: 250m, memory: 512Mi}
     limits: {cpu: "1", memory: 1Gi}

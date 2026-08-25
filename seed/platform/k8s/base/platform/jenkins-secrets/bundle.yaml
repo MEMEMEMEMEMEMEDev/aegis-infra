@@ -1,12 +1,13 @@
-# jenkins-system: ns + RQ + cert CA-trust + IngressRoute (v2).
-# PSS BASELINE (W-05): el build ya NO necesita privileged — kaniko
-# construye sin /dev/fuse ni privilegios (extrae capas al FS directo).
-# baseline (no restricted) porque kaniko corre como root en el container
-# (root != privileged: NO escapa al nodo); restricted prohíbe root. Es
-# un salto enorme desde privileged — el escape al nodo desde el build
-# (donde entra código no confiable via npm ci) queda cerrado. La corrida
-# valida que kaniko corre bajo baseline. Ir a restricted = deuda futura
-# (rootless real de kaniko / buildkit).
+# jenkins-system: ns + RQ + CA-trust cert + IngressRoute (v2).
+# PSS BASELINE (W-05): the build NO LONGER needs to be privileged —
+# kaniko builds without /dev/fuse and without privileges (it extracts
+# layers straight to the FS). baseline (not restricted) because kaniko
+# runs as root in the container (root != privileged: it does NOT escape
+# to the node); restricted forbids root. It is an enormous jump down
+# from privileged — the escape to the node from the build (where
+# untrusted code comes in via npm ci) is closed. The run validates that
+# kaniko runs under baseline. Going to restricted = future debt (real
+# rootless kaniko / buildkit).
 ---
 apiVersion: v1
 kind: Namespace
@@ -23,25 +24,25 @@ metadata:
   namespace: jenkins-system
 spec:
   hard:
-    # Dimensionado con aritmética, no a ojo (corrida #11: con "8" un
-    # solapamiento normal — ci-images residual 2500m + build de app
-    # 4000m + jenkins-0 2200m = 8700m — agotó la quota, el plugin no
-    # pudo crear el pod y el build quedó encolado para siempre).
-    # Invariante (check 36 de verify-static lo vigila):
-    #   quota >= jenkins-0 + 2 × pod-de-build-más-pesado
-    # porque reintentos/solapamientos del multibranch SON el caso
-    # normal, no la excepción. Hoy: limits jenkins-0 = 2200m/2.25Gi;
-    # build app = 5000m/4.25Gi (W-05: +container crane p/ el push del
-    # tar escaneado) → mínimo 12200m/10.75Gi. limits son techo, no
-    # reserva — el overcommit es barato:
+    # Sized with arithmetic, not by eye (run #11: with "8" a normal
+    # overlap — residual ci-images 2500m + app build 4000m +
+    # jenkins-0 2200m = 8700m — exhausted the quota, the plugin could
+    # not create the pod and the build stayed queued forever).
+    # Invariant (check 36 of verify-static watches it):
+    #   quota >= jenkins-0 + 2 × heaviest-build-pod
+    # because multibranch retries/overlaps ARE the normal case, not
+    # the exception. Today: limits jenkins-0 = 2200m/2.25Gi; app build
+    # = 5000m/4.25Gi (W-05: +crane container for the push of the
+    # scanned tar) → minimum 12200m/10.75Gi. limits are a ceiling, not
+    # a reservation — overcommit is cheap:
     requests.cpu: "6"
     requests.memory: 8Gi
     limits.cpu: "13"
     limits.memory: 12Gi
-  # A29: RQ estricta => TODO container (init/sidecar/jnlp/buildah)
-  # necesita limits; el chart values los declara todos.
+  # A29: a strict RQ => EVERY container (init/sidecar/jnlp/buildah)
+  # needs limits; the chart values declare them all.
 ---
-# vehículo del ca.crt para buildah (cainjector no propaga — A26):
+# vehicle for the ca.crt for buildah (cainjector does not propagate — A26):
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:

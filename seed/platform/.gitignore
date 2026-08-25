@@ -1,12 +1,12 @@
-# tofu: providers y state NUNCA al repo (corrida #4: git add -A
-# arrastró un .terraform/ de 233 MB — GitHub lo rechaza — y el
-# tfstate, que puede contener valores sensibles).
-# El .terraform.lock.hcl SÍ se versiona (reproducibilidad de
-# providers) — estos patrones no lo tocan.
+# tofu: providers and state NEVER reach the repo (run #4: git add -A
+# dragged in a 233 MB .terraform/ — GitHub rejects it — and the
+# tfstate, which can contain sensitive values).
+# The .terraform.lock.hcl IS versioned (reproducibility of providers)
+# — these patterns do not touch it.
 **/.terraform/
 *.tfstate
 *.tfstate.backup
 crash.log
 
-# venv de ansible (regenerable de requirements.txt — fase 20):
+# ansible's venv (regenerable from requirements.txt — phase 20):
 ansible/.venv/

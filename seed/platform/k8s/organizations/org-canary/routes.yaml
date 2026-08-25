@@ -1,42 +1,47 @@
 ---
-# El ruteo del canario — LA ÚNICA IngressRoute escrita a mano, y por un
-# motivo que no es pereza.
+# The canary's routing — THE ONLY hand-written IngressRoute, and for
+# a reason that is not laziness.
 #
-# Desde #54 el ruteo de una organización lo deriva `aegis org` de su
-# contrato, y el kind IngressRoute está prohibido en el AppProject de
-# cada inquilino: un AppProject filtra por *kind* y jamás por el valor
-# de un campo, así que mientras un inquilino pudiera crear una, podía
-# reclamar el Host del vecino. Medido el 2026-08-06 sobre esta misma
-# instancia: dos organizaciones reclamaron el mismo hostname, las dos
-# admitidas sin una queja, y traefik terminó sirviendo la del segundo.
+# Since #54 an organization's routing is derived by `aegis org` from
+# its contract, and the IngressRoute kind is forbidden in every
+# tenant's AppProject: an AppProject filters by *kind* and never by a
+# field's value, so for as long as a tenant could create one, it could
+# claim its neighbour's Host. Measured on 2026-08-06 on this very
+# instance: two organizations claimed the same hostname, both were
+# admitted without a complaint, and traefik ended up serving the
+# second one's.
 #
-# El canario NO TIENE CONTRATO, y eso es deliberado: existe para probar
-# que el camino del inquilino funciona, así que no puede depender de
-# ese camino. Sin contrato no hay nada de donde derivar, y por eso su
-# ruta se escribe acá, del lado de la plataforma — que es lo que
-# importa. Lo que cierra el agujero no es que la ruta esté GENERADA:
-# es que no la escriba el repo de la app.
+# The canary HAS NO CONTRACT, and that is deliberate: it exists to
+# prove that the tenant path works, so it cannot depend on that path.
+# With no contract there is nothing to derive from, and that is why
+# its route is written here, on the platform's side — which is the
+# part that matters. What closes the hole is not that the route is
+# GENERATED: it is that the app's repo does not write it.
 #
-# Tampoco sigue la convención `<org>-<servicio>:8080` que la plataforma
-# impone a las organizaciones con contrato. El canario expone
-# `hello-aegis:80` desde antes de que la convención existiera, y
-# alinearlo obligaría a tocar el repo que sirve de referencia para
-# comprobar que el camino del inquilino sigue andando. Se deja como
-# está y se dice acá, que es mejor que un renombre silencioso.
+# Nor does it follow the `<org>-<service>:8080` convention the
+# platform imposes on organizations with a contract. The canary has
+# exposed `hello-aegis:80` since before the convention existed, and
+# aligning it would mean touching the very repo that serves as the
+# reference for checking that the tenant path still works. It is left
+# as it is and said out loud here, which beats a silent rename.
 #
-# ── LOS TRES MIDDLEWARES DEL BORDE (#81, #90) ─────────────────────
+# ── THE THREE EDGE MIDDLEWARES (#81, #90) ─────────────────────────
 #
-# También a mano, y por el mismo motivo que la ruta: el canario no
-# tiene contrato del que derivarlos. Pero tiene que llevarlos igual —
-# `aegis.__ROOT_DOMAIN__` es un hostname público como cualquier otro, y
-# dejarlo afuera convertiría al canario en el único sitio sin
-# protección justo por ser el que prueba que todo funciona.
+# Hand-written too, and for the same reason as the route: the canary
+# has no contract to derive them from. But it has to carry them all
+# the same — `aegis.__ROOT_DOMAIN__` is a public hostname like any
+# other, and leaving it out would make the canary the only site
+# without protection precisely because it is the one that proves
+# everything works.
 #
-# Son BYTE A BYTE los que `aegis-org` genera para una organización con
-# contrato (render_routes). Eso es duplicación real, y se acepta a
-# cambio de que el canario siga sin depender del camino que existe
-# para probar. El check 91 de verify-static compara los dos lados: si
-# alguien cambia el generador y se olvida de acá, se pone rojo.
+# They are BYTE FOR BYTE the ones `aegis org` generates for an
+# organization with a contract (render_routes). That is real
+# duplication, accepted in exchange for the canary staying free of
+# the very path it exists to test. Check 91b of verify-static
+# compares the two sides: it parses both `spec:` bodies and compares
+# those rather than the characters, precisely so that rewording these
+# comments cannot turn it red — but changing the generator and
+# forgetting this file does.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
@@ -81,10 +86,11 @@ spec:
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
-  # `canary-ruteo` y no `hello-aegis`: durante la transición convive
-  # con la ruta que todavía crea el repo del canario, y dos objetos
-  # con el mismo nombre serían dos Applications disputándose el
-  # mismo recurso. Cuando la vieja se borre, ésta queda sola.
+  # `canary-ruteo` and not `hello-aegis`: during the transition it
+  # coexists with the route the canary's repo still creates, and two
+  # objects with the same name would be two Applications fighting
+  # over the same resource. Once the old one is deleted, this is the
+  # only one left.
   name: canary-ruteo
   namespace: org-canary
   labels: {aegis.dev/part-of: aegis-organizaciones}

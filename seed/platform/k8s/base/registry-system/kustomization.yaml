@@ -1,20 +1,21 @@
-# kustomization registry-system v2. KSOPS generator con LISTA
-# EXPLÍCITA (A7): cada .enc.yaml nuevo = entry nuevo ACÁ, o el
-# Secret no existe aunque la App esté Healthy.
+# registry-system kustomization v2. KSOPS generator with an EXPLICIT
+# LIST (A7): every new .enc.yaml = a new entry HERE, or the Secret
+# does not exist even though the App is Healthy.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  # namespace.yaml PRIMERO (corrida #7, bug A): la App registry tenía
-  # CreateNamespace=true pero es una app KUSTOMIZE/KSOPS y el sync
-  # falló "namespaces registry-system not found" — CreateNamespace
-  # resultó NO confiable para apps kustomize (sí lo es para apps HELM:
-  # cert-manager, infra-edge). trivy-system y kyverno-base (que también
-  # tienen CreateNamespace=true) funcionaron porque declaran el ns
-  # explícito. Se iguala al patrón que SÍ funciona:
+  # namespace.yaml FIRST (run #7, bug A): the registry App had
+  # CreateNamespace=true but it is a KUSTOMIZE/KSOPS app and the sync
+  # failed with "namespaces registry-system not found" —
+  # CreateNamespace turned out NOT to be reliable for kustomize apps
+  # (it is for HELM apps: cert-manager, infra-edge). trivy-system and
+  # kyverno-base (which also have CreateNamespace=true) worked because
+  # they declare the ns explicitly. This matches the pattern that
+  # DOES work:
   - namespace.yaml
   - registry.yaml
-  # NetworkPolicies: escritas pero NO listadas hasta Cilium
-  # (ADR-0014; kube-router no enforce — validar enforcement
-  # POSITIVO antes de activarlas).
+  # NetworkPolicies: written but NOT listed until Cilium
+  # (ADR-0014; kube-router does not enforce — validate POSITIVE
+  # enforcement before turning them on).
 generators:
   - secret-generator.yaml

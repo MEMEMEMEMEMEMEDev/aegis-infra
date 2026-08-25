@@ -1,19 +1,21 @@
-# NetworkPolicy de jenkins-system — W-07 iter2 (aislamiento de plataforma).
-# Entregado por la App 'jenkins-secrets' (path k8s/base/platform/jenkins-
-# secrets, dest jenkins-system) — el mismo directory-app que ya trae el
-# namespace/RQ/cert/IngressRoute. netpol.yaml separado (patrón del tenant).
+# NetworkPolicy of jenkins-system — W-07 iter2 (platform isolation).
+# Delivered by the 'jenkins-secrets' App (path k8s/base/platform/jenkins-
+# secrets, dest jenkins-system) — the same directory-app that already
+# brings the namespace/RQ/cert/IngressRoute. Separate netpol.yaml (the
+# tenant's pattern).
 #
-# ITER2 = INGRESS-ONLY (ver trivy-system/netpol.yaml para el porqué de no
-# tocar egress: los builds necesitan salir a npm/docker.io/gcr.io/github y
-# flannel no hace FQDN — eso es Cilium/Hetzner, ADR-0014). Dejar el egress
-# abierto es LO SEGURO: no rompe ni `npm ci`, ni el pull de bases de kaniko,
-# ni el push al registry, ni el DNS.
+# ITER2 = INGRESS-ONLY (see trivy-system/netpol.yaml for why egress is not
+# touched: the builds need to get out to npm/docker.io/gcr.io/github and
+# flannel does not do FQDN — that is Cilium/Hetzner, ADR-0014). Leaving
+# egress open is THE SAFE THING: it breaks neither `npm ci`, nor the pull
+# of kaniko base images, nor the push to the registry, nor DNS.
 #
-# Valor real acá: NADIE fuera del edge y del propio namespace puede alcanzar
-# a Jenkins. En iter1 el tenant ya no llegaba (por su egress default-deny);
-# esto lo cierra desde el lado de Jenkins y también frente a CUALQUIER otro
-# namespace. Riesgo si la allowlist quedara mal: UI/webhook/agentes cortados
-# — RECUPERABLE (delete netpol). Por eso jenkins-system va en iter2.
+# The real value here: NOBODY outside the edge and the namespace itself can
+# reach Jenkins. In iter1 the tenant already could not (through its own
+# default-deny egress); this closes it from the Jenkins side and also
+# against ANY other namespace. Risk if the allowlist were wrong:
+# UI/webhook/agents cut off — RECOVERABLE (delete netpol). That is why
+# jenkins-system goes in iter2.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -24,13 +26,13 @@ spec:
   podSelector: {}
   policyTypes: [Ingress]
 ---
-# Clientes legítimos (matriz §1):
-#  - infra-edge (traefik): la UI de Jenkins Y el webhook de GitHub, que
-#    entra por el túnel → cloudflared → traefik → jenkins :8080. Puerto
-#    verificado en la IngressRoute (services: jenkins:8080).
-#  - el propio namespace: los pods agente (JNLP :50000) hablan con el
-#    controller y viceversa; intra-ns sin restricción de puerto (el
-#    controller↔agente usa varios). podSelector {} = mismo namespace.
+# Legitimate clients (matrix §1):
+#  - infra-edge (traefik): the Jenkins UI AND the GitHub webhook, which
+#    comes in through the tunnel → cloudflared → traefik → jenkins
+#    :8080. Port verified in the IngressRoute (services: jenkins:8080).
+#  - the namespace itself: the agent pods (JNLP :50000) talk to the
+#    controller and vice versa; intra-ns with no port restriction (the
+#    controller↔agent uses several). podSelector {} = same namespace.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -46,12 +48,12 @@ spec:
       ports:
         - {protocol: TCP, port: 8080}
     - from:
-        - podSelector: {}          # intra-namespace: controller ↔ agentes JNLP
-    # observabilidad (fase-85 §7): vmagent scrapea /prometheus del
-    # controller en :8080 (plugin `prometheus`). Sin esta entry, up==0
-    # con todo «sano» — un agujero de scrape indistinguible de un
-    # incidente. En instancia viva la agrega la fase 85 (guard
-    # estructural, jamás grep de mención):
+        - podSelector: {}          # intra-namespace: controller ↔ JNLP agents
+    # observability (phase-85 §7): vmagent scrapes the controller's
+    # /prometheus on :8080 (`prometheus` plugin). Without this entry,
+    # up==0 with everything «healthy» — a scrape hole indistinguishable
+    # from an incident. On a live instance phase 85 adds it (structural
+    # guard, never a grep for a mention):
     - from:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: observability}

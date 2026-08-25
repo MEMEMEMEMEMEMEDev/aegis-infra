@@ -1,40 +1,40 @@
-# garage-system — el almacenamiento S3 COMPARTIDO de la plataforma.
+# garage-system — the platform's SHARED S3 storage.
 #
-# QUÉ ES Y POR QUÉ ES COMPARTIDO. Un Garage para todas las
-# organizaciones, con un bucket y un par de claves por cada una. La
-# alternativa —un Garage por organización, que es lo que tiene
-# org-ecommerce— gasta 256 MiB y un PVC por tenant para servir unos
-# pocos objetos, y multiplica por N el trabajo de mantener, actualizar y
-# resguardar. Con un solo nodo real de hardware, esa cuenta no cierra.
+# WHAT IT IS AND WHY IT IS SHARED. One Garage for every organization,
+# with one bucket and one key pair for each. The alternative —one
+# Garage per organization, which is what org-ecommerce has— spends
+# 256 MiB and a PVC per tenant to serve a handful of objects, and
+# multiplies by N the work of maintaining, upgrading and backing up.
+# With a single real hardware node, that arithmetic does not add up.
 #
-# El aislamiento NO se pierde: en Garage los permisos son por
-# CLAVE-y-BUCKET. La clave de una organización solo puede leer y
-# escribir en su bucket, y no puede listar los demás. Es menos poder que
-# un IAM completo, y menos con qué equivocarse.
+# Isolation is NOT lost: in Garage permissions are per KEY-and-BUCKET.
+# An organization's key can only read and write in its own bucket, and
+# cannot list the others. It is less power than a full IAM, and less to
+# get wrong with.
 #
-# LO QUE GARAGE NO TIENE, y condiciona cómo se usa:
-#   - SIN versionado de objetos ni object-lock: lo que se borra, se fue.
-#     Un backup inmutable NO se puede apoyar acá.
-#   - SIN cifrado del lado del servidor: los objetos quedan en texto
-#     plano sobre un disco que además no está cifrado.
-# Las dos limitaciones importan más ahora que el disco es compartido.
+# WHAT GARAGE DOES NOT HAVE, which shapes how it is used:
+#   - NO object versioning and no object-lock: what is deleted is gone.
+#     An immutable backup CANNOT lean on this.
+#   - NO server-side encryption: objects sit in plain text on a disk
+#     that is not encrypted either.
+# Both limitations matter more now that the disk is shared.
 #
-# EL ENCIERRO, que es la razón por la que Garage ganó sobre MinIO:
-# la imagen es UN binario estático y nada más — sin shell, sin gestor de
-# paquetes, sin libc, sin utilidades. Si alguien encontrara una RCE, no
-# hay `sh`, ni `curl`, ni `apk` con qué encadenar nada.
+# THE CONFINEMENT, which is the reason Garage won over MinIO: the image
+# is ONE static binary and nothing else — no shell, no package manager,
+# no libc, no utilities. If somebody found an RCE, there is no `sh`, no
+# `curl`, no `apk` to chain anything with.
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: garage-system
   labels:
-    # ZONA DE ENFORCE de Kyverno, no propiedad. Los namespaces de
-    # plataforma se excluyen para que un crash duro de Kyverno no
-    # bloquee la RECUPERACIÓN del cluster (argocd, kyverno, registry,
-    # jenkins, cert-manager). Garage no es necesario para recuperar el
-    # cluster y guarda datos de terceros: acá fail-closed es el
-    # requisito, no un riesgo. Mismo razonamiento que ai-system.
+    # Kyverno ENFORCE ZONE, not ownership. Platform namespaces are
+    # excluded so that a hard Kyverno crash does not block the
+    # RECOVERY of the cluster (argocd, kyverno, registry, jenkins,
+    # cert-manager). Garage is not needed to recover the cluster and it
+    # holds third-party data: here fail-closed is the requirement, not
+    # a risk. Same reasoning as ai-system.
     aegis.dev/part-of: aegis-tenants
     aegis.dev/component: garage
     pod-security.kubernetes.io/enforce: restricted
@@ -44,10 +44,10 @@ kind: ServiceAccount
 metadata:
   name: default
   namespace: garage-system
-# Garage no habla con la API de Kubernetes. Ni token montado.
+# Garage does not talk to the Kubernetes API. Not even a token mounted.
 automountServiceAccountToken: false
 imagePullSecrets:
-  # Patrón A: la plataforma provee el CÓMO pullear.
+  # Pattern A: the platform provides the HOW of pulling.
   - name: regcred-internal
 ---
 apiVersion: v1
@@ -62,18 +62,19 @@ data:
     data_dir     = "/var/lib/garage/data"
     db_engine    = "lmdb"
 
-    # Un solo nodo: no hay a quién replicar. Subir esto sin agregar
-    # nodos deja a Garage esperando pares que no existen.
+    # A single node: there is nobody to replicate to. Raising this
+    # without adding nodes leaves Garage waiting for peers that do not
+    # exist.
     replication_factor = 1
 
     rpc_bind_addr   = "[::]:3901"
-    # Un solo nodo nunca habla RPC por la red; localhost alcanza y evita
-    # depender de que el DNS del pod resuelva al arrancar.
+    # A single node never speaks RPC over the network; localhost is
+    # enough and avoids depending on the pod's DNS resolving at boot.
     rpc_public_addr = "127.0.0.1:3901"
 
-    # rpc_secret y admin_token NO van acá: llegan por GARAGE_RPC_SECRET
-    # y GARAGE_ADMIN_TOKEN desde secretKeyRef. Este ConfigMap es legible
-    # por cualquiera con acceso al namespace.
+    # rpc_secret and admin_token do NOT go here: they arrive through
+    # GARAGE_RPC_SECRET and GARAGE_ADMIN_TOKEN from secretKeyRef. This
+    # ConfigMap is readable by anyone with access to the namespace.
 
     [s3_api]
     s3_region     = "garage"
@@ -90,8 +91,8 @@ metadata:
   namespace: garage-system
   labels: {app: garage, aegis.dev/component: garage}
 spec:
-  # Headless: la StatefulSet necesita identidad estable de red y no hace
-  # falta balancear nada con una sola réplica.
+  # Headless: the StatefulSet needs a stable network identity and there
+  # is nothing to balance with a single replica.
   clusterIP: None
   selector: {app: garage}
   ports:
@@ -107,19 +108,19 @@ metadata:
   labels: {app: garage, aegis.dev/component: garage}
 spec:
   serviceName: garage
-  # Los tres campos que siguen son DEFAULTS de Kubernetes, declarados a
-  # propósito. El apiserver los rellena y ArgoCD compara lo declarado
-  # contra lo vivo: omitirlos deja la App OutOfSync para siempre por
-  # campos que nadie cambió. Se obtuvieron del diff real de la API de
-  # ArgoCD, no de suponer cuáles serían.
+  # The three fields that follow are Kubernetes DEFAULTS, declared on
+  # purpose. The apiserver fills them in and ArgoCD compares what is
+  # declared against what is live: omitting them leaves the App
+  # OutOfSync forever over fields nobody changed. They were taken from
+  # the real diff of the ArgoCD API, not from guessing which they were.
   podManagementPolicy: OrderedReady
   revisionHistoryLimit: 10
   updateStrategy:
     type: RollingUpdate
     rollingUpdate: {partition: 0}
-  # UNA réplica, y no es negociable con esta configuración:
-  # replication_factor=1 y --single-node describen un cluster de un
-  # nodo. Subir replicas crea pods que Garage rechaza ("the cluster
+  # ONE replica, and it is not negotiable with this configuration:
+  # replication_factor=1 and --single-node describe a one-node cluster.
+  # Raising replicas creates pods that Garage rejects ("the cluster
   # already has other nodes").
   replicas: 1
   selector:
@@ -133,50 +134,50 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
-        # Sin esto el usuario no-root no puede escribir en el PVC.
+        # Without this the non-root user cannot write to the PVC.
         fsGroup: 1000
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: garage
-          # POR DIGEST. Kyverno reescribe imagen:tag agregándole el
-          # digest al admitir, y con un tag en git desired != live PARA
-          # SIEMPRE; la salida obvia —ignoreDifferences sobre la
-          # imagen— APAGA el auto-sync (#36). Con el digest, la mutación
-          # es un no-op. Es la diferencia con el garage de
-          # org-ecommerce, que sigue en el modelo viejo.
+          # BY DIGEST. Kyverno rewrites image:tag by appending the
+          # digest on admission, and with a tag in git desired != live
+          # FOREVER; the obvious way out —ignoreDifferences on the
+          # image— TURNS OFF auto-sync (#36). With the digest, the
+          # mutation is a no-op. That is the difference with the garage
+          # of org-ecommerce, which is still on the old model.
           image: registry.registry-system.svc.cluster.local:5000/garage@sha256:dac0c92add4f1a0b41035e94b41036a270ffbe88a37c7ac9c3f19e6dc5bdccf2
-          # command Y args, no solo args. La imagen de Garage NO declara
-          # ENTRYPOINT: trae únicamente CMD ["/garage","server"]. En
-          # Kubernetes `args` reemplaza al CMD y `command` al
-          # ENTRYPOINT, así que poner solo args deja al pod intentando
-          # ejecutar un binario llamado "server" — que no existe. El
-          # síntoma es StartError con "executable file not found in
-          # $PATH", y cuesta leerlo porque el manifiesto se ve bien.
+          # command AND args, not just args. The Garage image does NOT
+          # declare an ENTRYPOINT: it ships only CMD
+          # ["/garage","server"]. In Kubernetes `args` replaces CMD and
+          # `command` replaces ENTRYPOINT, so setting args alone leaves
+          # the pod trying to run a binary called "server" — which does
+          # not exist. The symptom is StartError with "executable file
+          # not found in $PATH", and it is hard to read because the
+          # manifest looks fine.
           command: ["/garage"]
-          # SIN --default-bucket, que es la diferencia con el modelo por
-          # organización. Acá los buckets y las claves los crea el Job
-          # de aprovisionamiento de cada organización contra la API de
-          # admin, con el material que ya vive cifrado en su repo.
+          # WITHOUT --default-bucket, which is the difference with the
+          # per-organization model. Here buckets and keys are created
+          # by each organization's provisioning Job against the admin
+          # API, with material that already lives encrypted in its repo.
           args: ["server", "--single-node"]
           env:
             - name: GARAGE_CONFIG_FILE
               value: /etc/garage/garage.toml
-            # POR VARIABLE DE ENTORNO Y NO POR ARCHIVO, a pesar de que
-            # Garage soporta rpc_secret_file/admin_token_file y de que
-            # un archivo suele ser preferible.
+            # BY ENVIRONMENT VARIABLE AND NOT BY FILE, even though
+            # Garage supports rpc_secret_file/admin_token_file and a
+            # file is usually preferable.
             #
-            # El motivo es un choque real entre dos requisitos de este
-            # mismo pod: fsGroup (necesario para que el usuario no-root
-            # escriba en el PVC) hace que Kubernetes agregue el bit de
-            # lectura de grupo a TODOS los volúmenes, dejando el Secret
-            # en 0440. Garage exige exactamente 0600 y se niega a
-            # arrancar. Con fsGroup puesto no hay forma de conseguir
-            # 0600 en un volumen de Secret.
+            # The reason is a real clash between two requirements of
+            # this same pod: fsGroup (needed so the non-root user can
+            # write to the PVC) makes Kubernetes add the group read
+            # bit to ALL volumes, leaving the Secret at 0440. Garage
+            # demands exactly 0600 and refuses to start. With fsGroup
+            # set there is no way to get 0600 on a Secret volume.
             #
-            # La otra salida era GARAGE_ALLOW_WORLD_READABLE_SECRETS,
-            # y se descartó: apaga la verificación PARA SIEMPRE,
-            # incluida la vez que el archivo quede realmente 0644.
-            # Cambiar el mecanismo es mejor que desactivar el control.
+            # The other way out was GARAGE_ALLOW_WORLD_READABLE_SECRETS,
+            # and it was discarded: it turns the check off FOREVER,
+            # including the time the file really is 0644. Changing the
+            # mechanism is better than disabling the control.
             - name: GARAGE_RPC_SECRET
               valueFrom:
                 secretKeyRef: {name: garage-credentials, key: rpc_secret}
@@ -191,9 +192,10 @@ spec:
             allowPrivilegeEscalation: false
             capabilities: {drop: ["ALL"]}
             readOnlyRootFilesystem: true
-          # Sondas TCP a propósito: una sonda HTTP obligaría a asumir
-          # qué endpoint de salud existe y si pide token. El puerto S3
-          # aceptando conexiones es señal suficiente y no asume nada.
+          # TCP probes on purpose: an HTTP probe would force us to
+          # assume which health endpoint exists and whether it asks for
+          # a token. The S3 port accepting connections is signal enough
+          # and assumes nothing.
           readinessProbe:
             tcpSocket: {port: 3900}
             initialDelaySeconds: 5
@@ -207,12 +209,12 @@ spec:
             limits: {cpu: "1", memory: 2Gi}
           volumeMounts:
             - {name: config, mountPath: /etc/garage/garage.toml, subPath: garage.toml, readOnly: true}
-            # subPath de un mismo PVC: garantiza que meta/ y data/
-            # existan (los crea Kubernetes) sin depender de que Garage
-            # lo haga.
+            # subPath of one same PVC: it guarantees that meta/ and
+            # data/ exist (Kubernetes creates them) without depending
+            # on Garage to do it.
             - {name: data, mountPath: /var/lib/garage/meta, subPath: meta}
             - {name: data, mountPath: /var/lib/garage/data, subPath: data}
-            # Con readOnlyRootFilesystem, /tmp viene de afuera.
+            # With readOnlyRootFilesystem, /tmp comes from outside.
             - {name: tmp, mountPath: /tmp}
       volumes:
         - name: config
@@ -220,12 +222,12 @@ spec:
         - name: tmp
           emptyDir: {}
   volumeClaimTemplates:
-    # apiVersion, kind y volumeMode los rellena el apiserver por default.
-    # Van DECLARADOS y no ignorados: sin ellos desired != live para
-    # siempre, y la salida obvia —ampliar `ignoreDifferences` a todo el
-    # volumeClaimTemplate— apagaría el auto-sync y taparía un cambio real
-    # de tamaño o de accessMode. Declarar el default es gratis; ignorarlo
-    # cuesta el auto-sync (#36).
+    # apiVersion, kind and volumeMode are filled in by the apiserver by
+    # default. They go DECLARED and not ignored: without them desired
+    # != live forever, and the obvious way out —widening
+    # `ignoreDifferences` to the whole volumeClaimTemplate— would turn
+    # off auto-sync and hide a real change of size or accessMode.
+    # Declaring the default is free; ignoring it costs auto-sync (#36).
     - apiVersion: v1
       kind: PersistentVolumeClaim
       metadata:
@@ -234,12 +236,12 @@ spec:
         accessModes: [ReadWriteOnce]
         volumeMode: Filesystem
         resources:
-          # Compartido entre todas las organizaciones. El techo por
-          # organización lo pone su cuota, no este número.
+          # Shared across all the organizations. The ceiling per
+          # organization is set by its quota, not by this number.
           #
-          # OJO: local-path hace bind de un directorio del host y NO
-          # impone cuota de disco. Esto limita el tamaño DECLARADO, no
-          # el USADO: un tenant puede escribir más que su bucket hasta
-          # llenar /. Es limitación del provisioner y está anotada
-          # también en plans.yaml.
+          # CAREFUL: local-path bind-mounts a host directory and does
+          # NOT impose a disk quota. This limits the DECLARED size, not
+          # the USED one: a tenant can write past its bucket until it
+          # fills /. It is a limitation of the provisioner and it is
+          # noted in plans.yaml as well.
           requests: {storage: 20Gi}

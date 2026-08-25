@@ -1,20 +1,20 @@
-# Recursos "alrededor" de argocd que NO son Secrets.
+# Resources "around" argocd that are NOT Secrets.
 #
-# Hallazgo A v1.1 — REGLA DE ESTE ARCHIVO: la App argocd-secrets es
-# la que la fase 35 sincroniza ANTES de argocd-self (los Secrets
-# deben existir antes de que el server los resuelva). Por eso acá NO
-# puede entrar ningún recurso cuyo CRD o admission webhook lo provea
-# una App que sincroniza DESPUÉS: el apply muere determinista con
-# "no endpoints available"/"no matches for kind" y cae la fase.
-# Ya pasó con Certificate/aegis-ca-trust (webhook de cert-manager)
-# → movido a aegis-ca-issuer, junto al ClusterIssuer que referencia.
-# El check 73 de verify-static prohíbe la regresión.
+# Finding A v1.1 — THE RULE OF THIS FILE: the argocd-secrets App is
+# the one phase 35 syncs BEFORE argocd-self (the Secrets must exist
+# before the server resolves them). That is why NO resource whose
+# CRD or admission webhook is provided by an App that syncs LATER
+# may go in here: the apply dies deterministically with "no
+# endpoints available"/"no matches for kind" and the phase falls.
+# It already happened with Certificate/aegis-ca-trust (cert-manager's
+# webhook) → moved to aegis-ca-issuer, next to the ClusterIssuer it
+# references. Check 73 of verify-static forbids the regression.
 #
-# El IngressRoute (CRD de traefik) se CONSERVA acá — es la
-# exposición de argocd-server, su lugar natural — y la dependencia
-# se resolvió por ORDEN: la fase 35 ahora sincroniza cert-manager,
-# la PKI y traefik ANTES que argocd-secrets (ninguno de ellos
-# depende de estos Secrets, así que adelantarlos es gratis).
+# The IngressRoute (traefik CRD) is KEPT here — it is the
+# exposure of argocd-server, its natural place — and the dependency
+# was resolved by ORDER: phase 35 now syncs cert-manager, the PKI
+# and traefik BEFORE argocd-secrets (none of them depends on these
+# Secrets, so moving them up is free).
 ---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute

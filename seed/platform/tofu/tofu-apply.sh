@@ -139,17 +139,17 @@ if [[ -n "$ENV_ARG" && "$ENV_ARG" == /* ]]; then
     fi
 fi
 
-CLARO="" ; CIFRADO="" ; HUELLA_ANTES=""
+PLAIN="" ; ENCRYPTED="" ; FINGERPRINT_BEFORE=""
 if [[ -n "$ENV_ARG" ]]; then
-    CLARO="$HERE/$ENV_ARG/terraform.tfstate"
-    CIFRADO="$CLARO.enc.json"
+    PLAIN="$HERE/$ENV_ARG/terraform.tfstate"
+    ENCRYPTED="$PLAIN.enc.json"
 fi
 
-huella() { [[ -f "$1" ]] && sha256sum "$1" | cut -d' ' -f1 || echo "(does not exist)"; }
+fingerprint() { [[ -f "$1" ]] && sha256sum "$1" | cut -d' ' -f1 || echo "(does not exist)"; }
 
-if [[ -n "$CIFRADO" && -f "$CIFRADO" ]]; then
+if [[ -n "$ENCRYPTED" && -f "$ENCRYPTED" ]]; then
     if [[ -z "${SOPS_AGE_KEY_FILE:-}" ]]; then
-        die "there is encrypted state in $(basename "$CIFRADO") but SOPS_AGE_KEY_FILE is not exported.
+        die "there is encrypted state in $(basename "$ENCRYPTED") but SOPS_AGE_KEY_FILE is not exported.
        The state CANNOT be read without the age key, and that is on purpose (#46).
        If this is CI: this job cannot apply the edge. The drift check that
        DOES run without the age key lives in aegis check."
@@ -158,10 +158,10 @@ if [[ -n "$CIFRADO" && -f "$CIFRADO" ]]; then
     # Decrypts to a 600 file and NOT to stdout: the wrapper's stdout is
     # sacred (H4) and, besides, the tunnel_secret travels in there.
     umask 077
-    sops -d "$CIFRADO" > "$CLARO" || die "sops -d of the state failed (is the age key the right one?)"
-    log "state decrypted ($(python3 -c "import json,sys; print(len(json.load(open('$CLARO')).get('resources',[])))") resources)"
+    sops -d "$ENCRYPTED" > "$PLAIN" || die "sops -d of the state failed (is the age key the right one?)"
+    log "state decrypted ($(python3 -c "import json,sys; print(len(json.load(open('$PLAIN')).get('resources',[])))") resources)"
 fi
-[[ -n "$CLARO" ]] && HUELLA_ANTES="$(huella "$CLARO")"
+[[ -n "$PLAIN" ]] && FINGERPRINT_BEFORE="$(fingerprint "$PLAIN")"
 
 # `tofu` and not `exec tofu`: we have to come back AFTERWARDS to
 # re-encrypt. stdout still passes straight through —the callers capture
@@ -176,14 +176,14 @@ set -e
 # every run even when the content is identical (a fresh data key), so
 # re-encrypting always would fill git with diffs that mean nothing —
 # and a diff that means nothing is a diff that stops being read.
-if [[ -n "$CLARO" && -f "$CLARO" && "$(huella "$CLARO")" != "$HUELLA_ANTES" ]]; then
+if [[ -n "$PLAIN" && -f "$PLAIN" && "$(fingerprint "$PLAIN")" != "$FINGERPRINT_BEFORE" ]]; then
     command -v sops >/dev/null || die "the state changed and sops is not in PATH"
     umask 077
     sops -e --input-type json --output-type json \
-         --filename-override "$CIFRADO" "$CLARO" > "$CIFRADO.tmp" \
+         --filename-override "$ENCRYPTED" "$PLAIN" > "$ENCRYPTED.tmp" \
         || die "sops -e of the state failed"
-    mv "$CIFRADO.tmp" "$CIFRADO"
-    log "state re-encrypted -> $(basename "$CIFRADO")  — COMMIT IT"
+    mv "$ENCRYPTED.tmp" "$ENCRYPTED"
+    log "state re-encrypted -> $(basename "$ENCRYPTED")  — COMMIT IT"
     log "  without that commit, the next recovery does not know this exists."
 fi
 

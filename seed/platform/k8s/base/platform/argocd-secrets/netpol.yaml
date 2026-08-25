@@ -1,18 +1,19 @@
-# NetworkPolicy de argocd — W-07 iter2 (aislamiento de plataforma).
-# Entregado por la App 'argocd-secrets' (path k8s/base/platform/argocd-
-# secrets, dest argocd) — directory-app que ya sincroniza a ese namespace.
-# netpol.yaml separado (patrón del tenant).
+# NetworkPolicy of argocd — W-07 iter2 (platform isolation).
+# Delivered by the 'argocd-secrets' App (path k8s/base/platform/argocd-
+# secrets, dest argocd) — a directory-app that already syncs to that
+# namespace. Separate netpol.yaml (the tenant's pattern).
 #
-# ITER2 = INGRESS-ONLY. El egress de argocd (repo-server → GitHub, app-
+# ITER2 = INGRESS-ONLY. The egress of argocd (repo-server → GitHub, app-
 # controller → API server, repo-server → GitHub)
-# NO se toca: cortarlo mal rompería el GitOps y flannel no distingue esos
-# FQDN. Egress a Cilium/Hetzner (ADR-0014). Dejarlo abierto no rompe nada.
+# is NOT touched: cutting it wrong would break GitOps and flannel does not
+# tell those FQDNs apart. Egress goes to Cilium/Hetzner (ADR-0014). Leaving
+# it open breaks nothing.
 #
-# Riesgo si la allowlist quedara mal: la UI de ArgoCD o algún flujo interno
-# cortado — RECUPERABLE (delete netpol; ArgoCD sigue reconciliando por el
-# app-controller, que usa EGRESS al API server, no ingress). Por eso argocd
-# va en iter2. El API server NO ingresa a argocd (argocd no tiene webhook de
-# admisión — a diferencia de kyverno/cert-manager, que van en iter3).
+# Risk if the allowlist were wrong: the ArgoCD UI or some internal flow cut
+# off — RECOVERABLE (delete netpol; ArgoCD keeps reconciling through the
+# app-controller, which uses EGRESS to the API server, not ingress). That is
+# why argocd goes in iter2. The API server does NOT ingress into argocd
+# (argocd has no admission webhook — unlike kyverno/cert-manager, iter3).
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -23,15 +24,15 @@ spec:
   podSelector: {}
   policyTypes: [Ingress]
 ---
-# Clientes legítimos (matriz §1):
-#  - infra-edge (traefik): la UI/API de argocd-server y, si está, el
-#    receptor de webhook. Sin restricción de puerto a propósito: argocd-
-#    server escucha insecure/HTTP plano (server.insecure=true) y el puerto
-#    efectivo varía (80/8080); acotar el puerto mal cortaría la UI. El
-#    valor —que solo el edge entre— se mantiene igual.
-#  - el propio namespace: argocd-server ↔ repo-server (:8081) ↔ redis
-#    (:6379) ↔ app-controller ↔ applicationset, todo
-#    intra-ns. podSelector {} = mismo namespace, sin restricción de puerto.
+# Legitimate clients (matrix §1):
+#  - infra-edge (traefik): the argocd-server UI/API and, if present, the
+#    webhook receiver. No port restriction on purpose: argocd-
+#    server listens insecure/plain HTTP (server.insecure=true) and the
+#    effective port varies (80/8080); narrowing the port wrongly would cut
+#    the UI. The value —that only the edge gets in— stays the same.
+#  - the namespace itself: argocd-server ↔ repo-server (:8081) ↔ redis
+#    (:6379) ↔ app-controller ↔ applicationset, all
+#    intra-ns. podSelector {} = same namespace, no port restriction.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -44,11 +45,11 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: infra-edge}
-        - podSelector: {}          # intra-namespace: componentes de argocd
-    # observabilidad (fase-85 §7): vmagent scrapea los /metrics nativos
-    # de argocd (controller :8082, server :8083, repo-server :8084 —
-    # los puertos del job `argocd` en vmagent/values.yaml). En instancia
-    # viva la agrega la fase 85 (guard estructural):
+        - podSelector: {}          # intra-namespace: argocd components
+    # observability (phase-85 §7): vmagent scrapes argocd's native
+    # /metrics (controller :8082, server :8083, repo-server :8084 —
+    # the ports of the `argocd` job in vmagent/values.yaml). On a live
+    # instance phase 85 adds it (structural guard):
     - from:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: observability}

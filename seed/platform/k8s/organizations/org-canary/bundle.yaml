@@ -1,5 +1,5 @@
-# tenant org-canary v2 — patrón A completo: la plataforma provee
-# el CÓMO pullear (SA default + regcred); las apps no declaran creds.
+# org-canary tenant v2 — full pattern A: the platform provides the
+# HOW of pulling (default SA + regcred); apps declare no credentials.
 ---
 apiVersion: v1
 kind: Namespace
@@ -16,22 +16,22 @@ metadata:
   namespace: org-canary
 spec:
   hard:
-    # Dimensionado para varias apps reales con sus dependencias (front +
-    # backend + cache + base), no para el canary de un pod. El nodo
-    # tiene 32 cores y 30 GiB; con estos topes el tenant no puede
-    # asfixiar al plano de control ni a un segundo tenant.
+    # Sized for several real apps with their dependencies (front end
+    # + backend + cache + database), not for the one-pod canary. The
+    # node has 32 cores and 30 GiB; with these ceilings the tenant
+    # cannot starve the control plane or a second tenant.
     requests.cpu: "8"
     requests.memory: 8Gi
     limits.cpu: "16"
     limits.memory: 16Gi
-    # Techo de objetos: un bug de reconciliación que cree pods o PVCs en
-    # bucle se frena acá y no se lleva puesto el nodo.
+    # Object ceiling: a reconciliation bug that creates pods or PVCs
+    # in a loop is stopped here instead of taking the node down.
     pods: "50"
     persistentvolumeclaims: "10"
-    # OJO — esto limita el tamaño DECLARADO de los PVCs, no el usado:
-    # local-path hace bind de un directorio del host y no impone cuota
-    # de disco. Un pod puede escribir más que su PVC hasta llenar /.
-    # El límite real del disco sigue siendo el disco.
+    # CAREFUL — this limits the DECLARED size of the PVCs, not the
+    # used one: local-path binds a host directory and imposes no disk
+    # quota. A pod can write past its PVC until it fills /. The real
+    # limit on the disk is still the disk.
     requests.storage: 50Gi
 ---
 apiVersion: v1
@@ -39,15 +39,16 @@ kind: ServiceAccount
 metadata:
   name: default
   namespace: org-canary
-# W-07 iter2 (RBAC del tenant): el tenant NO usa la API de K8s (la app
-# corre, no la administra) → no montar su token en los pods. Un pod
-# comprometido no puede hablarle al apiserver con el SA. La app estática
-# no lo nota; una app que SÍ necesite la API lo pide a nivel de pod.
+# W-07 iter2 (tenant RBAC): the tenant does NOT use the K8s API (the
+# app runs, it does not administer it) → do not mount its token in the
+# pods. A compromised pod cannot talk to the apiserver with the SA.
+# The static app does not notice; an app that DOES need the API asks
+# for it at the pod level.
 automountServiceAccountToken: false
 imagePullSecrets:
-  - name: regcred-internal     # A40: patrón A de pull
+  - name: regcred-internal     # A40: pattern A for pulling
 ---
-# App anidada del canary (repo de la app, overlay dev — ADR-0004/7):
+# The canary's nested App (app repo, dev overlay — ADR-0004/7):
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -64,17 +65,18 @@ spec:
   syncPolicy:
     automated: {selfHeal: true}
     syncOptions: [ServerSideApply=true]
-  # Mismo motivo que en org-portafolio: la política de firma tiene
-  # mutateDigest y le agrega el digest verificado a la imagen en
-  # admisión, así que el objeto vivo nunca va a ser igual al de git.
-  # Sin esto la app queda OutOfSync para siempre y el semáforo deja de
-  # avisar. Ver el comentario largo en org-portafolio/bundle.yaml.
+  # Same reason as in org-portafolio: the signing policy has
+  # mutateDigest and adds the verified digest to the image at
+  # admission, so the live object will never match the one in git.
+  # Without this the app stays OutOfSync forever and the traffic light
+  # stops warning. See the long comment in org-portafolio/bundle.yaml.
   #
-  # Acá todavía NO se ve el efecto, y por un motivo que vale registrar:
-  # el pod de hello-aegis que corre hoy fue admitido SIN pasar por la
-  # política (no tiene la anotación kyverno.io/verify-images), asi que su
-  # Deployment no trae digest. Lo va a traer en cuanto se recree. Se deja
-  # puesto ahora para que el arreglo llegue antes que el problema.
+  # The effect is NOT visible here yet, for a reason worth recording:
+  # the hello-aegis pod running today was admitted WITHOUT going
+  # through the policy (it carries no kyverno.io/verify-images
+  # annotation), so its Deployment brings no digest. It will bring one
+  # as soon as it is recreated. This is put in place now so the fix
+  # arrives before the problem.
   ignoreDifferences:
     - group: apps
       kind: Deployment

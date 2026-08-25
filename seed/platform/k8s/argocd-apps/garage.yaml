@@ -1,12 +1,12 @@
-# El almacenamiento S3 compartido de la plataforma.
+# The platform's shared S3 storage.
 #
-# Archivo aparte de core.yaml porque no es bootstrap: el cluster se
-# recupera sin esto. Y aparte de tenants.yaml porque no es de ninguna
-# organización — lo comparten todas.
+# A separate file from core.yaml because it is not bootstrap: the
+# cluster recovers without it. And separate from tenants.yaml because
+# it belongs to no organization — every one of them shares it.
 #
-# ORDEN: depende de que exista el registry (para pullear la imagen) y de
-# que Kyverno esté arriba (garage-system está en la zona de enforce). Las
-# dos son Apps de core/ci-supply, que el operador sincroniza antes.
+# ORDER: it depends on the registry existing (to pull the image) and on
+# Kyverno being up (garage-system sits in the enforce zone). Both are
+# core/ci-supply Apps, which the operator syncs first.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -24,17 +24,18 @@ spec:
     automated: {selfHeal: true}
     syncOptions: [ServerSideApply=true, CreateNamespace=true]
   ignoreDifferences:
-    # El apiserver agrega un bloque `status` DENTRO del
-    # volumeClaimTemplate. Es estado observado, no configuración: no hay
-    # forma de declararlo y sin esto la App queda OutOfSync para siempre.
+    # The apiserver adds a `status` block INSIDE the
+    # volumeClaimTemplate. It is observed state, not configuration:
+    # there is no way to declare it, and without this the App stays
+    # OutOfSync forever.
     #
-    # El alcance es lo más angosto posible: SOLO .status de esas
-    # entradas. NO todo /spec/volumeClaimTemplates, que es el atajo
-    # habitual y taparía un cambio de tamaño o de accessMode.
+    # The scope is as narrow as it gets: ONLY the .status of those
+    # entries. NOT the whole /spec/volumeClaimTemplates, which is the
+    # usual shortcut and would hide a size or accessMode change.
     #
-    # Y NO se ignora la imagen: va por digest, así que la mutación de
-    # Kyverno es un no-op y no hay deriva que ignorar. Ignorarla es lo
-    # que apaga el auto-sync (#36).
+    # And the image is NOT ignored: it goes by digest, so Kyverno's
+    # mutation is a no-op and there is no drift to ignore. Ignoring it
+    # is what switches off auto-sync (#36).
     - group: apps
       kind: StatefulSet
       name: garage

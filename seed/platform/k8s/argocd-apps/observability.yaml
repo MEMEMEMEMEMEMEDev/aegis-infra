@@ -1,21 +1,21 @@
-# Apps de observabilidad (fase 85; multi-doc por área — mismo
-# contrato que core.yaml): ServerSideApply=true; selfHeal=true;
-# prune OMITIDO (A19); labels aegis.dev/* (A18); placeholders
-# __GH_OWNER__/__PLATFORM_REPO__ (fase 10). El ORDEN de habilitación
-# lo da la fase 85: observability-base primero (namespace + secretos
-# + crudos), luego stores (vmsingle, vlogs, vlogs-events), luego
-# colectores (vmagent, vector), luego vmalert, último grafana —
-# productores antes que consumidores (D5).
+# Observability Apps (phase 85; multi-doc by area — same contract
+# as core.yaml): ServerSideApply=true; selfHeal=true; prune OMITTED
+# (A19); aegis.dev/* labels (A18); __GH_OWNER__/__PLATFORM_REPO__
+# placeholders (phase 10). Phase 85 decides the ORDER in which they
+# are enabled: observability-base first (namespace + secrets + raw
+# manifests), then the stores (vmsingle, vlogs, vlogs-events), then
+# the collectors (vmagent, vector), then vmalert, grafana last —
+# producers before consumers (D5).
 #
-# Versiones de charts: pinneadas EXACTAS (precedente
-# cilium_chart_version), verificadas 2026-08-19 contra el index.yaml
-# de cada repo Helm (la última estable publicada ese día).
+# Chart versions: pinned EXACTLY (cilium_chart_version precedent),
+# verified 2026-08-19 against each Helm repo's index.yaml (the latest
+# stable published that day).
 ---
-# observability-base ANTES que todo (patrón argocd-secrets/ADR-0015):
-# el namespace, los Secrets KSOPS, los crudos (ntfy, alertmanager,
-# puente, blackbox), las reglas, los dashboards, la exposición y el
-# CronJob trivy-db-age (que lleva namespace trivy-system EXPLÍCITO —
-# el project aegis-platform permite '*').
+# observability-base BEFORE everything else (argocd-secrets/ADR-0015
+# pattern): the namespace, the KSOPS Secrets, the raw manifests (ntfy,
+# alertmanager, bridge, blackbox), the rules, the dashboards, the
+# exposure and the trivy-db-age CronJob (which carries an EXPLICIT
+# trivy-system namespace — the aegis-platform project allows '*').
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -102,9 +102,10 @@ spec:
     automated: {selfHeal: true}
     syncOptions: [ServerSideApply=true]
 ---
-# DOS releases del mismo chart victoria-logs-single, y es EL punto
-# (design.md §4.1): la retención OSS es global por instancia — vlogs
-# corta (logs de pods), vlogs-events 1y (auditoría supply-chain).
+# TWO releases of the same victoria-logs-single chart, and that is
+# THE point (design.md §4.1): OSS retention is global per instance —
+# vlogs keeps it short (pod logs), vlogs-events 1y (supply-chain
+# auditing).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

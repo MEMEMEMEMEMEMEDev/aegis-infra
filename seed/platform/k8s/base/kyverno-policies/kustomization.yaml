@@ -1,14 +1,14 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# NACE VACÍO A PROPÓSITO — orden como MECANISMO, no como comentario
-# (corrida #12): la App kyverno-policies es automated+selfHeal — el
-# root la crea en la fase 35 y sincroniza SOLA; sin este kustomization
-# (directory-app) el ClusterPolicy con el placeholder COSIGN_PUB vivo
-# entraba vivo ANTES de la firma, su evaluación crasheaba (clave
-# placeholder + imagen sin digest firmado) y el webhook con
-# failurePolicy=Fail rechazaba el canary de la fase 70 ("missing
-# digest") — un fallo de EVALUACIÓN bloquea aunque el action sea
-# Audit. La fase 80 agrega la entry EN EL MISMO COMMIT que inyecta la
-# pub real (patrón runtime-entry — checks 18/18b/39). NO listar
-# policies acá a mano.
+# BORN EMPTY ON PURPOSE — order as a MECHANISM, not as a comment
+# (run #12): the kyverno-policies App is automated+selfHeal — the root
+# creates it in phase 35 and it syncs ON ITS OWN; without this
+# kustomization (directory-app) the ClusterPolicy with the live
+# COSIGN_PUB placeholder went in live BEFORE the signature, its
+# evaluation crashed (placeholder key + image with no signed digest)
+# and the webhook with failurePolicy=Fail rejected the phase 70 canary
+# ("missing digest") — an EVALUATION failure blocks even when the
+# action is Audit. Phase 80 adds the entry IN THE SAME COMMIT that
+# injects the real pub (runtime-entry pattern — checks 18/18b/39). Do
+# NOT list policies here by hand.
 resources: []

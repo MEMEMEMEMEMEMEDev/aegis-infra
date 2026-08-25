@@ -1,12 +1,12 @@
-# Alertmanager v0.34.0 (crudo — precedente registry.yaml). Agrupa,
-# enruta y silencia lo que vmalert evalúa; el webhook sale al puente
-# ntfy-alertmanager (ntfy habla HTTP plano, no el protocolo de
-# Alertmanager — design.md §4.1).
+# Alertmanager v0.34.0 (raw — registry.yaml set the precedent). It
+# groups, routes and silences whatever vmalert evaluates; the webhook
+# goes out to the ntfy-alertmanager bridge (ntfy speaks plain HTTP,
+# not Alertmanager's protocol — design.md §4.1).
 #
-# emptyDir para silences A PROPÓSITO (fase-85 §2): un silence es
-# estado operativo efímero; perderlo en un restart re-alerta, que es
-# el fallo SEGURO. Un PVC para silences sería estado-a-click con
-# disfraz.
+# emptyDir for silences ON PURPOSE (phase-85 §2): a silence is
+# ephemeral operational state; losing it in a restart re-alerts, which
+# is the SAFE failure. A PVC for silences would be state-by-click in
+# disguise.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -23,10 +23,10 @@ data:
       group_interval: 5m
       repeat_interval: 12h
       routes:
-        # el deadman (design.md §4.2a): SIEMPRE firing; su valor es
-        # su AUSENCIA en el teléfono. La cadencia es por perfil
-        # (fase-85 §4: dev 24h — el notebook duerme por diseño y la
-        # ausencia nocturna no es señal; hetzner 6h):
+        # the deadman (design.md §4.2a): ALWAYS firing; its value is
+        # its ABSENCE from the phone. The cadence is per profile
+        # (phase-85 §4: dev 24h — the notebook sleeps by design and
+        # the nightly absence is not a signal; hetzner 6h):
         - matchers: ['alertname="DeadmanAegis"']
           receiver: ntfy
           group_wait: 0s
@@ -63,8 +63,8 @@ spec:
     spec:
       containers:
         - name: alertmanager
-          # verificado 2026-08-19 contra github.com/prometheus/
-          # alertmanager releases (v0.34.0, 2026-08-16) y el tag en
+          # verified 2026-08-19 against github.com/prometheus/
+          # alertmanager releases (v0.34.0, 2026-08-16) and the tag on
           # quay.io/prometheus/alertmanager:
           image: quay.io/prometheus/alertmanager:v0.34.0
           args:
@@ -80,7 +80,7 @@ spec:
           livenessProbe:
             httpGet: {path: /-/healthy, port: 9093}
             initialDelaySeconds: 15
-          resources:            # fase-85 §10
+          resources:            # phase-85 §10
             requests: {cpu: 25m, memory: 32Mi}
             limits: {cpu: 250m, memory: 128Mi}
       volumes:

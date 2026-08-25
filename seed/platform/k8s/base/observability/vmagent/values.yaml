@@ -153,7 +153,7 @@ config:
     # Traefik: entrypoint metrics :9100 (prometheus viene activo por
     # default en el chart 40.3.0 — verificado 2026-08-19 contra sus
     # values: metrics.prometheus.entryPoint=metrics, ports.metrics
-    # 9100; el puerto no está en el Service, por eso pod-SD):
+    # 9100; the port is not in the Service, hence pod-SD):
     - job_name: traefik
       kubernetes_sd_configs:
         - role: pod
@@ -214,7 +214,7 @@ config:
         - target_label: __address__
           replacement: blackbox.observability.svc:9115
     # el /healthz de trivy (pide la entry :4954 en la netpol de
-    # trivy-system — fase-85 §7):
+    # trivy-system — phase-85 §7):
     - job_name: blackbox-trivy
       metrics_path: /probe
       params: {module: [http_2xx]}
@@ -238,6 +238,6 @@ config:
     # (no organization declares a domain with a public path)
     # --- END DERIVED ---
 
-resources:                      # fase-85 §10
+resources:                      # phase-85 §10
   requests: {cpu: 50m, memory: 64Mi}
   limits: {cpu: 500m, memory: 256Mi}

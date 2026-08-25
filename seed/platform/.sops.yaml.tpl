@@ -1,15 +1,15 @@
-# .sops.yaml del repo de plataforma v2 — TEMPLATE. La fase 10 del
-# init reemplaza __AGE_PUBLIC__ con la pública recién generada.
-# Regla A4: este archivo SOMBREA al del workspace — TODA regla
-# necesaria vive acá, no se hereda nada.
-# Rotación de la age key: actualizar recipient + `sops updatekeys`
-# sobre TODOS los cifrados (ver protocolo rotate-age-key).
+# The platform repo's .sops.yaml — TEMPLATE. The init's phase 10
+# replaces __AGE_PUBLIC__ with the freshly generated public key.
+# Rule A4: this file SHADOWS the workspace's — EVERY rule that is
+# needed lives here, nothing is inherited.
+# Rotating the age key: update the recipient + `sops updatekeys` over
+# ALL the encrypted files (see the rotate-age-key protocol).
 creation_rules:
-  # Secrets K8s cifrados (KSOPS): solo data/stringData
+  # Encrypted K8s Secrets (KSOPS): only data/stringData
   - path_regex: k8s/.*\.enc\.yaml$
     encrypted_regex: ^(data|stringData)$
     age: __AGE_PUBLIC__
-  # tokens de tofu: todo cifrado salvo metadata de auditoría
+  # tofu's tokens: everything encrypted except the audit metadata
   - path_regex: tofu/secrets/.*\.enc\.yaml$
     unencrypted_suffix: _unencrypted
     age: __AGE_PUBLIC__

@@ -1,12 +1,12 @@
-# kustomization observability (fase 85). KSOPS generator con LISTA
-# EXPLÍCITA (A7): cada .enc.yaml nuevo = entry nuevo ACÁ, o el
-# Secret no existe aunque la App esté Healthy.
+# observability's kustomization (phase 85). KSOPS generator with an
+# EXPLICIT LIST (A7): every new .enc.yaml = a new entry HERE, or the
+# Secret does not exist even with the App Healthy.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  # namespace.yaml PRIMERO (corrida #7, bug A): CreateNamespace no es
-  # confiable en apps kustomize — patrón registry-system, se iguala
-  # al que funciona:
+  # namespace.yaml FIRST (run #7, bug A): CreateNamespace is not
+  # reliable in kustomize apps — the registry-system pattern; this
+  # matches the one that works:
   - namespace.yaml
   - configmap-aegis-ca.yaml
   - ntfy.yaml
@@ -21,8 +21,9 @@ resources:
   - dashboards/edge.yaml
   - dashboards/usage.yaml
   - routes.yaml
-  # NetworkPolicy: escrita (netpol.yaml) pero NO listada hasta Cilium
-  # (ADR-0014; kube-router no enforce — validar enforcement POSITIVO
-  # antes de activarla). Mismo trato que registry-system.
+  # NetworkPolicy: written (netpol.yaml) but NOT listed until Cilium
+  # (ADR-0014; kube-router does not enforce — validate POSITIVE
+  # enforcement before switching it on). Same treatment as
+  # registry-system.
 generators:
   - secret-generator.yaml

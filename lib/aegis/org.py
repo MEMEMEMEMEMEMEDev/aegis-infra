@@ -435,18 +435,19 @@ def render_bundle(c, plans, h):
     lines = [HEADER.format(org=org, hash=h)]
     lines.append(f"""\
 #
-# Namespace, cuota y la identidad con la que se pullea.
+# Namespace, quota and the identity images are pulled with.
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: {ns}
   labels:
-    # ESTA ETIQUETA ES LA FRONTERA DE SEGURIDAD, no una clasificación.
-    # Es lo que mete al namespace en el alcance del webhook de Kyverno:
-    # sin ella, acá entrarían imágenes sin firmar y NADA avisaría. Pasó
-    # el 2026-07-27 con org-portafolio y org-ecommerce, que nacieron
-    # fuera del alcance y admitieron un busybox público.
+    # THIS LABEL IS THE SECURITY BOUNDARY, not a classification. It is
+    # what puts the namespace inside the scope of Kyverno's webhook:
+    # without it, unsigned images would get in here and NOTHING would
+    # warn. It happened on 2026-07-27 with org-portafolio and
+    # org-ecommerce, which were born outside the scope and admitted a
+    # public busybox.
     aegis.dev/part-of: aegis-tenants
     pod-security.kubernetes.io/enforce: restricted
 ---
@@ -456,8 +457,8 @@ metadata:
   name: {ns}-quota
   namespace: {ns}
 spec:
-  # Plan `{c["cuota"]}` de plans.yaml. Los números NO se editan acá:
-  # se cambia el plan, o se le cambia la cuota al contrato.
+  # Plan `{c["cuota"]}` from plans.yaml. The numbers are NOT edited
+  # here: you change the plan, or you change the contract's `cuota`.
   hard:""")
     for k in ("requests.cpu", "requests.memory", "limits.cpu", "limits.memory",
               "pods", "persistentvolumeclaims", "requests.storage"):
@@ -474,13 +475,14 @@ kind: ServiceAccount
 metadata:
   name: default
   namespace: {ns}
-# El tenant NO usa la API de K8s: la app corre, no se administra. Un pod
-# comprometido no puede hablarle al apiserver. Una app que SÍ necesite la
-# API lo pide a nivel de pod y queda visible en su manifiesto.
+# The tenant does NOT use the K8s API: the app runs, it is not
+# administered. A compromised pod cannot talk to the apiserver. An app
+# that DOES need the API asks for it at pod level, where it stays
+# visible in its own manifest.
 automountServiceAccountToken: false
 imagePullSecrets:
-  # Patrón A: la plataforma provee el CÓMO pullear; las apps no declaran
-  # credenciales de registry.
+  # Pattern A: the platform provides the HOW of pulling; apps do not
+  # declare registry credentials.
   - name: regcred-internal
 """)
     return "\n".join(lines)
@@ -505,25 +507,25 @@ def render_data(c, h):
 
     parts = [HEADER.format(org=org, hash=h), f"""\
 #
-# Bases de datos de esta organización.
+# The databases of this organization.
 #
-# UNA BASE POR ORGANIZACIÓN, nunca compartida. Un `DROP` de una no puede
-# tocar a la vecina, y el costo en RAM de un postgres ocioso es
-# despreciable frente a esa garantía.
+# ONE DATABASE PER ORGANIZATION, never shared. A `DROP` on one cannot
+# touch its neighbour, and the RAM cost of an idle postgres is
+# negligible next to that guarantee.
 #
-# La imagen va POR DIGEST (services.yaml). Con un tag, Kyverno le
-# agregaría el digest al admitir y desired != live para siempre; la
-# salida obvia —ignoreDifferences sobre la imagen— APAGA el auto-sync.
-# Con el digest en git la mutación es un no-op. Es el hallazgo #36."""]
+# The image goes BY DIGEST (services.yaml). With a tag, Kyverno would
+# append the digest on admission and desired != live forever; the
+# obvious way out —ignoreDifferences on the image— TURNS OFF auto-sync.
+# With the digest in git the mutation is a no-op. That is finding #36."""]
 
     for s in sorted(dbs, key=lambda x: x["nombre"]):
         n = s["nombre"]
         app = f"{org}-{n}"
         parts.append(f"""\
 ---
-# Headless: cada réplica tiene DNS propio. Con una sola réplica da
-# igual, pero un Service normal delante de un StatefulSet es la clase de
-# atajo que después nadie se anima a cambiar.
+# Headless: every replica gets DNS of its own. With a single replica
+# it makes no difference, but a plain Service in front of a StatefulSet
+# is the kind of shortcut nobody dares to change later.
 apiVersion: v1
 kind: Service
 metadata:
@@ -544,9 +546,9 @@ metadata:
   labels: {{app: {app}, aegis.dev/component: datos}}
 spec:
   serviceName: {n}
-  # UNA réplica. Postgres no se replica poniendo replicas: 2 — eso da
-  # dos bases distintas peleando por el mismo disco. La alta
-  # disponibilidad real es otra decisión y otro operador.
+  # ONE replica. Postgres is not replicated by setting replicas: 2 —
+  # that gives two different databases fighting over the same disk.
+  # Real high availability is another decision and another operator.
   replicas: 1
   selector:
     matchLabels: {{app: {app}}}
@@ -554,15 +556,15 @@ spec:
     metadata:
       labels: {{app: {app}, aegis.dev/component: datos}}
     spec:
-      # El tenant no habla con la API de Kubernetes.
+      # The tenant does not talk to the Kubernetes API.
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: {t['uid']}
         runAsGroup: {t['uid']}
-        # fsGroup para que el PVC nazca escribible por ese UID: sin
-        # esto el arranque muere en "permission denied" sobre PGDATA y
-        # el mensaje no se parece a la causa.
+        # fsGroup so the PVC is born writable by that UID: without
+        # this, start-up dies on "permission denied" over PGDATA and
+        # the message looks nothing like the cause.
         fsGroup: {t['uid']}
         seccompProfile: {{type: RuntimeDefault}}
       containers:
@@ -571,8 +573,8 @@ spec:
           ports:
             - {{name: postgres, containerPort: {t['puerto']}}}
           env:
-            # La credencial NUNCA en el manifiesto: sale del secreto
-            # cifrado con SOPS que lista secret-generator.yaml.
+            # The credential NEVER in the manifest: it comes from the
+            # SOPS-encrypted secret that secret-generator.yaml lists.
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef: {{name: {n}-credenciales, key: password}}
@@ -581,19 +583,20 @@ spec:
                 secretKeyRef: {{name: {n}-credenciales, key: usuario}}
             - name: POSTGRES_DB
               value: {org}
-            # PGDATA en un SUBDIRECTORIO del volumen, no en la raíz: el
-            # `lost+found` de un ext4 hace que initdb se niegue a
-            # arrancar sobre un directorio "no vacío".
+            # PGDATA in a SUBDIRECTORY of the volume, not at the root:
+            # an ext4's `lost+found` makes initdb refuse to start over
+            # a directory that is "not empty".
             - {{name: PGDATA, value: /var/lib/postgresql/data/pgdata}}
           volumeMounts:
             - {{name: datos, mountPath: /var/lib/postgresql/data}}
-            # /tmp y /run escribibles porque el root filesystem no lo es:
-            # postgres necesita el socket unix y archivos temporales.
+            # /tmp and /run writable because the root filesystem is
+            # not: postgres needs the unix socket and temporary files.
             - {{name: tmp, mountPath: /tmp}}
             - {{name: run, mountPath: /var/run/postgresql}}
-          # `pg_isready` y no un TCP genérico: el puerto abre antes de
-          # que la base acepte consultas, y una sonda que solo mira el
-          # puerto declara listo un servicio que todavía rechaza todo.
+          # `pg_isready` and not a generic TCP check: the port opens
+          # before the database accepts queries, and a probe that only
+          # looks at the port calls ready a service that still refuses
+          # everything.
           readinessProbe:
             exec: {{command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "{org}"]}}
             initialDelaySeconds: 5
@@ -616,15 +619,16 @@ spec:
         - name: run
           emptyDir: {{}}
   volumeClaimTemplates:
-    # apiVersion, kind y volumeMode los rellena el apiserver por default.
-    # Van DECLARADOS: sin ellos desired != live en cada refresh y el
-    # StatefulSet queda OutOfSync PARA SIEMPRE. Medido con el Garage el
-    # 2026-08-04, antes de que existiera el primer postgres generado.
+    # apiVersion, kind and volumeMode are filled in by the apiserver
+    # by default. They go DECLARED: without them desired != live on
+    # every refresh and the StatefulSet stays OutOfSync FOREVER.
+    # Measured with Garage on 2026-08-04, before the first generated
+    # postgres existed.
     #
-    # La salida obvia —ampliar ignoreDifferences a todo el
-    # volumeClaimTemplate— apaga el auto-sync y de paso tapa un cambio
-    # real de tamaño o de accessMode (#36). Declarar un default es
-    # gratis; ignorarlo se paga.
+    # The obvious way out —widening ignoreDifferences to the whole
+    # volumeClaimTemplate— turns off auto-sync and, on the way, hides a
+    # real change of size or of accessMode (#36). Declaring a default
+    # is free; ignoring one is paid for.
     - apiVersion: v1
       kind: PersistentVolumeClaim
       metadata:
@@ -682,27 +686,27 @@ def render_apps(c, h):
 
     parts = [HEADER.format(org=org, hash=h), """\
 #
-# Las Applications de esta organización.
+# The Applications of this organization.
 #
-# Viven acá, CON su organización, y no en argocd-apps/. Declararlas en
-# los dos lados hace que dos Applications se disputen el mismo objeto y
-# la App root quede OutOfSync de forma permanente."""]
+# They live here, WITH their organization, and not in argocd-apps/.
+# Declaring them on both sides makes two Applications fight over the
+# same object and leaves the root App permanently OutOfSync."""]
     for repo, name in sorted(repos.items()):
         parts.append(f"""\
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  # El nombre de la Application. Hasta #59 tenía que coincidir con el
-  # namePattern del Image Updater; ese componente se retiró —el digest
-  # lo escribe el propio pipeline desde #36/#37— así que el nombre ya
-  # no acopla con nada de la plataforma.
+  # The name of the Application. Until #59 it had to match the Image
+  # Updater's namePattern; that component was withdrawn —the digest is
+  # written by the pipeline itself since #36/#37— so the name no longer
+  # couples with anything on the platform.
   name: {name}
   namespace: argocd
   labels: {{aegis.dev/part-of: aegis-tenants}}
 spec:
-  # Proyecto de ESTA organización: solo puede leer de su repo y solo
-  # puede escribir en su namespace. cluster-scoped vacío.
+  # THIS organization's project: it can only read from its repo and
+  # can only write in its namespace. cluster-scoped empty.
   project: aegis-tenant-{org}
   source:
     repoURL: {repo}
@@ -712,23 +716,22 @@ spec:
   syncPolicy:
     automated: {{selfHeal: true}}
     syncOptions: [ServerSideApply=true]
-  # SIN ignoreDifferences sobre la imagen, y es deliberado.
+  # NO ignoreDifferences on the image, and that is deliberate.
   #
-  # Tenerlo era la respuesta obvia a que Kyverno reescribe la imagen
-  # agregándole el digest verificado. Pero APAGABA EL AUTO-SYNC: si la
-  # única diferencia entre git y el cluster es la imagen, y la imagen
-  # está ignorada, ArgoCD no ve nada que hacer y nada se despliega. La
-  # app queda verde y quieta. Medido el 2026-08-03 (#36): 4 syncs en 8
-  # días, todos por cambios estructurales.
+  # Having it was the obvious answer to Kyverno rewriting the image to
+  # append the verified digest. But it TURNED OFF AUTO-SYNC: if the
+  # only difference between git and the cluster is the image, and the
+  # image is ignored, ArgoCD sees nothing to do and nothing gets
+  # deployed. The app stays green and still. Measured on 2026-08-03
+  # (#36): 4 syncs in 8 days, all of them structural changes.
   #
-  # La solución no es ignorar la deriva: es NO PRODUCIRLA. El pipeline
-  # escribe el DIGEST en git (etapa `desplegar`), con lo cual la
-  # mutación de Kyverno es un no-op —verificado por admisión, entrada
-  # idéntica a salida— y no queda nada que ignorar.
+  # The fix is not to ignore the drift: it is NOT TO PRODUCE IT. The
+  # pipeline writes the DIGEST into git (the `desplegar` stage), and
+  # with that Kyverno's mutation is a no-op —verified on admission,
+  # input identical to output— and there is nothing left to ignore.
   #
-  # Si una organización vuelve a quedar OutOfSync por la imagen,
-  # significa que su pipeline está escribiendo un TAG. El arreglo va
-  # ahí, no acá.""")
+  # If an organization goes OutOfSync over the image again, it means
+  # its pipeline is writing a TAG. The fix goes there, not here.""")
     return "\n".join(parts) + "\n"
 
 
@@ -737,10 +740,11 @@ def render_netpol(c, h):
     ns = f"org-{org}"
     parts = [HEADER.format(org=org, hash=h), f"""\
 #
-# Aislamiento de red. TODO denegado salvo lo que el contrato concedió.
+# Network isolation. EVERYTHING denied except what the contract
+# granted.
 #
-# Lo que un servicio no declara en `usa:`, no alcanza. No por convención
-# ni por revisión de código: porque el kernel no lo deja.
+# What a service does not declare in `usa:`, it cannot reach. Not by
+# convention nor by code review: because the kernel does not allow it.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -751,9 +755,9 @@ spec:
   podSelector: {{}}
   policyTypes: [Ingress, Egress]
 ---
-# Entrada SOLO desde el borde, y solo al 8080. El puerto es parte del
-# contrato: una app que escuche en otro lado arranca bien y no recibe
-# tráfico nunca — un fallo silencioso.
+# Ingress ONLY from the edge, and only to 8080. The port is part of
+# the contract: an app listening somewhere else starts up fine and
+# never receives traffic — a silent failure.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -769,9 +773,9 @@ spec:
       ports:
         - {{protocol: TCP, port: 8080}}
 ---
-# Entre pods de la MISMA organización se permite: un front hablándole a
-# su propio backend es el caso normal, y obligar a declararlo uno por
-# uno solo produce políticas que nadie mantiene.
+# Between pods of the SAME organization it is allowed: a front end
+# talking to its own backend is the normal case, and forcing it to be
+# declared one by one only produces policies nobody maintains.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -787,7 +791,8 @@ spec:
     - to:
         - podSelector: {{}}
 ---
-# DNS. Sin esto nada resuelve y el síntoma no se parece a la causa.
+# DNS. Without this nothing resolves and the symptom looks nothing
+# like the cause.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -810,12 +815,12 @@ spec:
             if u == "ai":
                 parts.append(f"""\
 ---
-# {s['nombre']} -> gateway de AI, PUERTA INTERNA (8081).
+# {s['nombre']} -> AI gateway, INTERNAL DOOR (8081).
 #
-# La puerta interna y la pública son PUERTOS distintos, no rutas: así la
-# separación la impone el kernel y no un `if` en el código. Un pod de
-# tenant no puede alcanzar la puerta pública ni falsificar cabeceras de
-# cliente.
+# The internal door and the public one are different PORTS, not routes:
+# that way the separation is imposed by the kernel and not by an `if`
+# in the code. A tenant pod cannot reach the public door, nor forge
+# client headers.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -842,7 +847,7 @@ spec:
                 # on working.
                 parts.append(f"""\
 ---
-# {s['nombre']} -> la base de la organización.
+# {s['nombre']} -> the organization's database.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -861,7 +866,7 @@ spec:
             elif u == "bucket":
                 parts.append(f"""\
 ---
-# {s['nombre']} -> almacenamiento S3 compartido (Garage).
+# {s['nombre']} -> shared S3 storage (Garage).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -880,15 +885,16 @@ spec:
             elif u == "internet":
                 parts.append(f"""\
 ---
-# {s['nombre']} -> internet, SOLO 443 y SOLO fuera de lo privado.
+# {s['nombre']} -> internet, ONLY 443 and ONLY outside the private
+# ranges.
 #
-# Nació con org-shop (2026-08-21): la pasarela de pago vive afuera y
-# ningún otro uso lo cubría. Dos recortes deliberados:
-#   - puerto 443 únicamente: lo que una app de tenant tiene que
-#     hablar con el mundo es HTTPS; abrir más es abrir por si acaso.
-#   - except de los rangos privados: sin él, «internet» sería también
-#     un pase al cluster entero por IP de pod/servicio, saltándose
-#     todas las políticas de arriba. El kernel no sabe de intenciones.
+# Born with org-shop (2026-08-21): the payment gateway lives outside
+# and no other use covered it. Two deliberate cuts:
+#   - port 443 only: what a tenant app has to speak to the world is
+#     HTTPS; opening more is opening just in case.
+#   - except on the private ranges: without it, «internet» would also
+#     be a pass to the whole cluster by pod/service IP, skipping every
+#     policy above. The kernel knows nothing about intentions.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -959,20 +965,21 @@ def render_routes(c, h):
 
     parts = [HEADER.format(org=org, hash=h), f"""\
 #
-# El ruteo de esta organización — DERIVADO de `dominio` y de los
-# `publico:` del contrato. El repo de la app ya no lo escribe: no puede,
-# IngressRoute está en el namespaceResourceBlacklist de su proyecto.
+# The routing of this organization — DERIVED from `dominio` and from
+# the contract's `publico:` entries. The app's repo no longer writes
+# it: it cannot, IngressRoute sits in its project's
+# namespaceResourceBlacklist.
 #
-# ── LOS TRES MIDDLEWARES DEL BORDE (#81, #90) ─────────────────────
+# ── THE THREE EDGE MIDDLEWARES (#81, #90) ─────────────────────────
 #
-# Hasta el 2026-08-13 el cluster tenía CERO middlewares y los sitios
-# públicos no mandaban una sola cabecera de seguridad: lo único que
-# volvía era `server: cloudflare`. Con demos abiertas a internet eso
-# deja de ser cosmético.
+# Until 2026-08-13 the cluster had ZERO middlewares and the public
+# sites did not send a single security header: the only thing coming
+# back was `server: cloudflare`. With demos open to the internet that
+# stops being cosmetic.
 #
-# Van en ESTE namespace y no en infra-edge: traefik corre sin
-# `allowCrossNamespace`, así que una referencia cruzada no explota —
-# se ignora en silencio y la ruta queda desnuda con todo en verde.
+# They go in THIS namespace and not in infra-edge: traefik runs without
+# `allowCrossNamespace`, so a cross-namespace reference does not blow
+# up — it is ignored in silence and the route is left bare, all green.
 ---
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
@@ -982,28 +989,29 @@ metadata:
   labels: {{aegis.dev/part-of: aegis-organizaciones}}
 spec:
   headers:
-    # forceSTSHeader es OBLIGATORIO acá y no una preferencia: el TLS lo
-    # termina Cloudflare, así que traefik ve HTTP plano y sin esto NO
-    # emitiría STS nunca. La cabecera saldría ausente y el chequeo
-    # diría «configurado» — enfermedad E.
+    # forceSTSHeader is MANDATORY here and not a preference: TLS is
+    # terminated by Cloudflare, so traefik sees plain HTTP and without
+    # this it would NEVER emit STS. The header would come out absent
+    # and the check would say «configured» — Disease E.
     forceSTSHeader: true
-    stsSeconds: 15552000            # 180 días
-    stsIncludeSubdomains: false     # hay subdominios que no controlamos
-    # sin `preload`: entrar a la lista de precarga de los navegadores es
-    # prácticamente irreversible, y esto es un portafolio en desarrollo.
+    stsSeconds: 15552000            # 180 days
+    stsIncludeSubdomains: false     # there are subdomains we do not own
+    # no `preload`: getting into the browsers' preload list is
+    # practically irreversible, and this is a portfolio still in
+    # development.
     contentTypeNosniff: true
-    browserXssFilter: false         # obsoleto y con fallos propios
+    browserXssFilter: false         # obsolete, with bugs of its own
     referrerPolicy: strict-origin-when-cross-origin
-    # frame-ancestors es la defensa REAL contra clickjacking; el
-    # X-Frame-Options de abajo es para los navegadores viejos que no
-    # miran CSP. Medido: los 4 sitios sirven CERO iframes, así que
-    # 'none' no rompe nada de lo que hay hoy.
+    # frame-ancestors is the REAL defence against clickjacking; the
+    # X-Frame-Options below is for the old browsers that do not look at
+    # CSP. Measured: the 4 sites serve ZERO iframes, so 'none' breaks
+    # nothing of what exists today.
     #
-    # NO se declara un CSP completo (default-src/script-src) a
-    # propósito: el portafolio sirve 3 scripts inline (hidratación de
-    # las islas de Astro) y un `script-src 'self'` los mataría en el
-    # navegador, sin error en ningún log del cluster. Eso es trabajo de
-    # medir sitio por sitio; queda declarado, no fingido.
+    # A full CSP (default-src/script-src) is NOT declared, on purpose:
+    # the portfolio serves 3 inline scripts (hydration of the Astro
+    # islands) and a `script-src 'self'` would kill them in the
+    # browser, with no error in any log of the cluster. That is work to
+    # be measured site by site; it is declared, not faked.
     contentSecurityPolicy: "frame-ancestors 'none'"
     customResponseHeaders:
       X-Frame-Options: "DENY"
@@ -1016,23 +1024,23 @@ metadata:
   labels: {{aegis.dev/part-of: aegis-organizaciones}}
 spec:
   rateLimit:
-    # Por VISITANTE, no por sitio. Es la parte que se puede hacer mal
-    # sin notarlo: traefik ve como par a cloudflared —una sola IP de
-    # pod— así que un criterio ingenuo metería a todo internet en un
-    # mismo balde y un visitante ocupado ahogaría a los demás.
+    # Per VISITOR, not per site. This is the part that can be got
+    # wrong without noticing: traefik sees cloudflared as its peer —a
+    # single pod IP— so a naive criterion would tip the whole internet
+    # into one bucket and a busy visitor would starve everybody else.
     #
-    # Acá funciona porque el entrypoint `web` lleva
-    # forwardedHeaders.trustedIPs=10.42.0.0/16, y con eso la estrategia
-    # por defecto resuelve la IP del visitante real. MEDIDO el
-    # 2026-08-13: el origen recibe `XFF: 186.9.x.x, 10.42.0.206` — la
-    # IP pública primero, la del pod de cloudflared después.
+    # Here it works because the `web` entrypoint carries
+    # forwardedHeaders.trustedIPs=10.42.0.0/16, and with that the
+    # default strategy resolves the real visitor's IP. MEASURED on
+    # 2026-08-13: the origin receives `XFF: 186.9.x.x, 10.42.0.206` —
+    # the public IP first, cloudflared's pod IP after it.
     #
-    # Y es resistente a falsificación por construcción: Cloudflare
-    # AÑADE la IP real al final de la XFF que mande el cliente, y
-    # traefik toma la última NO confiable. Inventar entradas por la
-    # izquierda no corre el resultado.
-    average: 50                     # req/s sostenidos por visitante
-    burst: 100                      # una carga de página son ~20-50
+    # And it resists forgery by construction: Cloudflare APPENDS the
+    # real IP at the end of whatever XFF the client sends, and traefik
+    # takes the last UNTRUSTED one. Inventing entries on the left does
+    # not move the result.
+    average: 50                     # sustained req/s per visitor
+    burst: 100                      # a page load is ~20-50
     period: 1s
 ---
 apiVersion: traefik.io/v1alpha1
@@ -1043,12 +1051,12 @@ metadata:
   labels: {{aegis.dev/part-of: aegis-organizaciones}}
 spec:
   buffering:
-    # SOLO la petición. `maxResponseBodyBytes` está ausente a
-    # propósito: bufferear la RESPUESTA rompería el streaming del chat
-    # de AI (SSE), y el síntoma —«el chat se quedó pensando»— no se
-    # parece en nada a la causa.
+    # ONLY the request. `maxResponseBodyBytes` is absent on purpose:
+    # buffering the RESPONSE would break the streaming of the AI chat
+    # (SSE), and the symptom —«the chat is stuck thinking»— looks
+    # nothing at all like the cause.
     maxRequestBodyBytes: 10485760   # 10 MiB
-    memRequestBodyBytes: 1048576    # 1 MiB en RAM, el resto a disco
+    memRequestBodyBytes: 1048576    # 1 MiB in RAM, the rest to disk
 ---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
@@ -1057,9 +1065,9 @@ metadata:
   namespace: {ns}
   labels: {{aegis.dev/part-of: aegis-organizaciones}}
 spec:
-  # `web` y no `websecure`: el TLS lo termina Cloudflare y el túnel
-  # entrega HTTP plano acá adentro. Un certificado en traefik sería un
-  # segundo lugar donde vencerse.
+  # `web` and not `websecure`: TLS is terminated by Cloudflare and the
+  # tunnel delivers plain HTTP in here. A certificate in traefik would
+  # be a second place for one to expire.
   entryPoints: [web]
   routes:"""]
     for s in public_svcs:
@@ -1076,7 +1084,7 @@ spec:
         # duplication — a route without the list is a route without
         # protection.
         parts.append(f"""\
-    # {s['nombre']} — `publico: {path}` en el contrato
+    # {s['nombre']} — `publico: {path}` in the contract
     - kind: Rule
       match: {match}
       middlewares:
@@ -1124,8 +1132,8 @@ metadata:
   annotations:
     config.kubernetes.io/function: |
       exec: {{path: ksops}}
-# LISTA EXPLÍCITA (A7): nada de globs. Un glob incorpora en silencio
-# cualquier .enc.yaml que caiga en el directorio.
+# EXPLICIT LIST (A7): no globs. A glob silently takes in any .enc.yaml
+# that happens to land in the directory.
 files:"""]
     for s in secrets:
         parts.append(f"  - {s}")
@@ -1687,15 +1695,15 @@ def render_ai_registry():
     return f"""{markers.BANNER}
 # hash: {h}
 #
-# Sale de `ai.tareas` de cada contrato en orgs/ (nombre, capacidad,
-# prompt y el TENANT autorizado) + ai/tasks.yaml (clase y topes) +
-# ai/routes.yaml (qué engine sirve cada capacidad).
+# Comes out of the `ai.tareas` of each contract in orgs/ (nombre,
+# capacidad, prompt and the authorized TENANT) + ai/tasks.yaml (clase
+# and ceilings) + ai/routes.yaml (which engine serves each capacidad).
 #
-# LOS PROMPTS NO ESTÁN ACÁ: son contenido escrito a mano y viven en
-# prompts.yaml, al lado. Mezclarlos garantizaba que el generador
-# terminara pisando lo escrito.
+# THE PROMPTS ARE NOT HERE: they are hand-written content and live in
+# prompts.yaml, next door. Mixing them in guaranteed the generator
+# would end up overwriting what somebody wrote.
 #
-# Para cambiarlo se edita la FUENTE y se corre `{CMD_ORG_APPLY}`.
+# To change it, edit the SOURCE and run `{CMD_ORG_APPLY}`.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -1735,11 +1743,11 @@ def render_routes_k8s():
     return f"""{markers.BANNER}
 # hash: {h}
 #
-# Sale de ai/routes.yaml (capacidades) + plans.yaml (planes) + el
-# `ai.plan` de cada contrato en orgs/ (tenants).
+# Comes out of ai/routes.yaml (capabilities) + plans.yaml (plans) +
+# the `ai.plan` of each contract in orgs/ (tenants).
 #
-# Para cambiarlo se edita la FUENTE y se corre `{CMD_ORG_APPLY}`.
-# Editar esto a mano funciona hasta la próxima corrida, que lo pisa.
+# To change it, edit the SOURCE and run `{CMD_ORG_APPLY}`.
+# Editing this by hand works until the next run, which overwrites it.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -1779,20 +1787,20 @@ def render_tenants():
         orgs.append(c["organizacion"])
 
     parts = [markers.BANNER + f"""
-# Una Application por CONTRATO en orgs/. Se rederiva en cada
-# `{CMD_ORG_APPLY}`, así que agregar una organización es escribir
-# su contrato y nada más.
+# One Application per CONTRACT in orgs/. It is re-derived on every
+# `{CMD_ORG_APPLY}`, so adding an organization is writing its
+# contract and nothing else.
 #
-# Lo heredado —organizaciones anteriores al generador— vive en
-# tenants-heredados.yaml, a mano y a propósito: mezclarlo acá haría que
-# la próxima corrida lo borrara en silencio.
+# The inherited ones —organizations older than the generator— live in
+# tenants-heredados.yaml, by hand and on purpose: mixing them in here
+# would make the next run delete them in silence.
 #
-# CreateNamespace=true: el Namespace está en el bundle, pero ArgoCD
-# necesita que exista para aplicarle el resto; sin esta opción hay una
-# carrera en el primer sync.
+# CreateNamespace=true: the Namespace is in the bundle, but ArgoCD
+# needs it to exist before it can apply the rest into it; without this
+# option there is a race on the first sync.
 #
-# RECORDATORIO: root NO tiene automated (ADR-0012). Agregar una App acá
-# no la crea sola — hay que sincronizar root:  {CMD_SYNC_ROOT}"""]
+# REMINDER: root does NOT have automated (ADR-0012). Adding an App here
+# does not create it by itself — you have to sync root:  {CMD_SYNC_ROOT}"""]
 
     for org in orgs:
         parts.append(f"""\
@@ -1804,11 +1812,12 @@ metadata:
   namespace: argocd
   labels: {{aegis.dev/part-of: aegis-platform}}
 spec:
-  # NO es `aegis-platform`. Esta App despliega el SUSTRATO de una
-  # organización —namespace, cuota, red, secretos— y eso es un tercer
-  # tipo: ni plataforma ni tenant. Su proyecto acota el cluster-scoped a
-  # `Namespace` (en aegis-platform heredaba '*') y le busca huérfanos,
-  # que en aegis-platform no pasaba (#47).
+  # It is NOT `aegis-platform`. This App deploys the SUBSTRATE of an
+  # organization —namespace, quota, network, secrets— and that is a
+  # third kind: neither platform nor tenant. Its project narrows
+  # cluster-scoped down to `Namespace` (under aegis-platform it
+  # inherited '*') and looks for orphans, which under aegis-platform
+  # did not happen (#47).
   project: aegis-organizaciones
   source:
     repoURL: {platform_repo()}
@@ -1819,19 +1828,19 @@ spec:
     automated: {{selfHeal: true}}
     syncOptions: [ServerSideApply=true, CreateNamespace=true]
   ignoreDifferences:
-    # El apiserver agrega un bloque `status` DENTRO de cada
-    # volumeClaimTemplate de un StatefulSet. Es estado observado, no
-    # configuración: no hay forma de declararlo, y sin esto una
-    # organización con base de datos queda OutOfSync para siempre.
+    # The apiserver adds a `status` block INSIDE each of a
+    # StatefulSet's volumeClaimTemplates. It is observed state, not
+    # configuration: there is no way to declare it, and without this an
+    # organization with a database stays OutOfSync forever.
     #
-    # El alcance es lo más angosto posible: SOLO .status de esas
-    # entradas. NO todo /spec/volumeClaimTemplates, que es el atajo
-    # habitual y taparía un cambio de tamaño o de accessMode.
+    # The scope is as narrow as it can be: ONLY the .status of those
+    # entries. NOT the whole /spec/volumeClaimTemplates, which is the
+    # usual shortcut and would hide a change of size or of accessMode.
     #
-    # Y NO se ignora la imagen. Ese es el otro atajo, y APAGA el
-    # auto-sync (#36): si la única diferencia es la imagen y la imagen
-    # está ignorada, ArgoCD no ve nada que hacer. Acá no hace falta
-    # porque todo lo generado va por digest.
+    # And the image is NOT ignored. That is the other shortcut, and it
+    # TURNS OFF auto-sync (#36): if the only difference is the image
+    # and the image is ignored, ArgoCD sees nothing to do. Here it is
+    # not needed, because everything generated goes by digest.
     - group: apps
       kind: StatefulSet
       jqPathExpressions:
@@ -1894,29 +1903,28 @@ def render_appprojects():
             projects.append((c["organizacion"], repos))
 
     parts = [markers.BANNER + f"""
-# Un AppProject por CONTRATO que declara repo. Se rederiva en cada
-# `{CMD_ORG_APPLY}`.
+# One AppProject per CONTRACT that declares a repo. It is re-derived
+# on every `{CMD_ORG_APPLY}`.
 #
-# Los proyectos del sustrato (aegis-bootstrap, aegis-platform) y los que
-# no salen de un contrato (aegis-tenant-canary, aegis-tenant-ecommerce)
-# viven a mano en appprojects.yaml, al lado. Mezclarlos acá haría que la
-# próxima corrida los borrara en silencio.
+# The substrate projects (aegis-bootstrap, aegis-platform) and the ones
+# that do not come out of a contract (aegis-tenant-canary,
+# aegis-tenant-ecommerce) live by hand in appprojects.yaml, next door.
+# Mixing them in here would make the next run delete them in silence.
 #
-# UN AppProject POR ORGANIZACIÓN, no uno compartido con varios destinos.
-# La diferencia importa: con un solo proyecto que liste los tres
-# namespaces, una app del ecommerce podría desplegarse en el namespace
-# del portafolio con solo cambiar una línea de su propio repo. El
-# proyecto ES la frontera, y una frontera con tres puertas abiertas no
-# es una frontera.
+# ONE AppProject PER ORGANIZATION, not one shared across destinations.
+# The difference matters: with a single project listing the three
+# namespaces, an ecommerce app could deploy into the portfolio's
+# namespace by changing one line in its own repo. The project IS the
+# boundary, and a boundary with three open gates is not a boundary.
 #
-# ESTOS NO LOS GESTIONA NINGUNA App, a propósito (W-06 / R1 camino B).
-# Se aplican por kubectl antes que root: (a) evita la carrera
-# AppProject-vs-Application dentro de un mismo sync, y (b) cierra el
-# vector de escalar privilegios por una App que edite proyectos. Por eso
-# viven fuera de k8s/argocd-apps/, que es el path del App-of-Apps."""]
+# NO App MANAGES THESE, on purpose (W-06 / R1 path B). They are applied
+# with kubectl before root: (a) it avoids the AppProject-vs-Application
+# race inside a single sync, and (b) it closes the privilege-escalation
+# vector of an App that edits projects. That is why they live outside
+# k8s/argocd-apps/, which is the App-of-Apps path."""]
 
     if not projects:
-        parts.append("#\n# (ningún contrato declara repo todavía)")
+        parts.append("#\n# (no contract declares a repo yet)")
         return "\n".join(parts) + "\n"
 
     for org, repos in projects:
@@ -1930,69 +1938,71 @@ metadata:
   namespace: argocd
   labels: {{aegis.dev/part-of: aegis-platform}}
 spec:
-  description: apps de la organización {org} — SOLO su repo, SOLO org-{org}, CERO cluster-scoped
-  # Los repos que declara el contrato: el de la organización y los que
-  # cada servicio haya declarado por su cuenta. Enumerados, nunca '*'.
+  description: apps of organization {org} — ONLY its repo, ONLY org-{org}, ZERO cluster-scoped
+  # The repos the contract declares: the organization's own and the
+  # ones each service declared for itself. Enumerated, never '*'.
   sourceRepos:
 {listing}
   destinations:
     - {{server: https://kubernetes.default.svc, namespace: org-{org}}}
-  # EL fix de R1-B: deny-all cluster-scoped. Escribir en el repo de una
-  # app ya no da acceso al cluster entero.
+  # THE R1-B fix: deny-all cluster-scoped. Writing in an app's repo no
+  # longer grants access to the whole cluster.
   clusterResourceWhitelist: []
-  # Y dentro de su namespace, que no se auto-escale ni cambie sus
-  # propios límites: esos los pone la plataforma (App org-{org}).
+  # And inside its namespace, no self-scaling and no changing its own
+  # limits: those are set by the platform (App org-{org}).
   namespaceResourceBlacklist:
     - {{group: "", kind: ResourceQuota}}
     - {{group: "", kind: LimitRange}}
     - {{group: rbac.authorization.k8s.io, kind: Role}}
     - {{group: rbac.authorization.k8s.io, kind: RoleBinding}}
-    # Y NO puede escribir su propio ruteo (#54). Este es el que no es
-    # obvio: los cuatro de arriba protegen a la organización de sí
-    # misma, éste protege a LAS DEMÁS de ella.
+    # And it CANNOT write its own routing (#54). This is the one that
+    # is not obvious: the four above protect the organization from
+    # itself; this one protects THE OTHERS from it.
     #
-    # Un AppProject filtra por *kind*, jamás por el valor de un campo,
-    # así que no hay forma de decir "IngressRoutes sí, pero solo con TU
-    # Host". Mientras el inquilino pudiera crear una, podía reclamar el
-    # hostname del vecino. MEDIDO el 2026-08-06: org-blog reclamó un
-    # host, org-ejemplo reclamó EL MISMO, los dos admitidos sin una
-    # queja, y traefik terminó sirviendo el del segundo. El dueño
-    # legítimo no tenía defensa ni aviso.
+    # An AppProject filters by *kind*, never by the value of a field,
+    # so there is no way to say "IngressRoutes yes, but only with YOUR
+    # Host". As long as the tenant could create one, it could claim the
+    # neighbour's hostname. MEASURED on 2026-08-06: org-blog claimed a
+    # host, org-ejemplo claimed THE SAME one, both admitted without a
+    # complaint, and traefik ended up serving the second one's. The
+    # legitimate owner had no defence and no warning.
     #
-    # La única forma de acotarlo por kind es que el kind no le
-    # pertenezca: el ruteo lo deriva la plataforma del contrato
-    # (routes.yaml, App org-{org}) y acá se le quita la lapicera.
+    # The only way to bound it by kind is for the kind not to belong to
+    # it: the routing is derived by the platform from the contract
+    # (routes.yaml, App org-{org}) and here the pen is taken away.
     - {{group: traefik.io, kind: IngressRoute}}
-    # Y el Middleware por el MISMO motivo, agregado con #81/#90
-    # (2026-08-13). El ruteo derivado engancha tres middlewares por
-    # ruta —cabeceras, ritmo, cuerpo— que viven en el namespace del
-    # inquilino. Sin esta línea, el inquilino podía declarar un
-    # Middleware con el mismo nombre y contenido vacío: mismo nombre,
-    # misma referencia desde la IngressRoute que él no controla, y el
-    # rate-limit desaparecía sin que la ruta cambiara.
+    # And Middleware for the SAME reason, added with #81/#90
+    # (2026-08-13). The derived routing hooks three middlewares onto
+    # every route —cabeceras, ritmo, cuerpo— and they live in the
+    # tenant's namespace. Without this line, the tenant could declare a
+    # Middleware with the same name and empty contents: same name, same
+    # reference from the IngressRoute it does not control, and the rate
+    # limit would disappear without the route changing at all.
     #
-    # Es exactamente la forma del robo de Host de arriba: no se roba el
-    # recurso propio, se pisa el que otro referencia por nombre.
+    # It is exactly the shape of the Host theft above: you do not steal
+    # your own resource, you overwrite the one another references by
+    # name.
     - {{group: traefik.io, kind: Middleware}}
-  # AVISAR de lo que sobra, sin borrarlo (A19 / #31).
+  # WARN about what is left over, without deleting it (A19 / #31).
   #
-  # `prune` está omitido en toda la plataforma a propósito: quitar algo
-  # de git NO lo quita del cluster. La decisión es correcta —un prune
-  # mal disparado se lleva datos— pero deja un punto ciego: nadie se
-  # entera de lo que quedó vivo. Ya pasó con NetworkPolicies borradas de
-  # git que siguieron aplicándose durante días.
+  # `prune` is omitted across the whole platform on purpose: taking
+  # something out of git does NOT take it out of the cluster. The
+  # decision is right —a badly aimed prune takes data with it— but it
+  # leaves a blind spot: nobody finds out what stayed alive. It already
+  # happened with NetworkPolicies deleted from git that went on being
+  # applied for days.
   #
-  # `warn: true` cierra ese hueco sin agregar riesgo: ArgoCD marca los
-  # huérfanos como condición de la app, y el operador decide. Detección,
-  # no prevención, y se acepta como tal.
+  # `warn: true` closes that hole without adding risk: ArgoCD marks the
+  # orphans as a condition of the app, and the operator decides.
+  # Detection, not prevention, and it is accepted as such.
   orphanedResources:
     warn: true
     ignore:
-      # Lo crea el kube-controller-manager en CADA namespace, no sale de
-      # ningún git y nunca va a salir. Sin esta excepción el aviso
-      # aparecería en toda organización para siempre, y un aviso
-      # permanente apaga la señal igual que una ausencia — que es la
-      # Enfermedad E y la razón de que este mecanismo exista.
+      # The kube-controller-manager creates it in EVERY namespace; it
+      # comes out of no git and never will. Without this exception the
+      # warning would show up in every organization forever, and a
+      # permanent warning kills the signal just as an absence does —
+      # which is Disease E and the reason this mechanism exists.
       - group: ""
         kind: ConfigMap
         name: kube-root-ca.crt""")
@@ -2048,13 +2058,13 @@ def render_argocd_secretgen():
     # information needed when something does not show up.
     fixed = [
         ("secret-ops-stack-repo.enc.yaml",
-         "fase 15 (tmb aplicado por pipe en fase 30 — KSOPS lo ADOPTA después)"),
-        ("secret-github-webhook.enc.yaml", "fase 15 (HMAC — A27)"),
+         "phase 15 (pipe also applies it in phase 30 — KSOPS ADOPTS it later)"),
+        ("secret-github-webhook.enc.yaml", "phase 15 (HMAC — A27)"),
         # The canary's deploy key. It was the LAST one with WRITE
         # permission, and it had it only so that the Image Updater could
         # push its write-back. With that component withdrawn (#59), it
         # becomes READ ONLY, like the blog's and the portfolio's (#49).
-        ("secret-hello-aegis-repo.enc.yaml", "fase 15 (deploy key de LECTURA)"),
+        ("secret-hello-aegis-repo.enc.yaml", "phase 15 (READ-ONLY deploy key)"),
     ]
     # secret-regcred-image-updater.enc.yaml WAS HERE, withdrawn in #59
     # along with the component. It was the credential the updater used
@@ -2063,10 +2073,10 @@ def render_argocd_secretgen():
     # nothing in return (I4).
     lines = [
         *markers.FRAME,
-        "# REGLA TEMPORAL (corrida #4, bug que frenó la fase 35): esta App",
-        "# sincroniza en fase 35 — un entry cuyo .enc.yaml se genera en una fase",
-        "# POSTERIOR rompe el build ENTERO de kustomize (es atómico) y NINGÚN",
-        "# secret de la App se crea, ni los que sí existen en el repo.",
+        "# TEMPORARY RULE (run #4, the bug that stalled phase 35): this App",
+        "# syncs in phase 35 — an entry whose .enc.yaml is generated in a LATER",
+        "# phase breaks the WHOLE kustomize build (it is atomic) and NOT ONE of",
+        "# the App's secrets is created, not even the ones already in the repo.",
         "apiVersion: viaduct.ai/v1",
         "kind: ksops",
         "metadata:",
@@ -2074,8 +2084,8 @@ def render_argocd_secretgen():
         "  annotations:",
         "    config.kubernetes.io/function: |",
         "      exec: {path: ksops}",
-        "# LISTA EXPLÍCITA (A7): nada de globs. La diferencia con antes es que",
-        "# esta lista la deriva el generador, no una persona.",
+        "# EXPLICIT LIST (A7): no globs. The difference from before is that",
+        "# this list is derived by the generator, not by a person.",
         "files:",
     ]
     for filename, why in fixed:
@@ -2091,10 +2101,11 @@ def render_argocd_secretgen():
         repos += [f"secret-{n}-repo.enc.yaml" for n in repos_of(c).values()]
     if repos:
         lines.append(
-            "  # La deploy key con la que ArgoCD LEE el repo de cada organización.\n"
-            f"  # Sale de su `repo:` y se crea con `{CMD_SECRET}`, que\n"
-            "  # además imprime la mitad pública para registrarla en GitHub. Sin\n"
-            "  # registrarla, la App queda en 'repository not accessible'.")
+            "  # The deploy key ArgoCD READS each organization's repo with.\n"
+            f"  # It comes from its `repo:` and is created by `{CMD_SECRET}`,\n"
+            "  # which also prints the public half so it can be registered on\n"
+            "  # GitHub. Without registering it, the App stays in 'repository\n"
+            "  # not accessible'.")
         lines += [f"  - {r}" for r in sorted(repos)]
     return "\n".join(lines) + "\n"
 
@@ -2188,9 +2199,9 @@ def render_garage_kustomization():
         resources.append("aprovisionar.yaml")
     lines = [
         *markers.FRAME,
-        "# Sale del conjunto de contratos: `aprovisionar.yaml` se lista solo",
-        "# cuando alguna organización declaró `almacenamiento.bucket`, porque",
-        "# kustomize falla si un recurso listado no existe.",
+        "# Comes out of the set of contracts: `aprovisionar.yaml` is listed",
+        "# only when some organization declared `almacenamiento.bucket`,",
+        "# because kustomize fails if a listed resource does not exist.",
         "apiVersion: kustomize.config.k8s.io/v1beta1",
         "kind: Kustomization",
         "resources:",
@@ -2203,11 +2214,12 @@ def render_garage_kustomization():
 def render_garage_secretgen():
     fixed = [
         ("secret-garage-credentials.enc.yaml",
-         "rpc_secret y admin_token del Garage compartido. Los crea\n"
-         f"  # `{CMD_SECRET}` si faltan, y NUNCA los regenera: rotarlos con\n"
-         "  # el cluster arriba deja al nodo sin poder hablarse a sí mismo."),
+         "rpc_secret and admin_token of the shared Garage. Created by\n"
+         f"  # `{CMD_SECRET}` if they are missing, and NEVER regenerated:\n"
+         "  # rotating them with the cluster up leaves the node unable to\n"
+         "  # talk to itself."),
         ("secret-regcred-internal.enc.yaml",
-         "Credencial de lectura del registry interno, para pullear la imagen."),
+         "Read credential for the internal registry, to pull the image."),
     ]
     lines = [
         *markers.FRAME,
@@ -2218,9 +2230,9 @@ def render_garage_secretgen():
         "  annotations:",
         "    config.kubernetes.io/function: |",
         "      exec: {path: ksops}",
-        "# LISTA EXPLÍCITA (A7): nada de globs. Un glob incorpora en silencio",
-        "# cualquier .enc.yaml que caiga en el directorio. La diferencia con",
-        "# antes es que esta lista la deriva el generador, no una persona.",
+        "# EXPLICIT LIST (A7): no globs. A glob silently takes in any",
+        "# .enc.yaml that lands in the directory. The difference from before",
+        "# is that this list is derived by the generator, not by a person.",
         "files:",
     ]
     for filename, why in fixed:
@@ -2229,10 +2241,10 @@ def render_garage_secretgen():
     orgs = orgs_with_bucket()
     if orgs:
         lines.append(
-            "  # Espejo de la clave S3 de cada organización. El MISMO material\n"
-            "  # que en su namespace: la app la consume allá, y el Job de\n"
-            "  # aprovisionamiento la IMPORTA desde acá. Al revés —que el Job\n"
-            "  # la generara— cada corrida daría una credencial distinta.")
+            "  # Mirror of each organization's S3 key. The SAME material as\n"
+            "  # in its namespace: the app consumes it over there, and the\n"
+            "  # provisioning Job IMPORTS it from here. The other way round\n"
+            "  # —the Job generating it— every run would give a different one.")
         for org in orgs:
             lines.append(f"  - secret-garage-{org}.enc.yaml")
     return "\n".join(lines) + "\n"
@@ -2299,17 +2311,17 @@ def render_provisioning():
     indented = "\n".join("    " + l if l.strip() else "" for l in script.rstrip("\n").split("\n"))
 
     parts = [markers.BANNER + f"""
-# Un Job por organización que declaró `almacenamiento.bucket`.
+# One Job per organization that declared `almacenamiento.bucket`.
 #
-# El script es ai/aprovisionar-bucket.mjs, que vive como ARCHIVO y no
-# embebido en el generador: así se puede correr a mano contra un Garage
-# de prueba, que es como se lo verificó antes de escribir esto.
+# The script is ai/aprovisionar-bucket.mjs, which lives as a FILE and
+# not embedded in the generator: that way it can be run by hand against
+# a test Garage, which is how it was verified before this was written.
 #
-# CORRE COMO HOOK DE SYNC, no como recurso suelto. Un Job es inmutable:
-# reaplicarlo con cualquier cambio falla. Con `hook-delete-policy:
-# BeforeHookCreation` cada sync borra el anterior y crea el nuevo, y
-# como el script es idempotente eso además REPARA — si alguien borra un
-# bucket, el próximo sync lo recrea.
+# IT RUNS AS A SYNC HOOK, not as a loose resource. A Job is immutable:
+# reapplying it with any change fails. With `hook-delete-policy:
+# BeforeHookCreation` each sync deletes the previous one and creates
+# the new one, and since the script is idempotent that also REPAIRS —
+# if somebody deletes a bucket, the next sync recreates it.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -2333,16 +2345,16 @@ metadata:
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
-  # Tres intentos y se rinde. Un Job que reintenta para siempre convierte
-  # un error de configuración en ruido de fondo.
+  # Three attempts and it gives up. A Job that retries forever turns a
+  # configuration error into background noise.
   backoffLimit: 3
   template:
     metadata:
       labels:
         aegis.dev/component: garage
-        # La etiqueta que le abre la NetworkPolicy hacia el puerto de
-        # ADMIN. Se concede por POD y no por namespace justamente para
-        # que la tenga este Job y no todo lo que corra al lado.
+        # The label that opens the NetworkPolicy towards the ADMIN
+        # port. It is granted per POD and not per namespace precisely
+        # so this Job has it and not everything running beside it.
         aegis.dev/rol: aprovisionar-bucket
     spec:
       restartPolicy: Never
@@ -2354,11 +2366,11 @@ spec:
         seccompProfile: {{type: RuntimeDefault}}
       containers:
         - name: aprovisionar
-          # nodejs-distroless, ya espejada y firmada. Node hace HTTP sin
-          # una sola dependencia: traer y firmar una imagen nueva solo
-          # para hablar con una API sería un eslabón más en la cadena de
-          # suministro a cambio de nada. Y sin shell, que es exactamente
-          # lo que se quiere en un pod que maneja el admin token.
+          # nodejs-distroless, already mirrored and signed. Node speaks
+          # HTTP without a single dependency: pulling and signing a new
+          # image just to talk to an API would be one more link in the
+          # supply chain in exchange for nothing. And no shell, which
+          # is exactly what you want in a pod holding the admin token.
           image: {image}
           args: ["/app/aprovisionar.mjs"]
           env:
@@ -2368,10 +2380,10 @@ spec:
             - name: GARAGE_ADMIN_TOKEN
               valueFrom:
                 secretKeyRef: {{name: garage-credentials, key: admin_token}}
-            # El MISMO material que tiene la organización en su
-            # namespace. Se importa, no se pide: si Garage generara la
-            # clave, cada corrida daría una distinta y habría que
-            # escribirla de vuelta a algún lado.
+            # The SAME material the organization has in its own
+            # namespace. It is imported, not asked for: if Garage
+            # generated the key, every run would give a different one
+            # and it would have to be written back somewhere.
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef: {{name: garage-{org}, key: AWS_ACCESS_KEY_ID}}
@@ -2482,12 +2494,12 @@ def jenkins_jobs():
 def render_jobs_block():
     lines = [JOBS_BLOCK_START]
     lines.append(f"""\
-          # Un job multibranch por repo declarado en un contrato de
-          # orgs/. El nombre del job es el de su Application: un repo,
-          # un job, una App — la misma clave en Jenkins y en ArgoCD.
-          # Este bloque se rederiva ENTERO en cada corrida de
-          # {CMD_ORG}: lo que se edite entre las marcas no
-          # sobrevive a la próxima.""")
+          # One multibranch job per repo declared in a contract in
+          # orgs/. The job's name is its Application's: one repo, one
+          # job, one App — the same key in Jenkins and in ArgoCD.
+          # This block is re-derived WHOLE on every run of
+          # {CMD_ORG}: whatever is edited between the markers does
+          # not survive the next one.""")
     for n, owner, repo in jenkins_jobs():
         lines.append(f"""\
           - script: >
@@ -2569,13 +2581,14 @@ def tenant_probes():
 def render_probes_block():
     lines = [PROBES_BLOCK_START]
     lines.append(f"""\
-    # Un probe por organización con dominio y ruta pública. Mide el
-    # camino COMPLETO que recorre un cliente: DNS, borde, túnel,
-    # traefik, middlewares y la app. Todo lo demás mide piezas.
-    # Este bloque se rederiva ENTERO en cada {CMD_ORG_APPLY}.""")
+    # One probe per organization with a domain and a public path. It
+    # measures the COMPLETE path a customer walks: DNS, edge, tunnel,
+    # traefik, middlewares and the app. Everything else measures
+    # pieces.
+    # This block is re-derived WHOLE on every {CMD_ORG_APPLY}.""")
     probes = tenant_probes()
     if not probes:
-        lines.append("    # (ninguna organización declara dominio con ruta pública)")
+        lines.append("    # (no organization declares a domain with a public path)")
     for org, dom in probes:
         lines.append(f"""\
     - job_name: sitio-{org}
@@ -2666,7 +2679,7 @@ def apply_jenkins(write):
 #
 # It is instantiated into the staging area .aegis-app/<org>/<svc>/ and
 # NOT into a versioned directory: this file's destination is THE APP's
-# repo (caminos §3 — `aegis-app aplicar` pushes it only into an empty
+# repo (journeys §3 — `aegis app apply` pushes it only into an empty
 # repo), and versioning here a copy of what lives over there would
 # repeat platform/'s historical mistake: two copies, and the one nobody
 # looks at rots. That is why .aegis-app/ is in the .gitignore.
@@ -2736,7 +2749,7 @@ def apply_jenkinsfiles(write):
     # I4: the staging area of a service that no longer derives from any
     # contract is SURPLUS. ONLY the Jenkinsfile is removed —which is
     # what this derivation produces— and the directories left empty: the
-    # day the staging area also holds skeletons from `aegis-app nueva`,
+    # day the staging area also holds skeletons from `aegis app new`,
     # those are not ours to delete.
     if os.path.isdir(STAGING_DIR):
         for org in sorted(os.listdir(STAGING_DIR)):

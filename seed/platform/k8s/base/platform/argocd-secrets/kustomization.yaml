@@ -1,17 +1,18 @@
-# argocd-secrets v2: los Secrets "alrededor" de argocd + su
-# IngressRoute + el cert CA-trust, que el repo-server usa para validar
-# el TLS del registry interno. A7: lista explícita en el generator.
+# argocd-secrets v2: the Secrets "around" argocd + its
+# IngressRoute + the CA-trust cert, which the repo-server uses to
+# validate the internal registry's TLS. A7: explicit list in the
+# generator.
 #
-# REGLA TEMPORAL (misma que el generator): esta App sincroniza en
-# fase 35. imageupdater-hello-aegis.yaml NO se lista acá A PROPÓSITO
-# — su CRD lo instala el chart image-updater en la fase 70; listarlo
-# estático rompería el sync de la 35 (kind desconocido). La fase 70
-# lo agrega a resources EN EL MISMO COMMIT post-CRD (patrón
-# same-commit). NO "arreglar" agregándolo a mano.
+# TEMPORAL RULE (the same as the generator's): this App syncs in
+# phase 35. imageupdater-hello-aegis.yaml is NOT listed here ON
+# PURPOSE — its CRD is installed by the image-updater chart in phase
+# 70; listing it statically would break the sync of the 35 (unknown
+# kind). Phase 70 adds it to resources IN THE SAME COMMIT, post-CRD
+# (same-commit pattern). Do NOT "fix" it by adding it by hand.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - extras.yaml
-  - netpol.yaml          # W-07 iter2: aislamiento de ingress de argocd (core, sin CRD → estático OK)
+  - netpol.yaml          # W-07 iter2: argocd ingress isolation (core, no CRD → static OK)
 generators:
   - secret-generator.yaml

@@ -1,30 +1,31 @@
-# values kyverno 3.8.1 v2 — CA + scope horneados (A44).
+# kyverno 3.8.1 v2 values — CA + scope baked in (A44).
 global:
-  # CA raíz de aegis (T1, PEM público). global.* => llega a los TRES
-  # controllers (admission+background+reports; per-controller dejaba
-  # reports sin CA — bug #101 v1). El placeholder AEGIS_CA_PEM (con
-  # dunders, abajo en data) lo inyecta la FASE 80 del init (el CA no
-  # existe hasta que cert-manager lo emite en fase 35) — mismo patrón
-  # que COSIGN_PUB; ambos son de clase-generado
-  # (render_platform_placeholders NO los toca). CR-2 corrida #14:
-  # este comentario NO escribe el placeholder literal — el inyector
-  # viejo tomaba el indent de la PRIMERA ocurrencia (este comentario,
-  # indent 2) y el PEM quedaba fuera del block scalar (indent 6);
-  # inject_placeholder toma el indent de la línea real y el check 48
-  # prohíbe el literal en comentarios.
+  # aegis root CA (T1, public PEM). global.* => it reaches ALL THREE
+  # controllers (admission+background+reports; per-controller left
+  # reports without a CA — bug #101 in v1). The AEGIS_CA_PEM
+  # placeholder (with dunders, below in data) is injected by PHASE 80
+  # of the init (the CA does not exist until cert-manager issues it in
+  # phase 35) — same pattern as COSIGN_PUB; both are of the
+  # generated class (render_platform_placeholders does NOT touch
+  # them). CR-2 run #14: this comment does NOT write the literal
+  # placeholder — the old injector took the indent of the FIRST
+  # occurrence (this comment, indent 2) and the PEM ended up outside
+  # the block scalar (indent 6); inject_placeholder takes the indent
+  # of the real line and check 48 forbids the literal in comments.
   caCertificates:
     data: |
       __AEGIS_CA_PEM__
-  # el mount solo NO basta: go-containerregistry no levanta el
-  # bundle — SSL_CERT_FILE lo fuerza (verificado con crane en v1):
+  # the mount alone is NOT enough: go-containerregistry does not pick
+  # up the bundle — SSL_CERT_FILE forces it (verified with crane, v1):
   extraEnvVars:
     - name: SSL_CERT_FILE
       value: /etc/ssl/certs/ca-certificates.crt
 
-# scope NATIVO de TODOS los webhooks => blast radius del Fail =
-# org-canary. Consistente mutating+validating (los matchConditions
-# per-policy NO — rompen verifyImages). DEUDA heredada consciente:
-# toda policy futura nace scopeada a org-canary; expandir acá.
+# NATIVE scope of ALL the webhooks => blast radius of the Fail =
+# org-canary. Consistent mutating+validating (the per-policy
+# matchConditions are NOT — they break verifyImages). CONSCIOUS
+# inherited debt: every future policy is born scoped to org-canary;
+# widen it here.
 config:
   webhooks:
     namespaceSelector:

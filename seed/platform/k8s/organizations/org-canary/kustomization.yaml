@@ -2,10 +2,10 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - bundle.yaml
-  - netpol.yaml   # W-07: k3s enforcea netpols nativo (kube-router
-                  # embebido) — no espera Cilium (04-netpol-diseno §5)
-  - routes.yaml    # #54: la ruta la pone la PLATAFORMA, no el repo de la
-                  # app. Acá a mano porque el canario no tiene contrato
-                  # del que derivarla; el archivo explica por qué.
+  - netpol.yaml   # W-07: k3s enforces netpols natively (embedded
+                  # kube-router) — no Cilium (04-netpol-diseno §5)
+  - routes.yaml    # #54: the PLATFORM puts the route in, not the app's
+                  # repo. Hand-written here because the canary has no
+                  # contract to derive it from; the file explains why.
 generators:
   - secret-generator.yaml

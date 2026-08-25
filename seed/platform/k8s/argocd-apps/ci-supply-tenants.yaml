@@ -1,6 +1,6 @@
-# Apps de CI, supply-chain y tenants (v2). Mismo contrato que
-# core.yaml. El ORDEN de habilitación lo da el init (fases 40-80);
-# kyverno-policies es LA ÚLTIMA (D5 — H-7 codificado).
+# CI, supply-chain and tenant Apps (v2). Same contract as core.yaml.
+# The init decides the ORDER in which they are enabled (phases 40-80);
+# kyverno-policies is THE LAST one (D5 — H-7 encoded).
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -99,18 +99,18 @@ spec:
     automated: {selfHeal: true}
     syncOptions: [ServerSideApply=true]
 ---
-# ACÁ VIVÍA la Application del argocd-image-updater, retirada en #59.
+# HERE LIVED the argocd-image-updater Application, retired in #59.
 #
-# Su último consumidor era el canario, y salió en #57. Las
-# organizaciones generadas nacen con despliegue por DIGEST escrito por
-# su propio pipeline, así que el componente se quedó sin nadie a quien
-# servir. No se deja "por las dudas": un componente que corre y no sirve
-# a nadie es superficie de ataque y ruido (I4).
+# Its last consumer was the canary, and it left in #57. Generated
+# organizations are born deploying by DIGEST, written by their own
+# pipeline, so the component was left with nobody to serve. It is not
+# kept "just in case": a component that runs and serves nobody is
+# attack surface and noise (I4).
 #
-# Lo que lo reemplazó es mejor y no sólo distinto: el pipeline que
-# CONSTRUYÓ la imagen ya sabe su digest y lo escribe en git. El updater
-# tenía que redescubrirlo sondeando el registry, con un poller que se
-# cuelga y un write-back que puede no aterrizar.
+# What replaced it is better and not merely different: the pipeline
+# that BUILT the image already knows its digest and writes it into
+# git. The updater had to rediscover it by polling the registry, with
+# a poller that hangs and a write-back that may never land.
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -152,7 +152,7 @@ spec:
     automated: {selfHeal: true}
     syncOptions: [ServerSideApply=true]
 ---
-# LA ÚLTIMA en habilitarse (D5): Enforce solo con firma existente.
+# THE LAST one enabled (D5): Enforce only with a signature in place.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -166,22 +166,22 @@ spec:
     targetRevision: main
     path: k8s/base/kyverno-policies
   destination: {server: https://kubernetes.default.svc, namespace: kyverno}
-  # H7 corrida #15 (BLOQUEANTE determinista): el webhook de Kyverno
-  # inyecta ~9 campos DEFAULT al admitir el ClusterPolicy (admission,
-  # emitWarning, validationFailureAction:Audit —cosmético: el Enforce
-  # real es failureAction de la regla—, skipBackgroundRequests,
-  # required/useCache/verifyDigest, signatureAlgorithm en entry y
-  # keys) → diff desired-vs-live que NUNCA cierra → OutOfSync eterno
-  # → el gate anclado a Synced moría a los 300s con op=Succeeded.
-  # Solución CANÓNICA upstream (fricción Kyverno↔ArgoCD documentada):
-  # ignorar los paths de defaulting + RespectIgnoreDifferences=true
-  # (sin la syncOption, el ignore solo afecta el DIFF, no el apply).
-  # NO se hornean los defaults en el seed (workaround d8e2940 del
-  # operador): cada versión de Kyverno puede AGREGAR defaults y el
-  # seed quedaría casado con la versión exacta — esto cubre la
-  # familia. Los campos que git SÍ declara (background, failureAction,
-  # imageReferences, publicKeys, failurePolicy) NO están en la lista:
-  # su drift se sigue detectando.
+  # H7 run #15 (deterministic BLOCKER): the Kyverno webhook injects
+  # ~9 DEFAULT fields when admitting the ClusterPolicy (admission,
+  # emitWarning, validationFailureAction:Audit —cosmetic: the real
+  # Enforce is the rule's failureAction—, skipBackgroundRequests,
+  # required/useCache/verifyDigest, signatureAlgorithm in entry and
+  # keys) → a desired-vs-live diff that NEVER closes → eternal
+  # OutOfSync → the gate anchored to Synced died at 300s with
+  # op=Succeeded. CANONICAL upstream fix (documented Kyverno↔ArgoCD
+  # friction): ignore the defaulting paths +
+  # RespectIgnoreDifferences=true (without the syncOption the ignore
+  # only affects the DIFF, not the apply). The defaults are NOT baked
+  # into the seed (the operator's d8e2940 workaround): every Kyverno
+  # version may ADD defaults and the seed would end up married to the
+  # exact version — this covers the whole family. The fields git DOES
+  # declare (background, failureAction, imageReferences, publicKeys,
+  # failurePolicy) are NOT on the list: their drift is still detected.
   ignoreDifferences:
     - group: kyverno.io
       kind: ClusterPolicy
@@ -221,13 +221,13 @@ spec:
     automated: {selfHeal: true}
     syncOptions: [ServerSideApply=true, CreateNamespace=true]
 ---
-# El canary: la ÚNICA App que lee del repo de la APP (no de
-# plataforma). El overlay dev trae el tag que el CI produce y el
-# Image Updater actualiza (write-back). La credencial es el Secret
-# repository hello-aegis-repo (fase 15). El sync lo dispara la fase
-# 70, DESPUÉS del primer build (el tag del overlay debe existir en
-# el registry). Hueco cazado en sesión 4: la fase 70 sincronizaba
-# una App que no estaba declarada en ningún lado.
+# The canary: the ONLY App that reads from the APP repo (not from
+# the platform one). The dev overlay carries the tag the CI produces
+# and the Image Updater updates (write-back). The credential is the
+# hello-aegis-repo repository Secret (phase 15). Phase 70 triggers
+# the sync, AFTER the first build (the overlay's tag must exist in
+# the registry). Gap caught in session 4: phase 70 was syncing an App
+# that was not declared anywhere.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

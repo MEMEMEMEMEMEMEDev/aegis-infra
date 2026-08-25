@@ -1,18 +1,18 @@
-# NetworkPolicies del tenant org-canary — W-07 / R1 / P-D ("el
-# aislamiento del tenant era conceptual, no técnico"). k3s enforcea
-# networking.k8s.io/v1 con su controller embebido (kube-router) — NO
-# requiere Cilium (el comentario "cuando llegue Cilium" del kustomization
-# quedó obsoleto; verificado en 04-netpol-diseno.md §5). Rollout: el
-# tenant es el paso 1 (menor riesgo, máximo valor). Los namespaces de
-# plataforma van en una iteración siguiente (kyverno/cert-manager al
-# final: cortar mal su ingress = cluster sin admisión).
+# NetworkPolicies for the org-canary tenant — W-07 / R1 / P-D
+# ("tenant isolation was conceptual, not technical"). k3s enforces
+# networking.k8s.io/v1 with its embedded controller (kube-router) — it
+# does NOT require Cilium (the "when Cilium arrives" comment in the
+# kustomization is obsolete; verified in 04-netpol-diseno.md §5).
+# Rollout: the tenant is step 1 (least risk, most value). The platform
+# namespaces come in a later iteration (kyverno/cert-manager last:
+# cutting their ingress wrong = a cluster with no admission).
 #
-# RIESGO C7 (solo la corrida lo confirma): si el controller de k3s NO
-# exceptúa el tráfico del nodo, la default-deny de ingress podría cortar
-# la probe del kubelet (readiness a :8080/healthz) y dejar el canary
-# NotReady. El diseño, que MIDIÓ el tráfico, asume que el host queda
-# exceptuado; si la corrida muestra NotReady, agregar una regla de
-# ingress para el CIDR del nodo.
+# RISK C7 (only the run confirms it): if the k3s controller does NOT
+# exempt node traffic, the ingress default-deny could cut the kubelet
+# probe (readiness on :8080/healthz) and leave the canary NotReady.
+# The design, which MEASURED the traffic, assumes the host is
+# exempted; if the run shows NotReady, add an ingress rule for the
+# node's CIDR.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -23,8 +23,9 @@ spec:
   podSelector: {}
   policyTypes: [Ingress, Egress]
 ---
-# solo el edge (traefik en infra-edge) entra, y solo al puerto de la app.
-# podSelector {}: cualquier pod del tenant (robusto al canary efímero):
+# only the edge (traefik in infra-edge) gets in, and only to the app's
+# port. podSelector {}: any pod of the tenant (robust to the ephemeral
+# canary):
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -40,27 +41,28 @@ spec:
       ports:
         - {protocol: TCP, port: 8080}
 ---
-# Tráfico DENTRO del propio namespace. Sin esto el tenant solo servía
-# apps de un único pod: un front no podía hablarle a su backend, ni un
-# backend a su redis o a su base — la default-deny corta también el
-# tráfico pod↔pod del mismo namespace, cosa que sorprende a todo el
-# mundo la primera vez (se piensa la default-deny como frontera del
-# namespace, y es frontera de CADA POD).
+# Traffic INSIDE the namespace itself. Without this the tenant could
+# only serve single-pod apps: a front end could not talk to its
+# backend, nor a backend to its redis or its database — the
+# default-deny cuts pod↔pod traffic within the same namespace too,
+# something that surprises everyone the first time (one pictures the
+# default-deny as the namespace's boundary, and it is EVERY POD's
+# boundary).
 #
-# `podSelector: {}` dentro de `from`/`to` significa "cualquier pod de
-# ESTE namespace" — NO de todos. El aislamiento entre tenants queda
-# intacto: org-canary sigue sin poder hablarle a ningún otro
-# namespace, y nadie de afuera entra salvo el edge.
+# `podSelector: {}` inside `from`/`to` means "any pod in THIS
+# namespace" — NOT in all of them. Isolation between tenants stays
+# intact: org-canary still cannot talk to any other namespace, and
+# nobody from outside gets in except the edge.
 #
-# ALCANCE ELEGIDO A PROPÓSITO: el namespace es la frontera de confianza,
-# así que acá adentro se permite todo. La alternativa —una política por
-# app, con selectores de labels— es más estricta pero exige una regla
-# nueva por cada par de componentes que se hablan, y equivocarse ahí
-# rompe en runtime de formas difíciles de diagnosticar. Cuando dos apps
-# INDEPENDIENTES convivan en el mismo namespace y se quiera que no se
-# vean entre sí, el refinamiento correcto es ese; mientras tanto, apps
-# de distinto dueño van en organizaciones distintas, que es la frontera
-# que la plataforma sí enforcea.
+# SCOPE CHOSEN ON PURPOSE: the namespace is the trust boundary, so
+# inside it everything is allowed. The alternative —one policy per
+# app, with label selectors— is stricter but demands a new rule for
+# every pair of components that talk to each other, and getting that
+# wrong breaks at runtime in ways that are hard to diagnose. When two
+# INDEPENDENT apps share a namespace and the goal is that they not see
+# each other, that is the right refinement; meanwhile, apps with
+# different owners go in different organizations, which is the
+# boundary the platform does enforce.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -76,14 +78,15 @@ spec:
     - to:
         - podSelector: {}
 ---
-# solo DNS sale (el error #1 de netpol es olvidar el :53 y romper toda
-# la resolución). Una SPA estática no necesita más egress.
+# only DNS goes out (the #1 netpol mistake is forgetting :53 and
+# breaking all resolution). A static SPA needs no more egress.
 #
-# NO hay egress a internet, y es deliberado: la app que necesite llamar
-# a una API externa lo pide con una regla propia y explícita. Así el
-# default sigue siendo cerrado y cada salida a la red queda escrita en
-# algún lado. (Los pull de imágenes NO pasan por acá: los hace el
-# kubelet, que no está sujeto a NetworkPolicy.)
+# There is NO egress to the internet, and that is deliberate: an app
+# that needs to call an external API asks for it with its own explicit
+# rule. That way the default stays closed and every way out to the
+# network is written down somewhere. (Image pulls do NOT go through
+# here: the kubelet does them, and it is not subject to
+# NetworkPolicy.)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

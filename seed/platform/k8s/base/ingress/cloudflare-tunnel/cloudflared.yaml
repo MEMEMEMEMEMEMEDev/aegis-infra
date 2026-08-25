@@ -1,11 +1,12 @@
-# cloudflared v2 — el token viene del Secret KSOPS que la fase 25
-# cifró desde `tofu output` (nunca pantalla). restartCount alto con
-# red intermitente = reconexión correcta, no bug (memoria v1).
+# cloudflared v2 — the token comes from the KSOPS Secret that phase
+# 25 encrypted from `tofu output` (never on screen). A high
+# restartCount with an intermittent network = correct reconnection,
+# not a bug (v1 memory).
 #
-# --metrics 0.0.0.0:2000 + containerPort (hooks.md / fase-85 §7, el
-# enchufe de 2 líneas): vmagent scrapea reconexiones y conexiones
-# activas del túnel (job `cloudflared`). En la semilla va de fábrica;
-# en instancia viva lo agrega la fase 85 con guard estructural.
+# --metrics 0.0.0.0:2000 + containerPort (hooks.md / phase-85 §7, the
+# 2-line plug): vmagent scrapes the tunnel's reconnections and active
+# connections (`cloudflared` job). In the seed it ships from the
+# factory; on a live instance phase 85 adds it with a structural guard.
 ---
 apiVersion: apps/v1
 kind: Deployment

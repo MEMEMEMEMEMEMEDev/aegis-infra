@@ -1,7 +1,7 @@
-# ClusterIssuers Let's Encrypt v2 — DNS-01 (no hay puerto 80
-# expuesto). Patrón: staging PRIMERO, flip a prod tras validar la
-# pipeline ACME (rate limit). El token vive SOLO en el Secret KSOPS
-# (D7: su único consumidor es este ns).
+# Let's Encrypt ClusterIssuers v2 — DNS-01 (there is no port 80
+# exposed). Pattern: staging FIRST, flip to prod after validating the
+# ACME pipeline (rate limit). The token lives ONLY in the KSOPS Secret
+# (D7: its only consumer is this ns).
 ---
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer

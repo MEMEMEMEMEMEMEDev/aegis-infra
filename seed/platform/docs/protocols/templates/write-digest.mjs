@@ -20,62 +20,62 @@
 // the script's quotes. Here it can also be tested without CI.
 import { readFileSync, writeFileSync } from 'node:fs'
 
-const ARCHIVO = process.env.OVERLAY ?? 'k8s/overlays/dev/kustomization.yaml'
+const OVERLAY_FILE = process.env.OVERLAY ?? 'k8s/overlays/dev/kustomization.yaml'
 
-const porImagen = new Map()
+const byImage = new Map()
 for (const arg of process.argv.slice(2)) {
   const i = arg.indexOf('=')
   if (i < 0) {
     console.error(`argument without an '=': ${arg}`)
     process.exit(2)
   }
-  const nombre = arg.slice(0, i)
+  const name = arg.slice(0, i)
   const digest = arg.slice(i + 1)
   // An empty or malformed digest would write rubbish into git and
   // leave the pod in ImagePullBackOff. It stops here.
   if (!/^sha256:[0-9a-f]{64}$/.test(digest)) {
-    console.error(`invalid digest for ${nombre}: ${JSON.stringify(digest)}`)
+    console.error(`invalid digest for ${name}: ${JSON.stringify(digest)}`)
     process.exit(2)
   }
-  porImagen.set(nombre, digest)
+  byImage.set(name, digest)
 }
-if (porImagen.size === 0) {
+if (byImage.size === 0) {
   console.error('nothing to write')
   process.exit(2)
 }
 
-const lineas = readFileSync(ARCHIVO, 'utf8').split('\n')
-const escritas = new Set()
-let esperando = null
+const lines = readFileSync(OVERLAY_FILE, 'utf8').split('\n')
+const written = new Set()
+let awaiting = null
 
-const salida = lineas.map((linea) => {
-  const m = linea.match(/^(\s*)-\s*name:\s*(\S+)\s*$/)
+const out = lines.map((line) => {
+  const m = line.match(/^(\s*)-\s*name:\s*(\S+)\s*$/)
   if (m) {
-    esperando = porImagen.has(m[2]) ? m[2] : null
-    return linea
+    awaiting = byImage.has(m[2]) ? m[2] : null
+    return line
   }
   // What gets replaced is the line that FOLLOWS the `name:` that
   // matched. It works both for `newTag:` (the first deploy) and for
   // `digest:` (every one after), so running it twice changes nothing.
-  if (esperando && /^\s*(newTag|digest):/.test(linea)) {
-    const sangria = linea.match(/^\s*/)[0]
-    const nueva = `${sangria}digest: ${porImagen.get(esperando)}`
-    escritas.add(esperando)
-    esperando = null
-    return nueva
+  if (awaiting && /^\s*(newTag|digest):/.test(line)) {
+    const indent = line.match(/^\s*/)[0]
+    const replacement = `${indent}digest: ${byImage.get(awaiting)}`
+    written.add(awaiting)
+    awaiting = null
+    return replacement
   }
-  return linea
+  return line
 })
 
 // If an image does not appear in the overlay, the deploy would stay on
 // the old version WITH NOBODY SAYING SO. That is exactly the kind of
 // silent failure this change exists to eliminate, so it stops here.
-const faltan = [...porImagen.keys()].filter((n) => !escritas.has(n))
-if (faltan.length) {
-  console.error(`I could not find these images in ${ARCHIVO}:`)
-  for (const n of faltan) console.error(`  - ${n}`)
+const missing = [...byImage.keys()].filter((n) => !written.has(n))
+if (missing.length) {
+  console.error(`I could not find these images in ${OVERLAY_FILE}:`)
+  for (const n of missing) console.error(`  - ${n}`)
   process.exit(1)
 }
 
-writeFileSync(ARCHIVO, salida.join('\n'))
-for (const [n, d] of porImagen) console.log(`  ${n} -> ${d}`)
+writeFileSync(OVERLAY_FILE, out.join('\n'))
+for (const [n, d] of byImage) console.log(`  ${n} -> ${d}`)

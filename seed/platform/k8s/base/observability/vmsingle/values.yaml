@@ -1,20 +1,21 @@
-# values victoria-metrics-single 0.45.0 — el store+query de métricas
-# (design.md §4.1: un binario por rol, sin operator ni CRDs). Sin
-# réplica, PVC 5Gi (fase-85 §2: la retención de dev en un nodo solo
-# cabe de sobra; escalar a cluster es problema del perfil hetzner
-# FUTURO).
+# victoria-metrics-single 0.45.0 values — the metrics store+query
+# (design.md §4.1: one binary per role, no operator and no CRDs). No
+# replica, PVC 5Gi (phase-85 §2: dev's retention on a single node fits
+# with room to spare; scaling to a cluster is the FUTURE hetzner
+# profile's problem).
 server:
-  fullnameOverride: vmsingle    # Service = `vmsingle` :8428 (nombre
-                                # estable: lo consumen vmagent,
-                                # vmalert, grafana y el CronJob
-                                # trivy-db-age)
-  # clase-config, por perfil (fase-85 §4): 30d dev / 90d hetzner.
-  # external_labels no existen en vmsingle (no scrapea — el dato ya
-  # llega etiquetado por vmagent, que es donde vive __AEGIS_PROFILE__):
+  fullnameOverride: vmsingle    # Service = `vmsingle` :8428 (a stable
+                                # name: vmagent, vmalert, grafana and
+                                # the trivy-db-age CronJob all consume
+                                # it)
+  # config class, per profile (phase-85 §4): 30d dev / 90d hetzner.
+  # external_labels do not exist in vmsingle (it does not scrape — the
+  # datum arrives already labelled by vmagent, which is where
+  # __AEGIS_PROFILE__ lives):
   retentionPeriod: __OBS_RETENCION_METRICAS__
   persistentVolume:
     enabled: true
     size: 5Gi
-  resources:                    # fase-85 §10
+  resources:                    # phase-85 §10
     requests: {cpu: 100m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}

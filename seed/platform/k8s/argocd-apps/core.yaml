@@ -1,13 +1,13 @@
-# Apps del plano base v2 (multi-doc por área). Convenciones comunes:
-# ServerSideApply=true; selfHeal=true SALVO argocd-self (ADR-0012);
-# prune OMITIDO (A19); labels aegis.dev/* (A18). El repoURL usa
-# placeholders __GH_OWNER__/__PLATFORM_REPO__ que la fase 10 del
-# init reemplaza junto con el .sops.yaml (TODO E10: unificar el
-# templating de placeholders en un solo paso del init).
+# Base-plane Apps v2 (multi-doc by area). Shared conventions:
+# ServerSideApply=true; selfHeal=true EXCEPT for argocd-self
+# (ADR-0012); prune OMITTED (A19); aegis.dev/* labels (A18). The
+# repoURL uses __GH_OWNER__/__PLATFORM_REPO__ placeholders that
+# phase 10 of the init replaces along with the .sops.yaml (TODO E10:
+# unify placeholder templating into a single init step).
 ---
-# argocd-secrets ANTES que argocd (ADR-0015): KSOPS + generator con
-# LISTA EXPLÍCITA (A7) — files: ops-stack-repo, github-webhook,
-# hello-aegis-repo (SOLO LECTURA desde #59), ca-trust cert.
+# argocd-secrets BEFORE argocd (ADR-0015): KSOPS + generator with an
+# EXPLICIT LIST (A7) — files: ops-stack-repo, github-webhook,
+# hello-aegis-repo (READ-ONLY since #59), ca-trust cert.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -25,8 +25,8 @@ spec:
     automated: {selfHeal: true}
     syncOptions: [ServerSideApply=true]
 ---
-# argocd self: SIN automated NI finalizer (ADR-0012). Multi-source
-# $values; ignoreDifferences de las keys runtime.
+# argocd self: NO automated and NO finalizer (ADR-0012). Multi-source
+# $values; ignoreDifferences for the runtime keys.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -40,7 +40,7 @@ spec:
       chart: argo-cd
       targetRevision: 9.5.20
       helm:
-        releaseName: argocd          # contrato de adopción (fase 30)
+        releaseName: argocd          # adoption contract (phase 30)
         valueFiles: [$values/k8s/base/platform/argocd/values.yaml]
     - repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
       targetRevision: main
@@ -52,7 +52,7 @@ spec:
     - group: ""
       kind: Secret
       name: argocd-secret
-      jsonPointers: [/data]          # server.secretkey etc. runtime
+      jsonPointers: [/data]          # server.secretkey etc., runtime
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application

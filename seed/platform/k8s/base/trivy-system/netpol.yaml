@@ -1,20 +1,22 @@
-# NetworkPolicy de trivy-system — W-07 iter2 (aislamiento de plataforma).
-# Entregado por la App 'trivy-system' (path k8s/base/trivy-system, dest
-# trivy-system) — mismo directory-app que ya crea el namespace, sin App
-# nueva ni cross-namespace (patrón del tenant: netpol.yaml junto al resto).
+# NetworkPolicy of trivy-system — W-07 iter2 (platform isolation).
+# Delivered by the 'trivy-system' App (path k8s/base/trivy-system, dest
+# trivy-system) — the same directory-app that already creates the
+# namespace, with no new App and no cross-namespace (the tenant's pattern:
+# netpol.yaml alongside the rest).
 #
-# ITER2 = INGRESS-ONLY. flannel/kube-router (el CNI de k3s) NO hace FQDN
-# egress, así que restringir la salida de trivy a su DB (ghcr/aquasec) es
-# inviable acá — el egress real se difiere a Cilium/Hetzner (ADR-0014).
-# No declarar Egress deja la salida abierta: la descarga de la DB de
-# vulnerabilidades y el DNS siguen funcionando (nada se rompe).
+# ITER2 = INGRESS-ONLY. flannel/kube-router (the CNI of k3s) does NOT do
+# FQDN egress, so restricting trivy's way out to its DB (ghcr/aquasec) is
+# unfeasible here — real egress is deferred to Cilium/Hetzner (ADR-0014).
+# Not declaring Egress leaves the way out open: the download of the
+# vulnerability DB and DNS keep working (nothing breaks).
 #
-# Riesgo si esta allowlist quedara mal: el scan falla — RECUPERABLE
-# (`kubectl delete netpol -n trivy-system --all`) y además el Jenkinsfile
-# ya tolera trivy-server ausente en bootstrap (WARN, no rompe). Por eso
-# trivy-system entra en iter2 y no en la iter3 de los 🔴🔴.
-# Excepción del nodo (validada en la corrida v1: el canary quedó Ready
-# bajo default-deny) cubre las probes del kubelet.
+# Risk if this allowlist were wrong: the scan fails — RECOVERABLE
+# (`kubectl delete netpol -n trivy-system --all`) and besides, the
+# Jenkinsfile already tolerates trivy-server being absent at bootstrap
+# (WARN, does not break). That is why trivy-system goes in iter2 and not
+# in the iter3 of the 🔴🔴.
+# The node exception (validated in the v1 run: the canary went Ready
+# under default-deny) covers the kubelet probes.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -25,14 +27,14 @@ spec:
   podSelector: {}
   policyTypes: [Ingress]
 ---
-# Clientes legítimos:
-#  - jenkins-system: los pods de build escanean contra trivy :4954 (server
-#    mode). Puerto verificado en el Jenkinsfile.app (TRIVY_SERVER=...:4954).
-#  - el propio namespace: el gate 'trivy-responde' del init corre un pod
-#    trivy-probe DENTRO de trivy-system que curl-ea trivy:4954/healthz
-#    (fase 80). Sin este intra-ns, el default-deny lo cortaba y la fase 80
-#    frenaba con trivy 1/1 Running pero inalcanzable (corrida integración
-#    2026-07-23). podSelector {} = mismo namespace.
+# Legitimate clients:
+#  - jenkins-system: the build pods scan against trivy :4954 (server
+#    mode). Port verified in Jenkinsfile.app (TRIVY_SERVER=...:4954).
+#  - the namespace itself: the init's 'trivy-responde' gate runs a
+#    trivy-probe pod INSIDE trivy-system that curls trivy:4954/healthz
+#    (phase 80). Without this intra-ns, default-deny cut it off and phase
+#    80 stalled with trivy 1/1 Running but unreachable (integration run
+#    2026-07-23). podSelector {} = same namespace.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -45,14 +47,14 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: jenkins-system}
-        - podSelector: {}          # intra-ns: el trivy-probe del gate del init
+        - podSelector: {}          # intra-ns: the init gate's trivy-probe
       ports:
         - {protocol: TCP, port: 4954}
-    # observabilidad (fase-85 §7): blackbox sondea el /healthz de trivy
-    # en :4954 (job `blackbox-trivy` — el vigía del vigía por
-    # disponibilidad; la EDAD de la DB la pushea el CronJob trivy-db-age,
-    # que corre DENTRO de este ns y sale por egress, no entra). En
-    # instancia viva la agrega la fase 85 (guard estructural):
+    # observability (phase-85 §7): blackbox probes trivy's /healthz
+    # on :4954 (job `blackbox-trivy` — the watcher of the watcher, for
+    # availability; the AGE of the DB is pushed by the trivy-db-age
+    # CronJob, which runs INSIDE this ns and goes out by egress, does not
+    # come in). On a live instance phase 85 adds it (structural guard):
     - from:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: observability}

@@ -1,8 +1,8 @@
-# registry v2 (multi-doc) — TLS desde el día uno (desvío pedido por
-# la fuente: 2026-07-04:7). Baches horneados: args EXPLÍCITO (sin
-# args el binario ignora el ConfigMap y arranca SIN AUTH silencioso
-# — A23), probes tcpSocket (401 rompe httpGet — A23), ClusterIP FIJA
-# pareada con el SAN del cert (A24/A30).
+# registry v2 (multi-doc) — TLS from day one (a detour asked for by
+# the source: 2026-07-04:7). Potholes baked in: EXPLICIT args (without
+# args the binary ignores the ConfigMap and starts WITHOUT AUTH,
+# silently — A23), tcpSocket probes (401 breaks httpGet — A23), FIXED
+# ClusterIP paired with the cert's SAN (A24/A30).
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -21,12 +21,13 @@ data:
       tls:
         certificate: /certs/tls.crt
         key: /certs/tls.key
-      # métricas de distribution (hooks.md / fase-85 §7): listener de
-      # debug SEPARADO del público — :5001 solo se expone a ClusterIP
-      # (vmagent, job `registry`), jamás por el edge. HTTP plano a
-      # propósito: el cert del registry no lista :5001 y el scrape es
-      # in-cluster. En instancia viva lo agrega la fase 85 (guard
-      # estructural + restart del pod: el ConfigMap solo no reinicia):
+      # distribution metrics (hooks.md / phase-85 §7): a debug
+      # listener SEPARATE from the public one — :5001 is exposed only
+      # to ClusterIP (vmagent, `registry` job), never through the edge.
+      # Plain HTTP on purpose: the registry cert does not list :5001
+      # and the scrape is in-cluster. On a live instance phase 85 adds
+      # it (structural guard + pod restart: the ConfigMap alone does
+      # not restart it):
       debug:
         addr: :5001
         prometheus: {enabled: true}
@@ -42,10 +43,10 @@ metadata:
   namespace: registry-system
   labels: {aegis.dev/part-of: aegis-platform}
 spec:
-  clusterIP: __REGISTRY_CLUSTER_IP__   # FIJA: SAN del cert + mirror host
+  clusterIP: __REGISTRY_CLUSTER_IP__   # FIXED: cert SAN + mirror host
   selector: {app.kubernetes.io/name: registry}
-  # dos puertos ⇒ K8s exige nombrarlos AMBOS (el presupuesto de §7
-  # decía "1 línea"; el name del 5000 es costo de validación, no scope):
+  # two ports ⇒ K8s demands naming BOTH of them (the §7 budget said
+  # "1 line"; the name of the 5000 is validation cost, not scope):
   ports:
     - {name: registry, port: 5000, targetPort: 5000}
     - {name: metrics, port: 5001, targetPort: 5001}
@@ -57,15 +58,16 @@ metadata:
   namespace: registry-system
 spec:
   secretName: registry-tls
-  duration: 2160h        # 90d; renovación auto a 60d. DEUDA operativa
-  renewBefore: 720h      # heredada: el pod NO reinicia solo — restart
-                         # manual ~60d o Reloader con 3+ pods (B11).
+  duration: 2160h        # 90d; auto-renewal at 60d. INHERITED
+  renewBefore: 720h      # operational debt: the pod does NOT restart
+                         # by itself — manual restart ~60d or Reloader
+                         # with 3+ pods (B11).
   issuerRef: {name: aegis-internal-ca, kind: ClusterIssuer}
   dnsNames:
     - registry.registry-system.svc.cluster.local
     - registry.registry-system.svc
     - registry.registry-system
-  ipAddresses: [__REGISTRY_CLUSTER_IP__]   # el kubelet valida la IP
+  ipAddresses: [__REGISTRY_CLUSTER_IP__]   # the kubelet validates the IP
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -75,19 +77,19 @@ metadata:
   labels: {aegis.dev/part-of: aegis-platform}
 spec:
   replicas: 1
-  strategy: {type: Recreate}    # PVC RWO
+  strategy: {type: Recreate}    # RWO PVC
   selector:
     matchLabels: {app.kubernetes.io/name: registry}
   template:
     metadata:
       labels: {app.kubernetes.io/name: registry}
-      # A22: NO tocar labels/annotations de acá cosméticamente —
-      # rota el pod (template hash) con selfHeal activo.
+      # A22: do NOT touch the labels/annotations here cosmetically —
+      # it rotates the pod (template hash) with selfHeal active.
     spec:
       containers:
         - name: registry
           image: registry:3.1.1
-          # A23: SIN args el binario usa config default (SIN auth):
+          # A23: WITHOUT args the binary uses the default config (NO auth):
           args: ["serve", "/etc/distribution/config.yml"]
           ports: [{containerPort: 5000}]
           volumeMounts:
@@ -96,7 +98,7 @@ spec:
             - {name: tls, mountPath: /certs, readOnly: true}
             - {name: auth, mountPath: /auth, readOnly: true}
           readinessProbe:
-            tcpSocket: {port: 5000}    # A23: httpGet da 401
+            tcpSocket: {port: 5000}    # A23: httpGet returns 401
             initialDelaySeconds: 5
           livenessProbe:
             tcpSocket: {port: 5000}

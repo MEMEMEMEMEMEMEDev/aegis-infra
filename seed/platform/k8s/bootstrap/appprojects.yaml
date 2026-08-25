@@ -1,38 +1,39 @@
-# AppProjects v2 — W-06 / R1 camino B (escribir en el repo de una app
-# ya no da acceso cluster-scoped). Se aplican por kubectl en la fase 35
-# ANTES de root (clase C1: el proyecto existe antes de que cualquier
-# Application lo referencie). NO los gestiona ninguna App: son infra de
-# bootstrap (como los Secrets D2). Eso evita (a) la carrera
-# AppProject-vs-Application dentro de un mismo sync, y (b) el vector de
-# escalar privilegios por una App que edite proyectos. Por eso viven
-# fuera de k8s/argocd-apps/ (el path del App-of-Apps).
+# AppProjects v2 — W-06 / R1 path B (writing to an app's repo no
+# longer grants cluster-scoped access). They are applied with kubectl
+# in phase 35, BEFORE root (class C1: the project exists before any
+# Application references it). No App manages them: they are bootstrap
+# infra (like the D2 Secrets). That avoids (a) the
+# AppProject-vs-Application race inside a single sync, and (b) the
+# privilege-escalation vector of an App that edits projects. Hence
+# they live outside k8s/argocd-apps/ (the App-of-Apps path).
 #
-# ── QUÉ QUEDÓ ACÁ Y QUÉ SE FUE (2026-08-05, #19) ──────────────────
+# ── WHAT STAYED HERE AND WHAT LEFT (2026-08-05, #19) ──────────────
 #
-# Los proyectos de las organizaciones CON CONTRATO ahora los deriva
-# `bin/aegis-org` en appprojects-tenants.yaml, al lado. Este archivo
-# guarda solo lo que no sale de ningún contrato:
+# The projects of the organizations WITH A CONTRACT are now derived by
+# `aegis org` into appprojects-tenants.yaml, next door. This file
+# keeps only what comes from no contract at all:
 #
-#   aegis-bootstrap, aegis-platform  el sustrato. No pertenecen a
-#                                    ninguna organización.
-#   aegis-tenant-canary              el canary es de la PLATAFORMA:
-#                                    prueba que el camino del tenant
-#                                    funciona, así que no puede
-#                                    depender de ese camino.
+#   aegis-bootstrap, aegis-platform  the substrate. They belong to no
+#                                    organization.
+#   aegis-tenant-canary              the canary belongs to the
+#                                    PLATFORM: it proves the tenant
+#                                    path works, so it cannot depend
+#                                    on that very path.
 #
-# Una instancia con historia puede tener acá, además, organizaciones
-# ANTERIORES al generador —sin contrato del que derivarlas—. Eso es
-# deuda de esa instancia y no viaja en la semilla: acá arranca solo el
-# sustrato más el canary.
+# An instance with history may also keep organizations here that
+# PREDATE the generator —with no contract to derive them from—. That
+# is debt belonging to that instance and it does not travel in the
+# seed: here only the substrate plus the canary starts out.
 #
-# Por qué se derivó: repetir el bloque a mano DERIVA, y se pagó. El
-# 2026-08-05 se midió en el cluster que aegis-tenant-canary era el
-# único de los cuatro proyectos de tenant SIN `orphanedResources`
-# —quedó afuera cuando #31 lo agregó a los otros tres— así que la app
-# del canary no se evaluaba nunca y `aegis check` la contaba
-# dentro de "nada huérfano". Un bloque copiado tres veces se actualiza
-# dos. Se corrigió abajo, y de los derivados ya no puede volver a
-# pasar: son idénticos por construcción y no por disciplina.
+# Why it was derived: repeating the block by hand DRIFTS, and the bill
+# came due. On 2026-08-05 it was measured on the cluster that
+# aegis-tenant-canary was the only one of the four tenant projects
+# WITHOUT `orphanedResources` —it was left out when #31 added it to
+# the other three— so the canary's app was never evaluated and
+# `aegis check` counted it under "nothing orphaned". A block copied
+# three times gets updated twice. It is fixed below, and for the
+# derived ones it can no longer happen: they are identical by
+# construction, not by discipline.
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
@@ -41,15 +42,15 @@ metadata:
   namespace: argocd
   labels: {aegis.dev/part-of: aegis-platform}
 spec:
-  description: root App-of-Apps — solo crea Applications de plataforma
+  description: root App-of-Apps — only creates platform Applications
   sourceRepos:
     - git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
   destinations:
     - {server: https://kubernetes.default.svc, namespace: argocd}
-  # root solo aplica Applications (namespaced) en argocd:
+  # root only applies Applications (namespaced) in argocd:
   namespaceResourceWhitelist:
     - {group: argoproj.io, kind: Application}
-  clusterResourceWhitelist: []          # nada cluster-scoped
+  clusterResourceWhitelist: []          # nothing cluster-scoped
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
@@ -58,10 +59,10 @@ metadata:
   namespace: argocd
   labels: {aegis.dev/part-of: aegis-platform}
 spec:
-  description: plano de plataforma — charts pinneados + manifests del repo de plataforma
-  # solo el repo de plataforma y los chart repos que las Apps usan
-  # (enumerados, NO '*'). Deben matchear repoURL exacto de core.yaml /
-  # ci-supply-tenants.yaml / observability.yaml:
+  description: platform plane — pinned charts + manifests from the platform repo
+  # only the platform repo and the chart repos the Apps use
+  # (enumerated, NOT '*'). They must match the exact repoURL in
+  # core.yaml / ci-supply-tenants.yaml / observability.yaml:
   sourceRepos:
     - git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
     - https://argoproj.github.io/argo-helm
@@ -70,25 +71,26 @@ spec:
     - https://charts.jenkins.io
     - https://aquasecurity.github.io/helm-charts
     - https://kyverno.github.io/kyverno
-    # observabilidad (fase 85 — observability.yaml):
+    # observability (phase 85 — observability.yaml):
     - https://victoriametrics.github.io/helm-charts
     - https://helm.vector.dev
     - https://grafana.github.io/helm-charts
-  # namespace '*' (este cluster): los charts crean RBAC en namespaces que
-  # NO son el suyo — cert-manager pone su leaderelection Role/RoleBinding
-  # en kube-system (corrida v1: "namespace kube-system is not permitted").
-  # Enumerar namespaces = whack-a-mole (cada corrida descubre otro). El
-  # proyecto de plataforma es TRUSTED; la restricción real es sourceRepos
-  # (solo el repo de plataforma + charts conocidos). El LÍMITE de
-  # seguridad es el proyecto aegis-tenant-canary (org-canary, cluster-scoped []).
+  # namespace '*' (this cluster): the charts create RBAC in namespaces
+  # that are NOT their own — cert-manager puts its leaderelection
+  # Role/RoleBinding in kube-system (v1 run: "namespace kube-system is
+  # not permitted"). Enumerating namespaces = whack-a-mole (every run
+  # finds another one). The platform project is TRUSTED; the real
+  # restriction is sourceRepos (only the platform repo + known
+  # charts). The security BOUNDARY is the aegis-tenant-canary project
+  # (org-canary, cluster-scoped []).
   destinations:
     - {server: https://kubernetes.default.svc, namespace: '*'}
-  # cluster-scoped '*': los charts de plataforma instalan CRDs, RBAC
-  # cluster, webhooks, ClusterIssuer/ClusterPolicy, IngressClass, etc.
-  # Enumerar = whack-a-mole (cada corrida descubre un kind más → otra
-  # corrida completa). La plataforma es TRUSTED; su límite REAL es
-  # sourceRepos (solo el repo de plataforma + charts conocidos). El
-  # límite de seguridad es aegis-tenant-canary (org-canary, cluster-scoped []).
+  # cluster-scoped '*': the platform charts install CRDs, cluster
+  # RBAC, webhooks, ClusterIssuer/ClusterPolicy, IngressClass, etc.
+  # Enumerating = whack-a-mole (every run finds one more kind →
+  # another full run). The platform is TRUSTED; its REAL boundary is
+  # sourceRepos (only the platform repo + known charts). The security
+  # boundary is aegis-tenant-canary (org-canary, cluster-scoped []).
   clusterResourceWhitelist:
     - {group: '*', kind: '*'}
 ---
@@ -99,78 +101,83 @@ metadata:
   namespace: argocd
   labels: {aegis.dev/part-of: aegis-platform}
 spec:
-  description: el canary de la plataforma — SOLO su repo, SOLO org-canary, CERO cluster-scoped (R1 camino B)
+  description: the platform canary — ONLY its repo, ONLY org-canary, ZERO cluster-scoped (R1 path B)
   sourceRepos:
     - git@github.com:__GH_OWNER__/__APP_REPO__.git
   destinations:
     - {server: https://kubernetes.default.svc, namespace: org-canary}
-  clusterResourceWhitelist: []          # deny-all cluster-scoped (EL fix de R1-B)
-  # y dentro de su namespace, que no se auto-escale ni cambie sus
-  # propios límites (esos los pone la plataforma, App org-canary):
+  clusterResourceWhitelist: []          # deny-all cluster-scoped (THE R1-B fix)
+  # and inside its namespace, it must not scale itself up nor change
+  # its own limits (the platform sets those, via the org-canary App):
   namespaceResourceBlacklist:
     - {group: "", kind: ResourceQuota}
     - {group: "", kind: LimitRange}
     - {group: rbac.authorization.k8s.io, kind: Role}
     - {group: rbac.authorization.k8s.io, kind: RoleBinding}
-    # Y NO puede escribir su propio ruteo (#54). Los de arriba protegen
-    # a la organización de sí misma; éste protege a LAS DEMÁS de ella.
+    # And it cannot write its own routing (#54). The ones above
+    # protect the organization from itself; this one protects ALL THE
+    # OTHERS from it.
     #
-    # Un AppProject filtra por *kind* y jamás por el valor de un campo,
-    # así que no hay forma de decir "IngressRoutes sí, pero solo con TU
-    # Host". MEDIDO el 2026-08-06: dos organizaciones reclamaron el
-    # mismo hostname, las dos admitidas sin una queja, y traefik sirvió
-    # la del segundo. El dueño legítimo no tenía defensa ni aviso.
+    # An AppProject filters by *kind* and never by a field's value, so
+    # there is no way to say "IngressRoutes yes, but only with YOUR
+    # Host". MEASURED on 2026-08-06: two organizations claimed the
+    # same hostname, both were admitted without a complaint, and
+    # traefik served the second one's. The rightful owner had neither
+    # a defense nor a warning.
     #
-    # La ruta la pone la plataforma (k8s/organizations/org-*/routes.yaml).
+    # The platform puts the route in (k8s/organizations/org-*/routes.yaml).
     - {group: traefik.io, kind: IngressRoute}
-  # AGREGADO el 2026-08-05. Faltaba desde #31: los otros tres proyectos
-  # de tenant lo tenían y este no, así que la app `hello-aegis` no se
-  # evaluaba y el chequeo la contaba como limpia. El canary es
-  # justamente donde MÁS importa —es lo que se rompe a propósito para
-  # probar que la plataforma avisa— y era el único punto ciego.
+  # ADDED on 2026-08-05. Missing since #31: the other three tenant
+  # projects had it and this one did not, so the `hello-aegis` app was
+  # never evaluated and the check counted it as clean. The canary is
+  # precisely where it matters MOST —it is what gets broken on purpose
+  # to prove the platform warns— and it was the only blind spot.
   orphanedResources:
     warn: true
     ignore:
-      # Lo crea el kube-controller-manager en CADA namespace, no sale de
-      # ningún git y nunca va a salir. Sin esta excepción el aviso
-      # aparecería para siempre, y un aviso permanente apaga la señal
-      # igual que una ausencia — que es la Enfermedad E y la razón de
-      # que este mecanismo exista.
+      # The kube-controller-manager creates it in EVERY namespace, it
+      # comes from no git and never will. Without this exception the
+      # warning would show up forever, and a permanent warning kills
+      # the signal just as an absence does — which is Disease E and
+      # the very reason this mechanism exists.
       - group: ""
         kind: ConfigMap
         name: kube-root-ca.crt
 ---
-# LA INFRAESTRUCTURA DE LAS ORGANIZACIONES (#47, 2026-08-05).
+# THE ORGANIZATIONS' INFRASTRUCTURE (#47, 2026-08-05).
 #
-# Las Apps `org-*` despliegan el sustrato de cada organización —el
-# namespace, la cuota, las NetworkPolicies, los Secrets, la base— desde
-# el repo de PLATAFORMA. No son apps de tenant (esas vienen del repo de
-# la organización y viven en su `aegis-tenant-<org>`), pero tampoco son
-# plataforma: son un tercer tipo, y hasta hoy no tenían dónde.
+# The `org-*` Apps deploy each organization's substrate —the
+# namespace, the quota, the NetworkPolicies, the Secrets, the base—
+# from the PLATFORM repo. They are not tenant apps (those come from
+# the organization's own repo and live in its `aegis-tenant-<org>`),
+# but neither are they platform: they are a third kind, and until
+# today they had nowhere to live.
 #
-# Estaban en `aegis-platform`, y eso costaba dos cosas:
+# They used to sit in `aegis-platform`, and that cost two things:
 #
-# 1. NO SE LES BUSCABAN HUÉRFANOS. `aegis-platform` no tiene
-#    `orphanedResources`, así que sus Apps no producen nunca esa
-#    condición. Medido el 2026-08-05: de 28 Applications se evaluaban
-#    3. Las 25 restantes —incluidas estas cinco, que son las que
-#    despliegan las NetworkPolicies del incidente que motivó #31—
-#    salían en verde sin que nadie las hubiera mirado.
+# 1. NOBODY LOOKED FOR ORPHANS IN THEM. `aegis-platform` has no
+#    `orphanedResources`, so its Apps never produce that condition.
+#    Measured on 2026-08-05: of 28 Applications, 3 were evaluated.
+#    The remaining 25 —including these five, the ones that deploy
+#    the NetworkPolicies of the incident behind #31— came out green
+#    without anyone ever having looked at them.
 #
-# 2. HEREDABAN cluster-scoped '*'. Una App de organización podía crear
-#    un ClusterRoleBinding en cualquier lado. Lo único cluster-scoped
-#    que despliegan de verdad es su Namespace — enumerado abajo.
+# 2. THEY INHERITED cluster-scoped '*'. An organization App could
+#    create a ClusterRoleBinding anywhere. The only cluster-scoped
+#    thing they really deploy is their Namespace — enumerated below.
 #
-# POR QUÉ NO SE ARREGLÓ AGREGÁNDOLE orphanedResources A aegis-platform,
-# que era lo obvio: se midió. Activarlo produce ~146 avisos permanentes
-# —81 solos de la App `gpu`, cuyo namespace destino es kube-system, más
-# los Secrets que generan cert-manager y el propio ArgoCD— y ninguno es
-# un huérfano real: son recursos que nunca salieron de git y nunca van a
-# salir. Un aviso permanente apaga la señal igual que una ausencia, que
-# es la Enfermedad E y la razón de que este mecanismo exista.
+# WHY THIS WAS NOT FIXED BY ADDING orphanedResources TO
+# aegis-platform, which was the obvious move: it was measured.
+# Turning it on produces ~146 permanent warnings —81 from the `gpu`
+# App alone, whose destination namespace is kube-system, plus the
+# Secrets that cert-manager and ArgoCD itself generate— and not one is
+# a real orphan: they are resources that never came from git and never
+# will. A permanent warning kills the signal just as an absence does,
+# which is Disease E and the reason this mechanism exists.
 #
-# Las cinco `org-*` reportaron CERO en esa misma medición. Por eso
-# cubrirlas acá no cuesta ruido y da cobertura donde importa.
+# The five `org-*` reported ZERO in that same measurement. That is why
+# covering them here costs no noise and gives coverage where it
+# counts.
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
@@ -178,35 +185,35 @@ metadata:
   namespace: argocd
   labels: {aegis.dev/part-of: aegis-platform}
 spec:
-  description: el sustrato de cada organización — namespace, cuota, red y secretos, desde el repo de plataforma
-  # Solo el repo de plataforma. Estas Apps NO despliegan código de
-  # nadie: el código de una organización viene de su propio repo y usa
-  # su propio proyecto.
+  description: each organization's substrate — namespace, quota, network and secrets, from the platform repo
+  # Only the platform repo. These Apps deploy NOBODY's code: an
+  # organization's code comes from its own repo and uses its own
+  # project.
   sourceRepos:
     - git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
   destinations:
-    # El namespace de cada organización, por patrón: dar de alta una
-    # organización no debe requerir editar esto. La alternativa
-    # —enumerar— es un lugar más donde acordarse, que es exactamente lo
-    # que #19 vino a sacar.
+    # Each organization's namespace, by pattern: onboarding an
+    # organization must not require editing this. The alternative
+    # —enumerating— is one more place to remember, which is exactly
+    # what #19 came to remove.
     - {server: https://kubernetes.default.svc, namespace: 'org-*'}
-    # Y argocd, porque el bundle de una organización incluye las
-    # Applications de sus repos, que son objetos del namespace de
-    # ArgoCD. Es la única razón, y está acotada por sourceRepos.
+    # And argocd, because an organization's bundle includes the
+    # Applications for its repos, which are objects in the ArgoCD
+    # namespace. That is the only reason, and sourceRepos bounds it.
     - {server: https://kubernetes.default.svc, namespace: argocd}
-  # ENUMERADO, no '*'. Se midió qué despliegan de verdad estas cinco
-  # Apps: 5 Namespaces y nada más cluster-scoped. Si mañana el
-  # generador emite otro kind cluster-scoped, el sync falla diciendo
-  # "not permitted" —un error claro y en el momento— en vez de
-  # concederlo en silencio para siempre.
+  # ENUMERATED, not '*'. What these five Apps really deploy was
+  # measured: 5 Namespaces and nothing else cluster-scoped. If the
+  # generator emits another cluster-scoped kind tomorrow, the sync
+  # fails saying "not permitted" —a clear error, right there and
+  # then— instead of granting it silently forever.
   clusterResourceWhitelist:
     - {group: "", kind: Namespace}
-  # AVISAR de lo que sobra, sin borrarlo (A19 / #31).
+  # WARN about what is left over, without deleting it (A19 / #31).
   orphanedResources:
     warn: true
     ignore:
-      # Lo crea el kube-controller-manager en CADA namespace, no sale de
-      # ningún git y nunca va a salir.
+      # The kube-controller-manager creates it in EVERY namespace, it
+      # comes from no git and never will.
       - group: ""
         kind: ConfigMap
         name: kube-root-ca.crt

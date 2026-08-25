@@ -1,38 +1,41 @@
-# ClusterPolicy verifyImages v2 — Enforce de firmas cosign.
-# TODO EL DISEÑO 3.E horneado (A44):
-#  - ClusterPolicy GA, NO ImageValidatingPolicy (IVP fuerza TUF de
-#    Sigstore online — falla offline; revisar en cada upgrade).
-#  - failurePolicy Fail SIN matchConditions (rompen el flujo
-#    mutation→validation: "missing digest"). El blast radius lo
-#    acota el config.webhooks.namespaceSelector NATIVO (values del
-#    chart) — verificar SIEMPRE los webhookconfigurations generados.
-#  - mutateDigest true: la mutation verifica + reescribe a digest +
-#    annotation; la validation la exige. REQUERIDO para Enforce.
-#  - Kyverno caído: graceful quita webhooks (sin disrupción); crash
-#    duro los deja => los tenants RECHAZAN (fail-closed real).
-# ORDEN DE BOOTSTRAP (D5/H-7) — MECANISMO, no comentario (corrida
-# #12): este archivo NO está listado en el kustomization (nace con
-# resources: []); la fase 80 lo agrega EN EL MISMO COMMIT que inyecta
-# la pub real. Antes, la App automated lo aplicaba con el placeholder
-# desde la fase 35 → la EVALUACIÓN crasheaba (clave inválida + imagen
-# sin firma) y failurePolicy=Fail rechazaba el canary de la 70 aunque
-# el action fuera Audit. NO listarlo estático (check 39 lo vigila).
-# El placeholder COSIGN_PUB (con dunders, abajo en publicKeys) lo
-# inyecta la fase 80 (la pub no existe hasta la ceremonia cosign).
-# CR-1 corrida #14: este comentario NO escribe el placeholder literal
-# — el replace() global lo volcaba TAMBIÉN acá y rompía el YAML
-# top-level; inject_placeholder ignora comentarios y el check 48
-# prohíbe el literal en comentarios (defensa doble).
-# Datos de ESTA versión de Kyverno (verificados en vivo #12):
-#  - failurePolicy va en spec.webhookConfiguration.failurePolicy;
-#    spec.failurePolicy está deprecado y el API lo RECHAZA (Forbidden).
-#  - admission:false + background:false a la vez está PROHIBIDO — no
-#    hay "apagar la policy" por patch; la forma de que no aplique es
-#    que NO EXISTA (este patrón).
-# failurePolicy=Fail se CONSERVA: es el fail-closed deliberado (A44,
-# blast radius acotado por el namespaceSelector del webhook); las
-# dependencias externas se resuelven por ORDEN (existir recién cuando
-# la clave/firma existen), no debilitando el gate con Ignore.
+# ClusterPolicy verifyImages v2 — Enforce of cosign signatures.
+# THE WHOLE 3.E DESIGN baked in (A44):
+#  - GA ClusterPolicy, NOT ImageValidatingPolicy (IVP forces Sigstore
+#    TUF online — it fails offline; review on every upgrade).
+#  - failurePolicy Fail WITHOUT matchConditions (they break the
+#    mutation→validation flow: "missing digest"). The blast radius is
+#    narrowed by the NATIVE config.webhooks.namespaceSelector (chart
+#    values) — ALWAYS check the generated webhookconfigurations.
+#  - mutateDigest true: the mutation verifies + rewrites to digest +
+#    annotation; the validation demands it. REQUIRED for Enforce.
+#  - Kyverno down: a graceful stop removes the webhooks (no
+#    disruption); a hard crash leaves them => tenants are REJECTED
+#    (real fail-closed).
+# BOOTSTRAP ORDER (D5/H-7) — a MECHANISM, not a comment (run
+# #12): this file is NOT listed in the kustomization (it is born with
+# resources: []); phase 80 adds it IN THE SAME COMMIT that injects
+# the real pub. Before, the automated App applied it with the
+# placeholder from phase 35 on → the EVALUATION crashed (invalid key +
+# unsigned image) and failurePolicy=Fail rejected the canary of the 70
+# even though the action was Audit. Do NOT list it statically (check
+# 39 watches for that). The COSIGN_PUB placeholder (with dunders,
+# below in publicKeys) is injected by phase 80 (the pub does not exist
+# until the cosign ceremony).
+# CR-1 run #14: this comment does NOT write the literal placeholder
+# — the global replace() dumped it HERE too and broke the top-level
+# YAML; inject_placeholder ignores comments and check 48 forbids the
+# literal inside comments (double defence).
+# Facts about THIS version of Kyverno (verified live, #12):
+#  - failurePolicy goes in spec.webhookConfiguration.failurePolicy;
+#    spec.failurePolicy is deprecated and the API REJECTS it
+#    (Forbidden).
+#  - admission:false + background:false at the same time is FORBIDDEN
+#    — there is no "turn the policy off" by patch; the way for it not
+#    to apply is for it NOT TO EXIST (this pattern).
+# failurePolicy=Fail is KEPT: it is the deliberate fail-closed (A44,
+# blast radius narrowed by the webhook's namespaceSelector); external
+# dependencies are resolved by ORDER (only coming into existence once
+# the key/signature exist), not by weakening the gate with Ignore.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -41,65 +44,67 @@ metadata:
     aegis.dev/part-of: aegis-platform
     aegis.dev/component: policy-enforcement
   annotations:
-    # Autogen SIN ReplicaSet ni ReplicationController (el default de
-    # Kyverno los incluye).
+    # Autogen WITHOUT ReplicaSet or ReplicationController (Kyverno's
+    # default includes them).
     #
-    # Al encender el background scan quedaron 4 rojos permanentes, y los
-    # cuatro eran ReplicaSets VIEJOS escalados a 0: dos con imágenes que
-    # nunca se firmaron (main-000002, main-000005) y dos con imágenes que
-    # ya ni existen en el registry. Ninguno corre nada.
+    # Turning the background scan on left 4 permanent reds, and all
+    # four were OLD ReplicaSets scaled to 0: two with images that were
+    # never signed (main-000002, main-000005) and two with images that
+    # no longer even exist in the registry. None of them runs anything.
     #
-    # Es información cierta —si alguien hiciera rollback a esas
-    # revisiones, no arrancarían— pero es la misma enfermedad que el
-    # OutOfSync permanente: cuatro rojos que nunca cambian entrenan al
-    # ojo a ignorar el reporte, y el hallazgo de verdad se pierde en el
-    # ruido. La política existe para gobernar lo que CORRE.
+    # It is true information —if somebody rolled back to those
+    # revisions, they would not start— but it is the same disease as
+    # the permanent OutOfSync: four reds that never change train the
+    # eye to ignore the report, and the real finding gets lost in the
+    # noise. The policy exists to govern what RUNS.
     #
-    # NO debilita el gate, y esto se verificó:
-    #  - Un `rollout undo` modifica el DEPLOYMENT, que sigue en la lista.
-    #  - Un ReplicaSet creado a mano con imagen sin firmar crea Pods, y
-    #    los Pods se evalúan igual (los pods CON dueño se evalúan: el del
-    #    portafolio tiene dueño y está anotado).
-    # O sea: se saca del REPORTE lo que no corre, no del ENFORCEMENT.
+    # It does NOT weaken the gate, and this was verified:
+    #  - A `rollout undo` modifies the DEPLOYMENT, still in the list.
+    #  - A ReplicaSet created by hand with an unsigned image creates
+    #    Pods, and Pods are evaluated all the same (pods WITH an owner
+    #    are evaluated: the portfolio's has an owner and is annotated).
+    # That is: what does not run is taken out of the REPORT, not out of
+    # ENFORCEMENT.
     pod-policies.kyverno.io/autogen-controllers: DaemonSet,Deployment,Job,StatefulSet,CronJob
 spec:
   webhookConfiguration:
     failurePolicy: Fail
-  # background: true — salda la deuda #103, y no como mejora cosmética.
+  # background: true — it settles debt #103, and not as a cosmetic
+  # improvement.
   #
-  # LO QUE ARREGLA. Los PolicyReports se generaban SOLO en admisión. Un
-  # pod que se salta la admisión no produce un reporte en rojo: no
-  # produce NINGUNO. Y "no hay reporte" no se ve — mirando la lista de
-  # reportes todo estaba en verde.
+  # WHAT IT FIXES. PolicyReports were generated ONLY on admission. A
+  # pod that skips admission does not produce a report in red: it
+  # produces NONE. And "there is no report" cannot be seen — looking at
+  # the list of reports, everything was green.
   #
-  # Pasó de verdad el 2026-07-27: tras el corte de luz, el pod de
-  # hello-aegis se creó 3 segundos después de que el admission
-  # controller quedara Ready y quedó SIN la anotación
-  # kyverno.io/verify-images. Estuvo 14 horas corriendo sin que la
-  # política lo hubiera evaluado nunca, sin un solo error en ningún lado.
-  # El failurePolicy es Fail, así que no fue un webhook caído —eso habría
-  # rechazado el pod—: fue que Kyverno atiende admisión antes de terminar
-  # de cargar sus políticas.
+  # It really happened on 2026-07-27: after the power cut, the
+  # hello-aegis pod was created 3 seconds after the admission
+  # controller went Ready and ended up WITHOUT the
+  # kyverno.io/verify-images annotation. It ran for 14 hours without
+  # the policy ever having evaluated it, without a single error
+  # anywhere. failurePolicy is Fail, so it was not a webhook that was
+  # down —that would have rejected the pod—: it was that Kyverno serves
+  # admission before it finishes loading its policies.
   #
-  # Con background, Kyverno reevalúa lo que YA está corriendo, así que un
-  # recurso que se escapó de la admisión aparece en rojo en el siguiente
-  # barrido. Convierte una ausencia invisible en un reporte.
+  # With background, Kyverno re-evaluates what is ALREADY running, so a
+  # resource that escaped admission shows up in red on the next sweep.
+  # It turns an invisible absence into a report.
   #
-  # POR QUÉ NO SE PREVIENE EN VEZ DE DETECTAR. La prevención sería dejar
-  # los webhooks registrados de forma permanente y fail-closed. En un
-  # nodo único eso es un candado sin llave: si Kyverno no arranca, no
-  # arranca NADA — incluido Kyverno. Se elige detectar.
+  # WHY NOT PREVENT INSTEAD OF DETECT. Prevention would mean leaving
+  # the webhooks registered permanently and fail-closed. On a single
+  # node that is a lock with no key: if Kyverno does not start, NOTHING
+  # starts — Kyverno included. Detecting is the choice.
   #
-  # NO toca la admisión: `background` gobierna el escaneo de recursos
-  # existentes y solo produce reportes. Lo que bloquea sigue siendo
+  # It does NOT touch admission: `background` governs the scanning of
+  # existing resources and only produces reports. What blocks is still
   # failureAction: Enforce.
   #
-  # Requisitos verificados antes de activarlo (2026-07-28): el SA
-  # kyverno-background-controller puede leer el Secret regcred-kyverno,
-  # no hay NetworkPolicy que le corte la salida al registry, tiene
-  # ca-certificates montado, y la clave pública va embebida acá (sin
-  # dependencia externa). Costo: reverifica firmas periódicamente contra
-  # el registry interno.
+  # Requirements verified before turning it on (2026-07-28): the
+  # kyverno-background-controller SA can read the regcred-kyverno
+  # Secret, there is no NetworkPolicy cutting off its way out to the
+  # registry, it has ca-certificates mounted, and the public key is
+  # embedded here (no external dependency). Cost: it re-verifies
+  # signatures periodically against the internal registry.
   background: true
   rules:
     - name: verify-aegis-signature
@@ -107,27 +112,28 @@ spec:
         any:
           - resources:
               kinds: [Pod]
-              # Por ETIQUETA, no por lista de nombres (2026-07-27).
-              # `namespaces: [org-personal]` dejaba a toda organización
-              # nueva fuera de la política sin ninguna señal: se creó
-              # org-portafolio, se desplegó ahí, y nada avisó de que esa
-              # frontera no existía. La etiqueta la lleva el bundle de
-              # cada tenant, así que la cobertura es automática.
+              # By LABEL, not by a list of names (2026-07-27).
+              # `namespaces: [org-personal]` left every new
+              # organization outside the policy with no signal at all:
+              # org-portafolio was created, something was deployed
+              # there, and nothing warned that the boundary was not
+              # there. The label is carried by each tenant's bundle, so
+              # coverage is automatic.
               namespaceSelector:
                 matchLabels:
                   aegis.dev/part-of: aegis-tenants
       verifyImages:
         # W-04 / R1 / PLAT-03 — DENY-BY-DEFAULT. imageReferences '*':
-        # TODO pod de un namespace tenant debe estar firmado por la key de
-        # aegis. La allowlist por nombre anterior (hello-aegis en dos
-        # formas del registry) dejaba entrar SIN verificar cualquier
-        # otra imagen (P1.2: bypass por forma ClusterIP confirmado en
-        # vivo, "resuelto" agregando la 2a forma — enumerar formas
-        # garantiza una tercera). El invariante correcto es que no
-        # exista allowlist. El canary, firmado, matchea '*' y pasa;
-        # nginx/otro-registry sin firma se rechaza (gate
-        # negativo-deny-by-default de la fase 80). '*' cubre por
-        # construcción cualquier forma (DNS, ClusterIP, externa):
+        # EVERY pod of a tenant namespace must be signed by the aegis
+        # key. The previous allowlist by name (hello-aegis in two forms
+        # of the registry) let any other image in WITHOUT verifying it
+        # (P1.2: bypass through the ClusterIP form confirmed live,
+        # "solved" by adding the 2nd form — enumerating forms
+        # guarantees a third one). The correct invariant is that no
+        # allowlist exists. The canary, signed, matches '*' and passes;
+        # nginx/another-registry without a signature is rejected (the
+        # negative deny-by-default gate of phase 80). '*' covers by
+        # construction any form (DNS, ClusterIP, external):
         - imageReferences:
             - "*"
           failureAction: Enforce
@@ -140,5 +146,5 @@ spec:
                 - keys:
                     publicKeys: |
                       __COSIGN_PUB__
-                    rekor: {ignoreTlog: true}     # firmas offline:
-                    ctlog: {ignoreSCT: true}      # sin Sigstore SaaS
+                    rekor: {ignoreTlog: true}     # offline signatures:
+                    ctlog: {ignoreSCT: true}      # no Sigstore SaaS

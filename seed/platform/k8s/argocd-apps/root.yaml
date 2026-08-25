@@ -1,14 +1,14 @@
-# root App-of-Apps v2. SYNC MANUAL SIEMPRE (ADR-0012): el init y el
-# operador controlan el CUÁNDO de cada App — ese control ES el
-# mecanismo de orden del bootstrap (ADR-0015 y D5).
-# A19: sin defaults del schema declarados; prune se OMITE.
+# root App-of-Apps v2. ALWAYS A MANUAL SYNC (ADR-0012): the init and
+# the operator control the WHEN of each App — that control IS the
+# bootstrap's ordering mechanism (ADR-0015 and D5).
+# A19: no schema defaults declared; prune is OMITTED.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: root
   namespace: argocd
   labels:
-    aegis.dev/part-of: aegis-platform   # A18: JAMÁS app.kubernetes.io/part-of
+    aegis.dev/part-of: aegis-platform   # A18: NEVER app.kubernetes.io/part-of
 spec:
   project: aegis-bootstrap
   source:

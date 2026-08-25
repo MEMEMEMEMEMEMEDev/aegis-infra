@@ -1,14 +1,14 @@
-# ntfy-alertmanager 1.0.0 — el puente (crudo). Existe porque vmalert
-# habla el protocolo de Alertmanager y ntfy habla HTTP plano: sin él,
-# el webhook llegaría a ntfy como JSON crudo ilegible (design.md
-# §4.1). Eslabón extra aceptado CON los ojos abiertos: el deadman
-# vigila la cadena completa de punta a punta.
+# ntfy-alertmanager 1.0.0 — the bridge (raw). It exists because
+# vmalert speaks Alertmanager's protocol and ntfy speaks plain HTTP:
+# without it the webhook would reach ntfy as unreadable raw JSON
+# (design.md §4.1). An extra link accepted WITH eyes open: the deadman
+# watches the complete chain end to end.
 #
-# SIN ConfigMap a propósito (fase-85 §1 no le lista uno): su config
-# scfg lleva la credencial con la que publica en ntfy, así que el
-# archivo ENTERO vive en el Secret ntfy-bridge-token (KSOPS, lo cifra
-# la fase 85). Contenido esperado del key `config` — documentado acá
-# porque es el contrato entre este Deployment y la fase:
+# NO ConfigMap on purpose (phase-85 §1 does not list one for it): its
+# scfg config carries the credential it publishes to ntfy with, so the
+# WHOLE file lives in the ntfy-bridge-token Secret (KSOPS, encrypted
+# by phase 85). Expected content of the `config` key — documented here
+# because it is the contract between this Deployment and the phase:
 #
 #   http-address :8080
 #   alert-mode single
@@ -16,14 +16,14 @@
 #       server http://ntfy.observability.svc
 #       topic aegis-alertas
 #       user puente
-#       password <ntfy_bridge_token del store>
+#       password <ntfy_bridge_token from the store>
 #   }
 #   cache {
 #       type memory
 #   }
 #
-# (formato verificado 2026-08-19 contra config.scfg del tag v1.0.0
-# en git.xenrox.net/~xenrox/ntfy-alertmanager)
+# (format verified 2026-08-19 against config.scfg of tag v1.0.0 at
+# git.xenrox.net/~xenrox/ntfy-alertmanager)
 ---
 apiVersion: v1
 kind: Service
@@ -51,9 +51,9 @@ spec:
     spec:
       containers:
         - name: ntfy-alertmanager
-          # verificado 2026-08-19 contra hub.docker.com/r/xenrox/
-          # ntfy-alertmanager (tag 1.0.0, 2026-03-31; el README del
-          # proyecto en git.xenrox.net apunta a ese repo de imagen):
+          # verified 2026-08-19 against hub.docker.com/r/xenrox/
+          # ntfy-alertmanager (tag 1.0.0, 2026-03-31; the project's
+          # README at git.xenrox.net points at that image repo):
           image: docker.io/xenrox/ntfy-alertmanager:1.0.0
           args: ["--config", "/etc/ntfy-alertmanager/config"]
           ports: [{name: http, containerPort: 8080}]
@@ -65,7 +65,7 @@ spec:
           livenessProbe:
             tcpSocket: {port: 8080}
             initialDelaySeconds: 15
-          resources:            # fase-85 §10
+          resources:            # phase-85 §10
             requests: {cpu: 10m, memory: 16Mi}
             limits: {cpu: 100m, memory: 64Mi}
       volumes:
