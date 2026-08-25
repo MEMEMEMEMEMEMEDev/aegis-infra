@@ -1,23 +1,23 @@
-# ntfy v2.27.0 (multi-doc, crudo — precedente registry.yaml: un
-# contenedor + un ConfigMap no amortizan un chart). El canal de «la
-# plataforma está rota» AUTOHOSPEDADO (design.md §4.1): no puede
-# depender de un SaaS gratuito con topics adivinables.
+# ntfy v2.27.0 (multi-doc, raw — precedent registry.yaml: one
+# container + one ConfigMap do not amortize a chart). The SELF-HOSTED
+# «the platform is broken» channel (design.md §4.1): it cannot depend
+# on a free SaaS with guessable topics.
 #
-# ntfy va SIN Access (la app del teléfono no puede presentar service
-# token) — la cerradura es la auth PROPIA: deny-all + ACL (fase-85
-# §3/§5). La provisión de usuarios es DECLARATIVA por config:
-# verificado 2026-08-19 contra server/server.yml del tag v2.27.0
-# (auth-users/auth-access existen desde antes de esa versión), así
-# que NO hay `kubectl exec ntfy user add` imperativo.
+# ntfy goes WITHOUT Access (the phone app cannot present a service
+# token) — the lock is its OWN auth: deny-all + ACL (phase-85 §3/§5).
+# User provisioning is DECLARATIVE, by config: verified 2026-08-19
+# against server/server.yml of tag v2.27.0 (auth-users/auth-access
+# existed before that version), so there is NO imperative
+# `kubectl exec ntfy user add`.
 #
-# Los DOS hashes bcrypt de auth-users son de clase-generado (dueño:
-# fase 85, via inject_placeholder — los genera `ntfy user hash` /
-# htpasswd -B con las credenciales gen_or_restore del store). Un hash
-# bcrypt no es material reversible: mismo criterio que el htpasswd
-# del registry, pero acá el formato de ntfy lo pide en el config.
-# La credencial del puente EN CLARO solo vive en el Secret
-# ntfy-bridge-token (ntfy-bridge.yaml); la del operador solo en el
-# store + su teléfono (fase-85 §3: nadie en el cluster la consume).
+# The TWO bcrypt hashes in auth-users are class-generated (owner:
+# phase 85, via inject_placeholder — produced by `ntfy user hash` /
+# htpasswd -B with the gen_or_restore credentials from the store). A
+# bcrypt hash is not reversible material: the same criterion as the
+# registry's htpasswd, but here ntfy's format demands it in the
+# config. The bridge credential IN CLEAR lives only in the Secret
+# ntfy-bridge-token (ntfy-bridge.yaml); the operator's only in the
+# store + their phone (phase-85 §3: nobody in the cluster consumes it).
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -29,13 +29,13 @@ data:
   server.yml: |
     base-url: "https://ntfy.__ROOT_DOMAIN__"
     listen-http: ":8080"
-    behind-proxy: true            # traefik/cloudflared delante: rate
-                                  # limits por visitante real, no por
-                                  # la IP del edge
+    behind-proxy: true            # traefik/cloudflared in front: rate
+                                  # limits per real visitor, not per
+                                  # the edge's IP
     cache-file: "/var/lib/ntfy/cache.db"
     auth-file: "/var/lib/ntfy/auth.db"
-    # DENY-ALL: un ntfy abierto sería spam-relay con nuestro dominio
-    # (gate obs-ntfy-publico-responde: publicar sin credencial = 403):
+    # DENY-ALL: an open ntfy would be a spam relay on our domain (gate
+    # obs-ntfy-publico-responde: publishing with no credential = 403):
     auth-default-access: "deny-all"
     auth-users:
       - "operador:__OBS_NTFY_OPERADOR_HASH__:user"
@@ -43,8 +43,8 @@ data:
     auth-access:
       - "operador:aegis-alertas:read-only"
       - "puente:aegis-alertas:write-only"
-    # métricas en listener DEDICADO: jamás en el puerto público (el
-    # Service las expone solo a ClusterIP; la IngressRoute rutea al 80):
+    # metrics on a DEDICATED listener: never on the public port (the
+    # Service exposes them ClusterIP-only; the IngressRoute routes to 80):
     metrics-listen-http: ":9090"
 ---
 apiVersion: v1
@@ -76,10 +76,10 @@ spec:
     spec:
       containers:
         - name: ntfy
-          # verificado 2026-08-19 contra github.com/binwiederhier/ntfy
-          # releases (v2.27.0, 2026-08-04) y el tag en Docker Hub:
+          # verified 2026-08-19 against github.com/binwiederhier/ntfy
+          # releases (v2.27.0, 2026-08-04) and the tag in Docker Hub:
           image: binwiederhier/ntfy:v2.27.0
-          args: ["serve"]        # lee /etc/ntfy/server.yml (default)
+          args: ["serve"]        # reads /etc/ntfy/server.yml (default)
           ports:
             - {name: http, containerPort: 8080}
             - {name: metrics, containerPort: 9090}
@@ -92,7 +92,7 @@ spec:
           livenessProbe:
             httpGet: {path: /v1/health, port: 8080}
             initialDelaySeconds: 15
-          resources:            # fase-85 §10
+          resources:            # phase-85 §10
             requests: {cpu: 25m, memory: 32Mi}
             limits: {cpu: 250m, memory: 128Mi}
       volumes:

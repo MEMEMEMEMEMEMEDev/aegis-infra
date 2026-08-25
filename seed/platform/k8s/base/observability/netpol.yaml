@@ -1,23 +1,23 @@
-# NetworkPolicy de observability — ESCRITA pero NO LISTADA en el
-# kustomization hasta Cilium (ADR-0014: kube-router no enforce —
-# validar enforcement POSITIVO antes de activarla). Mismo trato que
-# registry-system. INGRESS-ONLY como toda la iter2 (flannel no hace
+# NetworkPolicy for observability — WRITTEN but NOT LISTED in the
+# kustomization until Cilium (ADR-0014: kube-router does not enforce —
+# validate POSITIVE enforcement before turning it on). Same treatment
+# as registry-system. INGRESS-ONLY like all of iter2 (flannel does no
 # FQDN egress).
 #
-# Clientes legítimos cuando se active:
-#  - infra-edge (traefik): grafana :3000 y ntfy :8080 (las dos
-#    IngressRoutes de routes.yaml).
-#  - trivy-system: el CronJob trivy-db-age pushea a vmsingle :8428.
-#  - jenkins-system: el stage `report` de todo build pushea el evento
-#    supply-chain a vlogs-events :9428 y sus tres métricas a vmsingle
-#    :8428. Faltaba en esta lista y en la regla: el POST del evento
-#    existe desde la fase 85 y el de las métricas desde hoy, así que
-#    activar esta netpol tal como estaba habría cortado los dos. No se
-#    notaba porque el archivo no está listado en el kustomization —
-#    justamente el tipo de deuda que se cobra el día que sí lo esté.
-#  - el propio namespace: vmagent scrapea a todos, vmalert habla con
-#    vmsingle y alertmanager, alertmanager con el puente, el puente
-#    con ntfy, grafana con los tres stores, vector con los dos vlogs.
+# Legitimate clients once it is on:
+#  - infra-edge (traefik): grafana :3000 and ntfy :8080 (the two
+#    IngressRoutes of routes.yaml).
+#  - trivy-system: the trivy-db-age CronJob pushes to vmsingle :8428.
+#  - jenkins-system: the `report` stage of every build pushes the
+#    supply-chain event to vlogs-events :9428 and its three metrics to
+#    vmsingle :8428. Missing from this list and from the rule: the
+#    event POST exists since phase 85 and the metrics one since today,
+#    so turning this netpol on as it stood would have cut both. It
+#    went unnoticed because the file is not listed in the kustomization
+#    — precisely the kind of debt that comes due the day it is.
+#  - the namespace itself: vmagent scrapes everyone, vmalert talks to
+#    vmsingle and alertmanager, alertmanager to the bridge, the bridge
+#    to ntfy, grafana to the three stores, vector to the two vlogs.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -44,4 +44,4 @@ spec:
             matchLabels: {kubernetes.io/metadata.name: trivy-system}
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: jenkins-system}
-        - podSelector: {}          # intra-ns: toda la cañería interna
+        - podSelector: {}          # intra-ns: all the internal plumbing

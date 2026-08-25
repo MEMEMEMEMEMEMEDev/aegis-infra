@@ -1,258 +1,269 @@
-# Capacidad de AI: cuánta gente entra y por qué
+# AI capacity: how many people get in, and why
 
-Modelo para responder «¿cuántos visitantes a la vez aguanta esto?» sin
-adivinar. Todos los números están **medidos** el 2026-08-16 en la máquina
-de la instancia (Ryzen 9 5950X, 32 hilos, RTX 5070 de 12 GiB).
+A model for answering «how many visitors at once does this hold?»
+without guessing. Every number here was **MEASURED** on 2026-08-16 on
+the instance's machine (Ryzen 9 5950X, 32 threads, RTX 5070 with
+12 GiB).
 
-Documento hermano: [ai-gateway.md](ai-gateway.md), que cubre el carril de
-GPU. Acá se cubren los dos y, sobre todo, en qué se diferencian.
-
----
-
-## 1. La asimetría que gobierna todo
-
-Los dos carriles se comportan **al revés** uno del otro, y casi todo lo
-demás sale de ahí.
-
-**La GPU es exclusiva pero AGRUPA.** vLLM hace *continuous batching*: diez
-pedidos en vuelo corren de verdad juntos en la misma pasada, compartiendo
-la lectura de los pesos. Medido: once traducciones salieron en 1,34 s, no
-en once veces 0,2. En ese carril la concurrencia es casi gratis — diez
-personas tardan casi lo mismo que una.
-
-**La CPU es divisible pero SERIALIZA.** Whisper transcribiendo dos audios
-a la vez no va el doble de rápido; comparten el ancho de banda de memoria.
-Lo que se puede hacer es repartir: varios obreros con menos hilos cada uno.
-
-Eso invierte la intuición. **La GPU, que es el recurso caro y único, es la
-que mejor aguanta multitud.** Los tres modelitos de CPU, que suenan
-baratos, son los que hacen cola.
+Sibling document: [ai-gateway.md](ai-gateway.md), which covers the GPU
+lane. Here both lanes are covered and, above all, how they differ.
 
 ---
 
-## 2. Los números medidos
+## 1. The asymmetry that governs everything
 
-Techo de caudal por capacidad, con la configuración vigente
-(`engine-cpu`: oido 4 obreros × 4 hilos, voz y vision 2 × 6):
+The two lanes behave **the opposite way round** from each other, and
+almost everything else follows from that.
 
-| capacidad | 1 solo | techo | dónde satura |
+**The GPU is exclusive but it BATCHES.** vLLM does *continuous
+batching*: ten requests in flight genuinely run together in the same
+pass, sharing the read of the weights. MEASURED: eleven translations
+came out in 1.34 s, not in eleven times 0.2. In that lane concurrency
+is nearly free — ten people take almost as long as one.
+
+**The CPU is divisible but it SERIALIZES.** Whisper transcribing two
+audio clips at once does not go twice as fast; they share memory
+bandwidth. What can be done is to divide it up: several workers with
+fewer threads each.
+
+That inverts the intuition. **The GPU, which is the expensive and
+single resource, is the one that best withstands a crowd.** The three
+little CPU models, which sound cheap, are the ones that queue.
+
+---
+
+## 2. The measured numbers
+
+Throughput ceiling per capability, with the configuration in force
+(`engine-cpu`: oido 4 workers × 4 threads, voz and vision 2 × 6):
+
+| capability | just one | ceiling | where it saturates |
 |---|---|---|---|
-| traduce (GPU) | ~0,2 s | **~8/s** | caché KV / presupuesto de tokens |
-| vision | 0,16 s | **7,75/s** | hilos de onnxruntime |
-| voz | 0,45 s | **3,36/s** | hilos de onnxruntime |
-| oido | 2,67 s | **0,59/s** | obreros de CTranslate2 |
-| oido, entrada patológica | 3,72 s | **0,41/s** | ídem |
-| embeddings | 11 ms | **440/s** | nada que hoy importe |
+| traduce (GPU) | ~0.2 s | **~8/s** | KV cache / token budget |
+| vision | 0.16 s | **7.75/s** | onnxruntime threads |
+| voz | 0.45 s | **3.36/s** | onnxruntime threads |
+| oido | 2.67 s | **0.59/s** | CTranslate2 workers |
+| oido, pathological input | 3.72 s | **0.41/s** | same |
+| embeddings | 11 ms | **440/s** | nothing that matters today |
 
-`oido` es el único que está en otro orden de magnitud, y por eso es el que
-manda en el modelo.
+`oido` is the only one in a different order of magnitude, and that is
+why it is the one that rules the model.
 
 ---
 
-## 3. El modelo
+## 3. The model
 
-Para cada capacidad *i*:
+For each capability *i*:
 
 ```
-  λ = N · f / T          pedidos por segundo que llegan
-  ρ = λ / μ              qué fracción del motor se usa
+  λ = N · f / T          requests per second that arrive
+  ρ = λ / μ              what fraction of the engine is in use
 ```
 
-- **N** — visitantes a la vez en el sitio
-- **f** — qué fracción de ellos está usando ESA capacidad
-- **T** — segundos entre dos pedidos del mismo visitante (mirar, escribir,
-  leer el resultado)
-- **μ** — el techo de la tabla de arriba
+- **N** — visitors on the site at once
+- **f** — what fraction of them are using THAT capability
+- **T** — seconds between two requests from the same visitor (looking,
+  typing, reading the result)
+- **μ** — the ceiling from the table above
 
-Con ρ por debajo de 0,7 la espera es despreciable. Por encima de 1 la cola
-crece sin fondo y no hay número que la salve.
+With ρ below 0.7 the wait is negligible. Above 1 the queue grows
+bottomlessly and no number saves it.
 
-**Los que no están medidos son `f` y `T`**, y se dice a propósito: son
-supuestos sobre cómo se comporta la gente, no propiedades de la máquina.
-Los de abajo son estimaciones y hay que tratarlas como tales.
+**The ones that are NOT measured are `f` and `T`**, and that is said on
+purpose: they are assumptions about how people behave, not properties
+of the machine. The ones below are estimates and have to be treated as
+such.
 
-| | f | T | por qué |
+| | f | T | why |
 |---|---|---|---|
-| traduce | 0,35 | 20 s | escribir una frase y leer la respuesta |
-| voz | 0,25 | 25 s | escribir, sintetizar, escuchar |
-| vision | 0,25 | 20 s | dar permiso, capturar, mirar las cajas |
-| oido | **0,15** | **35 s** | grabar ~10 s y leer; y **mucha gente no le da el micrófono a una web** |
+| traduce | 0.35 | 20 s | type a sentence and read the answer |
+| voz | 0.25 | 25 s | type, synthesize, listen |
+| vision | 0.25 | 20 s | grant permission, capture, look at the boxes |
+| oido | **0.15** | **35 s** | record ~10 s and read; and **plenty of people do not hand a web page their microphone** |
 
-### El resultado para N = 50
+### The result for N = 50
 
 | | λ | μ | ρ | |
 |---|---|---|---|---|
-| traduce | 0,88/s | 8 | **0,11** | holgado |
-| vision | 0,63/s | 7,75 | **0,08** | holgado |
-| voz | 0,50/s | 3,36 | **0,15** | holgado |
-| oido | 0,21/s | 0,59 | **0,36** | cómodo — ~1,5 s de espera extra |
+| traduce | 0.88/s | 8 | **0.11** | roomy |
+| vision | 0.63/s | 7.75 | **0.08** | roomy |
+| voz | 0.50/s | 3.36 | **0.15** | roomy |
+| oido | 0.21/s | 0.59 | **0.36** | comfortable — ~1.5 s of extra wait |
 
-**Cincuenta entran.** El primero que se acerca al límite es `oido`, y le
-sobra la mitad.
+**Fifty get in.** The first one to come near the limit is `oido`, and
+it still has half of itself to spare.
 
-### Dónde se rompe
+### Where it breaks
 
-Despejando ρ = 0,8 para `oido`, que es el único que importa:
+Solving ρ = 0.8 for `oido`, which is the only one that matters:
 
-| si la fracción que usa oido es… | aguanta hasta |
+| if the fraction using oido is… | it holds up to |
 |---|---|
-| 0,15 (la estimación) | **110 visitantes** |
-| 0,50 | 33 |
-| 1,00 (todos grabando) | **16** |
+| 0.15 (the estimate) | **110 visitors** |
+| 0.50 | 33 |
+| 1.00 (everybody recording) | **16** |
 
-Ese rango —de 16 a 110— **no es imprecisión del modelo: es el modelo
-diciendo dónde está la incertidumbre.** No está en la máquina, está en
-cuánta gente elige grabar. Si algún día hay medición real de uso, este es
-el único número que hay que reemplazar.
+That range — from 16 to 110 — **is not imprecision in the model: it is
+the model saying where the uncertainty lives.** It is not in the
+machine, it is in how many people choose to record. If one day there is
+a real measurement of usage, this is the only number that has to be
+replaced.
 
 ---
 
-## 4. El patrón: acotar el TRABAJO, no la ENTRADA
+## 4. The pattern: bound the WORK, not the INPUT
 
-Es la lección que salió de medir, y vale para los dos carriles.
+This is the lesson that came out of measuring, and it holds for both
+lanes.
 
-Los topes que había —300 caracteres, 8 MB, 30 segundos— acotan **lo que
-entra**. Ninguno acotaba **lo que cuesta**. Medido, dos audios de la
-**misma duración** (28,1 s):
+The caps that existed — 300 characters, 8 MB, 30 seconds — bound **what
+comes in**. None of them bounded **what it costs**. MEASURED, two audio
+clips of the **same duration** (28.1 s):
 
-| | tiempo |
+| | time |
 |---|---|
-| habla normal | 2,24 s |
-| habla repetida | **10,49 s** |
+| normal speech | 2.24 s |
+| repetitive speech | **10.49 s** |
 
-Cinco veces el trabajo por el mismo tamaño de entrada. Y una cola solo
-puede prometer una espera si el costo por pedido está acotado; si no, es
-una cola sin unidad de medida.
+Five times the work for the same input size. And a queue can only
+promise a wait if the cost per request is bounded; otherwise it is a
+queue with no unit of measurement.
 
-La causa era la **escalera de temperaturas** de faster-whisper: ante
-salida repetitiva rehace la ventana entera hasta seis veces (0.0, 0.2 …
-1.0). Con `temperature=[0.0]` el peor caso baja a 2,99 s y el texto sale
-igual de largo — los cinco reintentos no rescataban nada.
+The cause was faster-whisper's **temperature ladder**: faced with
+repetitive output it redoes the whole window up to six times (0.0, 0.2
+… 1.0). With `temperature=[0.0]` the worst case drops to 2.99 s and the
+text comes out just as long — the five retries were not rescuing
+anything.
 
-**Y la entrada patológica es la más probable:** lo primero que dice
-cualquiera frente a un micrófono es «probando, probando».
+**And the pathological input is the most likely one:** the first thing
+anybody says in front of a microphone is «testing, testing».
 
-El carril de GPU ya tenía esto resuelto sin que nos diéramos cuenta:
-`max_output_tokens` por tarea acota el trabajo, no la entrada. Por eso ese
-carril se comportaba y este no.
+The GPU lane already had this solved without our noticing:
+`max_output_tokens` per task bounds the work, not the input. That is
+why that lane behaved and this one did not.
 
 ---
 
-## 5. La trampa que casi nos come
+## 5. The trap that nearly ate us
 
-La primera versión de la piscina **no funcionó, y no dio ningún error.**
+The first version of the pool **did not work, and it raised no error at
+all.**
 
-Los endpoints eran `async def` y el trabajo de los modelos es bloqueante:
-corría dentro del bucle de eventos, así que congelaba el proceso entero.
-El semáforo de cuatro puestos estaba bien puesto y no protegía nada,
-porque nunca había dos cosas a la vez que proteger.
+The endpoints were `async def` and the models' work is blocking: it ran
+inside the event loop, so it froze the whole process. The four-slot
+semaphore was correctly placed and protected nothing, because there
+were never two things at once to protect.
 
-Medido con la piscina «puesta»:
+MEASURED with the pool «in place»:
 
 ```
-  1 a la vez    0,38/s
-  4 a la vez    0,38/s
-  8 a la vez    0,38/s
- 16 a la vez    0,38/s     <- idéntico. Eso es serialización pura.
+  1 at a time    0.38/s
+  4 at a time    0.38/s
+  8 at a time    0.38/s
+ 16 at a time    0.38/s     <- identical. That is pure serialization.
 ```
 
-El arreglo es sacar el trabajo a un hilo de verdad
-(`anyio.to_thread.run_sync`) con el `CapacityLimiter` como cupo. Los dos
-hacen falta juntos: sin el hilo no hay paralelismo aunque sobren puestos,
-y sin el limitador entran todos y se pisan.
+The fix is to take the work out to a real thread
+(`anyio.to_thread.run_sync`) with `CapacityLimiter` as the slot count.
+Both are needed together: without the thread there is no parallelism
+however many slots are spare, and without the limiter they all come in
+and trample each other.
 
-**La señal que distingue es el caudal contra la concurrencia.** Una cola
-que avanza se ve igual en los dos casos; lo único que los separa es que
-los números no se muevan.
+**The signal that tells them apart is throughput against concurrency.**
+A queue that is advancing looks the same in both cases; the only thing
+that separates them is that the numbers do not move.
 
-Antes y después, `oido` con ocho a la vez:
+Before and after, `oido` with eight at a time:
 
-| | caudal | p95 |
+| | throughput | p95 |
 |---|---|---|
-| 1 obrero, escalera de temperaturas | 0,46/s | 18,27 s |
-| piscina rota (`async def`) | 0,38/s | 20,73 s |
-| **4 obreros, hilo real, sin escalera** | **0,59/s** | **13,55 s** |
+| 1 worker, temperature ladder | 0.46/s | 18.27 s |
+| broken pool (`async def`) | 0.38/s | 20.73 s |
+| **4 workers, real thread, no ladder** | **0.59/s** | **13.55 s** |
 
 ---
 
-## 6. Lo que faltaba, y qué se hizo (#95, 2026-08-17)
+## 6. What was missing, and what was done (#95, 2026-08-17)
 
-Los tres puntos de la primera versión de esta sección están resueltos
-**en el código**; lo que falta es el tren de despliegue (abajo).
+The three points from the first version of this section are resolved
+**in the code**; what is missing is the deployment train (below).
 
-**Colas por recurso — hecho.** El gateway tiene una `Admision` por
-engine (`llm` y `cpu`), el engine de la capacidad elige la cola, y cada
-puerta rechaza tareas del otro carril con 400. Una transcripción ya no
-puede ponerse delante de una traducción que ni usa el mismo hardware.
+**Per-resource queues — done.** The gateway has one `Admision` per
+engine (`llm` and `cpu`), the capability's engine picks the queue, and
+each door rejects tasks from the other lane with a 400. A
+transcription can no longer put itself in front of a translation that
+does not even use the same hardware.
 
-**Reparto justo entre inquilinos — hecho.** Al desencolar se despierta
-al tenant **menos recientemente servido**, no al que llegó primero: una
-ráfaga de cincuenta pedidos ya no ocupa las cincuenta primeras
-posiciones. La lección de implementarlo: turnarse **exige memoria** de
-a quién se acaba de servir — la primera versión recalculaba el turno
-mirando solo la fila, y apenas se atendía al primero de la ráfaga el
-segundo volvía a ganar por llegada. Además la sala de espera guarda un
-cuarto para los demás: sin eso, «cola llena» podía significar «cola
-llena DE OTRO» y la garantía de turno nunca llegaba a aplicarse.
+**Fair sharing between tenants — done.** On dequeuing, the tenant woken
+is the **least recently served** one, not the one that arrived first: a
+burst of fifty requests no longer occupies the first fifty positions.
+The lesson from implementing it: taking turns **requires memory** of
+who was just served — the first version recomputed the turn by looking
+only at the queue, and as soon as the first of the burst had been
+served the second one won again on arrival order. On top of that, the
+waiting room reserves a quarter of itself for everybody else: without
+that, «queue full» could mean «full OF SOMEBODY ELSE», and the
+turn-taking guarantee never got a chance to apply.
 
-**Admisión por costo estimado — hecho en el carril CPU.** Cada motor
-del engine-cpu acota su sala (2 pedidos por obrero) y rechaza con 429 +
-`Retry-After` calculado del **costo típico auto-medido** (promedio
-móvil sobre lo que tardó cada pedido real). Medido: 20 pedidos
-simultáneos de 27 s de audio → 12 atendidos, 8 rechazados en 66 ms con
-`Retry-After: 6`.
+**Admission by estimated cost — done in the CPU lane.** Each of
+engine-cpu's motors bounds its own waiting room (2 requests per worker)
+and rejects with 429 + a `Retry-After` computed from the **typical,
+self-measured cost** (moving average over how long each real request
+took). MEASURED: 20 simultaneous requests of 27 s of audio → 12 served,
+8 rejected in 66 ms with `Retry-After: 6`.
 
-## 6b. Dos modelos en una placa (#97, 2026-08-17)
+## 6b. Two models on one card (#97, 2026-08-17)
 
-La GPU dejó de ser «un engine»: el gateway aprende carriles de texto
-como CONJUNTO (`AI_ENGINES`), cada uno con su vLLM, su
-`served-model-name` y su cola del #95, y el ruteo elige carril por
-capacidad. La primera convivencia:
+The GPU stopped being «one engine»: the gateway learns text lanes as a
+SET (`AI_ENGINES`), each with its own vLLM, its own
+`served-model-name` and its own queue from #95, and the routing picks
+the lane by capability. The first cohabitation:
 
-| carril | modelo | sirve | GPU_MEM_UTIL |
+| lane | model | serves | GPU_MEM_UTIL |
 |---|---|---|---|
-| `llm` | Hy-MT2-1.8B bf16 | `traduccion` (traduce.exe) | 0,38 |
-| `charla` | qwen3-4b-instruct-2507 AWQ int4 | `chat.rapido`, `chat.largo` | 0,38 |
+| `llm` | Hy-MT2-1.8B bf16 | `traduccion` (traduce.exe) | 0.38 |
+| `charla` | qwen3-4b-instruct-2507 AWQ int4 | `chat.rapido`, `chat.largo` | 0.38 |
 
-El motivo es que cada modelo se quede con lo que sabe hacer: Hy-MT2 es
-un traductor especialista (qwen traduciendo fallaba de dos maneras
-medidas), y como conversador es al revés — el 4B narra donde el 1.8B
-balbucea. La capacidad `traduccion` nació para esto: traduce.texto
-nombra su promesa real y el resto del chat viajó de carril **sin tocar
-ningún contrato**.
+The reason is for each model to keep what it knows how to do: Hy-MT2 is
+a specialist translator (qwen translating failed in two MEASURED ways),
+and as a conversationalist it is the other way round — the 4B narrates
+where the 1.8B babbles. The `traduccion` capability was born for this:
+traduce.texto names its real promise, and the rest of the chat moved
+lane **without touching any contract**.
 
-Mecánica de la convivencia: el device plugin anuncia la placa como 2
-unidades (time-slicing; sin aislamiento de memoria — el reparto real lo
-hacen los `gpu-memory-utilization`), la cuota de ai-system pone el
-techo en 2 para que un tercer pod se rechace ruidoso, el controlador
-escala la flota entera con el modo, y `VRAM_LIMITE` de `bin/ai` bajó de
-4390 a 2200 (los presupuestos de los engines y el colchón del
-escritorio siguen siendo una sola decisión). Agregar un tercer modelo
-—la 4090 del futuro— es: pesos al PV, un Deployment calcado, una
-entrada en `AI_ENGINES` y una fila en el ruteo. Cero código.
+The mechanics of the cohabitation: the device plugin advertises the
+card as 2 units (time-slicing; no memory isolation — the real division
+is done by the `gpu-memory-utilization` values), the ai-system quota
+puts the ceiling at 2 so that a third pod is rejected loudly, the
+controller scales the whole fleet with the mode, and `VRAM_LIMIT_MIB`
+in `aegis ai` came down from 4390 to 2200 (the engines' budgets and the
+desktop's cushion are still one single decision). Adding a third model
+— the 4090 of the future — is: weights onto the PV, a Deployment traced
+from the last one, an entry in `AI_ENGINES` and a row in the routing.
+Zero code.
 
-## 7. Lo que falta ahora
+## 7. What is missing now
 
-**El tren de despliegue llegó (2026-08-17).** Gateway `main-000013` con
-las colas nuevas, engine-cpu `0.1.0-7919d8c` (imagen construida por el
-job `engine-cpu` de Jenkins: kaniko → trivy → cosign, la llave nunca
-salió del cluster), PVC sembrado por hardlink, y la capacidad
-`embeddings` declarada al final, cuando ya se podía servir. Verificado
-de punta a punta: un pod del tenant → netpol → puerta interna →
-`/v1/vector` → 384d normalizados; y la tarea cpu por `/v1/tarea`
-rechaza con 400.
+**The deployment train arrived (2026-08-17).** Gateway `main-000013`
+with the new queues, engine-cpu `0.1.0-7919d8c` (image built by
+Jenkins's `engine-cpu` job: kaniko → trivy → cosign, the key never left
+the cluster), the PVC seeded by hardlink, and the `embeddings`
+capability declared last, once it could already be served. Verified end
+to end: a tenant pod → netpol → internal door → `/v1/vector` → 384d
+normalized; and the cpu task through `/v1/tarea` is rejected with a
+400.
 
-**Medir el carril de GPU con 10 en vuelo.** El «4 es el óptimo» viene de
-qwen3-4b y el motor de hoy es otro. Está anotado como pendiente en
-`k8s/base/ai-system/gateway.yaml`.
+**Measure the GPU lane with 10 in flight.** The «4 is the optimum»
+comes from qwen3-4b and today's engine is a different one. It is noted
+as pending in `k8s/base/ai-system/gateway.yaml`.
 
-**El carril CPU del laboratorio sigue local.** En el cluster el
-engine-cpu solo tiene un consumidor (embeddings vía gateway); voz, oido
-y vision los consume el BFF local. Llevarlos a producción es empujar
-portafolio-v3, que es una decisión aparte del operador.
+**The lab's CPU lane is still local.** In the cluster, engine-cpu has
+only one consumer (embeddings via the gateway); voz, oido and vision
+are consumed by the local BFF. Taking them to production means pushing
+portafolio-v3, which is a separate decision of the operator's.
 
-**postgres:17.10-alpine no re-espeja.** El build 10 de mirror-images lo
-rechazó: su `gosu` upstream viene compilado con stdlib de Go 1.24.6 (7
-HIGH). La copia espejada previa sigue en el registry y no tiene
-consumidores desplegados; la salida es esperar el rebuild upstream o
-subir a un tag que lo traiga arreglado.
+**postgres:17.10-alpine does not re-mirror.** Build 10 of mirror-images
+rejected it: its upstream `gosu` comes compiled with the Go 1.24.6
+stdlib (7 HIGH). The previously mirrored copy is still in the registry
+and has no deployed consumers; the way out is to wait for the upstream
+rebuild or to move up to a tag that brings it fixed.

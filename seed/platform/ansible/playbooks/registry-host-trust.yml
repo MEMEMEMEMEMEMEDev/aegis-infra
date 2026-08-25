@@ -1,18 +1,19 @@
-# registry-host-trust — salda el "role Ansible pendiente" de
-# 2026-07-02:132: CA del registry al host + registries.yaml +
-# restart k3s. POR NODO (en hetzner el inventory tiene N hosts).
-# Reemplaza el bloque sudo manual de v1. Idempotente: solo reinicia
-# k3s si algo cambió.
+# registry-host-trust — settles the "pending Ansible role" from
+# 2026-07-02:132: registry CA onto the host + registries.yaml +
+# k3s restart. PER NODE (on hetzner the inventory has N hosts).
+# Replaces the manual sudo block from v1. Idempotent: it only
+# restarts k3s if something changed.
 ---
-- name: Host confía en el registry interno (CA propio de aegis)
+- name: Host trusts the internal registry (aegis' own CA)
   hosts: k3s_nodes
   become: true
-  # KUBECONFIG explícito (corrida #7, bug B / tarea censurada): las
-  # tareas corren como ROOT (become) y usan `kubectl` PELADO — root NO
-  # tiene ~/.kube/config (la fase 20 lo copió al usuario operador, no a
-  # root) → kubectl caía a localhost:8080 → "Extraer ca.crt ... FAILED"
-  # (censurado por no_log). k3s.yaml es mode 644, root lo lee. Cubre
-  # TODAS las tareas kubectl del play (extracción + waits post-restart).
+  # explicit KUBECONFIG (run #7, bug B / censored task): the tasks run
+  # as ROOT (become) and use BARE `kubectl` — root does NOT have
+  # ~/.kube/config (phase 20 copied it to the operator user, not to
+  # root) → kubectl fell back to localhost:8080 → "Extract ca.crt ...
+  # FAILED" (censored by no_log). k3s.yaml is mode 644, root can read
+  # it. Covers ALL the kubectl tasks of the play (extraction +
+  # post-restart waits).
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
   vars:
@@ -20,8 +21,8 @@
     registry_port: 5000
 
   tasks:
-    - name: Extraer ca.crt del Secret aegis-internal-ca (delegado al
-            primer nodo con kubectl; NUNCA se imprime — va a archivo)
+    - name: Extract ca.crt from the Secret aegis-internal-ca (delegated
+            to the first node with kubectl; NEVER printed — to a file)
       ansible.builtin.shell: |
         set -o pipefail
         kubectl -n cert-manager get secret aegis-internal-ca \
@@ -31,46 +32,48 @@
       delegate_to: "{{ groups['k3s_nodes'][0] }}"
       run_once: true
       changed_when: false
-      # falla FUERTE si el CA vino vacío (evita escribir un aegis-ca.pem
-      # vacío que rompería el trust en silencio — el pull falla 1 fase
-      # después con x509). no_log SIGUE (el CA es T1, patrón no-dump):
+      # fails HARD if the CA came back empty (avoids writing an empty
+      # aegis-ca.pem that would break trust silently — the pull fails 1
+      # phase later with x509). no_log STAYS (the CA is T1, no-dump
+      # pattern):
       failed_when: ca_pem.rc != 0 or (ca_pem.stdout | default('') | length) == 0
       no_log: true
 
-    - name: Instalar aegis-ca.pem
+    - name: Install aegis-ca.pem
       ansible.builtin.copy:
         content: "{{ ca_pem.stdout }}"
         dest: /etc/rancher/k3s/aegis-ca.pem
         mode: "0644"
       register: ca_file
 
-    - name: "Renderizar registries.yaml (mirror https por ClusterIP fija + ca_file — el kubelet no resuelve .svc — A30)"
+    - name: "Render registries.yaml (https mirror via fixed ClusterIP + ca_file — the kubelet does not resolve .svc — A30)"
       ansible.builtin.template:
         src: ../roles/registry-host-trust/templates/registries.yaml.j2
         dest: /etc/rancher/k3s/registries.yaml
         mode: "0644"
       register: registries_file
 
-    - name: "Mapear el nombre del registry a la ClusterIP en /etc/hosts (H2 corrida #13)"
-      # el kubelet/containerd corre EN EL HOST: los nombres .svc solo
-      # los resuelve CoreDNS (interno). El hosts.toml del mirror deja
-      # server = <el nombre> y containerd intenta RESOLVERLO antes de
-      # caer al host alternativo → el pull muere en DNS sin llegar al
-      # mirror. Con la entrada en /etc/hosts el pull funciona al
-      # instante (validado en vivo #13: auth+TLS+CA OK aguas abajo).
-      # La ClusterIP es fija por diseño (REGISTRY_CLUSTER_IP, T1):
+    - name: "Map the registry name to the ClusterIP in /etc/hosts (H2 run #13)"
+      # the kubelet/containerd runs ON THE HOST: .svc names are only
+      # resolved by CoreDNS (internal). The mirror's hosts.toml leaves
+      # server = <the name> and containerd tries to RESOLVE it before
+      # falling back to the alternate host → the pull dies in DNS
+      # without ever reaching the mirror. With the /etc/hosts entry the
+      # pull works instantly (validated live in #13: auth+TLS+CA OK
+      # downstream). The ClusterIP is fixed by design
+      # (REGISTRY_CLUSTER_IP, T1):
       ansible.builtin.lineinfile:
         path: /etc/hosts
         line: "{{ registry_cluster_ip }} registry.registry-system.svc.cluster.local"
         regexp: 'registry\.registry-system\.svc\.cluster\.local\s*$'
 
-    - name: Reiniciar k3s SOLO si cambió algo
+    - name: Restart k3s ONLY if something changed
       ansible.builtin.systemd:
         name: k3s
         state: restarted
       when: ca_file.changed or registries_file.changed
 
-    - name: Esperar el nodo Ready post-restart
+    - name: Wait for node Ready after the restart
       ansible.builtin.command: >-
         kubectl wait --for=condition=Ready node --all --timeout=180s
       changed_when: false

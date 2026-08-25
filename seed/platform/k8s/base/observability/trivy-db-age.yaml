@@ -1,21 +1,21 @@
-# trivy-db-age — el vigía del vigía (design.md §4.2d): si la DB de
-# Trivy no se actualiza, cada scan «verde» miente en silencio y el
-# pin A42 pasa a ser fe. No hay métrica nativa; se DERIVA: este
-# CronJob lee el metadata de la DB en el PVC del trivy-server y
-# pushea `aegis_trivy_db_updated_timestamp_seconds` a vmsingle
-# (/api/v1/import/prometheus). La regla trivy-db.yaml de vmalert
-# alerta a las 48h.
+# trivy-db-age — the watcher of the watcher (design.md §4.2d): if
+# Trivy's DB does not update, every «green» scan lies in silence and
+# the A42 pin turns into faith. There is no native metric; it is
+# DERIVED: this CronJob reads the DB metadata on the trivy-server's
+# PVC and pushes `aegis_trivy_db_updated_timestamp_seconds` to
+# vmsingle (/api/v1/import/prometheus). vmalert's trivy-db.yaml rule
+# alerts at 48h.
 #
-# namespace trivy-system EXPLÍCITO (fase-85 §1): el PVC de la DB es
-# RWO y vive ahí — el CronJob tiene que montar `data-trivy-0` (el
-# volumeClaimTemplate `data` del StatefulSet `trivy`, chart 0.24.0,
-# montado en /home/scanner/.cache ⇒ la DB queda en
+# EXPLICIT trivy-system namespace (phase-85 §1): the DB's PVC is RWO
+# and lives there — the CronJob has to mount `data-trivy-0` (the
+# `data` volumeClaimTemplate of the `trivy` StatefulSet, chart 0.24.0,
+# mounted at /home/scanner/.cache ⇒ the DB ends up in
 # <pvc>/trivy/db/metadata.json).
 #
-# CASO BORDE RWO (fase-85 §2): en nodo único el segundo mount RWO
-# co-localiza solo; en hetzner multi-nodo este CronJob necesita
-# afinidad al nodo del trivy-server — resolver al activar el perfil
-# hetzner (anotado acá a propósito; hoy no hay multi-nodo que medir).
+# RWO EDGE CASE (phase-85 §2): on a single node the second RWO mount
+# co-locates by itself; on multi-node hetzner this CronJob needs
+# affinity to the trivy-server's node — solve it when the hetzner
+# profile is activated (noted on purpose; no multi-node to measure).
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -24,7 +24,7 @@ metadata:
   namespace: trivy-system
   labels: {aegis.dev/part-of: aegis-platform}
 spec:
-  schedule: "17 * * * *"        # cada hora; el umbral es 48h — sobra
+  schedule: "17 * * * *"        # hourly; the threshold is 48h — plenty
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
@@ -37,13 +37,13 @@ spec:
           labels: {app.kubernetes.io/name: trivy-db-age}
         spec:
           restartPolicy: OnFailure
-          # El PVC de la DB es del trivy-server: `trivy/` es modo 2770 con
-          # dueño y grupo 65534 — ni siquiera se puede ATRAVESAR desde otro
-          # usuario. La imagen de curl corre como uid 100 por defecto, así que
-          # este CronJob falló 30 h seguidas con «Permission denied» sin que
-          # nada lo dijera (encontrado el 2026-08-22). Se corre con la misma
-          # identidad que el trivy-server, que es la única que abre ese
-          # directorio.
+          # The DB's PVC belongs to the trivy-server: `trivy/` is mode 2770
+          # with owner and group 65534 — it cannot even be TRAVERSED by
+          # another user. The curl image runs as uid 100 by default, so this
+          # CronJob failed for 30 h straight with «Permission denied» without
+          # anything saying so (found on 2026-08-22). It runs with the same
+          # identity as the trivy-server, which is the only one that opens
+          # that directory.
           securityContext:
             runAsNonRoot: true
             runAsUser: 65534
@@ -51,16 +51,16 @@ spec:
             seccompProfile: {type: RuntimeDefault}
           containers:
             - name: medir-y-pushear
-              # verificado 2026-08-19 contra github.com/curl/
-              # curl-container releases (8.21.0, 2026-06-24) y el tag
-              # en Docker Hub curlimages/curl:
+              # verified 2026-08-19 against github.com/curl/
+              # curl-container releases (8.21.0, 2026-06-24) and the
+              # tag in Docker Hub curlimages/curl:
               image: curlimages/curl:8.21.0
               command: ["/bin/sh", "-ec"]
               args:
-                # UpdatedAt del metadata (lo que la DB DICE de sí
-                # misma); si el parse falla, mtime del archivo (lo
-                # que el filesystem VIO) — degradación anotada, no
-                # silencio:
+                # UpdatedAt from the metadata (what the DB SAYS
+                # about itself); if the parse fails, the file's mtime
+                # (what the filesystem SAW) — a noted degradation,
+                # not silence:
                 - |
                   META=/trivy-cache/trivy/db/metadata.json
                   ISO="$(sed -n 's/.*"UpdatedAt":"\([0-9T:.-]*\)Z\{0,1\}".*/\1/p' "$META" | head -1)"

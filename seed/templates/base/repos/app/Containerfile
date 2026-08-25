@@ -1,6 +1,6 @@
-# __ORG__-app — builder pinneado a LÍNEA soportada (el pin del
-# toolchain envejece; el scan de Trivy del pipeline lo vigila y bloquea
-# cuando acumula CVEs — ese build rojo es la señal de subirlo acá).
+# __ORG__-app — builder pinned to a SUPPORTED LINE (the toolchain pin
+# ages; the pipeline's Trivy scan watches it and blocks when it piles
+# up CVEs — that red build is the signal to bump it here).
 FROM docker.io/library/golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod main.go ./
@@ -8,8 +8,8 @@ RUN CGO_ENABLED=0 go build -o /app .
 
 FROM docker.io/library/alpine:3.21
 COPY --from=build /app /usr/local/bin/app
-# No-root SIEMPRE: el namespace de la organización es PSS restricted y
-# un contenedor root ni siquiera llega a arrancar.
+# Non-root ALWAYS: the organization's namespace is PSS restricted and a
+# root container does not even get to start.
 USER 65532:65532
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/app"]

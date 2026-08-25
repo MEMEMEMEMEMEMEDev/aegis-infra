@@ -1,52 +1,52 @@
 #!/usr/bin/env bash
-# tofu-apply.sh v2 — wrapper OBLIGATORIO para todo tofu (A14).
-# Descifra tofu/secrets/tokens.enc.yaml EN MEMORIA y exporta las
-# TF_VARs. CAMBIO CLAVE vs v1 (D2/D6/D10): tofu v2 gestiona SOLO
-# Cloudflare — ni recursos K8s ni GitHub (repos/settings/webhooks
-# van por gh api en el init, fases 12/15). Superficie total del
-# wrapper: UN token (CF api), rotable vía tercero. Ni age key, ni
-# deploy keys, ni PAT, ni HMAC pasan por acá.
+# tofu-apply.sh v2 — MANDATORY wrapper for every tofu call (A14).
+# Decrypts tofu/secrets/tokens.enc.yaml IN MEMORY and exports the
+# TF_VARs. KEY CHANGE vs v1 (D2/D6/D10): tofu v2 manages ONLY
+# Cloudflare — no K8s resources and no GitHub (repos/settings/webhooks
+# go through gh api in the init, phases 12/15). Total surface of the
+# wrapper: ONE token (CF api), rotatable through a third party. Neither
+# the age key, nor deploy keys, nor a PAT, nor HMAC pass through here.
 #
-# Uso:  ./tofu-apply.sh -chdir=envs/<env> <plan|apply|output> [...]
+# Usage:  ./tofu-apply.sh -chdir=envs/<env> <plan|apply|output> [...]
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOKENS="$HERE/secrets/tokens.enc.yaml"
 
-# TODO diagnóstico a STDERR — el stdout del wrapper es SAGRADO (H4):
-# `exec tofu "$@"` deja pasar el stdout REAL de tofu, y los callers
-# capturan subcomandos de lectura con $() — p.ej. `output -raw
-# tunnel_id` en la fase 25. Un log a stdout contamina esa captura
-# (corrida #6, bug 3: TUNNEL_ID quedó con el header pegado → el gate
-# del token nunca matcheaba). Misma clase que log_* de lib/common.sh.
+# ALL diagnostics to STDERR — the wrapper's stdout is SACRED (H4):
+# `exec tofu "$@"` lets tofu's REAL stdout through, and the callers
+# capture read subcommands with $() — e.g. `output -raw tunnel_id`
+# in phase 25. A log line on stdout contaminates that capture (run #6,
+# bug 3: TUNNEL_ID ended up with the header glued on → the token gate
+# never matched). Same class as log_* in lib/common.sh.
 log()  { printf '[tofu-wrapper] %s\n' "$*" >&2; }
 die()  { printf '[tofu-wrapper] ERROR: %s\n' "$*" >&2; exit 1; }
 
-command -v tofu >/dev/null || die "tofu no está en PATH"
+command -v tofu >/dev/null || die "tofu is not in PATH"
 
-# EL TOKEN YA EXPORTADO POR EL CALLER TIENE PRECEDENCIA, igual que las
-# otras tres TF_VARs de más abajo. No es una excepción: es la MISMA
-# regla, aplicada al cuarto valor.
+# A TOKEN ALREADY EXPORTED BY THE CALLER TAKES PRECEDENCE, just like the
+# other three TF_VARs further down. It is not an exception: it is the
+# SAME rule, applied to the fourth value.
 #
-# Existe para que CI pueda correr esto SIN LA AGE KEY. El job edge-apply
-# recibe únicamente el token de Cloudflare como credencial de Jenkins,
-# y con eso el wrapper no necesita descifrar nada. La raíz de confianza
-# —la age key— NO entra a CI, nunca.
+# It exists so that CI can run this WITHOUT THE AGE KEY. The edge-apply
+# job receives only the Cloudflare token as a Jenkins credential, and
+# with that the wrapper does not need to decrypt anything. The root of
+# trust —the age key— does NOT enter CI, ever.
 #
-# Es exactamente para lo que D6 achicó la superficie de tofu a un solo
-# token de tercero, rotable sin ceremonia: el peor caso de que ese token
-# se filtre es una zona de DNS comprometida, no la plataforma entera.
+# This is exactly what D6 shrank tofu's surface for: a single
+# third-party token, rotatable without ceremony. The worst case if that
+# token leaks is a compromised DNS zone, not the whole platform.
 if [[ -n "${TF_VAR_cloudflare_api_token:-}" ]]; then
-    log "token inyectado por el caller — no se descifra nada (modo CI)"
+    log "token injected by the caller — nothing is decrypted (CI mode)"
     export TF_VAR_cloudflare_api_token
 else
-    command -v sops >/dev/null || die "sops no está en PATH"
+    command -v sops >/dev/null || die "sops is not in PATH"
     [[ -n "${SOPS_AGE_KEY_FILE:-}" ]] \
-        || die "SOPS_AGE_KEY_FILE no exportada (A2: no confiar en direnv)"
-    [[ -f "$TOKENS" ]] || die "no existe $TOKENS"
+        || die "SOPS_AGE_KEY_FILE not exported (A2: do not trust direnv)"
+    [[ -f "$TOKENS" ]] || die "$TOKENS does not exist"
 
-    # descifrado en memoria; extracción con python3 (no yq — C7):
-    decrypted="$(sops -d "$TOKENS")" || die "sops -d falló (¿age key?)"
+    # decryption in memory; extraction with python3 (not yq — C7):
+    decrypted="$(sops -d "$TOKENS")" || die "sops -d failed (age key?)"
 
     get() {
         printf '%s' "$decrypted" | python3 -c "
@@ -59,20 +59,21 @@ print(v['value'] if isinstance(v, dict) else v)"
     }
 
     export TF_VAR_cloudflare_api_token="$(get cloudflare.api_token)"
-    # #76: token SEPARADO para Access. Si el caller ya lo exporto (modo
-    # CI) tiene precedencia, igual que los otros — pero el job edge-apply
-    # NO deberia recibirlo: la separacion existe para que un CI
-    # comprometido no pueda desactivar Access.
+    # #76: a SEPARATE token for Access. If the caller already exported
+    # it (CI mode) it takes precedence, like the others — but the
+    # edge-apply job should NOT receive it: the separation exists so
+    # that a compromised CI cannot disable Access.
     export TF_VAR_cloudflare_access_token="${TF_VAR_cloudflare_access_token:-$(get cloudflare.access_token)}"
     unset decrypted
 fi
 
-# ── T1 derivables de la config (D11: lo conocido se DERIVA, jamás
-#    se re-pide). Corrida #4: el wrapper inyectaba solo el token y
-#    tofu paraba a pedir INTERACTIVAMENTE account_id/zone_id/domain
-#    — tres valores que el wizard ya capturó. Fuente: el
-#    aegis-init.conf del workspace (o AEGIS_INIT_CONF explícita);
-#    un TF_VAR_* ya exportado por el caller tiene precedencia. ────
+# ── T1 values derivable from the config (D11: what is known is
+#    DERIVED, never asked again). Run #4: the wrapper injected only
+#    the token and tofu stopped to ask INTERACTIVELY for
+#    account_id/zone_id/domain — three values the wizard had already
+#    captured. Source: the workspace's aegis-init.conf (or an explicit
+#    AEGIS_INIT_CONF); a TF_VAR_* already exported by the caller takes
+#    precedence. ──────────────────────────────────────────────
 AEGIS_CONF="${AEGIS_INIT_CONF:-$HERE/../../init/aegis-init.conf}"
 if [[ -f "$AEGIS_CONF" ]]; then
     # shellcheck source=/dev/null
@@ -80,61 +81,61 @@ if [[ -f "$AEGIS_CONF" ]]; then
     export TF_VAR_cloudflare_account_id="${TF_VAR_cloudflare_account_id:-${CF_ACCOUNT_ID:-}}"
     export TF_VAR_cloudflare_zone_id="${TF_VAR_cloudflare_zone_id:-${CF_ZONE_ID:-}}"
     export TF_VAR_root_domain="${TF_VAR_root_domain:-${ROOT_DOMAIN:-}}"
-    # #76: el mail del operador que puede entrar por Access. Sale de
-    # ACME_EMAIL y no de una key propia a propósito: es el mismo humano,
-    # y dos fuentes para el mismo valor es cómo se desincronizan.
+    # #76: the mail of the operator allowed in through Access. It comes
+    # from ACME_EMAIL and not from a key of its own on purpose: it is
+    # the same human, and two sources for one value is how they drift.
     export TF_VAR_operador_email="${TF_VAR_operador_email:-${ACME_EMAIL:-}}"
 fi
 
-# guard: TODA var inyectable presente y sin placeholder — un TF_VAR
-# faltante = prompt interactivo de tofu = D11 roto (mejor abortar
-# con evidencia que colgar esperando un tipeo):
+# guard: EVERY injectable var present and with no placeholder — a
+# missing TF_VAR = an interactive tofu prompt = D11 broken (better to
+# abort with evidence than to hang waiting for someone to type):
 INJECTED=(TF_VAR_cloudflare_api_token TF_VAR_cloudflare_access_token \
           TF_VAR_cloudflare_account_id \
           TF_VAR_cloudflare_zone_id TF_VAR_root_domain \
           TF_VAR_operador_email)
 for v in "${INJECTED[@]}"; do
-    [[ "${!v:-}" == PLACEHOLDER_* ]] && die "$v sigue en placeholder"
-    [[ -z "${!v:-}" ]] && die "$v vacío — ¿falta $AEGIS_CONF o la key en la config? (exportala como $v para override)"
+    [[ "${!v:-}" == PLACEHOLDER_* ]] && die "$v is still a placeholder"
+    [[ -z "${!v:-}" ]] && die "$v empty — is $AEGIS_CONF missing, or the key in the config? (export it as $v to override)"
 done
 
-# ── EL STATE (#46) ────────────────────────────────────────────────
+# ── THE STATE (#46) ───────────────────────────────────────────────
 #
-# El state vive CIFRADO Y VERSIONADO en terraform.tfstate.enc.json, y
-# el .tfstate en claro es un archivo de trabajo que nunca entra a git.
+# The state lives ENCRYPTED AND VERSIONED in terraform.tfstate.enc.json,
+# and the plaintext .tfstate is a working file that never enters git.
 #
-# POR QUÉ NO EN UN BACKEND REMOTO. El state tiene `tunnel_secret` y el
-# token de Cloudflare EN CLARO. Un backend con su propia credencial
-# pasaría a custodiar un secreto de PLATAFORMA: quien la consiga levanta
-# su propio cloudflared y recibe el tráfico de todos los hostnames. Hoy
-# el peor caso de que se filtre el token de CF es una zona de DNS
-# comprometida; con el state afuera pasaría a ser el tráfico entero.
-# Cifrarlo con la age key no agrega NADA nuevo que cuidar: esa llave ya
-# es la raíz de confianza y ya hace falta para recuperar.
+# WHY NOT IN A REMOTE BACKEND. The state holds `tunnel_secret` and the
+# Cloudflare token IN THE CLEAR. A backend with a credential of its own
+# would become the custodian of a PLATFORM secret: whoever obtains it
+# brings up their own cloudflared and receives the traffic of every
+# hostname. Today the worst case if the CF token leaks is a compromised
+# DNS zone; with the state outside it would become the entire traffic.
+# Encrypting it with the age key adds NOTHING new to look after: that
+# key is already the root of trust and is already needed to recover.
 #
-# LO QUE ESTO CUESTA, dicho de frente: CI no puede aplicar el borde,
-# porque descifrar necesita la age key y la age key no entra a CI (§4
-# del protocolo). El apply del borde es un comando del operador. A
-# cambio, el chequeo de deriva NO usa el state: le pregunta a Cloudflare
-# qué hostnames existen y los compara con los derivados de los
-# contratos. Ver `aegis check`.
+# WHAT THIS COSTS, said plainly: CI cannot apply the edge, because
+# decrypting needs the age key and the age key does not enter CI (§4 of
+# the protocol). Applying the edge is an operator command. In exchange,
+# the drift check does NOT use the state: it asks Cloudflare which
+# hostnames exist and compares them against the ones derived from the
+# contracts. See `aegis check`.
 ENV_ARG=""
 for a in "$@"; do
     case "$a" in -chdir=*) ENV_ARG="${a#-chdir=}" ;; esac
 done
 
-# Un -chdir ABSOLUTO volvía "$HERE/$ENV_ARG" una ruta basura y TODA la
-# maquinaria del state cifrado (#46) se saltaba EN SILENCIO: la fase 85
-# aplicó tres veces contra el state plano mientras el enc.json
-# envejecía sin que nadie lo supiera (medido 2026-08-21: serial 12 en
-# el plano, 11 en el cifrado, y el verificador de rotación pisando el
-# bueno con el viejo). Silencio jamás: si cae bajo este árbol se
-# normaliza; si no, se muere diciendo por qué.
+# An ABSOLUTE -chdir turned "$HERE/$ENV_ARG" into a garbage path and ALL
+# the encrypted-state machinery (#46) was skipped IN SILENCE: phase 85
+# applied three times against the plaintext state while the enc.json
+# aged without anybody knowing (measured 2026-08-21: serial 12 in the
+# plaintext one, 11 in the encrypted one, and the rotation verifier
+# overwriting the good one with the old one). Never silence: if it
+# falls under this tree it is normalised; if not, it dies saying why.
 if [[ -n "$ENV_ARG" && "$ENV_ARG" == /* ]]; then
     if [[ "$ENV_ARG" == "$HERE"/* ]]; then
         ENV_ARG="${ENV_ARG#"$HERE"/}"
     else
-        die "-chdir absoluto fuera de $HERE ($ENV_ARG): el state cifrado no sabría dónde vivir (#46) — usar ruta relativa a tofu/"
+        die "absolute -chdir outside $HERE ($ENV_ARG): the encrypted state would not know where to live (#46) — use a path relative to tofu/"
     fi
 fi
 
@@ -144,46 +145,46 @@ if [[ -n "$ENV_ARG" ]]; then
     CIFRADO="$CLARO.enc.json"
 fi
 
-huella() { [[ -f "$1" ]] && sha256sum "$1" | cut -d' ' -f1 || echo "(no existe)"; }
+huella() { [[ -f "$1" ]] && sha256sum "$1" | cut -d' ' -f1 || echo "(does not exist)"; }
 
 if [[ -n "$CIFRADO" && -f "$CIFRADO" ]]; then
     if [[ -z "${SOPS_AGE_KEY_FILE:-}" ]]; then
-        die "hay state cifrado en $(basename "$CIFRADO") pero SOPS_AGE_KEY_FILE no está exportada.
-       El state NO se puede leer sin la age key, y eso es a propósito (#46).
-       Si esto es CI: este job no puede aplicar el borde. El chequeo de
-       deriva que SÍ corre sin la age key está en aegis check."
+        die "there is encrypted state in $(basename "$CIFRADO") but SOPS_AGE_KEY_FILE is not exported.
+       The state CANNOT be read without the age key, and that is on purpose (#46).
+       If this is CI: this job cannot apply the edge. The drift check that
+       DOES run without the age key lives in aegis check."
     fi
-    command -v sops >/dev/null || die "sops no está en PATH"
-    # Descifra a un archivo 600 y NO por stdout: el stdout del wrapper es
-    # sagrado (H4) y además ahí va el tunnel_secret.
+    command -v sops >/dev/null || die "sops is not in PATH"
+    # Decrypts to a 600 file and NOT to stdout: the wrapper's stdout is
+    # sacred (H4) and, besides, the tunnel_secret travels in there.
     umask 077
-    sops -d "$CIFRADO" > "$CLARO" || die "sops -d del state falló (¿age key correcta?)"
-    log "state descifrado ($(python3 -c "import json,sys; print(len(json.load(open('$CLARO')).get('resources',[])))") recursos)"
+    sops -d "$CIFRADO" > "$CLARO" || die "sops -d of the state failed (is the age key the right one?)"
+    log "state decrypted ($(python3 -c "import json,sys; print(len(json.load(open('$CLARO')).get('resources',[])))") resources)"
 fi
 [[ -n "$CLARO" ]] && HUELLA_ANTES="$(huella "$CLARO")"
 
-# `tofu` y no `exec tofu`: hace falta volver DESPUÉS para recifrar. El
-# stdout sigue pasando derecho —los callers capturan `output -raw
-# tunnel_id` con $()— porque no se redirige nada acá.
-log "TF_VARs inyectadas (${#INJECTED[@]}). Delegando a tofu: $*"
+# `tofu` and not `exec tofu`: we have to come back AFTERWARDS to
+# re-encrypt. stdout still passes straight through —the callers capture
+# `output -raw tunnel_id` with $()— because nothing is redirected here.
+log "TF_VARs injected (${#INJECTED[@]}). Delegating to tofu: $*"
 set +e
 tofu "$@"
 RC=$?
 set -e
 
-# Recifrar SOLO si el state cambió. sops produce un texto distinto en
-# cada corrida aunque el contenido sea idéntico (clave de datos nueva),
-# así que recifrar siempre llenaría git de diffs que no significan nada
-# — y un diff que no significa nada es un diff que se deja de leer.
+# Re-encrypt ONLY if the state changed. sops produces different text on
+# every run even when the content is identical (a fresh data key), so
+# re-encrypting always would fill git with diffs that mean nothing —
+# and a diff that means nothing is a diff that stops being read.
 if [[ -n "$CLARO" && -f "$CLARO" && "$(huella "$CLARO")" != "$HUELLA_ANTES" ]]; then
-    command -v sops >/dev/null || die "el state cambió y sops no está en PATH"
+    command -v sops >/dev/null || die "the state changed and sops is not in PATH"
     umask 077
     sops -e --input-type json --output-type json \
          --filename-override "$CIFRADO" "$CLARO" > "$CIFRADO.tmp" \
-        || die "sops -e del state falló"
+        || die "sops -e of the state failed"
     mv "$CIFRADO.tmp" "$CIFRADO"
-    log "state recifrado -> $(basename "$CIFRADO")  — COMMITEALO"
-    log "  sin ese commit, la próxima recuperación no sabe que esto existe."
+    log "state re-encrypted -> $(basename "$CIFRADO")  — COMMIT IT"
+    log "  without that commit, the next recovery does not know this exists."
 fi
 
 exit $RC

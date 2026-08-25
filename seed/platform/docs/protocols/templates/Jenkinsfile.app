@@ -1,22 +1,23 @@
-// Jenkinsfile.app — TEMPLATE v2 para apps consumidoras de la
-// plataforma aegis (copiar al repo de la app y ajustar CHANGEME).
-// Es el pipeline del canary hello-aegis v1 destilado: build →
-// scan → push → sign → report, con el anti-loop de Image Updater
-// y todas las lecciones A* horneadas. Cambiar SOLO lo marcado
-// CHANGEME; el resto es contrato con la plataforma (pins, secrets,
-// limits — si algo de eso no te sirve, el cambio va en ops-stack,
-// no acá).
+// Jenkinsfile.app — TEMPLATE v2 for apps that consume the aegis
+// platform (copy it into the app's repo and adjust CHANGEME). It
+// is the hello-aegis v1 canary pipeline distilled: build → scan →
+// push → sign → report, with the Image Updater anti-loop and every
+// A* lesson baked in. Change ONLY what is marked CHANGEME; the
+// rest is a contract with the platform (pins, secrets, limits — if
+// any of that does not suit you, the change goes in ops-stack, not
+// here).
 //
-// Prerrequisitos en el namespace del tenant jenkins-system (los
-// crea el init / el protocolo registry-credentials.md):
-//   - Secret regcred-internal (dockerconfigjson del registry)
-//   - Secret aegis-ca-trust (ca.crt del CA interno)
+// Prerequisites in the jenkins-system tenant namespace (the init
+// creates them / see the registry-credentials.md protocol):
+//   - Secret regcred-internal (the registry's dockerconfigjson)
+//   - Secret aegis-ca-trust (the internal CA's ca.crt)
 //   - Secret cosign-signing-key (cosign.key + cosign.password)
 pipeline {
   agent {
     kubernetes {
-      // RQ estricta de jenkins-system: TODO container declara
-      // limits (incluido jnlp — NUNCA `yaml ''`, pisa el default).
+      // Strict RQ in jenkins-system: EVERY container declares its
+      // limits (jnlp included — NEVER `yaml ''`, it overrides the
+      // default).
       yaml '''
 apiVersion: v1
 kind: Pod
@@ -29,30 +30,31 @@ spec:
     resources:
       requests: { cpu: 500m, memory: 512Mi }
       limits:   { cpu: 1000m, memory: 1Gi }
-  # node: SOLO para la etapa `desplegar`, que escribe el digest en el
-  # overlay. No compila la app —de eso se encarga kaniko desde el
-  # Containerfile—, así que los límites son chicos a propósito. Si tu app
-  # necesita `npm ci` en el pipeline, subilos acá.
+  # node: ONLY for the `desplegar` stage, which writes the digest into
+  # the overlay. It does not compile the app —kaniko does that from the
+  # Containerfile—, so the limits are small on purpose. If your app needs
+  # `npm ci` in the pipeline, raise them here.
   #
-  # Imagen del registry interno, igual que crane y cosign: sale del mismo
-  # job ci-images, así que no agrega una dependencia de arranque nueva.
+  # Image from the internal registry, same as crane and cosign: it comes
+  # out of the same ci-images job, so it adds no new startup dependency.
   - name: node
     image: registry.registry-system.svc.cluster.local:5000/aegis-ci-node:22.23.1-alpine
     command: ['sleep', 'infinity']
-    # Chicos a propósito, y el número no es al voto: la ResourceQuota de
-    # jenkins-system tiene que bancar jenkins-0 + DOS builds solapados
-    # (reintentos y multibranch hacen que solaparse sea el caso normal,
-    # no el raro). Cada limit que se agregue acá se cuenta DOS VECES.
-    # Con 500m este pod pasaba el techo y verify-static lo cazó en el
-    # acto — check 36, la cascada de la corrida #11.
+    # Small on purpose, and the numbers are not a matter of taste: the
+    # jenkins-system ResourceQuota has to hold jenkins-0 + TWO builds
+    # overlapping (retries and multibranch make overlapping the normal
+    # case, not the rare one). Every limit added here counts TWICE.
+    # At 500m this pod went over the ceiling and verify-static caught
+    # it on the spot — check 36, the run #11 cascade.
     resources:
       requests: { cpu: 100m, memory: 128Mi }
       limits:   { cpu: 250m, memory: 256Mi }
-  # kaniko: build SIN privilegios (W-05). No /dev/fuse, no vfs, no
-  # privileged — extrae capas al FS directo (anda donde buildah rootless
-  # no, Ubuntu 24.04). root en el container pero NO privileged = no
-  # escapa al nodo. Auth: regcred en /kaniko/.docker/config.json; CA
-  # propio por --registry-certificate. -debug trae shell.
+  # kaniko: UNPRIVILEGED build (W-05). No /dev/fuse, no vfs, no
+  # privileged — it extracts layers straight onto the FS (it works where
+  # rootless buildah does not, Ubuntu 24.04). root inside the container
+  # but NOT privileged = no escape to the node. Auth: regcred at
+  # /kaniko/.docker/config.json; our own CA via --registry-certificate.
+  # -debug ships a shell.
   - name: kaniko
     image: gcr.io/kaniko-project/executor:v1.23.2-debug
     command: ['sleep', 'infinity']
@@ -68,10 +70,10 @@ spec:
     resources:
       requests: { cpu: 500m, memory: 512Mi }
       limits:   { cpu: 1500m, memory: 2Gi }
-  # crane: pushea el tar YA escaneado (scan-antes-de-push). Imagen custom
-  # aegis-ci-crane (crane distroless sobre alpine con shell; tag = FROM de
-  # ci-images/crane/Containerfile). Auth por DOCKER_CONFIG; CA por
-  # SSL_CERT_FILE (go-containerregistry lo honra).
+  # crane: pushes the tar that was ALREADY scanned (scan-before-push).
+  # Custom image aegis-ci-crane (distroless crane on alpine with a shell;
+  # tag = the FROM of ci-images/crane/Containerfile). Auth via
+  # DOCKER_CONFIG; CA via SSL_CERT_FILE (go-containerregistry honours it).
   - name: crane
     image: registry.registry-system.svc.cluster.local:5000/aegis-ci-crane:v0.20.3
     command: ['sleep', 'infinity']
@@ -92,25 +94,26 @@ spec:
     resources:
       requests: { cpu: 250m, memory: 256Mi }
       limits:   { cpu: 1000m, memory: 512Mi }
-  # trivy: cliente THIN — el server (trivy-system) tiene la DB.
+  # trivy: THIN client — the server (trivy-system) holds the DB.
   - name: trivy
     image: ghcr.io/aquasecurity/trivy:0.72.0
     command: ['sleep', 'infinity']
     resources:
       requests: { cpu: 250m, memory: 256Mi }
       limits:   { cpu: 1000m, memory: 512Mi }
-  # cosign: imagen custom aegis-ci-cosign (binario oficial sobre
-  # alpine con shell — la oficial es distroless y container(){sh}
-  # necesita shell). Password via secretKeyRef, NUNCA argv.
-  # optional:true en key/password: durante el bootstrap (fases
-  # 50-70) el secret cosign-signing-key AÚN no existe y el pod debe
-  # poder arrancar; el stage sign salta con WARN si falta la key.
-  # NO es un hueco permanente: kyverno-policies (fase 80) rechaza
-  # imágenes sin firma en cuanto entra el Enforce.
-  # ACOPLE DECLARADO: el tag DEBE coincidir con el FROM de
-  # ops-stack/ci-images/cosign/Containerfile (fuente del pin). Es
-  # inter-repo y no derivable en runtime; si divergen, el síntoma
-  # es ImagePullBackOff (visible, no silencioso).
+  # cosign: custom image aegis-ci-cosign (the official binary on
+  # alpine with a shell — the official one is distroless and
+  # container(){sh} needs a shell). Password via secretKeyRef,
+  # NEVER argv. optional:true on key/password: during the bootstrap
+  # (phases 50-70) the cosign-signing-key secret does NOT exist yet
+  # and the pod still has to start; the sign stage skips with WARN
+  # if the key is missing. It is NOT a permanent hole:
+  # kyverno-policies (phase 80) rejects unsigned images the moment
+  # Enforce goes in.
+  # DECLARED COUPLING: the tag MUST match the FROM of
+  # ops-stack/ci-images/cosign/Containerfile (source of the pin).
+  # It is inter-repo and not derivable at runtime; if they diverge,
+  # the symptom is ImagePullBackOff (visible, not silent).
   - name: cosign
     image: registry.registry-system.svc.cluster.local:5000/aegis-ci-cosign:v2.6.3
     command: ['sleep', 'infinity']
@@ -159,18 +162,18 @@ spec:
   }
   environment {
     REGISTRY = 'registry.registry-system.svc.cluster.local:5000'
-    IMAGE    = 'CHANGEME-app'   // nombre de la imagen en el registry
+    IMAGE    = 'CHANGEME-app'   // the image's name in the registry
   }
   stages {
     stage('compute-tag') {
-      // slug del branch + BUILD_NUMBER con zero-pad a 6: el orden
-      // lexicográfico == orden numérico.
+      // branch slug + BUILD_NUMBER zero-padded to 6: lexicographic
+      // order == numeric order.
       //
-      // El zero-pad nació para que el Image Updater ordenara bien los
-      // tags, y el Image Updater se retiró en #36/#37 —ahora el digest
-      // lo escribe este pipeline—. Se queda igual porque sigue sirviendo
-      // para leer `docker images` y los logs sin hacer cuentas: build 9
-      // antes que build 10.
+      // The zero-pad was born so the Image Updater would sort the tags
+      // properly, and the Image Updater was retired in #36/#37 —this
+      // pipeline writes the digest now—. It stays as it is because it
+      // still helps to read `docker images` and the logs without doing
+      // sums: build 9 before build 10.
       steps {
         script {
           def slug = env.BRANCH_NAME.replaceAll(/[^a-zA-Z0-9]/, '-').toLowerCase()
@@ -183,21 +186,21 @@ spec:
       steps { checkout scm }
     }
     stage('detect-change') {
-      // ANTI-LOOP. La etapa `desplegar` de más abajo commitea el
-      // digest a k8s/overlays/, y ese commit dispara este mismo job:
-      // si buildeara, saldría una imagen nueva → otro write-back →
-      // bucle infinito.
+      // ANTI-LOOP. The `desplegar` stage further down commits the
+      // digest to k8s/overlays/, and that commit fires this very job:
+      // if it built, a new image would come out → another write-back →
+      // an infinite loop.
       //
-      // (Antes el write-back lo hacía el Image Updater. Se retiró en
-      // #36/#37 y ahora lo hace el pipeline, pero el bucle que hay que
-      // cortar es exactamente el mismo.)
+      // (The write-back used to be the Image Updater's. It was retired
+      // in #36/#37 and the pipeline does it now, but the loop that has
+      // to be cut is exactly the same one.)
       //
-      // UNA señal estructural (los paths del commit), NUNCA [skip ci]
-      // del mensaje: dos señales que pueden discordar dan falsos skips,
-      // y pasó de verdad en el build #7 del canary.
+      // ONE structural signal (the commit's paths), NEVER [skip ci] in
+      // the message: two signals that can disagree produce false skips,
+      // and that really happened in the canary's build #7.
       //
-      // Default seguro = BUILDEAR: si diff-tree viene vacío (merge,
-      // primer build, disparo manual), se buildea.
+      // Safe default = BUILD: if diff-tree comes back empty (a merge,
+      // the first build, a manual trigger), it builds.
       steps {
         script {
           def changed = sh(
@@ -215,9 +218,9 @@ spec:
       when { expression { env.SKIP_BUILD != 'true' } }
       steps {
         container('kaniko') {
-          // W-05: kaniko buildea a un TAR (--no-push) para escanear ANTES
-          // de pushear. --destination da el ref del tar; CA propio por
-          // --registry-certificate.
+          // W-05: kaniko builds into a TAR (--no-push) so the scan runs
+          // BEFORE the push. --destination gives the tar its ref; our own
+          // CA via --registry-certificate.
           sh '''
             /kaniko/executor \
               --context=dir://${WORKSPACE} \
@@ -231,16 +234,16 @@ spec:
       }
     }
     stage('scan') {
-      // Trivy server-mode: exportar a DOCKER-ARCHIVE (oci-archive
-      // tar NO sirve para --input — verificado contra el binario).
-      // Bloquea el build con CRITICAL/HIGH accionables (el pin del
-      // toolchain envejece; el scan es el vigía).
+      // Trivy server-mode: export to DOCKER-ARCHIVE (an oci-archive
+      // tar does NOT work with --input — verified against the binary).
+      // It blocks the build on actionable CRITICAL/HIGH (the toolchain
+      // pin ages; the scan is the lookout).
       //
-      // TOLERANCIA DE BOOTSTRAP: si el trivy-server no responde
-      // (fases 50-70 del init, antes de la 80), el scan se SALTA con
-      // WARN en vez de romper el build. La distinción importa:
-      // infra-ausente ≠ vulnerabilidad-encontrada (la segunda SIEMPRE
-      // rompe). El hueco lo cierra la fase 80 (server vivo + Enforce).
+      // BOOTSTRAP TOLERANCE: if trivy-server does not answer (init
+      // phases 50-70, before phase 80), the scan is SKIPPED with a
+      // WARN instead of breaking the build. The distinction matters:
+      // infra-absent ≠ vulnerability-found (the second one ALWAYS
+      // breaks). Phase 80 closes the gap (live server + Enforce).
       when { expression { env.SKIP_BUILD != 'true' } }
       environment {
         TRIVY_SERVER = 'http://trivy.trivy-system.svc.cluster.local:4954'
@@ -251,7 +254,7 @@ spec:
             def up = sh(returnStatus: true, script:
               'wget -q -T 5 -O /dev/null ${TRIVY_SERVER}/healthz') == 0
             if (!up) {
-              echo 'WARN: trivy-server no disponible (bootstrap pre-fase-80) — scan SALTADO'
+              echo 'WARN: trivy-server unavailable (bootstrap pre-phase-80) — scan SKIPPED'
               env.SCAN_SKIPPED = 'true'
             } else {
               sh '''
@@ -273,8 +276,8 @@ spec:
       when { expression { env.SKIP_BUILD != 'true' } }
       steps {
         container('crane') {
-          // W-05: crane pushea el TAR YA escaneado (scan-antes-de-push
-          // preservado); el digest sale de crane digest, para la firma.
+          // W-05: crane pushes the ALREADY scanned TAR (scan-before-push
+          // preserved); the digest comes from crane digest, for the sign.
           sh '''
             crane push ${WORKSPACE}/image.tar ${REGISTRY}/${IMAGE}:${TAG}
             crane digest ${REGISTRY}/${IMAGE}:${TAG} > ${WORKSPACE}/image-digest
@@ -284,11 +287,12 @@ spec:
       }
     }
     stage('sign') {
-      // Firma por DIGEST (inmutable), al MISMO registry.
-      // --tlog-upload=false: nada del registry interno al Rekor
-      // público. cosign v2.6.3 (NO v3: rompe vs distribution 3.1.1).
-      // TOLERANCIA DE BOOTSTRAP: sin cosign-signing-key (fases
-      // 50-70) el stage salta con WARN; ver nota del container.
+      // Signed by DIGEST (immutable), to the SAME registry.
+      // --tlog-upload=false: nothing from the internal registry goes
+      // to the public Rekor. cosign v2.6.3 (NOT v3: it breaks against
+      // distribution 3.1.1). BOOTSTRAP TOLERANCE: with no
+      // cosign-signing-key (phases 50-70) the stage skips with a
+      // WARN; see the container's note.
       when { expression { env.SKIP_BUILD != 'true' } }
       steps {
         container('cosign') {
@@ -296,7 +300,7 @@ spec:
             def hasKey = sh(returnStatus: true,
               script: 'test -f /cosign/keys/cosign.key') == 0
             if (!hasKey) {
-              echo 'WARN: cosign-signing-key ausente (bootstrap pre-fase-80) — sign SALTADO'
+              echo 'WARN: cosign-signing-key missing (bootstrap pre-phase-80) — sign SKIPPED'
               env.SIGN_SKIPPED = 'true'
             } else {
               sh '''
@@ -313,47 +317,46 @@ spec:
       }
     }
     stage('desplegar') {
-      // ESCRIBIR EL DIGEST EN GIT — la etapa que a esta plantilla le
-      // FALTABA, y su ausencia era invisible (#56).
+      // WRITE THE DIGEST INTO GIT — the stage this template was
+      // MISSING, and whose absence was invisible (#56).
       //
-      // Sin ella el pipeline construye, escanea, publica y firma la
-      // imagen... y no despliega nada. Termina en verde, porque hace
-      // todo lo que dice hacer: lo que falta no está roto, está AUSENTE,
-      // y ningún chequeo mira lo que no existe. El canario la copió tal
-      // cual y estuvo así hasta el 2026-08-06.
+      // Without it the pipeline builds, scans, publishes and signs the
+      // image... and deploys nothing. It ends green, because it does
+      // everything it says it does: what is missing is not broken, it is
+      // ABSENT, and no check looks at what does not exist. The canary
+      // copied it as it was and stayed that way until 2026-08-06.
       //
-      // POR QUÉ EL DIGEST Y NO EL TAG: Kyverno reescribe la imagen
-      // agregándole el digest verificado al admitir el pod. Con un TAG
-      // en git, lo desplegado y lo deseado difieren SIEMPRE, y para que
-      // ArgoCD no quede OutOfSync eterno había que ignorar el campo
-      // `image` — lo que APAGABA el auto-sync: si la única diferencia es
-      // la imagen y la imagen está ignorada, ArgoCD no ve nada que hacer
-      // y nada se despliega. Medido el 2026-08-03 (#36): 4 syncs en 8
-      // días, ninguno por una imagen nueva.
+      // WHY THE DIGEST AND NOT THE TAG: Kyverno rewrites the image,
+      // adding the verified digest to it when it admits the pod. With a
+      // TAG in git, what is deployed and what is desired differ ALWAYS,
+      // and to keep ArgoCD from sitting OutOfSync forever the `image`
+      // field had to be ignored — which TURNED OFF the auto-sync: if the
+      // only difference is the image and the image is ignored, ArgoCD
+      // sees nothing to do and nothing gets deployed. Measured on
+      // 2026-08-03 (#36): 4 syncs in 8 days, none for a new image.
       //
-      // Con el digest en git la mutación de Kyverno es un no-op
-      // —verificado por admisión, entrada idéntica a salida—, no hay
-      // deriva, y el auto-sync vuelve.
+      // With the digest in git Kyverno's mutation is a no-op —verified
+      // at admission, input identical to output—, there is no drift,
+      // and the auto-sync comes back.
       //
-      // Lo escribe ESTE pipeline porque es quien construyó la imagen y
-      // ya sabe el digest. El commit toca solo k8s/, así que el
-      // anti-loop del detect-change saltea el build que dispare.
+      // THIS pipeline writes it because it is the one that built the
+      // image and already knows the digest. The commit touches only
+      // k8s/, so detect-change's anti-loop skips the build it fires.
       //
-      // REQUISITOS en el repo de la app (los dos van en esta carpeta de
-      // plantillas, al lado de este archivo):
+      // REQUIREMENTS in the app's repo (both of them live in this
+      // templates folder, next to this file):
       //   ci/write-digest.mjs
-      //   k8s/overlays/dev/kustomization.yaml  con la sección `images:`
-      // y una credencial `github-token` en Jenkins con permiso de
-      // escritura sobre este repo.
+      //   k8s/overlays/dev/kustomization.yaml  with its `images:` section
+      // plus a `github-token` credential in Jenkins with write
+      // permission on this repo.
       //
-      // SOLO EN LA RAMA POR DEFECTO, y esto no es una preferencia de
-      // estilo. Un job multibranch construye TODAS las ramas, así que
-      // sin este guarda una rama de trabajo escribiría el digest de SU
-      // imagen y lo empujaría a la rama desplegada: el trabajo a medio
-      // hacer de alguien saldría a producción sin que nadie lo pidiera.
-      // La rama de trabajo igual construye, escanea y firma —o sea que
-      // sigue comprobando que el código está bien—, simplemente no
-      // despliega.
+      // ONLY ON THE DEFAULT BRANCH, and this is not a matter of style.
+      // A multibranch job builds ALL the branches, so without this guard
+      // a working branch would write ITS image's digest and push it to
+      // the deployed branch: somebody's half-finished work would go out
+      // to production without anyone asking for it. The working branch
+      // still builds, scans and signs —so it keeps proving the code is
+      // sound—, it simply does not deploy.
       when {
         allOf {
           branch 'main'
@@ -366,9 +369,10 @@ spec:
             credentialsId: 'github-token',
             usernameVariable: 'GH_USER',
             passwordVariable: 'GH_TOKEN')]) {
-            // Comillas SIMPLES: $GH_TOKEN lo expande el shell, no Groovy.
-            // Con dobles el token quedaría incrustado en la config del
-            // job, que es un lugar donde queda escrito y se lee.
+            // SINGLE quotes: the shell expands $GH_TOKEN, not Groovy.
+            // With double ones the token would end up embedded in the
+            // job's config, which is a place where it stays written
+            // down and gets read.
             sh '''
               set -e
               cd ${WORKSPACE}
@@ -377,53 +381,56 @@ spec:
               node ci/write-digest.mjs "${REGISTRY}/${IMAGE}=${DIGEST}"
 
               if git diff --quiet k8s/overlays/dev/kustomization.yaml; then
-                echo "el digest ya estaba escrito — nada que commitear"
+                echo "the digest was already written — nothing to commit"
                 exit 0
               fi
 
-              # La config va al workspace y no a $HOME: el HOME del
-              # container puede no ser escribible, y así el cambio muere
-              # con el pod en vez de filtrarse a otro build.
+              # The config goes to the workspace and not to $HOME: the
+              # container's HOME may not be writable, and this way the
+              # change dies with the pod instead of leaking into another
+              # build.
               export GIT_CONFIG_GLOBAL="${WORKSPACE}/.gitconfig-ci"
 
-              # safe.directory ANTES QUE NADA (#55). El workspace lo crea
-              # el container jnlp con un UID y esta etapa corre en otro,
-              # así que git lo ve como "dubious ownership" y SE NIEGA A
-              # OPERAR — no falla al final, falla en el primer comando.
+              # safe.directory BEFORE ANYTHING ELSE (#55). The jnlp
+              # container creates the workspace under one UID and this
+              # stage runs under another, so git sees it as "dubious
+              # ownership" and REFUSES TO OPERATE — it does not fail at
+              # the end, it fails on the first command.
               #
-              # Y va acá y no en la imagen: la línea de arriba REEMPLAZA
-              # el config global por un archivo nuevo del workspace, así
-              # que cualquier safe.directory que trajera el container
-              # queda fuera de alcance.
+              # And it goes here and not in the image: the line above
+              # REPLACES the global config with a new file in the
+              # workspace, so any safe.directory the container brought
+              # along is out of reach.
               #
-              # MEDIDO el 2026-08-04 en blog-aegis, build 4:
+              # MEASURED on 2026-08-04 in blog-aegis, build 4:
               #   fatal: detected dubious ownership in repository at
               #   '/home/jenkins/agent/workspace/blog-mb_main'
-              # exit 128 DESPUÉS de construir, escanear, pushear y firmar.
-              # Todo el trabajo hecho y el digest sin escribir, con la app
-              # sirviendo la versión anterior en Synced + Healthy.
+              # exit 128 AFTER building, scanning, pushing and signing.
+              # All the work done and the digest unwritten, with the app
+              # serving the previous version in Synced + Healthy.
               git config --global --add safe.directory "${WORKSPACE}"
 
               git config --global user.email "ci@aegis"
               git config --global user.name "aegis CI"
               git config --global url."https://github.com/".insteadOf "git@github.com:"
-              # El token NUNCA toca argv ni disco: se guarda el NOMBRE de
-              # la variable y git la expande al invocar el helper.
+              # The token NEVER touches argv or disk: what is stored is
+              # the variable's NAME, and git expands it when it invokes
+              # the helper.
               git config --global credential.helper \
                 '!f() { echo username=x-access-token; echo password=$GH_TOKEN; }; f'
 
               git checkout -B ${BRANCH_NAME}
               git add k8s/overlays/dev/kustomization.yaml
-              git commit -m "deploy: ${TAG} por digest (build ${BUILD_NUMBER})"
+              git commit -m "deploy: ${TAG} by digest (build ${BUILD_NUMBER})"
 
-              # Reintento: otro build pudo empujar en el medio.
+              # Retry: another build may have pushed in the meantime.
               for i in 1 2 3; do
                 if git pull --rebase origin ${BRANCH_NAME} && git push origin ${BRANCH_NAME}; then
                   exit 0
                 fi
                 sleep 5
               done
-              echo "no se pudo empujar el digest tras 3 intentos" >&2
+              echo "could not push the digest after 3 attempts" >&2
               exit 1
             '''
           }
@@ -431,27 +438,27 @@ spec:
       }
     }
     stage('report') {
-      // HOOK de observabilidad (observability/design.md §2): UN
-      // JSON-line con el evento supply-chain completo. Clave
-      // natural: digest. Nunca valores de Secrets (la garantía nace
-      // acá, y quien lo consuma la hereda).
+      // Observability HOOK (observability/design.md §2): ONE
+      // JSON-line with the whole supply-chain event. Natural key:
+      // digest. Never Secret values (the guarantee is born here,
+      // and whoever consumes it inherits it).
       //
-      // POR QUÉ POSTEA Y NO ALCANZA CON IMPRIMIRLO
-      // ──────────────────────────────────────────
-      // El diseño original decía que Vector levantaría esta línea
-      // del stdout del pod de build, con CERO cambios acá. Esa
-      // premisa es FALSA en un agente Kubernetes de Jenkins: la
-      // salida de un paso `sh` no va al stdout del contenedor — el
-      // plugin durable-task la escribe a un archivo y la transmite
-      // por el canal de remoting hasta la consola del build. Vector
-      // lee /var/log/pods, así que la línea nunca pasaba por su
-      // vista. Medido el 2026-08-22: el stream jenkins-build tenía
-      // CERO filas y los dos paneles de supply-chain llevaban vacíos
-      // desde que nacieron, con builds reales corriendo.
+      // WHY IT POSTS, AND WHY PRINTING IT IS NOT ENOUGH
+      // ───────────────────────────────────────────────
+      // The original design said Vector would pick this line up
+      // from the build pod's stdout, with ZERO changes here. That
+      // premise is FALSE on a Jenkins Kubernetes agent: the output
+      // of an `sh` step does not go to the container's stdout — the
+      // durable-task plugin writes it to a file and streams it over
+      // the remoting channel to the build's console. Vector reads
+      // /var/log/pods, so the line never passed in front of it.
+      // Measured on 2026-08-22: the jenkins-build stream had ZERO
+      // rows and the two supply-chain panels had been empty since
+      // the day they were born, with real builds running.
       //
-      // Así que el evento viaja por donde ya viaja gates.jsonl en la
-      // fase 85: un POST directo. El printf se queda igual — sigue
-      // siendo lo que un humano lee en la consola del build.
+      // So the event travels the same road gates.jsonl already
+      // travels in phase 85: a direct POST. The printf stays as it
+      // is — it is still what a human reads in the build's console.
       steps {
         sh '''
           DIGEST=$(cat ${WORKSPACE}/image-digest 2>/dev/null || echo "")
@@ -462,47 +469,48 @@ spec:
             "${BUILD_NUMBER}" "${BRANCH_NAME}" \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
           printf 'AEGIS_EVENT %s\n' "$EVENTO"
-          # El Content-Type NO es decorativo: sin él curl declara
-          # x-www-form-urlencoded y VictoriaLogs descarta el cuerpo
-          # entero devolviendo HTTP 200 y cero filas — sin drop, sin
-          # log, sin queja. Costó una tarde descubrirlo (fase 85).
-          # Y el `||`: registrar no puede voltear un build, pero
-          # tampoco puede callarse — un fallo mudo acá es justo la
-          # enfermedad que este arreglo vino a curar.
+          # The Content-Type is NOT decorative: without it curl
+          # declares x-www-form-urlencoded and VictoriaLogs discards
+          # the whole body, returning HTTP 200 and zero rows — no
+          # drop, no log, no complaint. It cost an afternoon to find
+          # out (phase 85). And the `||`: logging cannot topple a
+          # build, but it cannot keep quiet either — a mute failure
+          # here is exactly the disease this fix came to cure.
           printf '%s\n' "$EVENTO" \
             | curl -fsS --max-time 15 \
                 -H 'Content-Type: application/stream+json' --data-binary @- \
                 'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \
-            || echo 'AVISO: el evento no se pudo registrar en vlogs-events (el build NO falla por esto)'
+            || echo 'NOTICE: the event could not be recorded in vlogs-events (the build does NOT fail for this)'
 
-          # ── y las MISMAS tres cosas como métrica ────────────────
+          # ── and the SAME three things as a metric ───────────────
           #
-          # El evento de arriba se guarda un año y nadie lo mira: no
-          # hay panel ni alerta que lo lea. Así que `scan_skipped:true`
-          # viajaba, se archivaba, y el build terminaba en VERDE con
-          # una imagen que nunca se escaneó corriendo en producción.
-          # Encontrado el 2026-08-22 revisando por qué el barrido de
-          # observabilidad no lo había cazado: no lo cazó porque no
-          # existía el instrumento.
+          # The event above is kept for a year and nobody looks at it:
+          # there is no panel and no alert that reads it. So
+          # `scan_skipped:true` travelled, got filed away, and the
+          # build ended GREEN with an image that was never scanned
+          # running in production. Found on 2026-08-22 while going
+          # over why the observability sweep had not caught it: it did
+          # not catch it because the instrument did not exist.
           #
-          # La tolerancia de bootstrap (arriba, stages scan y sign) es
-          # correcta y se queda: durante las fases 50-70 no hay
-          # trivy-server ni clave de cosign, y romper el build ahí
-          # sería impedir el arranque. Lo que no puede quedarse es que
-          # esa tolerancia sea INVISIBLE una vez que la plataforma está
-          # de pie. Un log que nadie lee no es una señal.
+          # The bootstrap tolerance (above, the scan and sign stages)
+          # is correct and it stays: during phases 50-70 there is no
+          # trivy-server and no cosign key, and breaking the build
+          # there would mean blocking the startup. What cannot stay is
+          # that tolerance being INVISIBLE once the platform is on its
+          # feet. A log nobody reads is not a signal.
           #
-          # Las dos caras no son simétricas, y por eso la alerta las
-          # separa: sin firma, Kyverno RECHAZA la admisión y el
-          # despliegue falla a gritos; sin escaneo no pasa nada — la
-          # imagen entra, corre, y la única diferencia con una sana es
-          # que a esta nadie la miró.
+          # The two sides are not symmetric, and that is why the alert
+          # keeps them apart: with no signature Kyverno REJECTS the
+          # admission and the deploy fails loudly; with no scan
+          # nothing happens — the image goes in, runs, and the only
+          # difference from a healthy one is that nobody looked at
+          # this one.
           #
-          # Solo cuando hubo build de verdad: con SKIP_BUILD el
-          # pipeline no produjo artefacto, y pushear 0 diría «el último
-          # build escaneó bien», que es justo lo contrario de lo que
-          # pasó. El valor anterior sigue siendo la verdad sobre la
-          # imagen que está corriendo.
+          # Only when there really was a build: with SKIP_BUILD the
+          # pipeline produced no artifact, and pushing 0 would say
+          # «the last build scanned clean», which is exactly the
+          # opposite of what happened. The previous value is still the
+          # truth about the image that is running.
           if [ "${SKIP_BUILD}" != "true" ]; then
             {
               printf 'aegis_build_scan_skipped{image="%s"} %s\n' "${IMAGE}" \
@@ -513,7 +521,7 @@ spec:
                 "$(date -u +%s)"
             } | curl -fsS --max-time 15 --data-binary @- \
                   'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' \
-              || echo 'AVISO: las métricas del build no llegaron a vmsingle (el build NO falla por esto)'
+              || echo 'NOTICE: the build metrics did not reach vmsingle (the build does NOT fail for this)'
           fi
         '''
       }

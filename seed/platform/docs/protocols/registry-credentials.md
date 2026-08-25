@@ -1,42 +1,43 @@
-# Protocolo: credenciales del registry (htpasswd + regcreds)
+# Protocol: the registry's credentials (htpasswd + regcreds)
 
-Salda C9/C10 parcial y codifica A27: htpasswd y sus 4 derivados son
-UNA credencial con 5 caras — se generan JUNTOS o se desincronizan
-(caso real v1: 6 días de mismatch → 401 en el primer push).
+Settles C9/C10 in part and encodes A27: htpasswd and its 4
+derivatives are ONE credential with 5 faces — they are generated
+TOGETHER or they drift apart (real v1 case: 6 days of mismatch →
+401 on the first push).
 
-## Regla de oro
+## Golden rule
 
-**Un origen, un proceso, un commit.** El init lo hace estructural
-(`derive_htpasswd_and_regcreds` en lib/secrets.sh); a mano, TODO en
-la misma shell antes de cualquier unset/exit.
+**One origin, one process, one commit.** The init makes it
+structural (`derive_htpasswd_and_regcreds` in lib/secrets.sh); by
+hand, EVERYTHING in the same shell before any unset/exit.
 
-## Flujo manual (si no se usa el init)
+## Manual flow (if the init is not used)
 
     mkdir -p /dev/shm/regcred && cd /dev/shm/regcred
     openssl rand -base64 32 | tr -d '\n' > pass    # → Bitwarden
-    # htpasswd bcrypt vía STDIN (jamás el password en argv —
-    # /proc/PID/cmdline es legible):
+    # htpasswd bcrypt via STDIN (never the password in argv —
+    # /proc/PID/cmdline is readable):
     htpasswd -nBi aegis-dev < pass > htpasswd
-    # dockerconfigjson con jq --rawfile (ídem: nunca argv):
+    # dockerconfigjson with jq --rawfile (same idea: never argv):
     jq -n --rawfile p pass --arg u aegis-dev \
       --arg h registry.registry-system.svc.cluster.local:5000 \
       '{auths:{($h):{username:$u,password:$p,
         auth:(($u+":"+$p)|@base64)}}}' > dockerconfig.json
 
-Después, POR CADA destino (registry-system/htpasswd + los 4
-regcred: jenkins-system, argocd, kyverno, org-personal): kubectl
---from-file → mv al path del repo → sops -e --in-place → roundtrip.
-UN commit con los 5 archivos.
+Afterwards, FOR EACH destination (registry-system/htpasswd + the 4
+regcreds: jenkins-system, argocd, kyverno, org-personal): kubectl
+--from-file → mv to the repo's path → sops -e --in-place →
+roundtrip. ONE commit with the 5 files.
 
-## Notas
+## Notes
 
-- `data:` siempre (byte-preserving); el protocolo v1 de laptop
-  usaba stringData para el htpasswd — funcionaba porque bcrypt es
-  ASCII sin folding, pero v2 unifica: data/--from-file SIEMPRE (una
-  regla sin excepciones vale más que la explicación de la
-  excepción).
-- Deuda heredada consciente: htpasswd es all-or-nothing (sin
-  pull/push separation). Trigger de separación: primer tenant
-  no-trusted / Hetzner (token-based auth, lift grande).
-- El test definitorio de las creds es cliente→servidor real (un
-  push y un pull), no `--get-login` ni el plan verde.
+- `data:` always (byte-preserving); the v1 laptop protocol used
+  stringData for the htpasswd — it worked because bcrypt is ASCII
+  with no folding, but v2 unifies: data/--from-file ALWAYS (a rule
+  with no exceptions is worth more than the explanation of the
+  exception).
+- Inherited debt, taken knowingly: htpasswd is all-or-nothing (no
+  pull/push separation). Trigger for splitting it: the first
+  non-trusted tenant / Hetzner (token-based auth, a big lift).
+- The defining test of the creds is client→server for real (a push
+  and a pull), not `--get-login` and not a green plan.

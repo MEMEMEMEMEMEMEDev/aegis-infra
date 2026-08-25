@@ -1,9 +1,9 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# SIN IngressRoute, y no es un olvido: la ruta pública la deriva la
-# PLATAFORMA del contrato (orgs/<organizacion>.yaml) y este repo no
-# puede escribirla aunque quiera — el kind está en el
-# namespaceResourceBlacklist del AppProject. Mientras un inquilino
-# pudiera crear una, podía reclamar el hostname del vecino.
+# NO IngressRoute, and it is not an oversight: the public route is
+# derived by the PLATFORM from the contract (orgs/<organizacion>.yaml)
+# and this repo could not write it even if it wanted to — the kind is in
+# the AppProject's namespaceResourceBlacklist. As long as a tenant could
+# create one, it could claim the neighbor's hostname.
 resources:
   - deployment.yaml

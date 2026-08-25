@@ -3,14 +3,14 @@ kind: Kustomization
 resources:
   - ../../base
 images:
-  # Este newTag es SOLO el tag INICIAL y NO se asume su número (H1
-  # corrida #13: el build #1 del multibranch es el cosmético ABORTED
-  # sin push — el primer tag real fue main-000002): la fase 70 lo
-  # ALINEA con el mayor tag main-* que EXISTE en el registry antes
-  # del primer deploy. Después, el Image Updater gobierna la imagen
-  # vía su write-back (target default .argocd-source-hello-aegis.yaml
-  # — verificado #13; este newTag no se reescribe). El commit de
-  # alineación toca SOLO k8s/** → el anti-loop del Jenkinsfile lo
-  # salta.
+  # This newTag is ONLY the INITIAL tag and its number is not assumed
+  # (H1 run #13: build #1 of the multibranch is the cosmetic ABORTED
+  # with no push — the first real tag was main-000002): phase 70
+  # ALIGNS it with the highest main-* tag that EXISTS in the registry
+  # before the first deploy. After that, the Image Updater governs the
+  # image via its write-back (default target
+  # .argocd-source-hello-aegis.yaml — verified #13; this newTag is not
+  # rewritten). The alignment commit touches ONLY k8s/** → the
+  # Jenkinsfile's anti-loop skips it.
   - name: registry.registry-system.svc.cluster.local:5000/hello-aegis
     newTag: main-000001

@@ -1,26 +1,25 @@
-# ── Cloudflare Access delante del SSH del VPS de laboratorio ────────
+# ── Cloudflare Access in front of the laboratory VPS's SSH ──────────
 #
-# Hermano CHICO de modules/cloudflare-access, separado a propósito:
-# aquél arrastra las apps HTTP del plano de operador, los bypass de
-# webhooks y un service token de automatización que acá no pintan
-# nada. Este módulo hace UNA sola cosa: el hostname SSH del lab lo
-# atraviesa únicamente el operador, con OTP al mail.
+# The LITTLE brother of modules/cloudflare-access, separate on purpose:
+# that one drags along the operator plane's HTTP apps, the webhook
+# bypasses and an automation service token that have no business here.
+# This module does ONE single thing: the lab's SSH hostname is crossed
+# by the operator alone, with an OTP to the mail.
 #
-# El cliente es `cloudflared access ssh` (ProxyCommand en el
-# ~/.ssh/config del operador); del lado del VPS, cloudflared corre
-# como servicio con el token del túnel y sshd escucha SOLO en
-# loopback. Sin puerto público no hay escaneo — la causa raíz que
-# identificó el archivo del 2026-08-22: el problema nunca fue «nos
-# escanean», fue «hay un 22 público».
+# The client is `cloudflared access ssh` (a ProxyCommand in the
+# operator's ~/.ssh/config); on the VPS side, cloudflared runs as a
+# service with the tunnel token and sshd listens ONLY on loopback.
+# With no public port there is no scanning — the root cause the
+# 2026-08-22 record identified: the problem was never «we are being
+# scanned», it was «there is a public port 22».
 #
-# type = "self_hosted" y NO "ssh": el plan original decía probar
-# type = "ssh" con fallback. Se fue directo al fallback porque el
-# flujo del cliente (`cloudflared access ssh --hostname`) funciona
-# idéntico con self_hosted, y self_hosted es el tipo YA PROBADO por
-# las cinco aplicaciones del módulo hermano con este provider (~>5.0).
-# Estrenar un tipo de app nuevo para ganar una etiqueta en el
-# dashboard es riesgo sin beneficio. Documentado en
-# docs/protocols/vps-lab.md.
+# type = "self_hosted" and NOT "ssh": the original plan said to try
+# type = "ssh" with a fallback. We went straight to the fallback
+# because the client flow (`cloudflared access ssh --hostname`) works
+# identically with self_hosted, and self_hosted is the type ALREADY
+# PROVEN by the sibling module's five applications with this provider
+# (~>5.0). Debuting a new app type to gain a label in the dashboard is
+# risk without benefit. Documented in docs/protocols/vps-lab.md.
 
 terraform {
   required_providers {
@@ -30,7 +29,7 @@ terraform {
 
 variable "account_id" { type = string }
 variable "hostname" {
-  description = "Hostname COMPLETO de la app SSH (ssh-lab.<root_domain>); lo arma el env, este módulo no conoce el dominio raíz"
+  description = "FULL hostname of the SSH app (ssh-lab.<root_domain>); the env assembles it, this module does not know the root domain"
   type        = string
 }
 variable "operador_email" { type = string }
@@ -39,9 +38,9 @@ variable "session_duration" {
   default = "24h"
 }
 
-# La única identidad que pasa. Sin service token: la automatización
-# no entra al lab por SSH — si un día hace falta, es una decisión
-# nueva, no un default heredado.
+# The only identity that gets through. No service token: automation
+# does not come into the lab over SSH — if one day it needs to, that
+# is a new decision, not an inherited default.
 resource "cloudflare_zero_trust_access_policy" "operador" {
   account_id = var.account_id
   name       = "aegis-lab-operador"
@@ -55,8 +54,8 @@ resource "cloudflare_zero_trust_access_application" "ssh" {
   domain           = var.hostname
   type             = "self_hosted"
   session_duration = var.session_duration
-  # sin auto_redirect: la pantalla de Access visible es parte de la
-  # señal (misma regla que el módulo hermano).
+  # no auto_redirect: the visible Access screen is part of the signal
+  # (same rule as the sibling module).
   auto_redirect_to_identity = false
   policies = [{
     id         = cloudflare_zero_trust_access_policy.operador.id

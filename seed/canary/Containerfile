@@ -1,5 +1,5 @@
-# Canary v2 — builder pinneado a LÍNEA soportada (A42: el pin del
-# toolchain envejece; el scan de Trivy lo vigila y bloquea).
+# Canary v2 — builder pinned to a SUPPORTED LINE (A42: the toolchain
+# pin ages; Trivy's scan watches it and blocks).
 FROM docker.io/library/golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod main.go ./

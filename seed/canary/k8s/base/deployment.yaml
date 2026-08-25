@@ -5,10 +5,10 @@ metadata:
   labels: {app: hello-aegis}
 spec:
   replicas: 1
-  # P2.12 reporte in-VM #14: con 1 réplica el rolling default
-  # (maxUnavailable 25% → 1) deja ~30s de Bad Gateway en cada update.
-  # Surge primero, matar después = cero ventana; el pod extra
-  # transitorio entra sobrado en la RQ de org-canary:
+  # P2.12 in-VM report #14: with 1 replica the default rolling update
+  # (maxUnavailable 25% → 1) leaves ~30s of Bad Gateway on every update.
+  # Surge first, kill after = zero window; the transient extra pod fits
+  # into org-canary's RQ with room to spare:
   strategy:
     rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
   selector:
@@ -17,20 +17,20 @@ spec:
     metadata:
       labels: {app: hello-aegis}
     spec:
-      # Patrón A: el pull secret lo aporta el SA default del ns
-      # (org-canary) — la app NO declara la credencial.
-      # PSS: org-canary es enforce=restricted (corrida #12, 2do
-      # obstáculo de la 70) — el workload DECLARA el perfil completo
-      # (no hay policy mutate que lo inyecte; explícito > mágico).
-      # La imagen ya corre USER 65532 (Containerfile) → runAsNonRoot
-      # valida sin runAsUser duplicado acá:
+      # Pattern A: the pull secret comes from the ns's default SA
+      # (org-canary) — the app does NOT declare the credential.
+      # PSS: org-canary is enforce=restricted (run #12, 2nd obstacle of
+      # phase 70) — the workload DECLARES the whole profile (there is no
+      # mutate policy injecting it; explicit > magic).
+      # The image already runs as USER 65532 (Containerfile) →
+      # runAsNonRoot validates with no duplicated runAsUser here:
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: app
-          # el TAG lo gobierna el overlay (kustomize images) y lo
-          # actualiza el Image Updater vía write-back:
+          # the TAG is governed by the overlay (kustomize images) and
+          # updated by the Image Updater via write-back:
           image: registry.registry-system.svc.cluster.local:5000/hello-aegis:seed
           ports: [{containerPort: 8080}]
           securityContext:

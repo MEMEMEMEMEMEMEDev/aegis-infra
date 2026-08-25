@@ -1,11 +1,11 @@
 variable "github_pat" {
-  description = "Fine-grained PAT (Administration RW, Contents RW, Metadata R, Webhooks RW). Wrapper-only, sin default (A14). EXPIRA: anotar fecha en Bitwarden (issue-github-token.md)."
+  description = "Fine-grained PAT (Administration RW, Contents RW, Metadata R, Webhooks RW). Wrapper-only, no default (A14). IT EXPIRES: write the date down in Bitwarden (issue-github-token.md)."
   type        = string
   sensitive   = true
 }
 
 variable "github_argocd_webhook_secret" {
-  description = "HMAC compartido webhook GitHub->ArgoCD. Mismo origen que el Secret KSOPS github-webhook (generados JUNTOS en fase 15 — A27)."
+  description = "HMAC shared by the GitHub->ArgoCD webhook. Same origin as the KSOPS Secret github-webhook (generated TOGETHER in phase 15 — A27)."
   type        = string
   sensitive   = true
 }

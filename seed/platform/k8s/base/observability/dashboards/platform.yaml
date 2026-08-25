@@ -1,7 +1,7 @@
-# Dashboard «plataforma» — design.md §4.4: ArgoCD sync/drift,
-# certs (servido vs declarado — B11), cloudflared, Kyverno.
-# Provisionado DESDE GIT via sidecar (label grafana_dashboard —
-# design.md §4.1: ninguno nace a click; editable:false en el JSON).
+# «platform» dashboard — design.md §4.4: ArgoCD sync/drift,
+# certs (served vs declared — B11), cloudflared, Kyverno.
+# Provisioned FROM GIT via the sidecar (grafana_dashboard label —
+# design.md §4.1: none is born by clicking; editable:false in the JSON).
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -15,8 +15,8 @@ data:
   plataforma.json: |
     {
       "uid": "aegis-plataforma",
-      "title": "Aegis · plataforma",
-      "description": "Capa 2 de design.md §1: la salud de plataforma que antes se chequeaba a mano.",
+      "title": "Aegis · platform",
+      "description": "Layer 2 of design.md §1: the platform health that used to be checked by hand.",
       "schemaVersion": 39,
       "editable": false,
       "timezone": "browser",
@@ -31,7 +31,7 @@ data:
       "panels": [
         {
           "id": 1,
-          "title": "Apps de ArgoCD fuera de Synced",
+          "title": "ArgoCD apps out of Synced",
           "type": "stat",
           "datasource": {
             "type": "prometheus",
@@ -57,11 +57,11 @@ data:
             "defaults": {},
             "overrides": []
           },
-          "description": "¿git y cluster divergen?"
+          "description": "Do git and cluster diverge?"
         },
         {
           "id": 2,
-          "title": "Días al vencimiento del cert SERVIDO (blackbox, B11)",
+          "title": "Days to expiry of the SERVED cert (blackbox, B11)",
           "type": "stat",
           "datasource": {
             "type": "prometheus",
@@ -89,11 +89,11 @@ data:
             },
             "overrides": []
           },
-          "description": "Handshake TLS real contra el CA — lo servido, no la declaración. La métrica de cert-manager (panel de al lado) es solo contexto."
+          "description": "A real TLS handshake against the CA — what is served, not what is declared. The cert-manager metric (the panel next to it) is context only."
         },
         {
           "id": 3,
-          "title": "Días al vencimiento según cert-manager (contexto)",
+          "title": "Days to expiry according to cert-manager (context)",
           "type": "stat",
           "datasource": {
             "type": "prometheus",
@@ -121,11 +121,11 @@ data:
             },
             "overrides": []
           },
-          "description": "Mide el Secret (la declaración). Si este dice 90d y el de blackbox dice 30d, el pod del registry sirve el cert viejo: ESA es la deuda B11."
+          "description": "It measures the Secret (the declaration). If this one says 90d and the blackbox one says 30d, the registry pod is serving the old cert: THAT is debt B11."
         },
         {
           "id": 4,
-          "title": "Conexiones activas del túnel",
+          "title": "Active tunnel connections",
           "type": "timeseries",
           "datasource": {
             "type": "prometheus",
@@ -145,18 +145,18 @@ data:
                 "type": "prometheus",
                 "uid": "vmsingle"
               },
-              "legendFormat": "conexiones"
+              "legendFormat": "connections"
             }
           ],
           "fieldConfig": {
             "defaults": {},
             "overrides": []
           },
-          "description": "Cero SOSTENIDO = túnel caído. Huecos de scrape en dev NO son incidentes (§3.3): distinguir «sin dato» de «cero»."
+          "description": "A SUSTAINED zero = tunnel down. Scrape gaps in dev are NOT incidents (§3.3): tell «no data» apart from «zero»."
         },
         {
           "id": 5,
-          "title": "Admisiones RECHAZADAS en tenants (org-*)",
+          "title": "REJECTED admissions in tenants (org-*)",
           "type": "timeseries",
           "datasource": {
             "type": "prometheus",
@@ -176,18 +176,18 @@ data:
                 "type": "prometheus",
                 "uid": "vmsingle"
               },
-              "legendFormat": "rechazos/h"
+              "legendFormat": "rejections/h"
             }
           ],
           "fieldConfig": {
             "defaults": {},
             "overrides": []
           },
-          "description": "En operación sana este número ES cero. Cada rechazo es un ataque o un pipeline roto — ambas urgentes."
+          "description": "In healthy operation this number IS zero. Every rejection is either an attack or a broken pipeline — both urgent."
         },
         {
           "id": 6,
-          "title": "Latencia del webhook de Kyverno (p95)",
+          "title": "Kyverno webhook latency (p95)",
           "type": "timeseries",
           "datasource": {
             "type": "prometheus",
@@ -216,11 +216,11 @@ data:
             },
             "overrides": []
           },
-          "description": "Está en el camino crítico de TODO pod de tenant. Ventana de 24 h y no de 5 min A PROPÓSITO: acá las admisiones ocurren en los despliegues, unas pocas por día. Con [5m] el panel estaba en blanco el 99% del tiempo y un panel siempre vacío deja de leerse (auditoría del 2026-08-21)."
+          "description": "It sits on the critical path of EVERY tenant pod. A 24 h window and not a 5 min one ON PURPOSE: here admissions happen at deploy time, a handful per day. With [5m] the panel was blank 99% of the time, and a panel that is always empty stops being read (audit of 2026-08-21)."
         },
         {
           "id": 7,
-          "title": "Targets de scrape caídos (up == 0)",
+          "title": "Scrape targets down (up == 0)",
           "type": "table",
           "datasource": {
             "type": "prometheus",
@@ -246,7 +246,7 @@ data:
             "defaults": {},
             "overrides": []
           },
-          "description": "El target caído por netpol se ve ACÁ y no 3 días después (gate obs-metricas-fluyen)."
+          "description": "The target knocked out by a netpol shows up HERE and not 3 days later (gate obs-metricas-fluyen)."
         }
       ],
       "templating": {

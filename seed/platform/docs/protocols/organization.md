@@ -1,407 +1,414 @@
-# Protocolo: organizaciones y servicios
+# Protocol: organizations and services
 
-Estado: **contrato v1**. Este documento define la superficie que un
-operador —humano o agente— toca para crear organizaciones y servicios en
-aegis. Está escrito para no volver a tocarse: lo que cambia con el tiempo
-son los PLANES y la TABLA DE RUTEO, no este contrato.
+Status: **contract v1**. This document defines the surface an operator
+—human or agent— touches in order to create organizations and services
+in aegis. It is written so as never to be touched again: what changes
+over time are the PLANS and the ROUTING TABLE, not this contract.
 
-Audiencia: el operador de una instancia de aegis. No hace falta ser el
-autor de aegis para leerlo. Si sos un agente, la sección
-[§10](#10-si-sos-un-agente) te dice exactamente qué ejecutar y qué nunca
-inventar.
-
----
-
-## 0. Por qué existe
-
-Hoy crear una organización son seis archivos YAML escritos a mano, dos
-ceremonias de secretos y una cantidad de pasos que solo viven en la
-cabeza de quien ya lo hizo. Eso funciona una vez. No funciona para un
-producto donde el autor es un cliente más.
-
-El problema no es la cantidad de YAML: es que **no hay un lugar donde
-esté escrito qué es una organización**. Cada una salió parecida a la
-anterior por imitación, y las diferencias entre ellas no son decisiones
-—son accidentes de cuándo se creó cada una.
-
-Este protocolo mueve eso a un contrato de un archivo y un generador que
-lo materializa.
+Audience: the operator of an aegis instance. You do not have to be the
+author of aegis to read it. If you are an agent, section
+[§10](#10-if-you-are-an-agent) tells you exactly what to run and what
+never to invent.
 
 ---
 
-## 1. El modelo, en cuatro frases
+## 0. Why it exists
 
-Una **organización** es un proyecto: `veterinaria`, `pasteleria`,
-`portafolio`. Vive en un namespace propio, tiene su cuota, su aislamiento
-de red y su frontera de seguridad.
+Creating an organization today means six YAML files written by hand, two
+secret ceremonies and a number of steps that live only in the head of
+whoever has already done it once. That works once. It does not work for
+a product where the author is just one more customer.
 
-Un **servicio** es una pieza desplegable dentro de una organización: un
-front, una API, una base, un worker. Una organización tiene varios.
+The problem is not the amount of YAML: it is that **there is nowhere
+that says what an organization IS**. Each one came out looking like the
+previous one by imitation, and the differences between them are not
+decisions —they are accidents of when each one was created.
 
-Los **servicios de plataforma** son compartidos por todas las
-organizaciones: el almacenamiento S3 (Garage), el sustrato de AI, el
-registry, el CI. Nadie los instala por organización; se les pide acceso.
+This protocol moves that into a one-file contract and a generator that
+materialises it.
 
-El **contrato** es un archivo YAML por organización. Es lo único que se
-escribe a mano.
+---
+
+## 1. The model, in four sentences
+
+An **organization** is a project: `veterinaria`, `pasteleria`,
+`portafolio`. It lives in a namespace of its own, and it has its own
+quota, its own network isolation and its own security boundary.
+
+A **service** is a deployable piece inside an organization: a front end,
+an API, a database, a worker. An organization has several.
+
+The **platform services** are shared by every organization: the S3
+storage (Garage), the AI substrate, the registry, the CI. Nobody
+installs them per organization; you ask them for access.
+
+The **contract** is one YAML file per organization. It is the only thing
+written by hand.
 
 ```
-orgs/veterinaria.yaml     ← contrato (a mano)
+orgs/veterinaria.yaml     ← contract (by hand)
         │
         │  aegis org apply
         ▼
-k8s/organizations/org-veterinaria/…   ← generado
-k8s/argocd-apps/tenants.yaml          ← generado (entrada)
+k8s/organizations/org-veterinaria/…   ← generated
+k8s/argocd-apps/tenants.yaml          ← generated (entry)
         │
         │  git commit + push
         ▼
-    ArgoCD despliega
+    ArgoCD deploys
 ```
 
 ---
 
-## 2. La inversión que hace que esto dure
+## 2. The inversion that makes this last
 
-**El contrato expresa INTENCIÓN. La plataforma impone GARANTÍAS.**
+**The contract expresses INTENT. The platform imposes GUARANTEES.**
 
-Un contrato no puede pedir menos seguridad de la que la plataforma exige
-hoy, ni quedar exento de la que exija mañana. Cuando el piso sube, sube
-para todas las organizaciones a la vez, sin editar ni un contrato.
+A contract cannot ask for less security than the platform demands today,
+nor be exempt from what it will demand tomorrow. When the floor rises,
+it rises for every organization at once, without editing a single
+contract.
 
-Concretamente, esto NO es configurable desde un contrato y nunca lo será:
+Concretely, this is NOT configurable from a contract and never will be:
 
-| Garantía | Dónde se impone |
+| Guarantee | Where it is imposed |
 |---|---|
-| Solo imágenes firmadas por esta plataforma | Kyverno `require-aegis-signature`, alcance por etiqueta de namespace |
-| La organización no puede crear recursos cluster-scoped | AppProject `aegis-tenant-<org>` con `clusterResourceWhitelist: []` |
-| Todo tráfico denegado salvo lo concedido | NetworkPolicy `default-deny` en cada namespace |
-| Todo container declara `limits` | ResourceQuota del namespace |
-| Los secretos viajan cifrados en git | SOPS + age, KSOPS al desplegar |
+| Only images signed by this platform | Kyverno `require-aegis-signature`, scoped by namespace label |
+| The organization cannot create cluster-scoped resources | AppProject `aegis-tenant-<org>` with `clusterResourceWhitelist: []` |
+| All traffic denied except what is granted | NetworkPolicy `default-deny` in every namespace |
+| Every container declares `limits` | The namespace's ResourceQuota |
+| Secrets travel encrypted in git | SOPS + age, KSOPS at deploy time |
 
-Un contrato pide *acceso al bucket* o *dos tareas de AI*. No pide
-"desactivar la verificación de firma". Esa opción no existe en el
-esquema, que es la única forma de que no exista nunca.
+A contract asks for *access to the bucket* or *two AI tasks*. It does
+not ask to "turn signature verification off". That option does not exist
+in the schema, which is the only way for it never to exist.
 
-**Corolario para las generaciones.** Una organización creada bajo
-contrato v1 sigue funcionando cuando la plataforma llegue a v3, porque
-lo que envejece es el RENDER (que el generador mantiene por versión) y
-no las garantías (que se aplican a todas por igual). Ver
-[§8](#8-versiones-y-migración).
+**Corollary for the generations.** An organization created under
+contract v1 keeps working when the platform reaches v3, because what
+ages is the RENDER (which the generator maintains per version) and not
+the guarantees (which apply to all alike). See
+[§8](#8-versions-and-migration).
 
 ---
 
-## 3. El contrato
+## 3. The contract
 
-Un archivo por organización en `orgs/<nombre>.yaml` del repo de
-plataforma.
+One file per organization, in `orgs/<name>.yaml` of the platform repo.
 
 ```yaml
 # orgs/veterinaria.yaml
-version: 1                      # OBLIGATORIO. Ver §8.
-organizacion: veterinaria       # [a-z][a-z0-9-]{2,30}. Namespace = org-<nombre>.
+version: 1                      # MANDATORY. See §8.
+organizacion: veterinaria       # [a-z][a-z0-9-]{2,30}. Namespace = org-<name>.
 dominio: veterinaria.__ROOT_DOMAIN__
 
-# Cuota: un PLAN CON NOMBRE, nunca números sueltos.
-# Los números viven en platform/plans.yaml y se pueden reajustar para
-# todas las organizaciones a la vez. Si acá hubiera `cpu: 4`, treinta
-# archivos habría que editar el día que cambie el hardware.
+# Quota: a NAMED PLAN, never loose numbers.
+# The numbers live in platform/plans.yaml and can be readjusted for
+# every organization at once. If `cpu: 4` were written here, thirty
+# files would have to be edited the day the hardware changes.
 cuota: pequena                  # pequena | mediana | grande
 
 almacenamiento:
-  bucket: true                  # bucket propio en el Garage compartido
+  bucket: true                  # a bucket of its own in the shared Garage
 
 ai:
   plan: basico                  # basico | estandar | intensivo
   tareas:
-    # La organización nombra una CAPACIDAD, jamás un modelo ni un
-    # proveedor. Ver §5.
+    # The organization names a CAPABILITY, never a model and never a
+    # provider. See §5.
     - {nombre: chat.recepcion, capacidad: chat.rapido, prompt: recepcion.txt}
     - {nombre: npc.mascota,    capacidad: chat.rapido, prompt: mascota.txt}
 
 servicios:
   - nombre: front
-    tipo: estatico              # nginx sirviendo un build
+    tipo: estatico              # nginx serving a build
     repo: github.com/ORG/veterinaria-front
-    publico: /                  # ruta bajo `dominio`
-    # SIN `usa`: un front estático no tiene dónde guardar una
-    # credencial. Lo que necesite AI o bucket va detrás del `http`.
+    publico: /                  # path under `dominio`
+    # NO `usa`: a static front end has nowhere to keep a credential.
+    # Whatever needs AI or the bucket goes behind the `http`.
   - nombre: api
     tipo: http
     repo: github.com/ORG/veterinaria-api
     puerto: 8080
     publico: /api
-    usa: [bucket, ai, postgres] # concesiones de red explícitas
+    usa: [bucket, ai, postgres] # explicit network grants
   - nombre: db
-    tipo: postgres              # lo provee la plataforma: sin repo
+    tipo: postgres              # the platform provides it: no repo
   - nombre: recordatorios
-    tipo: worker                # no escucha: procesa
+    tipo: worker                # it does not listen: it processes
     repo: github.com/ORG/veterinaria-cron
     usa: [postgres]
 ```
 
-### Qué significa cada `tipo`
+### What each `tipo` means
 
-Un tipo que no restringe nada no es un tipo, es una etiqueta. Cada uno
-acota qué campos tienen sentido, y el generador **rechaza** lo que no:
+A type that restricts nothing is not a type, it is a label. Each one
+narrows down which fields make sense, and the generator **rejects** the
+ones that do not:
 
-| tipo | quién lo trae | `puerto` | `publico` | `usa` |
+| tipo | who brings it | `puerto` | `publico` | `usa` |
 |---|---|---|---|---|
-| `estatico` | repo del tenant | ✗ (la plataforma sirve en 8080) | **obligatorio** | ✗ **prohibido** |
-| `http` | repo del tenant | **obligatorio** | opcional | opcional |
-| `worker` | repo del tenant | ✗ | ✗ | opcional |
-| `postgres` | **la plataforma** | ✗ (5432) | ✗ nunca | ✗ |
+| `estatico` | the tenant's repo | ✗ (the platform serves on 8080) | **mandatory** | ✗ **forbidden** |
+| `http` | the tenant's repo | **mandatory** | optional | optional |
+| `worker` | the tenant's repo | ✗ | ✗ | optional |
+| `postgres` | **the platform** | ✗ (5432) | ✗ never | ✗ |
 
-De todas, la única que es de **seguridad** y no de coherencia es
-`estatico` sin `usa:`. Un front estático no tiene lado servidor: cada
-byte que se le entrega viaja al navegador, así que una credencial ahí
-está publicada. Lo que necesite hablar con la AI o con el bucket va
-detrás de un `http` — que es exactamente el rol del BFF, y lo que ya
-dicen los contratos del portafolio y el blog en un comentario. Ahora lo
-dice el generador.
+Of them all, the only one that is about **security** and not about
+coherence is `estatico` without `usa:`. A static front end has no server
+side: every byte handed to it travels to the browser, so a credential
+there is a published credential. Whatever needs to talk to the AI or to
+the bucket goes behind an `http` — which is exactly the BFF's role, and
+what the portfolio's and the blog's contracts already say in a comment.
+Now the generator says it too.
 
-`postgres` es el primer tipo **provisto por la plataforma**: no lleva
-repo, y su imagen (firmada, por digest), su disco y su credencial salen
-de `services.yaml`. Una base por organización, nunca compartida — un
-`DROP` de una no puede tocar a la vecina.
+`postgres` is the first type **provided by the platform**: it carries no
+repo, and its image (signed, by digest), its disk and its credential
+come out of `services.yaml`. One database per organization, never
+shared — a `DROP` in one cannot touch its neighbour.
 
-`aegis dev test-types` recorre cada regla con su contraejemplo y exige
-que el generador la rechace **nombrando la razón correcta**: un rechazo
-por el motivo equivocado saldría verde igual, y ese es un error que ya
-se cometió cuatro veces esta semana.
+`aegis dev test-types` walks every rule with its counter-example and
+demands that the generator reject it **naming the right reason**: a
+rejection for the wrong reason would come out green all the same, and
+that is a mistake already made four times this week.
 
-### Reglas del esquema
+### The schema's rules
 
-1. **Campos desconocidos = error.** No se ignoran en silencio. Un typo en
-   `almacenamineto:` tiene que fallar ruidoso, no desactivar el bucket sin
-   avisar.
-2. **Sin números de infraestructura.** Ni CPU, ni memoria, ni tokens por
-   minuto, ni réplicas. Todo eso es un plan con nombre.
-3. **Sin nombres de modelos ni proveedores.** Ver §5.
-4. **`usa:` es una lista blanca.** Un servicio que no declara `bucket` no
-   puede llegar al Garage — no por convención, sino porque la
-   NetworkPolicy generada no lo permite.
-5. **El nombre es inmutable.** Cambiarlo no renombra: crea otra
-   organización. El generador lo detecta y lo dice.
+1. **Unknown fields = error.** They are not ignored in silence. A typo
+   in `almacenamineto:` has to fail loudly, not turn the bucket off
+   without saying so.
+2. **No infrastructure numbers.** No CPU, no memory, no tokens per
+   minute, no replicas. All of that is a named plan.
+3. **No model names and no provider names.** See §5.
+4. **`usa:` is an allowlist.** A service that does not declare `bucket`
+   cannot reach the Garage — not by convention, but because the
+   generated NetworkPolicy does not let it.
+5. **The name is immutable.** Changing it does not rename: it creates
+   another organization. The generator detects that and says so.
 
 ---
 
-## 4. El generador
+## 4. The generator
 
 ```
-aegis org apply orgs/veterinaria.yaml      # renderiza a git
-aegis org apply orgs/*.yaml                # todas
-aegis org plan    orgs/veterinaria.yaml      # muestra el diff, no escribe
-aegis org delete  veterinaria                # ver §7
+aegis org apply orgs/veterinaria.yaml      # renders into git
+aegis org apply orgs/*.yaml                # all of them
+aegis org plan    orgs/veterinaria.yaml      # shows the diff, writes nothing
+aegis org delete  veterinaria                # see §7
 ```
 
-**El generador NO habla con el cluster.** No tiene `kubectl` en su
-camino. Escribe archivos en el repo y termina. Quien despliega es ArgoCD,
-después de que vos revises el diff y commitees. Esto no es purismo: es lo
-que hace que un `aegis org apply` sea seguro de correr en cualquier
-momento, incluso mal, porque lo peor que puede pasar es un diff feo que
-no commiteás.
+**The generator does NOT talk to the cluster.** It has no `kubectl` on
+its path. It writes files in the repo and stops. What deploys is ArgoCD,
+after you have reviewed the diff and committed. This is not purism: it
+is what makes an `aegis org apply` safe to run at any moment, even
+wrongly, because the worst that can happen is an ugly diff you do not
+commit.
 
-### Lo que se DERIVA de todos los contratos
+### What is DERIVED from all the contracts
 
-Además del directorio de cada organización, el generador rederiva ocho
-archivos que dependen del conjunto — no del contrato que acabás de
-tocar:
+Besides each organization's directory, the generator re-derives eight
+files that depend on the SET — not on the contract you have just
+touched:
 
-| Archivo | Qué sale de ahí |
+| File | What comes out of it |
 |---|---|
-| `tofu/envs/cloudflare-tunnel/main.tf` | los `public_hostnames` del borde |
-| `k8s/base/ai-system/routes.yaml` | el mapa organización → plan de AI |
-| `k8s/bootstrap/appprojects-tenants.yaml` | el AppProject de cada organización con repo |
-| `k8s/base/platform/argocd-secrets/secret-generator.yaml` | la deploy key con la que ArgoCD lee cada repo |
-| `k8s/argocd-apps/tenants.yaml` | la Application que despliega cada organización |
-| `k8s/base/garage-system/aprovisionar.yaml` | un Job por organización que pidió bucket |
-| `k8s/base/garage-system/kustomization.yaml` | si `aprovisionar.yaml` se incorpora o no |
-| `k8s/base/garage-system/secret-generator.yaml` | los espejos de credencial S3 que KSOPS descifra |
+| `tofu/envs/cloudflare-tunnel/main.tf` | the edge's `public_hostnames` |
+| `k8s/base/ai-system/routes.yaml` | the organization → AI plan map |
+| `k8s/bootstrap/appprojects-tenants.yaml` | the AppProject of every organization that has a repo |
+| `k8s/base/platform/argocd-secrets/secret-generator.yaml` | the deploy key ArgoCD reads each repo with |
+| `k8s/argocd-apps/tenants.yaml` | the Application that deploys each organization |
+| `k8s/base/garage-system/aprovisionar.yaml` | one Job per organization that asked for a bucket |
+| `k8s/base/garage-system/kustomization.yaml` | whether `aprovisionar.yaml` is wired in or not |
+| `k8s/base/garage-system/secret-generator.yaml` | the S3 credential mirrors that KSOPS decrypts |
 
-#### Los AppProjects (2026-08-05, #19)
+#### The AppProjects (2026-08-05, #19)
 
-El AppProject **es** la frontera de permisos de una organización: de qué
-repo puede leer, en qué namespace puede escribir, y que no puede tocar
-nada cluster-scoped. Se deriva **solo para los contratos que declaran
-repo**: una organización de pura infraestructura no tiene ninguna
-Application externa, y un proyecto sin `sourceRepos` no acota nada.
+The AppProject **is** an organization's permission boundary: which repo
+it may read from, which namespace it may write into, and the fact that
+it may not touch anything cluster-scoped. It is derived **only for the
+contracts that declare a repo**: an organization of pure infrastructure
+has no external Application at all, and a project without `sourceRepos`
+narrows nothing.
 
-Se derivó por dos cosas que se midieron, no por prolijidad:
+It was derived because of two things that were measured, not out of
+tidiness:
 
-1. **Faltaba uno.** `org-ejemplo` tenía contrato y no tenía proyecto. En
-   cuanto declarara `repo:`, su Application quedaría en *project not
-   found* — un error que llega tarde, después del repo, el pipeline y el
-   push.
-2. **Los repetidos derivan.** `aegis-tenant-canary` era el único de los
-   cuatro proyectos de tenant sin `orphanedResources`: quedó afuera
-   cuando #31 lo agregó a los otros tres. Consecuencia real: la app del
-   canary no se evaluaba nunca y `aegis check` la contaba dentro
-   de *"nada huérfano"*. **Un bloque copiado tres veces se actualiza
-   dos.** Derivado, los bloques son idénticos por construcción y no por
-   disciplina.
+1. **One was missing.** `org-ejemplo` had a contract and no project. The
+   moment it declared `repo:`, its Application would have sat in
+   *project not found* — an error that arrives late, after the repo, the
+   pipeline and the push.
+2. **Repeated blocks drift.** `aegis-tenant-canary` was the only one of
+   the four tenant projects without `orphanedResources`: it was left out
+   when #31 added it to the other three. The real consequence: the
+   canary's app was never evaluated and `aegis check` counted it inside
+   *"nothing orphaned"*. **A block copied three times gets updated
+   twice.** Derived, the blocks are identical by construction and not by
+   discipline.
 
-Lo que **no** se deriva y sigue a mano en `k8s/bootstrap/appprojects.yaml`:
-`aegis-bootstrap` y `aegis-platform` (son del sustrato, no de ninguna
-organización), `aegis-tenant-canary` (el canary es de la plataforma:
-prueba que el camino del tenant funciona, así que no puede depender de
-ese camino) y `aegis-tenant-ecommerce` (heredado, mismo criterio que
+What is **not** derived and stays by hand in
+`k8s/bootstrap/appprojects.yaml`: `aegis-bootstrap` and `aegis-platform`
+(they belong to the substrate, not to any organization),
+`aegis-tenant-canary` (the canary belongs to the platform: it proves the
+tenant path works, so it cannot depend on that path) and
+`aegis-tenant-ecommerce` (inherited, same criterion as
 `tenants-heredados.yaml`).
 
-**Estos NO los aplica ArgoCD**, a propósito (W-06 / R1-B): los aplica
-`kubectl` en la fase 35, antes de root. Eso evita la carrera
-AppProject-vs-Application dentro de un mismo sync y cierra el vector de
-escalar privilegios por una App que edite proyectos. Como consecuencia,
-al dar de alta una organización hay un paso más:
+**ArgoCD does NOT apply these**, on purpose (W-06 / R1-B): `kubectl`
+applies them in phase 35, before root. That avoids the
+AppProject-versus-Application race inside a single sync, and it closes
+the privilege-escalation vector of an App that edits projects. As a
+consequence, signing an organization up takes one extra step:
 
 ```
-kubectl apply -f k8s/bootstrap/appprojects-tenants.yaml   # ANTES
-bin/aegis-sync root                                       # DESPUÉS
+kubectl apply -f k8s/bootstrap/appprojects-tenants.yaml   # BEFORE
+aegis sync root                                           # AFTER
 ```
 
-El generador lo imprime cada vez que reescribe el archivo. Y el
-invariante «toda Application referencia un AppProject definido» lo
-comprueba `init/verify-static.sh` (check 76) contra el repo, sin
-cluster: se verifica que referencias ⊆ definiciones, no una lista de
-nombres — una lista sería un quinto lugar donde acordarse.
+The generator prints it every time it rewrites the file. And the
+invariant «every Application references a defined AppProject» is checked
+by `aegis verify` (check 76) against the repo, with no cluster: what is
+verified is that references ⊆ definitions, not a list of names — a list
+would be a fifth place to remember.
 
-#### La deploy key de repositorio (2026-08-05, #48)
+#### The repository deploy key (2026-08-05, #48)
 
-ArgoCD necesita una credencial para leer un repo privado, y esa
-credencial es de la organización aunque el Secret viva en el namespace
-de ArgoCD: sale de su `repo:` y desaparece con ella.
+ArgoCD needs a credential to read a private repo, and that credential
+belongs to the organization even though the Secret lives in ArgoCD's
+namespace: it comes out of its `repo:` and it disappears with it.
 
-Estaba en el peor de los estados posibles. Las dos que existían —blog y
-portafolio— se habían escrito a mano con `sops`, **nadie las producía**,
-ningún protocolo las documentaba y la checklist de rotación no las
-nombraba. El síntoma llega en una instancia nueva: ahí la age key es
-otra, el init recifra todo lo que sí produce, y estas dos quedan
-cifradas con una llave que ya no existe. KSOPS no las descifra y la App
-`argocd-secrets` no sincroniza nunca.
+It was in the worst possible state. The two that existed —blog and
+portfolio— had been written by hand with `sops`, **nobody produced
+them**, no protocol documented them and the rotation checklist did not
+name them. The symptom shows up on a fresh instance: there the age key
+is a different one, the init re-encrypts everything it does produce, and
+these two stay encrypted with a key that no longer exists. KSOPS cannot
+decrypt them and the `argocd-secrets` App never syncs.
 
-Ahora `aegis secret create <contrato>` las crea en la misma pasada
-que el resto de los secretos de la organización, y el generador las
-lista solo. El material se genera con `ssh-keygen` en tmpfs y se borra
-con `shred` — el mismo mecanismo que el init usa para la propia age key.
+Now `aegis secret create <contract>` creates them in the same pass as
+the rest of the organization's secrets, and the generator merely lists
+them. The material is generated with `ssh-keygen` in tmpfs and wiped
+with `shred` — the same mechanism the init uses for the age key itself.
 
-**Queda un paso a mano, y es irreducible:** la mitad PÚBLICA hay que
-registrarla en GitHub. El comando la imprime y dice qué hacer:
+**One manual step remains, and it is irreducible:** the PUBLIC half has
+to be registered on GitHub. The command prints it and says what to do:
 
 ```
 <repo> → Settings → Deploy keys → Add deploy key
-título: aegis-argocd-ro      SIN "Allow write access"
+title: aegis-argocd-ro       NO "Allow write access"
 ```
 
-Sin escritura, y eso importa: ArgoCD solo LEE. Una deploy key con
-escritura deja que quien tenga el cluster escriba en el repo de la app,
-que es la dirección equivocada.
+No write access, and that matters: ArgoCD only READS. A deploy key with
+write access lets whoever holds the cluster write into the app's repo,
+which is the wrong direction.
 
-Dos de los ocho son **el cableado** de garage, y están derivados por lo que pasó
-el 2026-08-04: estaban escritos a mano, y el generador escribía dentro
-de `garage-system/` dos archivos que ninguno de los dos listaba —
-`aprovisionar.yaml` y `secret-garage-<org>.enc.yaml`. El síntoma era el
-peor posible: `aplicar` decía que todo salió bien, los archivos quedaban
-en git, y en el cluster no pasaba nada. Sin error, en ningún lado.
+Two of the eight are garage's **wiring**, and they are derived because
+of what happened on 2026-08-04: they were written by hand, and the
+generator was writing two files inside `garage-system/` that neither of
+them listed — `aprovisionar.yaml` and `secret-garage-<org>.enc.yaml`.
+The symptom was the worst possible one: `apply` said everything had gone
+fine, the files stayed in git, and nothing happened in the cluster. No
+error, anywhere.
 
-**Un archivo generado que nadie lista es un archivo que no existe.** Si
-el generador escribe en un directorio, tiene que derivar también el
-cableado de ese directorio — o el cableado tiene que ser un glob, y los
-globs están prohibidos por A7 para los secretos.
+**A generated file that nobody lists is a file that does not exist.** If
+the generator writes into a directory, it has to derive that directory's
+wiring too — or the wiring has to be a glob, and globs are forbidden by
+A7 for secrets.
 
-La misma corrida barre los espejos que sobran: si una organización se
-borra, o le sacás el bucket del contrato, su `secret-garage-<org>.enc.yaml`
-desaparece de `garage-system/`. Ojo con qué significa eso — borrarlo del
-repo **no revoca la clave** en Garage; eso es `garage key delete` contra
-el almacén.
+The same run sweeps away the mirrors that are left over: if an
+organization is deleted, or you take the bucket out of its contract, its
+`secret-garage-<org>.enc.yaml` disappears from `garage-system/`. Mind
+what that means — deleting it from the repo **does not revoke the key**
+in Garage; that is `garage key delete` against the store.
 
-Los ocho corren **siempre**, al final de `plan`, `aplicar` y `borrar`.
-No son subcomandos que haya que acordarse de correr: acordarse es lo que
-ya falló dos veces con el borde. Y corren sobre TODOS los contratos
-porque dar de alta una organización cambia el conjunto entero — su
-hostname, su plan y su Application aparecen o desaparecen solos.
+The eight run **always**, at the end of `plan`, `apply` and `delete`.
+They are not subcommands you have to remember to run: remembering is
+exactly what already failed twice with the edge. And they run over ALL
+the contracts, because signing an organization up changes the whole set
+— its hostname, its plan and its Application appear or disappear on
+their own.
 
-El caso que esto cierra es el peor de todos: antes, `tenants.yaml` se
-editaba a mano. Olvidarse daba **todo generado, todo commiteado y nada
-desplegado**, sin un solo error a la vista.
+The case this closes is the worst of all: before, `tenants.yaml` was
+edited by hand. Forgetting gave you **everything generated, everything
+committed and nothing deployed**, without a single error in sight.
 
-Las organizaciones anteriores al generador viven en
-`tenants-heredados.yaml`, a mano y a propósito: mezclarlas en el archivo
-generado haría que la próxima corrida las borrara en silencio.
+The organizations that predate the generator live in
+`tenants-heredados.yaml`, by hand and on purpose: mixing them into the
+generated file would make the next run delete them in silence.
 
-### Las reglas de idempotencia
+### The idempotence rules
 
-Son el corazón del protocolo. Sin ellas "idempotente" es una palabra.
+They are the heart of the protocol. Without them "idempotent" is just a
+word.
 
-**I1 — Mismo contrato, salida byte a byte idéntica.** Sin marcas de
-tiempo, sin UUIDs, sin orden de mapa dependiente del intérprete. Correr
-dos veces seguidas deja el árbol de git limpio la segunda vez. Es
-verificable y el CI lo verifica.
+**I1 — Same contract, byte-for-byte identical output.** No timestamps,
+no UUIDs, no map ordering that depends on the interpreter. Running twice
+in a row leaves the git tree clean the second time. It is verifiable and
+the CI verifies it.
 
-**I2 — Los secretos se crean si faltan y NUNCA se regeneran.** Un
-`aegis org apply` sobre una organización viva no rota ninguna
-credencial. Rotar es un acto deliberado y tiene su propio comando:
-`aegis secret rotate <archivo.enc.yaml>`.
+**I2 — Secrets are created if they are missing and are NEVER
+regenerated.** An `aegis org apply` over a live organization rotates no
+credential. Rotating is a deliberate act and it has its own command:
+`aegis secret rotate <file.enc.yaml>`.
 
-(Hasta el 2026-08-23 este renglón decía «aegis org rotar» (sin comillas
-invertidas acá a propósito: en este documento las comillas invertidas
-son invocaciones, y el check 106 las verifica una por una), un comando
-que NUNCA EXISTIÓ. Quien lo tecleaba no recibía un error útil sino un
-«subcomando inválido», y la conclusión natural es «me equivoqué yo», no
-«el documento está viejo». Lo encontró el check 106, que extrae de los
-documentos toda invocación citada y exige que exista: los documentos
-que el operador ejecuta son código con otra sintaxis, y envejecen
-igual.) Sin esta regla nadie se anima a
-correr el generador dos veces, y un generador que da miedo no es
-idempotente aunque lo sea.
+(Until 2026-08-23 this line read «aegis org rotar» (with no backticks
+here, deliberately: in this document backticks are invocations, and
+check 106 verifies them one by one), a command that NEVER EXISTED.
+Whoever typed it got no useful error but an «invalid subcommand», and
+the natural conclusion is «I got it wrong», not «the document is
+stale». It was found by check 106, which extracts every cited
+invocation out of the documents and demands that it exist: the documents
+the operator executes are code in another syntax, and they age exactly
+the same.) Without this rule nobody dares run the generator twice, and a
+generator that frightens people is not idempotent even when it is.
 
-**I3 — Los archivos generados llevan cabecera y hash.**
+**I3 — Generated files carry a banner and a hash.**
 
 ```yaml
-# GENERADO POR aegis org — DO NOT EDIT BY HAND.
-# contrato: orgs/veterinaria.yaml
-# hash: sha256:3f9a…   (del contrato que lo produjo)
+# GENERATED BY `aegis org` — DO NOT EDIT BY HAND
+# contract: orgs/veterinaria.yaml
+# hash: sha256:3f9a…   (of the contract that produced it)
 ```
 
-Si el archivo cambió a mano, el hash no coincide y el generador **se
-niega y muestra la diferencia**, en vez de pisarla. La salida es el
-contrato, no el archivo.
+If the file was changed by hand, the hash does not match and the
+generator **refuses and shows the difference**, instead of overwriting
+it. The output is the contract, not the file.
 
-**I4 — Convergencia, no acumulación.** Sacar `bucket: true` del contrato
-y reaplicar QUITA la NetworkPolicy del bucket. El generador es dueño del
-directorio de la organización entero.
-Advertencia heredada: **quitar un recurso de git no lo quita del
-cluster** (`prune` omitido, A19). Por eso `aegis org apply` avisa
-explícitamente qué archivos borró y qué hay que hacer con ellos. Ver §7.
+**I4 — Convergence, not accumulation.** Taking `bucket: true` out of the
+contract and reapplying REMOVES the bucket's NetworkPolicy. The
+generator owns the organization's whole directory.
+Inherited warning: **removing a resource from git does not remove it
+from the cluster** (`prune` omitted, A19). That is why `aegis org apply`
+says explicitly which files it deleted and what has to be done about
+them. See §7.
 
-**I5 — El contrato inválido no produce nada.** Se valida entero antes de
-escribir el primer archivo. Nunca un árbol a medio generar.
+**I5 — An invalid contract produces nothing.** It is validated whole
+before the first file is written. Never a half-generated tree.
 
-### Qué emite
+### What it emits
 
 ```
 k8s/organizations/org-veterinaria/
-  bundle.yaml            Namespace (con la etiqueta de enforce), ResourceQuota,
-                         LimitRange, ServiceAccount default con regcred
+  bundle.yaml            Namespace (with the enforce label), ResourceQuota,
+                         LimitRange, default ServiceAccount with regcred
   appproject.yaml        AppProject aegis-tenant-veterinaria, cluster-scoped []
-  netpol.yaml            default-deny + las concesiones que pidió el contrato
-  apps.yaml              una Application de ArgoCD por servicio
-  secret-*.enc.yaml      SOLO si faltan (I2)
+  netpol.yaml            default-deny + the grants the contract asked for
+  apps.yaml              one ArgoCD Application per service
+  secret-*.enc.yaml      ONLY if they are missing (I2)
   kustomization.yaml
-k8s/argocd-apps/tenants.yaml    entrada de la organización
+k8s/argocd-apps/tenants.yaml    the organization's entry
 ```
 
-Y, si el contrato lo pide, dos registros en plataforma:
+And, if the contract asks for them, two registrations on the platform:
 
-- las tareas de AI en el registro del gateway,
-- el bucket y su credencial en el Garage.
+- the AI tasks in the gateway's registry,
+- the bucket and its credential in the Garage.
 
 ---
 
-## 5. AI: capacidades, planes y proveedores
+## 5. AI: capabilities, plans and providers
 
-Este es el pedazo diseñado para que agregar Vertex, Bedrock o créditos de
-un tercero **no toque ninguna organización**.
+This is the piece designed so that adding Vertex, Bedrock or a third
+party's credits **touches no organization**.
 
-### La organización pide una CAPACIDAD
+### The organization asks for a CAPABILITY
 
 ```yaml
 ai:
@@ -410,25 +417,25 @@ ai:
     - {nombre: chat.recepcion, capacidad: chat.rapido, prompt: recepcion.txt}
 ```
 
-Una capacidad es una promesa de comportamiento: *chat.rapido* significa
-"responde en pocos segundos, contexto corto". No dice con qué. Una
-organización que nombrara `qwen3-4b` quedaría casada con una decisión de
-infraestructura que no le corresponde, y el día que ese modelo se
-reemplace habría que editar todas.
+A capability is a promise about behaviour: *chat.rapido* means "answers
+within a few seconds, short context". It does not say with what. An
+organization that named `qwen3-4b` would be married to an infrastructure
+decision that is not its own, and the day that model is replaced every
+single one of them would have to be edited.
 
-Capacidades del contrato v1:
+Capabilities of contract v1:
 
-| Capacidad | Promesa |
+| Capability | Promise |
 |---|---|
-| `chat.rapido` | respuesta conversacional, contexto corto, latencia baja |
-| `chat.largo` | contexto amplio, latencia mayor tolerada |
-| `embeddings` | vectores para búsqueda semántica |
-| `transcripcion` | audio a texto |
+| `chat.rapido` | conversational reply, short context, low latency |
+| `chat.largo` | wide context, higher latency tolerated |
+| `embeddings` | vectors for semantic search |
+| `transcripcion` | audio to text |
 
-### La plataforma decide CON QUÉ
+### The platform decides WITH WHAT
 
-`platform/ai/routes.yaml`, plano de plataforma, fuera del alcance de las
-organizaciones:
+`platform/ai/routes.yaml`, a platform plane, outside the organizations'
+reach:
 
 ```yaml
 capacidades:
@@ -441,69 +448,69 @@ capacidades:
     modelo: qwen3-4b
     contexto_max: 12288
 
-# El día que haya créditos de un tercero, esto es TODO el cambio:
+# The day a third party's credits exist, this is ALL the change:
 #
 #   chat.largo:
 #     proveedor: vertex
 #     modelo: gemini-x
-#     credencial: secret-vertex-veterinaria   # o de plataforma
+#     credencial: secret-vertex-veterinaria   # or a platform one
 #     contexto_max: 1000000
 #
-# Cero organizaciones tocadas. Cero contratos migrados.
+# Zero organizations touched. Zero contracts migrated.
 ```
 
-**Regla de proveedores:** un proveedor nuevo se agrega implementando la
-interfaz del gateway (generar, con streaming y con corte por
-presupuesto). No se agrega metiéndole un `if` al camino de la request.
+**Provider rule:** a new provider is added by implementing the gateway's
+interface (generate, with streaming and with a budget cut-off). It is
+not added by dropping an `if` into the request path.
 
-**Regla de costo:** un proveedor pago tiene presupuesto en la MISMA
-moneda que el local — tokens, no requests — para que un cambio de ruteo
-no cambie el significado de un plan. Un plan `basico` cuesta lo mismo al
-usuario tanto si atrás hay una GPU propia como si hay una factura.
+**Cost rule:** a paid provider has its budget in the SAME currency as
+the local one — tokens, not requests — so that a change of routing does
+not change what a plan means. A `basico` plan costs the user the same
+whether what sits behind it is a GPU of our own or an invoice.
 
-**Solo se declara lo que se sabe servir.** `ai/routes.yaml` no lleva
-capacidades "reservadas para más adelante". El gateway rechaza al
-ARRANCAR un proveedor que no tenga cliente implementado, y `bin/aegis-org`
-saca de este archivo la lista de capacidades que un contrato puede
-nombrar. Una capacidad declarada de antemano sería un contrato válido
-que revienta recién cuando un visitante lo invoca: el error aparecería
-lejos de la causa, que es la forma más cara de equivocarse.
+**Only what can actually be served is declared.** `ai/routes.yaml`
+carries no capabilities "reserved for later". The gateway rejects at
+STARTUP a provider with no implemented client, and `aegis org` takes the
+list of capabilities a contract may name out of this file. A capability
+declared in advance would be a valid contract that blows up only when a
+visitor invokes it: the error would show up far away from its cause,
+which is the most expensive way to be wrong.
 
-> La versión anterior del generador tenía la lista de capacidades
-> escrita a mano e incluía `embeddings` y `transcripcion`, que todavía
-> no tienen engine. Un contrato que las pidiera pasaba la validación y
-> después impedía que el gateway arrancara.
+> The previous version of the generator had the capability list written
+> by hand and it included `embeddings` and `transcripcion`, which still
+> have no engine. A contract that asked for them passed validation and
+> then kept the gateway from starting.
 
-### Cómo llega al gateway
+### How it reaches the gateway
 
-El gateway no lee ninguno de estos archivos: lee un ConfigMap. Lo
-**genera** `bin/aegis-org` combinando tres fuentes, y por eso el mapa
-organización→plan no se escribe a mano en ningún lado.
+The gateway reads none of these files: it reads a ConfigMap. `aegis org`
+**generates** it by combining three sources, and that is why the
+organization→plan map is written by hand nowhere.
 
 ```
 ai/routes.yaml   ─┐
 platform/plans.yaml ─┼─→  k8s/base/ai-system/routes.yaml  (ConfigMap ai-ruteo)
-orgs/*.yaml     ─┘                    ↓  montado en /etc/ai-ruteo
+orgs/*.yaml     ─┘                    ↓  mounted at /etc/ai-ruteo
                                   ai-gateway
 ```
 
-| Fuente | Aporta | Quién la edita |
+| Source | Contributes | Who edits it |
 |---|---|---|
-| `ai/routes.yaml` | `capacidades` | plataforma |
-| `plans.yaml` | `planes` | plataforma |
-| `orgs/*.yaml` (`ai.plan`) | `tenants` | cada organización |
+| `ai/routes.yaml` | `capacidades` | the platform |
+| `plans.yaml` | `planes` | the platform |
+| `orgs/*.yaml` (`ai.plan`) | `tenants` | each organization |
 
-Se regenera **siempre** al final de `aegis-org plan` y `aegis-org
-aplicar`, igual que el borde, y por la misma razón: dar de alta una
-organización cambia el mapa entero, no solo su fila. Si hubiera que
-acordarse de correr un comando aparte, el síntoma sería un gateway que
-arranca sin conocer a la organización recién creada — y un tenant
-desconocido cae al plan más chico, en silencio.
+It is regenerated **always**, at the end of `aegis org plan` and
+`aegis org apply`, just like the edge, and for the same reason: signing
+an organization up changes the whole map, not just its row. If you had
+to remember to run a separate command, the symptom would be a gateway
+that starts without knowing about the organization just created — and an
+unknown tenant falls to the smallest plan, in silence.
 
-La clave del mapa es el **namespace** (`org-portafolio`), no el nombre
-corto del contrato: es lo que el gateway recibe en la API key.
+The map's key is the **namespace** (`org-portafolio`), not the
+contract's short name: it is what the gateway receives in the API key.
 
-### Los planes
+### The plans
 
 `platform/plans.yaml`:
 
@@ -514,146 +521,154 @@ ai:
   intensivo: {tokens_min: 12000, concurrencia: 4, prioridad: 1, reserva: 0.35}
 ```
 
-Cuatro números y cada uno acota algo distinto:
+Four numbers, and each one bounds something different:
 
-| Campo | Qué acota | Alcance |
+| Field | What it bounds | Scope |
 |---|---|---|
-| `tokens_min` | presupuesto de salida | **organización** |
-| `concurrencia` | pedidos suyos en la GPU a la vez | **organización** |
-| `prioridad` | a quién se despierta primero (menor = antes) | plan |
-| `reserva` | fracción del cupo garantizada | **plan** |
+| `tokens_min` | output budget | **organization** |
+| `concurrencia` | its own requests on the GPU at once | **organization** |
+| `prioridad` | who gets woken first (lower = sooner) | plan |
+| `reserva` | fraction of the quota that is guaranteed | **plan** |
 
-`prioridad` es lo que ordena la cola cuando hay contención: con una sola
-GPU detrás, dos organizaciones pidiendo a la vez tienen que resolverse de
-alguna manera, y "quien llegó primero" castiga a quien paga más.
+`prioridad` is what orders the queue when there is contention: with a
+single GPU behind it, two organizations asking at the same time have to
+be resolved somehow, and "first come, first served" punishes whoever
+pays more.
 
-`reserva` es el contrapeso, y es lo que impide que eso degenere en
-exclusividad: por bajo que sea el plan, esa fracción del cupo le queda
-siempre. **Un plan alto compra latencia, no el derecho a dejar a otro sin
-turno.**
+`reserva` is the counterweight, and it is what keeps that from
+degenerating into exclusivity: however low the plan, that fraction of
+the quota is always kept for it. **A high plan buys latency, not the
+right to leave somebody else without a turn.**
 
-**La reserva es por PLAN y no por organización.** Si fuera por
-organización, diez del plan más chico reservarían su fracción cada una y
-el cupo no alcanzaría para ninguna. Por plan, el conjunto de los básicos
-comparte su porción — que es lo que la palabra significa. La
-`concurrencia` sí es por organización, porque ahí lo que se acota es una
-concreta.
+**The reserve is per PLAN and not per organization.** If it were per
+organization, ten of them on the smallest plan would each reserve their
+fraction and the quota would not be enough for any of them. Per plan,
+the set of `basico` tenants shares its portion — which is what the word
+means. `concurrencia` IS per organization, because what is bounded there
+is one concrete organization.
 
-Detalle de implementación que conviene conocer: una fracción que
-redondea a cero lugares se sube a **uno**. Una reserva declarada que no
-reserva nada no es una reserva, y con cupos chicos (4 lugares) cualquier
-fracción menor a 0,25 caería ahí. Si la suma pasa el 100%, se escalan
-todas proporcionalmente en vez de fallar — un ruteo mal sumado no debe
-poder dejar al gateway sin arrancar.
+An implementation detail worth knowing: a fraction that rounds down to
+zero slots is raised to **one**. A declared reserve that reserves
+nothing is not a reserve, and with small quotas (4 slots) any fraction
+below 0.25 would land there. If the sum goes over 100%, they are all
+scaled down proportionally instead of failing — a badly summed routing
+must not be able to keep the gateway from starting.
 
-**Los números viven acá y en ningún otro lado.** Reajustarlos es editar
-un archivo, no treinta. Las cuotas de CPU/memoria viven en el mismo
-archivo bajo `cuota:`, con los mismos escalones con nombre.
+**The numbers live here and nowhere else.** Readjusting them means
+editing one file, not thirty. The CPU/memory quotas live in the same
+file under `cuota:`, with the same named steps.
 
 ---
 
-## 6. Secretos
+## 6. Secrets
 
-Cada organización necesita, según lo que pida:
+Each organization needs, depending on what it asks for:
 
-| Secreto | Cuándo | Origen |
+| Secret | When | Origin |
 |---|---|---|
-| `regcred-internal` | siempre | credencial de lectura del registry interno |
-| `ai-gateway-key` | si hay `ai:` | clave `aegisk_…` emitida por el gateway |
-| `garage-<org>` | si hay `bucket:` | par de claves S3 del bucket propio |
+| `regcred-internal` | always | read credential for the internal registry |
+| `ai-gateway-key` | if there is an `ai:` | `aegisk_…` key issued by the gateway |
+| `garage-<org>` | if there is a `bucket:` | the S3 key pair of its own bucket |
 
 ```
-aegis secret create orgs/veterinaria.yaml    # crea los que falten
-aegis secret --rotar <archivo>                # deliberado, de a uno
+aegis secret create orgs/veterinaria.yaml   # creates the ones that are missing
+aegis secret rotate <file>                  # deliberate, one at a time
 ```
 
-`bin/aegis-org` **no** crea secretos: escribe manifiestos y no maneja
-material criptográfico. Separar las dos cosas es lo que permite correr
-el generador sin pensarlo. Cuando falta alguno, lo lista con el comando
-exacto para crearlo.
+`aegis org` does **not** create secrets: it writes manifests and handles
+no cryptographic material. Separating the two is what makes it possible
+to run the generator without thinking twice about it. When any of them
+is missing, it lists it together with the exact command to create it.
 
-Reglas, todas consecuencia de I2:
+Rules, all of them consequences of I2:
 
-1. **Crear si falta, jamás sobreescribir.** Reaplicar no rota. Es un
-   mecanismo, no una promesa: `aegis-secret` sobre un archivo que
-   existe dice "no se toca" y sale.
-2. **El operador no ve el material.** Se genera con `secrets` (no
-   `random`, que es un Mersenne Twister predecible), se le pasa a `sops`
-   **por stdin** y lo único que toca el disco es el archivo cifrado. No
-   pasa por `argv` ni por un temporal legible.
-   Cifrar **no necesita la age key privada**, solo el recipient público
-   de `.sops.yaml`: crear credenciales nunca obliga a materializar la
-   llave que descifra todo.
-3. **Nunca en `argv`.** Ni local ni remoto. Por stdin o por archivo con
-   permisos 600 (regla A27 del init).
-4. **Se verifica por resultado, no por lectura.** El chequeo de que un
-   secreto quedó bien es que el pod arranca y autentica, no que alguien
-   lo imprimió. Hay un incidente registrado sobre esto:
-   `ai-tenant-key.md` §3 documenta un chequeo que respondía "OK" leyendo
-   el primer carácter de un mensaje de error.
-5. **Rotar es un comando aparte**, deliberado, con su propia bitácora.
-   `--rotar` va de a uno y es incompatible con `--todos`: rotar en lote
-   es cómo se rota algo que no se quería rotar.
+1. **Create if missing, never overwrite.** Reapplying does not rotate.
+   It is a mechanism, not a promise: `aegis secret` over a file that
+   already exists says "not touched" and exits.
+2. **The operator does not see the material.** It is generated with
+   `secrets` (not `random`, which is a predictable Mersenne Twister),
+   handed to `sops` **through stdin**, and the only thing that touches
+   disk is the encrypted file. It does not pass through `argv`, and it
+   does not pass through a readable temporary file.
+   Encrypting **does not need the private age key**, only the public
+   recipient from `.sops.yaml`: creating credentials never forces you to
+   materialise the key that decrypts everything.
+3. **Never in `argv`.** Neither locally nor remotely. Through stdin, or
+   through a file with 600 permissions (rule A27 of the init).
+4. **Verified by result, not by reading.** The check that a secret came
+   out right is that the pod starts and authenticates, not that somebody
+   printed it. There is a recorded incident about this:
+   `ai-tenant-key.md` §3 documents a check that answered "OK" by reading
+   the first character of an error message.
+5. **Rotating is a separate command**, deliberate, with a log of its
+   own. `aegis secret rotate` goes one file at a time and is
+   incompatible with the bulk `create`: rotating in bulk is how you end
+   up rotating something you did not mean to rotate.
 
-**Lo que rotar NO hace.** Genera la credencial nueva y nada más. La
-vieja sigue siendo válida donde la acepten: rotar `ai-gateway-key` no
-revoca nada hasta que se quite la entrada de
-`secret-ai-keys.enc.yaml` — un archivo compartido entre organizaciones,
-que por eso no se edita solo. El comando lo dice al rotar, en rojo.
+**What rotating does NOT do.** It generates the new credential and
+nothing else. The old one stays valid wherever it is accepted: rotating
+`ai-gateway-key` revokes nothing until the entry is removed from
+`secret-ai-keys.enc.yaml` — a file shared between organizations, which
+is precisely why it is not edited on its own. The command says so while
+rotating, in red.
 
 ---
 
-## 7. Borrar una organización
+## 7. Deleting an organization
 
 ```
-bin/aegis-org plan-borrar veterinaria    # muestra todo, no toca nada
-bin/aegis-org borrar      veterinaria
+aegis org plan-delete veterinaria    # shows everything, touches nothing
+aegis org delete      veterinaria
 ```
 
-Hoy esto es el punto más débil del protocolo y conviene decirlo antes que
-descubrirlo: **`prune` está omitido en toda la plataforma (A19)**, así que
-quitar archivos de git no quita nada del cluster.
+Today this is the protocol's weakest point, and it is better said than
+discovered: **`prune` is omitted across the whole platform (A19)**, so
+removing files from git removes nothing from the cluster.
 
-Por eso `borrar` hace dos cosas separadas y en este orden:
+That is why `delete` does two separate things, in this order:
 
-1. Quita el contrato y los archivos generados. Eso es git y es
-   reversible. Las tres derivaciones (borde, ruteo, `tenants.yaml`)
-   corren después, así que su hostname, su plan y su Application
-   desaparecen **solos** — salen de los contratos, no de listas aparte.
-2. **Imprime** los comandos exactos para retirar lo que quedó vivo y no
-   los ejecuta.
+1. It removes the contract and the generated files. That is git, and it
+   is reversible. The three derivations (edge, routing, `tenants.yaml`)
+   run afterwards, so its hostname, its plan and its Application
+   disappear **on their own** — they come out of the contracts, not out
+   of separate lists.
+2. It **prints** the exact commands to withdraw whatever is still alive,
+   and it does not run them.
 
-No los ejecuta porque borrar un namespace se lleva puestos los datos, y
-eso no puede pasar por un comando que alguien corrió con un nombre mal
-tipeado. El día que #31 se resuelva, el paso 2 puede volverse automático
-con confirmación.
+It does not run them because deleting a namespace takes the data with
+it, and that cannot happen through a command somebody ran with a
+mistyped name. The day #31 is resolved, step 2 can become automatic with
+a confirmation.
 
-Los comandos del paso 2 salen ordenados de menos a más destructivo, y
-**las Applications van primero**: mientras vivan, reconcilian y recrean
-lo que borres. Sus nombres se derivan del contrato, no se dejan a ojo —
-es justo ese paso donde un nombre tipeado a mano borra la organización
-de al lado.
+Step 2's commands come out ordered from least to most destructive, and
+**the Applications go first**: as long as they live, they reconcile and
+recreate whatever you delete. Their names are derived from the contract,
+not eyeballed — that is precisely the step where a hand-typed name
+deletes the organization next door.
 
-Dos avisos que el comando imprime porque son los que se descubren tarde:
+Two warnings that the command prints, because they are the ones
+discovered late:
 
-- **Borrar un `.enc.yaml` no revoca nada.** La credencial sigue siendo
-  válida donde la acepten. Revocar es parte del paso 2, y va antes de
-  borrar el archivo si querés poder auditarla después.
-- **Los PVC pueden sobrevivir al namespace** según la `reclaimPolicy`.
-  Se comprueba después, que es cuando se nota.
+- **Deleting an `.enc.yaml` revokes nothing.** The credential stays
+  valid wherever it is accepted. Revoking is part of step 2, and it goes
+  before deleting the file if you want to be able to audit it
+  afterwards.
+- **PVCs can outlive the namespace**, depending on the `reclaimPolicy`.
+  It is checked afterwards, which is when it shows.
 
-Dos cosas quedan a mano a propósito, porque viven en archivos
-COMPARTIDOS que el generador no gobierna: las tareas `<org>.*` del
-registro de AI, y la entrada de la organización en
-`secret-ai-keys.enc.yaml`. Editarlos automáticamente significaría que un
-`borrar` mal tipeado toca un archivo de todas las organizaciones.
+Two things are left by hand on purpose, because they live in SHARED
+files that the generator does not govern: the `<org>.*` tasks of the AI
+registry, and the organization's entry in `secret-ai-keys.enc.yaml`.
+Editing them automatically would mean that a mistyped `delete` touches a
+file belonging to every organization.
 
-El **AppProject** era la tercera hasta el 2026-08-05 (#19) y ya no lo
-es: `appprojects-tenants.yaml` es un archivo derivado, así que el
-documento de la organización desaparece solo en la misma corrida. Lo que
-sí queda a cargo del operador es **aplicar** el archivo — ArgoCD no
-gestiona los AppProjects a propósito, y borrarlos del repo no los saca
-del cluster (misma regla A19 que vale para todo lo demás):
+The **AppProject** was the third one until 2026-08-05 (#19) and is not
+any more: `appprojects-tenants.yaml` is a derived file, so the
+organization's document disappears on its own in the same run. What is
+left to the operator is **applying** the file — ArgoCD does not manage
+the AppProjects on purpose, and deleting them from the repo does not
+take them out of the cluster (the same rule A19 that holds for
+everything else):
 
 ```
 kubectl apply -f k8s/bootstrap/appprojects-tenants.yaml
@@ -662,85 +677,89 @@ kubectl delete appproject -n argocd aegis-tenant-<org>
 
 ---
 
-## 8. Versiones y migración
+## 8. Versions and migration
 
-`version:` es obligatorio y el generador **rechaza lo que no conoce**. Un
-contrato sin versión no es "v1 por defecto": es un error.
+`version:` is mandatory and the generator **rejects what it does not
+know**. A contract without a version is not "v1 by default": it is an
+error.
 
-- El generador mantiene un renderizador por versión. Un contrato v1 se
-  sigue renderizando igual aunque exista v2.
-- Una versión nueva se justifica solo si cambia el CONTRATO. Cambiar los
-  números de un plan, agregar una capacidad o cambiar el ruteo **no** son
-  versión nueva: por eso están afuera.
-- Migrar es explícito: `bin/aegis-org migrar orgs/veterinaria.yaml --a 2`
-  reescribe el contrato y muestra el diff. Nunca automático al aplicar.
-  **Hoy solo existe v1 y el comando lo dice** en vez de fingir: pedir
-  una versión que no existe falla nombrando las que sí. Existe ya, y no
-  como un TODO, porque el `--a` obligatorio es lo que impide la
-  alternativa mala — que alguien suba `version: 2` a mano y descubra
-  tarde que el generador no tenía nada nuevo que hacer con eso.
-- Las garantías de §2 se aplican a toda organización sea cual sea su
-  versión. Un contrato viejo no es un permiso viejo.
-
----
-
-## 9. Cómo se prueba que esto no es una fantasía
-
-Un protocolo que nadie ejecutó es un deseo. Las pruebas de aceptación,
-en orden de dureza:
-
-1. **Reproducir lo que ya existe.** Escribir el contrato de
-   `org-portafolio` —que hoy está a mano y desplegado— y verificar que el
-   generador produce lo mismo que está corriendo. Si no lo reproduce, el
-   modelo está mal, no la organización.
-2. **Idempotencia real.** `aplicar` dos veces seguidas deja el árbol
-   limpio la segunda. Lo verifica el CI, no una persona.
-3. **Alta de punta a punta.** Un contrato nuevo hasta un `curl` con TLS
-   contra el servicio desplegado, sin ningún paso manual fuera del
-   commit.
-4. **El piso se sostiene.** En la organización nueva, una imagen sin
-   firmar es RECHAZADA por admisión, y un pod suyo no alcanza a otra
-   organización. Se prueba ejerciendo el invariante, no leyendo el YAML
-   —la lección de `aegis check` y de la Enfermedad B.
-5. **Borrar y volver a crear** deja el sistema como al principio.
+- The generator keeps one renderer per version. A v1 contract keeps
+  rendering the same way even once v2 exists.
+- A new version is justified only if the CONTRACT changes. Changing a
+  plan's numbers, adding a capability or changing the routing are **not**
+  a new version: that is exactly why they live outside.
+- Migrating is explicit: `aegis org migrate orgs/veterinaria.yaml --to 2`
+  rewrites the contract and shows the diff. Never automatic on apply.
+  **Today only v1 exists and the command says so** instead of
+  pretending: asking for a version that does not exist fails naming the
+  ones that do. It exists already, and not as a TODO, because the
+  mandatory `--to` is what prevents the bad alternative — somebody
+  bumping `version: 2` by hand and finding out late that the generator
+  had nothing new to do with it.
+- The guarantees of §2 apply to every organization whatever its version.
+  An old contract is not an old permission.
 
 ---
 
-## 10. Si sos un agente
+## 9. How this is proven not to be a fantasy
 
-Estas reglas existen porque un agente con un `kubectl` a mano tiende a
-arreglar el síntoma.
+A protocol nobody has run is a wish. The acceptance tests, in order of
+hardness:
 
-**Hacé:**
-- Leé el contrato antes de tocar nada. La verdad está en `orgs/*.yaml`,
-  no en el cluster.
-- Para cualquier cambio de una organización: **editá el contrato y
-  reaplicá.** Siempre.
-- Mostrá el diff antes de commitear.
-- Si el generador se niega por hash (I3), mostrá la diferencia y
-  preguntá. No la pises.
-
-**No hagas:**
-- No edites archivos con la cabecera `GENERADO POR aegis org`. Lo que
-  hay que cambiar es el contrato.
-- No apliques manifiestos de una organización con `kubectl apply`. El
-  camino es git → ArgoCD. Un apply directo queda pisado en el próximo
-  sync y mientras tanto miente sobre el estado real.
-- No inventes valores de plan ni de cuota. Si el que hace falta no
-  existe, el cambio es agregar un plan en `platform/plans.yaml` y
-  decirlo.
-- No rotes secretos "por las dudas". Rotar es deliberado (§6.5).
-- No pongas nombres de modelo ni de proveedor en un contrato (§5).
-
-**Verificá por resultado, no por lectura.** "El YAML dice que la firma se
-exige" no es una verificación. Meter una imagen sin firmar y ver que
-rebote, sí.
+1. **Reproduce what already exists.** Write the contract for
+   `org-portafolio` —which today is hand-written and deployed— and check
+   that the generator produces the same thing that is running. If it
+   does not reproduce it, what is wrong is the model, not the
+   organization.
+2. **Real idempotence.** `apply` twice in a row leaves the tree clean
+   the second time. The CI verifies it, not a person.
+3. **Onboarding end to end.** A new contract all the way to a `curl`
+   with TLS against the deployed service, with no manual step outside
+   the commit.
+4. **The floor holds.** In the new organization, an unsigned image is
+   REJECTED by admission, and a pod of its own cannot reach another
+   organization. It is proven by exercising the invariant, not by
+   reading the YAML —the lesson of `aegis check` and of Disease B.
+5. **Deleting and creating again** leaves the system as it was at the
+   start.
 
 ---
 
-## Estado de implementación
+## 10. If you are an agent
 
-Este documento define el contrato. Lo que falta construir está en las
-tareas #39–#43. El contrato se considera cerrado; lo que se ajusta con la
-implementación son los planes, el ruteo y los tipos de servicio — todo
-afuera de este archivo a propósito.
+These rules exist because an agent with a `kubectl` at hand tends to fix
+the symptom.
+
+**Do:**
+- Read the contract before touching anything. The truth is in
+  `orgs/*.yaml`, not in the cluster.
+- For any change to an organization: **edit the contract and reapply.**
+  Always.
+- Show the diff before committing.
+- If the generator refuses because of the hash (I3), show the difference
+  and ask. Do not overwrite it.
+
+**Do not:**
+- Do not edit files that carry the **GENERATED BY `aegis org`** banner.
+  What has to change is the contract.
+- Do not apply an organization's manifests with `kubectl apply`. The
+  path is git → ArgoCD. A direct apply gets overwritten on the next sync
+  and, in the meantime, it lies about the real state.
+- Do not invent plan or quota values. If the one that is needed does not
+  exist, the change is to add a plan in `platform/plans.yaml` and say
+  so.
+- Do not rotate secrets "just in case". Rotating is deliberate (§6.5).
+- Do not put model names or provider names in a contract (§5).
+
+**Verify by result, not by reading.** "The YAML says the signature is
+required" is not a verification. Pushing an unsigned image in and
+watching it bounce is.
+
+---
+
+## Implementation status
+
+This document defines the contract. What is left to build is in tasks
+#39–#43. The contract is considered closed; what gets adjusted along
+with the implementation are the plans, the routing and the service
+types — all of it outside this file on purpose.

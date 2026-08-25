@@ -1,22 +1,22 @@
-# plans.yaml — LOS NÚMEROS VIVEN ACÁ Y EN NINGÚN OTRO LADO.
+# plans.yaml — THE NUMBERS LIVE HERE AND NOWHERE ELSE.
 #
-# Un contrato de organización dice `cuota: pequena`, nunca `cpu: 2`. La
-# razón es aritmética: el día que cambie el hardware, o que un plan
-# resulte mal dimensionado, esto es UN archivo y no treinta. Si los
-# números estuvieran en cada contrato, cambiarlos sería una migración.
+# An organization contract says `cuota: pequena`, never `cpu: 2`. The
+# reason is arithmetic: the day the hardware changes, or a plan turns
+# out to be badly sized, this is ONE file and not thirty. If the
+# numbers lived in each contract, changing them would be a migration.
 #
-# Cambiar un número de acá NO es una versión nueva del contrato (§8 de
-# docs/protocols/organization.md): el contrato no menciona números, así
-# que no puede quedar desactualizado por esto.
+# Changing a number in here is NOT a new version of the contract (§8 of
+# docs/protocols/organization.md): the contract names no numbers, so it
+# cannot fall out of date because of this.
 #
-# Los planes son ESCALONES, no un continuo. Un continuo invita a
-# negociar cada caso ("¿y si le damos 2.5 CPU?") y a los seis meses hay
-# treinta cuotas distintas que nadie puede razonar en conjunto.
+# The plans are STEPS, not a continuum. A continuum invites negotiating
+# every case ("what if we give them 2.5 CPU?") and six months later
+# there are thirty different quotas nobody can reason about as a whole.
 
 cuota:
-  # Un front estático y a lo sumo un backend chico. Deliberadamente
-  # apretado: una cuota no es una aspiración, es el techo que evita que
-  # un bug acá se lleve puesto al vecino.
+  # A static front end and at most one small backend. Deliberately
+  # tight: a quota is not an aspiration, it is the ceiling that keeps a
+  # bug in here from running the neighbor over.
   pequena:
     requests.cpu: "2"
     requests.memory: 2Gi
@@ -24,13 +24,13 @@ cuota:
     limits.memory: 4Gi
     pods: "20"
     persistentvolumeclaims: "5"
-    # OJO: limita el tamaño DECLARADO de los PVC, no el USADO. local-path
-    # hace bind de un directorio del host y no impone cuota de disco: un
-    # pod puede escribir más que su PVC hasta llenar /. Es una limitación
-    # conocida del provisioner, no de esto.
+    # WATCH OUT: this caps the DECLARED size of the PVCs, not the USED
+    # one. local-path bind-mounts a host directory and imposes no disk
+    # quota: a pod can write past its PVC until / fills up. It is a
+    # known limitation of the provisioner, not of this.
     requests.storage: 10Gi
 
-  # Front + API + una base. El escalón por defecto para un producto real.
+  # Front end + API + one database. The default step for a real product.
   mediana:
     requests.cpu: "4"
     requests.memory: 6Gi
@@ -50,108 +50,111 @@ cuota:
     requests.storage: 200Gi
 
 ai:
-  # La moneda es el TOKEN, no la request. Una request puede costar 10
-  # tokens o 3.000; cobrar por request premia exactamente el abuso que
-  # se quiere evitar.
+  # The currency is the TOKEN, not the request. A request can cost 10
+  # tokens or 3,000; charging per request rewards exactly the abuse we
+  # are trying to avoid.
   #
-  # `prioridad` ordena la cola cuando hay contención: con una sola GPU
-  # detrás, dos organizaciones pidiendo a la vez tienen que resolverse
-  # de alguna manera, y "quien llegó primero" castiga a quien paga más.
-  # Menor número = atendido antes.
+  # `prioridad` orders the queue under contention: with a single GPU
+  # behind it, two organizations asking at the same time have to be
+  # resolved somehow, and "first come, first served" punishes whoever
+  # pays more. Lower number = served earlier.
   #
-  # `reserva` es lo que impide que un plan alto sea exclusividad: por
-  # bajo que sea el plan, esa fracción del cupo le queda garantizada. Un
-  # plan intensivo compra LATENCIA, no el derecho a dejar a otro sin
-  # turno. Sin la reserva, una organización grande hambrea a las chicas
-  # y el producto deja de servir para quien recién empieza.
+  # `reserva` is what stops a high plan from becoming an exclusive: no
+  # matter how low the plan, that fraction of the quota stays
+  # guaranteed to it. An intensivo plan buys LATENCY, not the right to
+  # leave somebody else without a turn. Without the reserve, a large
+  # organization starves the small ones and the product stops being of
+  # any use to whoever is just starting out.
   #
-  # ── OJO CON LAS FRACCIONES A ESTE TAMAÑO ─────────────────────────
+  # ── MIND THE FRACTIONS AT THIS SIZE ──────────────────────────────
   #
-  # Con el cupo de HOY (4 en vuelo), estas tres fracciones dan lo mismo:
+  # With TODAY's quota (4 in flight), these three fractions give the
+  # same result:
   #
-  #   basico    0,15 x 4 = 0,6 -> 0 -> piso de 1
-  #   estandar  0,25 x 4 = 1,0 -> 1
-  #   intensivo 0,35 x 4 = 1,4 -> 1
+  #   basico    0.15 x 4 = 0.6 -> 0 -> floor of 1
+  #   estandar  0.25 x 4 = 1.0 -> 1
+  #   intensivo 0.35 x 4 = 1.4 -> 1
   #
-  # Medido en el arranque del gateway (build 7):
+  # Measured at gateway start-up (build 7):
   #   "reservas":{"basico":1,"estandar":1,"intensivo":1}
   #
-  # O sea: la PROPORCIÓN entre planes no se expresa. Tres de los cuatro
-  # lugares quedan reservados, uno por plan, y el cuarto es de quien
-  # llegue. Eso NO está roto —cada plan conserva su piso, que es lo que
-  # la reserva existe para dar— pero conviene saberlo antes de retocar
-  # estos números creyendo que mueven algo: a este tamaño lo que
-  # diferencia a los planes es `prioridad` (quién entra primero) y
-  # `concurrencia` (cuánto puede tomar cada organización), que sí
-  # funcionan con 4 lugares.
+  # That is: the PROPORTION between plans is not expressed. Three of the
+  # four slots end up reserved, one per plan, and the fourth goes to
+  # whoever gets there. That is NOT broken —each plan keeps its floor,
+  # which is what the reserve exists to give— but it is worth knowing
+  # before touching up these numbers believing they move something: at
+  # this size what tells the plans apart is `prioridad` (who gets in
+  # first) and `concurrencia` (how much each organization may take),
+  # which do work with 4 slots.
   #
-  # Las fracciones empiezan a significar algo con un cupo >= 8, que es
-  # cuando haya una segunda GPU. Se dejan expresadas para no tener que
-  # redescubrir la intención ese día.
+  # The fractions start to mean something with a quota >= 8, which is
+  # when there is a second GPU. They are left expressed so that the
+  # intention does not have to be rediscovered that day.
   #
-  # Esto se supo porque el gateway loguea las reservas AL ARRANCAR y no
-  # solo cuando cambian. Sin esa línea, "se aplicaron" y "nunca se
-  # evaluaron" se veían igual.
-  # `concurrencia` es por ORGANIZACIÓN, no por visitante: cuántos
-  # pedidos suyos pueden estar en la GPU a la vez. En 1 alcanzaba para
-  # un visitante y serializaba a dos, que con un cupo total de 4 es
-  # desperdiciar la mitad de la máquina para proteger de nada. En 2, una
-  # organización básica nunca pasa de la mitad del cluster y las demás
-  # conservan su reserva.
-  # ── LOS tokens_min SE MULTIPLICARON POR 10 el 2026-08-08 ──────────
+  # This was learned because the gateway logs the reserves AT START-UP
+  # and not only when they change. Without that line, "they were
+  # applied" and "they were never evaluated" looked identical.
+  # `concurrencia` is per ORGANIZATION, not per visitor: how many of its
+  # requests can be on the GPU at once. At 1 it was enough for one
+  # visitor and serialized two, which with a total quota of 4 is wasting
+  # half the machine to protect against nothing. At 2, a basico
+  # organization never takes more than half the cluster and the rest
+  # keep their reserve.
+  # ── tokens_min WERE MULTIPLIED BY 10 on 2026-08-08 ───────────────
   #
-  # Y NO es que se aflojaron los límites: es que la moneda cambió de
-  # tamaño. Hasta ese día el presupuesto descontaba sólo los tokens de
-  # SALIDA; la entrada era gratis. Medido sobre esta instancia:
+  # And it is NOT that the limits were loosened: it is that the currency
+  # changed size. Until that day the budget deducted only the OUTPUT
+  # tokens; input was free. Measured on this instance:
   #
-  #   org-blog      entrada 2277  salida 159   se cobraba 159
-  #   org-ejemplo   entrada 5526  salida 1173  se cobraba 1173
+  #   org-blog      input 2277  output 159   charged 159
+  #   org-ejemplo   input 5526  output 1173  charged 1173
   #
-  # O sea que un proyecto gastaba entre 6 y 15 veces más GPU de lo que
-  # se le descontaba. Ahora se cobra ENTRADA + SALIDA, que es lo que el
-  # comentario de arriba dice desde el principio: la moneda es el token,
-  # y un token de entrada cuesta GPU igual que uno de salida —el prefill
-  # es donde se va el tiempo—.
+  # Which means a project was spending between 6 and 15 times more GPU
+  # than it was charged for. Now INPUT + OUTPUT is charged, which is
+  # what the comment above has been saying from the start: the currency
+  # is the token, and an input token costs GPU just like an output one
+  # —prefill is where the time goes—.
   #
-  # El x10 mantiene el RITMO EFECTIVO que ya había, que era ~9 pedidos
-  # por minuto para `basico`. Con el costo real medido (~370 tokens un
-  # resumen, ~610 una consulta al blog con contexto de artículo), 6000
-  # da esos mismos ~10 pedidos. Cambiar la moneda sin recalibrar habría
-  # dejado a `basico` en menos de dos por minuto, y eso no se siente
-  # como una corrección: se siente como una caída de servicio.
+  # The x10 preserves the EFFECTIVE PACE that was already there, which
+  # was ~9 requests per minute for `basico`. With the real measured cost
+  # (~370 tokens for a summary, ~610 for a blog query carrying article
+  # context), 6000 gives those same ~10 requests. Changing the currency
+  # without recalibrating would have left `basico` under two per minute,
+  # and that does not feel like a correction: it feels like an outage.
   #
-  # OJO CON LOS DOS DE ARRIBA A ESTE TAMAÑO, misma advertencia que la de
-  # las reservas: con UNA GPU el techo físico son ~60 pedidos por minuto
-  # entre TODOS, o sea ~36.000 tokens/min. `estandar` e `intensivo`
-  # quedan por encima de eso, así que hoy no los limita su presupuesto
-  # sino la cola y la concurrencia. Se dejan proporcionales para que el
-  # día que haya una segunda GPU signifiquen lo que dicen.
+  # MIND THE TWO ABOVE AT THIS SIZE, the same warning as the one about
+  # the reserves: with ONE GPU the physical ceiling is ~60 requests per
+  # minute across EVERYONE, that is ~36,000 tokens/min. `estandar` and
+  # `intensivo` sit above that, so today what limits them is not their
+  # budget but the queue and the concurrency. They are left
+  # proportional so that the day there is a second GPU they mean what
+  # they say.
   #
-  # ── MEDIDO CONTRA EL CLUSTER, no calculado ───────────────────────
+  # ── MEASURED AGAINST THE CLUSTER, not calculated ─────────────────
   #
-  # 2026-08-08, gateway build 11, org-portafolio (`basico`) contra la
-  # puerta interna, pedidos secuenciales de portafolio.chat.guia:
+  # 2026-08-08, gateway build 11, org-portafolio (`basico`) against the
+  # internal door, sequential portafolio.chat.guia requests:
   #
-  #   una sola IP          12 pasan, corta el 13 con `ritmo_ip`
-  #   IPs distintas        24 pasan, corta el 25 con `presupuesto_tenant`
+  #   a single IP          12 pass, the 13th is cut by `ritmo_ip`
+  #   different IPs        24 pass, the 25th by `presupuesto_tenant`
   #
-  # LOS DOS RESULTADOS IMPORTAN Y DICEN COSAS DISTINTAS:
+  # BOTH RESULTS MATTER AND THEY SAY DIFFERENT THINGS:
   #
-  #   Un visitante solo martillando nunca llega al presupuesto: lo para
-  #   antes el ritmo por IP, que es el filtro más barato. Es lo que se
-  #   quiere — no hace falta gastar el balde de tokens del proyecto para
-  #   frenar a uno.
+  #   A single visitor hammering away never reaches the budget: the
+  #   per-IP rate stops them earlier, and it is the cheapest filter.
+  #   That is what we want — there is no need to spend the project's
+  #   bucket of tokens to hold back one person.
   #
-  #   El presupuesto de `tokens_min` es para el caso real: MUCHOS
-  #   visitantes de un mismo proyecto. Ahí sí corta, y corta donde dice
-  #   la aritmética: ráfaga 9000 + recarga durante los ~15 s del ensayo,
-  #   dividido los ~426 tokens que cuesta de verdad un pedido (383 de
-  #   entrada + ~43 de salida) = 24. Esos 383 de entrada son los que
-  #   antes de #61 viajaban gratis.
+  #   The `tokens_min` budget is for the real case: MANY visitors of the
+  #   same project. There it does cut, and it cuts where the arithmetic
+  #   says: burst 9000 + refill over the ~15 s of the trial, divided by
+  #   the ~426 tokens a request really costs (383 of input + ~43 of
+  #   output) = 24. Those 383 of input are the ones that travelled free
+  #   before #61.
   #
-  # Y EL VECINO SIGUIÓ ATENDIDO: con el portafolio en 429, org-blog
-  # respondió sus 5 pedidos con 200. El balde es por inquilino, y eso
-  # ahora está medido y no supuesto.
+  # AND THE NEIGHBOR WENT ON BEING SERVED: with the portfolio at 429,
+  # org-blog answered its 5 requests with 200. The bucket is per tenant,
+  # and that is now measured and not assumed.
   basico:
     tokens_min: 6000
     concurrencia: 2

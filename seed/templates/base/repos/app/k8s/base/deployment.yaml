@@ -1,17 +1,17 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  # Convención de la plataforma: el servicio `app` del contrato se
-  # nombra `<organizacion>-app`. La NetworkPolicy generada selecciona
-  # por la etiqueta `app: __ORG__-app` y la IngressRoute derivada busca
-  # el Service `__ORG__-app` en el 8080 — estos nombres NO son libres.
+  # Platform convention: the contract's `app` service is named
+  # `<organizacion>-app`. The generated NetworkPolicy selects by the
+  # label `app: __ORG__-app` and the derived IngressRoute looks for the
+  # Service `__ORG__-app` on 8080 — these names are NOT free.
   name: __ORG__-app
   labels: {app: __ORG__-app}
 spec:
   replicas: 1
-  # Con 1 réplica el rolling default (maxUnavailable 25% → 1) deja ~30s
-  # de Bad Gateway en cada update. Surge primero, matar después = cero
-  # ventana; el pod extra transitorio entra en la cuota `pequena`.
+  # With 1 replica the default rolling update (maxUnavailable 25% → 1)
+  # leaves ~30s of Bad Gateway on every update. Surge first, kill after
+  # = zero window; the transient extra pod fits in the `pequena` quota.
   strategy:
     rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
   selector:
@@ -20,19 +20,20 @@ spec:
     metadata:
       labels: {app: __ORG__-app}
     spec:
-      # El pull secret lo aporta el SA default del namespace: la app NO
-      # declara la credencial del registry.
-      # PSS: el namespace es enforce=restricted — el workload DECLARA el
-      # perfil completo (explícito > mágico). La imagen ya corre USER
-      # 65532 (Containerfile) → runAsNonRoot valida sin runAsUser acá.
+      # The pull secret comes from the namespace's default SA: the app
+      # does NOT declare the registry credential.
+      # PSS: the namespace is enforce=restricted — the workload DECLARES
+      # the whole profile (explicit > magic). The image already runs as
+      # USER 65532 (Containerfile) → runAsNonRoot validates with no
+      # runAsUser here.
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: app
-          # La IMAGEN la gobierna el overlay (kustomize images) y el
-          # pipeline le escribe el DIGEST en cada build. Esta referencia
-          # es solo la base que el overlay reescribe.
+          # The IMAGE is governed by the overlay (kustomize images) and
+          # the pipeline writes the DIGEST into it on every build. This
+          # reference is only the base the overlay rewrites.
           image: registry.registry-system.svc.cluster.local:5000/__ORG__-app
           ports: [{containerPort: 8080}]
           securityContext:
@@ -50,7 +51,8 @@ metadata:
   name: __ORG__-app
 spec:
   selector: {app: __ORG__-app}
-  # La plataforma rutea SIEMPRE al puerto 8080 del Service (convención
-  # de la IngressRoute derivada): este puerto no se cambia acá, se
-  # cambia en el contrato… y hoy el contrato tampoco lo cambia.
+  # The platform ALWAYS routes to port 8080 of the Service (convention
+  # of the derived IngressRoute): this port is not changed here, it is
+  # changed in the contract… and today the contract does not change it
+  # either.
   ports: [{port: 8080, targetPort: 8080}]

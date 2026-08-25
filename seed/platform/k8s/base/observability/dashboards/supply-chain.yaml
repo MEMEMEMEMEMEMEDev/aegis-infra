@@ -1,7 +1,7 @@
-# Dashboard «supply-chain» — design.md §4.4: eventos
-# builds→digest→scan→firma y la edad de la DB de Trivy.
-# Provisionado DESDE GIT via sidecar (label grafana_dashboard —
-# design.md §4.1: ninguno nace a click; editable:false en el JSON).
+# «supply-chain» dashboard — design.md §4.4: the
+# build→digest→scan→signature events and the age of Trivy's DB.
+# Provisioned FROM GIT via the sidecar (grafana_dashboard label —
+# design.md §4.1: none is born by clicking; editable:false in the JSON).
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -16,7 +16,7 @@ data:
     {
       "uid": "aegis-supply-chain",
       "title": "Aegis · supply-chain",
-      "description": "Capa 3 de design.md §1: los eventos que cuentan la historia, con su retención de 1 año.",
+      "description": "Layer 3 of design.md §1: the events that tell the story, with their 1-year retention.",
       "schemaVersion": 39,
       "editable": false,
       "timezone": "browser",
@@ -31,7 +31,7 @@ data:
       "panels": [
         {
           "id": 1,
-          "title": "Edad de la DB de Trivy (horas)",
+          "title": "Age of Trivy's DB (hours)",
           "type": "stat",
           "datasource": {
             "type": "prometheus",
@@ -59,11 +59,11 @@ data:
             },
             "overrides": []
           },
-          "description": "El vigía del vigía: si pasa de 48h, cada scan «verde» miente en silencio (alerta TrivyDBVieja)."
+          "description": "The watcher of the watcher: past 48h, every «green» scan lies in silence (alert TrivyDBVieja)."
         },
         {
           "id": 2,
-          "title": "/healthz de trivy (probe_success)",
+          "title": "trivy /healthz (probe_success)",
           "type": "stat",
           "datasource": {
             "type": "prometheus",
@@ -92,7 +92,7 @@ data:
         },
         {
           "id": 3,
-          "title": "Eventos de la cadena de suministro (AEGIS_EVENT)",
+          "title": "Supply-chain events (AEGIS_EVENT)",
           "type": "logs",
           "datasource": {
             "type": "victoriametrics-logs-datasource",
@@ -118,11 +118,11 @@ data:
             "defaults": {},
             "overrides": []
           },
-          "description": "La trazabilidad build→digest→scan→firma, de los DOS productores: los builds de aplicación (jenkins-build) y el espejo de imágenes de terceros (jenkins-mirror). Identidad de EVENTO, jamás label de métrica (design.md §2)."
+          "description": "The build→digest→scan→signature traceability, from BOTH producers: the application builds (jenkins-build) and the third-party image mirror (jenkins-mirror). EVENT identity, never a metric label (design.md §2)."
         },
         {
           "id": 4,
-          "title": "Builds por día",
+          "title": "Builds per day",
           "type": "timeseries",
           "datasource": {
             "type": "victoriametrics-logs-datasource",
@@ -151,7 +151,7 @@ data:
         },
         {
           "id": 5,
-          "title": "¿La escaneó alguien?",
+          "title": "Did anyone scan it?",
           "type": "stat",
           "datasource": {
             "type": "prometheus",
@@ -192,12 +192,12 @@ data:
                   "type": "value",
                   "options": {
                     "0": {
-                      "text": "escaneada",
+                      "text": "scanned",
                       "color": "green",
                       "index": 0
                     },
                     "1": {
-                      "text": "SIN ESCANEO",
+                      "text": "NOT SCANNED",
                       "color": "red",
                       "index": 1
                     }
@@ -207,11 +207,11 @@ data:
             },
             "overrides": []
           },
-          "description": "El último build de cada imagen, ¿pasó por Trivy? El stage tolera que el server no esté (bootstrap, fases 50-70) y sigue en verde: sin este panel esa tolerancia era invisible. Alerta ImagenSinEscaneo."
+          "description": "Did the last build of each image go through Trivy? The stage tolerates the server being absent (bootstrap, phases 50-70) and stays green: without this panel that tolerance was invisible. Alert ImagenSinEscaneo."
         },
         {
           "id": 6,
-          "title": "¿La firmó alguien?",
+          "title": "Did anyone sign it?",
           "type": "stat",
           "datasource": {
             "type": "prometheus",
@@ -252,12 +252,12 @@ data:
                   "type": "value",
                   "options": {
                     "0": {
-                      "text": "firmada",
+                      "text": "signed",
                       "color": "green",
                       "index": 0
                     },
                     "1": {
-                      "text": "SIN FIRMA",
+                      "text": "UNSIGNED",
                       "color": "orange",
                       "index": 1
                     }
@@ -267,11 +267,11 @@ data:
             },
             "overrides": []
           },
-          "description": "A diferencia del escaneo, esto NO es silencioso: Kyverno rechaza la admisión. El panel existe para nombrar la causa antes de depurar el rechazo desde cero."
+          "description": "Unlike the scan, this one is NOT silent: Kyverno rejects the admission. The panel exists to name the cause before debugging the rejection from scratch."
         },
         {
           "id": 7,
-          "title": "Hace cuánto que nadie la buildea",
+          "title": "How long since anyone built it",
           "type": "stat",
           "datasource": {
             "type": "prometheus",
@@ -312,7 +312,7 @@ data:
             },
             "overrides": []
           },
-          "description": "Cuánto vale lo que dicen los dos paneles de al lado. Los medió el último build: si fue hace un mes, describen esa imagen y no lo que se está desplegando hoy. Una imagen desplegada que no aparece acá no está en verde: está sin medir, y eso lo reporta aegis check."
+          "description": "How much what the two panels next to it say is worth. The last build measured them: if that was a month ago, they describe that image and not what is being deployed today. A deployed image that does not show up here is not green: it is unmeasured, and that is what aegis check reports."
         }
       ],
       "templating": {

@@ -1,20 +1,20 @@
-# Dashboard «consumo» — la pregunta que los otros tres no contestan.
+# «usage» dashboard — the question the other three do not answer.
 #
-# design.md §1 armó dos capas: el DETECTOR DE HUMO (¿algo está mal?) y la
-# CAJA NEGRA (¿qué pasó?). Las dos miran salud. Ninguna contesta la tercera
-# pregunta de quien opera una máquina propia: ¿CUÁNTO ESTOY USANDO Y CUÁNTO
-# ME QUEDA? Eso es capacidad, y hasta hoy no tenía panel.
+# design.md §1 built two layers: the SMOKE DETECTOR (is something wrong?)
+# and the BLACK BOX (what happened?). Both look at health. Neither answers
+# the third question of whoever runs their own machine: HOW MUCH AM I USING
+# AND HOW MUCH IS LEFT? That is capacity, and until today it had no panel.
 #
-# Nada de esto exigió instrumentar nada: cAdvisor viene en el kubelet y
-# vmagent ya lo raspaba desde la fase 85. Las métricas estaban; faltaba
-# mirarlas.
+# None of this required instrumenting anything: cAdvisor comes in the
+# kubelet and vmagent was already scraping it since phase 85. The metrics
+# were there; what was missing was looking at them.
 #
-# CADA CONSULTA SE PROBÓ CONTRA vmsingle ANTES DE ESCRIBIRSE. Un panel que
-# dice «No data» es la Enfermedad E en versión visual: ocupa lugar, parece
-# vigilancia y no mide nada.
+# EVERY QUERY WAS TESTED AGAINST vmsingle BEFORE BEING WRITTEN. A panel
+# that says «No data» is Disease E in visual form: it takes up space, it
+# looks like surveillance and it measures nothing.
 #
-# Provisionado DESDE GIT via sidecar (label grafana_dashboard —
-# design.md §4.1: ninguno nace a click; editable:false en el JSON).
+# Provisioned FROM GIT via the sidecar (grafana_dashboard label —
+# design.md §4.1: none is born by clicking; editable:false in the JSON).
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -28,8 +28,8 @@ data:
   consumo.json: |
     {
       "uid": "aegis-consumo",
-      "title": "Aegis · consumo",
-      "description": "Capacidad: cuánto usa cada organización y cuánto queda en la máquina. La pregunta que el detector de humo y la caja negra no contestan.",
+      "title": "Aegis · usage",
+      "description": "Capacity: how much each organization uses and how much is left on the machine. The question the smoke detector and the black box do not answer.",
       "schemaVersion": 39,
       "editable": false,
       "timezone": "browser",
@@ -40,13 +40,13 @@ data:
       "refresh": "1m",
       "tags": [
         "aegis",
-        "capacidad"
+        "capacity"
       ],
       "panels": [
         {
           "id": 1,
-          "title": "Memoria de la máquina",
-          "description": "Cuánto de la RAM física está comprometida. Es el número que decide si la semilla entra en un equipo más chico.",
+          "title": "Machine memory",
+          "description": "How much of the physical RAM is committed. It is the number that decides whether the seed fits on a smaller machine.",
           "type": "gauge",
           "datasource": { "type": "prometheus", "uid": "vmsingle" },
           "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
@@ -76,8 +76,8 @@ data:
         },
         {
           "id": 2,
-          "title": "Memoria libre",
-          "description": "Lo que queda para levantar algo nuevo sin desalojar a nadie.",
+          "title": "Free memory",
+          "description": "What is left to bring something new up without evicting anyone.",
           "type": "stat",
           "datasource": { "type": "prometheus", "uid": "vmsingle" },
           "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
@@ -105,8 +105,8 @@ data:
         },
         {
           "id": 3,
-          "title": "CPU de la máquina",
-          "description": "Promedio de los últimos 5 minutos sobre el total de núcleos.",
+          "title": "Machine CPU",
+          "description": "Average of the last 5 minutes over the total number of cores.",
           "type": "gauge",
           "datasource": { "type": "prometheus", "uid": "vmsingle" },
           "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
@@ -136,8 +136,8 @@ data:
         },
         {
           "id": 4,
-          "title": "Disco",
-          "description": "OJO: local-path NO impone cuota de disco. El tamaño declarado de un PVC no impide que un pod escriba hasta llenar la raíz — ver plans.yaml. Este es el único freno real, y es visual.",
+          "title": "Disk",
+          "description": "WATCH OUT: local-path does NOT enforce a disk quota. The declared size of a PVC does not stop a pod from writing until it fills the root — see plans.yaml. This is the only real brake, and it is a visual one.",
           "type": "gauge",
           "datasource": { "type": "prometheus", "uid": "vmsingle" },
           "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
@@ -167,8 +167,8 @@ data:
         },
         {
           "id": 5,
-          "title": "Memoria por organización",
-          "description": "Lo que consume cada inquilino. Apilado: el total es lo que las organizaciones le sacan a la máquina.",
+          "title": "Memory by organization",
+          "description": "What each tenant consumes. Stacked: the total is what the organizations take out of the machine.",
           "type": "timeseries",
           "datasource": { "type": "prometheus", "uid": "vmsingle" },
           "gridPos": { "h": 9, "w": 12, "x": 0, "y": 6 },
@@ -197,8 +197,8 @@ data:
         },
         {
           "id": 6,
-          "title": "CPU por organización",
-          "description": "En núcleos. Una demo en reposo debería vivir cerca de cero: si no lo hace, algo está girando en vacío.",
+          "title": "CPU by organization",
+          "description": "In cores. A demo at rest should live close to zero: if it does not, something is spinning idle.",
           "type": "timeseries",
           "datasource": { "type": "prometheus", "uid": "vmsingle" },
           "gridPos": { "h": 9, "w": 12, "x": 12, "y": 6 },
@@ -223,8 +223,8 @@ data:
         },
         {
           "id": 7,
-          "title": "Cuánto usa cada organización de lo que declaró",
-          "description": "Uso real sobre el techo declarado en los manifiestos. Muy por debajo = la cuota está sobredimensionada y esa RAM no se le puede prestar a nadie. Cerca de 100 = candidato a que lo maten por memoria.",
+          "title": "How much of what it declared each organization uses",
+          "description": "Real usage against the ceiling declared in the manifests. Far below = the quota is oversized and that RAM cannot be lent to anyone else. Close to 100 = a candidate to be killed for memory.",
           "type": "bargauge",
           "datasource": { "type": "prometheus", "uid": "vmsingle" },
           "gridPos": { "h": 9, "w": 12, "x": 0, "y": 15 },
@@ -262,8 +262,8 @@ data:
         },
         {
           "id": 8,
-          "title": "Memoria por subsistema",
-          "description": "Toda la máquina, no solo los inquilinos. Acá se ve cuánto cuesta la propia plataforma: observabilidad, CI, GitOps, el motor de AI.",
+          "title": "Memory by subsystem",
+          "description": "The whole machine, not just the tenants. This is where you see what the platform itself costs: observability, CI, GitOps, the AI engine.",
           "type": "timeseries",
           "datasource": { "type": "prometheus", "uid": "vmsingle" },
           "gridPos": { "h": 9, "w": 12, "x": 12, "y": 15 },
@@ -292,8 +292,8 @@ data:
         },
         {
           "id": 9,
-          "title": "Los diez que más memoria comen",
-          "description": "Ordenado. Cuando la máquina se aprieta, la respuesta empieza acá.",
+          "title": "The ten biggest memory eaters",
+          "description": "Sorted. When the machine gets tight, the answer starts here.",
           "type": "table",
           "datasource": { "type": "prometheus", "uid": "vmsingle" },
           "gridPos": { "h": 10, "w": 12, "x": 0, "y": 24 },
@@ -311,7 +311,7 @@ data:
               {
                 "matcher": { "id": "byName", "options": "Value" },
                 "properties": [
-                  { "id": "displayName", "value": "memoria" },
+                  { "id": "displayName", "value": "memory" },
                   { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } }
                 ]
               }
@@ -325,8 +325,8 @@ data:
         },
         {
           "id": 10,
-          "title": "Estrangulamiento de CPU",
-          "description": "Segundos por segundo que el kernel frenó a un contenedor por tocar su límite. Distinto de «usa mucha CPU»: acá el pod QUIERE trabajar y no lo dejan. Si esto sube, el límite quedó chico — no la máquina.",
+          "title": "CPU throttling",
+          "description": "Seconds per second the kernel held a container back for hitting its limit. Different from «it uses a lot of CPU»: here the pod WANTS to work and is not allowed to. If this rises, the limit was set too small — not the machine.",
           "type": "timeseries",
           "datasource": { "type": "prometheus", "uid": "vmsingle" },
           "gridPos": { "h": 10, "w": 12, "x": 12, "y": 24 },

@@ -4,50 +4,52 @@ terraform {
   }
 }
 
-# ── Cloudflare Access delante del plano de OPERADOR (#76) ───────────
+# ── Cloudflare Access in front of the OPERATOR plane (#76) ──────────
 #
-# Medido el 2026-08-12 desde fuera del cluster:
-#   argocd.<dominio>/            HTTP 200   (login público)
-#   argocd.<dominio>/api/version {"Version":"v3.4.3"} a ANÓNIMOS
-#   jenkins.<dominio>/login      HTTP 200   X-Jenkins: 2.555.3
-#   access_application/policy en tofu -> NINGUNO
-#   middleware de Traefik        -> NINGUNO
+# Measured on 2026-08-12 from outside the cluster:
+#   argocd.<domain>/            HTTP 200   (public login)
+#   argocd.<domain>/api/version {"Version":"v3.4.3"} to ANONYMOUS
+#   jenkins.<domain>/login      HTTP 200   X-Jenkins: 2.555.3
+#   access_application/policy in tofu -> NONE
+#   Traefik middleware                -> NONE
 #
-# Los dos publican su versión exacta a cualquiera, que es justo lo que
-# hace falta para elegir el CVE. Y el peor camino no es ArgoCD sino
-# Jenkins: en jenkins-system viven cosign-signing-key, github-token y
-# cloudflare-api-token. Quien entra ahí FIRMA IMÁGENES, y toda la cadena
-# de Kyverno deja de significar algo.
+# Both of them publish their exact version to anybody, which is just
+# what one needs in order to pick the CVE. And the worst path is not
+# ArgoCD but Jenkins: cosign-signing-key, github-token and
+# cloudflare-api-token live in jenkins-system. Whoever gets in there
+# SIGNS IMAGES, and the whole Kyverno chain stops meaning anything.
 #
-# ── por qué CUATRO aplicaciones y no dos ────────────────────────────
+# ── why FOUR applications and not two ───────────────────────────────
 #
-# Poner Access sobre los dos hostnames y nada más rompe CI en silencio.
-# Barrido del 2026-08-12 sobre quién entra por esas puertas:
+# Putting Access over the two hostnames and nothing else breaks CI in
+# silence. Sweep of 2026-08-12 over who comes in through those doors:
 #
 #   GitHub  -> jenkins.<dom>/github-webhook/    (2 repos)
 #   GitHub  -> argocd.<dom>/api/webhook
-#   tooling -> jenkins.<dom>/api/json           (aegis-rotate --verificar)
-#   tooling -> argocd.<dom>/api/v1/session      (aegis-rotate --verificar)
-#   init    -> jenkins.<dom>/login              (fase 60)
-#   init    -> argocd.<dom>                     (fase 35)
+#   tooling -> jenkins.<dom>/api/json           (aegis rotate check)
+#   tooling -> argocd.<dom>/api/v1/session      (aegis rotate check)
+#   init    -> jenkins.<dom>/login              (phase 60)
+#   init    -> argocd.<dom>                     (phase 35)
 #
-# Son TRES clases de visitante y cada una necesita una respuesta
-# distinta:
+# They are THREE classes of visitor and each one needs a different
+# answer:
 #
-#   humano     -> Access con OTP al mail. Es el que queremos proteger.
-#   GitHub     -> no puede autenticarse: los webhooks no llevan
-#                 cabeceras propias. Su ruta va en BYPASS, y por eso
-#                 las rutas son aplicaciones separadas: en Access gana
-#                 la aplicación de path MÁS ESPECÍFICO.
-#   automatización propia -> service token (CF-Access-Client-Id /
-#                 -Secret). Es lo que deja que aegis-rotate --verificar
-#                 siga midiendo el camino PÚBLICO, que es el que importa.
+#   human      -> Access with an OTP to the mail. This is the one we
+#                 want to protect.
+#   GitHub     -> cannot authenticate: webhooks carry no headers of
+#                 their own. Its route goes in BYPASS, and that is why
+#                 the routes are separate applications: in Access the
+#                 application with the MOST SPECIFIC path wins.
+#   our own automation -> service token (CF-Access-Client-Id /
+#                 -Secret). It is what lets aegis rotate check
+#                 keep measuring the PUBLIC path, which is the one that
+#                 matters.
 #
-# El bypass es la parte incómoda y conviene mirarla de frente: deja
-# `/github-webhook/` abierto a internet. No es un agujero nuevo —hoy
-# TODO jenkins.<dom> lo está— y esa ruta ya se defiende sola con el
-# HMAC, que es lo que la firma. Lo que Access agrega es que el resto de
-# Jenkins deja de estar expuesto.
+# The bypass is the uncomfortable part and it is worth looking at head
+# on: it leaves `/github-webhook/` open to the internet. It is not a new
+# hole —today ALL of jenkins.<dom> is— and that route already defends
+# itself with the HMAC that signs it. What Access adds is that the rest
+# of Jenkins stops being exposed.
 
 variable "account_id" { type = string }
 variable "root_domain" { type = string }
@@ -57,17 +59,17 @@ variable "session_duration" {
   default = "24h"
 }
 
-# ── el token de servicio para la automatización propia ──────────────
-# client_secret sólo se devuelve al CREARLO. Vive en el tfstate, que va
-# cifrado al repo (#46) — por eso el .sops.yaml cifra ese archivo ENTERO
-# y no por lista de campos.
+# ── the service token for our own automation ────────────────────────
+# client_secret is returned ONLY WHEN IT IS CREATED. It lives in the
+# tfstate, which goes encrypted into the repo (#46) — that is why the
+# .sops.yaml encrypts that WHOLE file and not by a list of fields.
 resource "cloudflare_zero_trust_access_service_token" "aegis" {
   account_id = var.account_id
   name       = "aegis-automatizacion"
-  duration   = "8760h" # 1 año; rotarlo entra en aegis-rotate
+  duration   = "8760h" # 1 year; rotating it goes into aegis-rotate
 }
 
-# ── políticas reutilizables ─────────────────────────────────────────
+# ── reusable policies ───────────────────────────────────────────────
 resource "cloudflare_zero_trust_access_policy" "operador" {
   account_id = var.account_id
   name       = "aegis-operador"
@@ -84,8 +86,8 @@ resource "cloudflare_zero_trust_access_policy" "automatizacion" {
   } }]
 }
 
-# `bypass` + everyone: la ruta queda accesible sin identidad. Es lo
-# único que GitHub puede atravesar.
+# `bypass` + everyone: the route stays reachable without identity. It is
+# the only thing GitHub can get through.
 resource "cloudflare_zero_trust_access_policy" "webhook_publico" {
   account_id = var.account_id
   name       = "aegis-webhook-publico"
@@ -93,9 +95,9 @@ resource "cloudflare_zero_trust_access_policy" "webhook_publico" {
   include    = [{ everyone = {} }]
 }
 
-# ── las rutas de webhook, PRIMERO ───────────────────────────────────
-# Van declaradas antes que las aplicaciones que las contienen para que
-# quede claro en el archivo que son la excepción, no un agregado.
+# ── the webhook routes, FIRST ───────────────────────────────────────
+# They are declared before the applications that contain them so that
+# the file makes it clear they are the exception, not an add-on.
 resource "cloudflare_zero_trust_access_application" "jenkins_webhook" {
   account_id       = var.account_id
   name             = "aegis · jenkins webhook (GitHub)"
@@ -120,16 +122,16 @@ resource "cloudflare_zero_trust_access_application" "argocd_webhook" {
   }]
 }
 
-# ── el plano de operador, bajo llave ────────────────────────────────
+# ── the operator plane, under lock ──────────────────────────────────
 resource "cloudflare_zero_trust_access_application" "jenkins" {
   account_id       = var.account_id
   name             = "aegis · Jenkins"
   domain           = "jenkins.${var.root_domain}"
   type             = "self_hosted"
   session_duration = var.session_duration
-  # sin auto_redirect: que la pantalla de Access sea visible es parte de
-  # la señal. Un redirect silencioso hace difícil distinguir "Access está
-  # puesto" de "Access no llegó a aplicarse".
+  # no auto_redirect: the Access screen being visible is part of the
+  # signal. A silent redirect makes it hard to tell "Access is in place"
+  # apart from "Access never got applied".
   auto_redirect_to_identity = false
   policies = [
     { id = cloudflare_zero_trust_access_policy.operador.id, precedence = 1 },

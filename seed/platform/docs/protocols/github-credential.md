@@ -1,41 +1,41 @@
-# github-credential — la credencial GitHub de aegis v2 (D11)
+# github-credential — the GitHub credential of aegis v2 (D11)
 
-## Qué es
+## What it is
 
-La credencial que Jenkins usa para escanear el repo de la app
-(github-branch-source) es el TOKEN DE LA SESIÓN gh del operador
-(`gh auth token`), guardado como credencial username+password
-(owner + token) en el Secret KSOPS `github-token` (jenkins-system).
-La toma la fase 15 del init, automáticamente.
+The credential Jenkins uses to scan the app's repo
+(github-branch-source) is the operator's gh SESSION TOKEN
+(`gh auth token`), stored as a username+password credential
+(owner + token) in the KSOPS Secret `github-token` (jenkins-system).
+Phase 15 of the init picks it up, automatically.
 
-## Por qué NO es una GitHub App (decisión D11, con honestidad)
+## Why it is NOT a GitHub App (decision D11, told honestly)
 
-La GitHub App de v1 (aegis-ci) requería: crearla en el navegador
-(el manifest flow de GitHub EXIGE un redirect web — no existe
-creación headless), descargar el .pem, moverlo a mano, convertirlo
-PKCS#1→PKCS#8, y anotar App ID/Installation ID. Acuñar PATs por API
-tampoco existe (ni clásicos ni fine-grained). Conclusión honesta:
-no hay forma de automatizar la App al 100% — así que se REEMPLAZÓ
-por lo que sí se automatiza por completo.
+v1's GitHub App (aegis-ci) required: creating it in the browser
+(GitHub's manifest flow DEMANDS a web redirect — there is no
+headless creation), downloading the .pem, moving it by hand,
+converting it PKCS#1→PKCS#8, and noting down App ID/Installation
+ID. Minting PATs through the API does not exist either (neither
+classic nor fine-grained). Honest conclusion: there is no way to
+automate the App 100% — so it was REPLACED by what can be
+automated end to end.
 
-## Modelo de seguridad (leer antes de objetar)
+## Security model (read it before objecting)
 
-- El token gh tiene los scopes de la sesión del operador (amplios).
-  Vive: (a) cifrado con age en el repo (.enc.yaml), (b) como Secret
-  en jenkins-system. Es MÁS amplio que la App — trade-off aceptado
-  explícitamente para dogfooding.
-- Rotación: `gh auth refresh` (o re-login) + re-correr la fase 15
-  con `--from 15` (el make_enc_secret regenera el .enc.yaml) +
-  sync de jenkins-secrets. Un solo lugar.
-- Revocación de emergencia: cerrar la sesión gh en github.com/
-  settings/applications revoca el token en todos lados.
+- The gh token carries the operator's session scopes (broad ones).
+  It lives: (a) age-encrypted in the repo (.enc.yaml), (b) as a
+  Secret in jenkins-system. It is BROADER than the App — a
+  trade-off accepted explicitly for dogfooding.
+- Rotation: `gh auth refresh` (or a re-login) + re-running phase 15
+  with `--from 15` (make_enc_secret regenerates the .enc.yaml) +
+  a sync of jenkins-secrets. A single place.
+- Emergency revocation: closing the gh session at github.com/
+  settings/applications revokes the token everywhere.
 
-## Upgrade path a producción (cuando haya SLA)
+## Upgrade path to production (once there is an SLA)
 
-Volver a una GitHub App (mejores rate limits, permisos acotados,
-checks API) ES el camino para producción — asumiendo el paso manual
-de navegador UNA vez, fuera del init: crear la App a mano, guardar
-la key como Secret `github-app-aegis-ci` (gitHubApp), y cambiar
-`scanCredentialsId('github-token')` → App en el values. El diseño
-v1 completo está en git (histórico de este archivo y de la fase 15
-pre-D11).
+Going back to a GitHub App (better rate limits, narrower
+permissions, checks API) IS the road to production — assuming the
+manual browser step ONCE, outside the init: create the App by hand,
+store the key as Secret `github-app-aegis-ci` (gitHubApp), and swap
+`scanCredentialsId('github-token')` → App in the values. The full
+v1 design is in git (this file's history and phase 15's, pre-D11).

@@ -1,9 +1,9 @@
-# blackbox-exporter v0.28.0 (crudo). B11 DE VERDAD (design.md §4.2b):
-# mide el certificado SERVIDO por el registry vía handshake TLS real
-# validado CONTRA EL CA de aegis (configmap-aegis-ca) — jamás
-# insecure_skip_verify: un probe con -k daría expiry igual pero
-# dejaría pasar un cert EQUIVOCADO en verde (el mismo -k que P2.4
-# desterró de la fase 40).
+# blackbox-exporter v0.28.0 (raw). B11 FOR REAL (design.md §4.2b): it
+# measures the certificate the registry SERVES through a real TLS
+# handshake validated AGAINST aegis' CA (configmap-aegis-ca) — never
+# insecure_skip_verify: a probe with -k would give the same expiry but
+# would let a WRONG cert through in green (the same -k that P2.4
+# banished from phase 40).
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -14,9 +14,10 @@ metadata:
 data:
   config.yml: |
     modules:
-      # registry_tls: acepta 401 como éxito — la auth del registry es
-      # posterior al handshake; el 401 ES la prueba de que TLS y auth
-      # están vivos (mismo criterio que el gate registry-tls-real):
+      # registry_tls: it accepts 401 as success — the registry's auth
+      # comes after the handshake; the 401 IS the proof that TLS and
+      # auth are alive (the same criterion as the registry-tls-real
+      # gate):
       registry_tls:
         prober: http
         timeout: 10s
@@ -26,34 +27,36 @@ data:
           fail_if_not_ssl: true
           tls_config:
             ca_file: /etc/blackbox/ca/ca.crt
-      # http_2xx plano: el /healthz de trivy (hooks.md — el vigía del
-      # vigía por disponibilidad; la EDAD de la DB la mide el CronJob):
+      # plain http_2xx: trivy's /healthz (hooks.md — the watchman's
+      # watchman by availability; the DB's AGE is measured by the
+      # CronJob):
       http_2xx:
         prober: http
         timeout: 10s
         http:
           method: GET
-      # sitio_publico: el camino COMPLETO de un cliente hasta un sitio
-      # de inquilino — DNS de Cloudflare, borde, túnel, traefik, los
-      # middlewares y la app. Es el único probe que mide lo que una
-      # persona experimenta; todo lo demás mide piezas.
+      # sitio_publico: the COMPLETE path of a customer to a tenant's
+      # site — Cloudflare's DNS, the edge, the tunnel, traefik, the
+      # middlewares and the app. It is the only probe that measures
+      # what a person experiences; everything else measures pieces.
       #
-      # Tres decisiones, y ninguna es de estilo:
+      # Three decisions, and not one of them is style:
       #
-      # ip4 OBLIGATORIO. Cloudflare publica A y AAAA; blackbox prefiere
-      # IPv6 por default y este cluster no tiene salida IPv6, así que la
-      # sonda fallaba en 1 ms con probe_success=0 — indistinguible de
-      # «el sitio está caído». Medido el 2026-08-22 antes de shippear
-      # esto: una sonda que siempre falla es tan inútil como una que
-      # siempre pasa, y más ruidosa.
+      # ip4 MANDATORY. Cloudflare publishes A and AAAA; blackbox
+      # prefers IPv6 by default and this cluster has no IPv6 way out,
+      # so the probe failed in 1 ms with probe_success=0 —
+      # indistinguishable from «the site is down». Measured on
+      # 2026-08-22 before shipping this: a probe that always fails is
+      # as useless as one that always passes, and noisier.
       #
-      # no_follow_redirects + valid_status_codes [200]: si alguna vez
-      # un sitio de inquilino queda detrás de Cloudflare Access por
-      # error, el 302 al login NO puede contar como éxito. Es la misma
-      # regla que el check 90 del init: no medir el borde creyendo
-      # medir la app.
+      # no_follow_redirects + valid_status_codes [200]: if a tenant's
+      # site ever ends up behind Cloudflare Access by mistake, the 302
+      # to the login CANNOT count as success. It is the same rule as
+      # init's check 90: do not measure the edge believing you are
+      # measuring the app.
       #
-      # Sin tls_config: acá el emisor es Cloudflare, no el CA interno.
+      # No tls_config: here the issuer is Cloudflare, not the internal
+      # CA.
       sitio_publico:
         prober: http
         timeout: 10s
@@ -91,9 +94,9 @@ spec:
     spec:
       containers:
         - name: blackbox-exporter
-          # verificado 2026-08-19 contra github.com/prometheus/
-          # blackbox_exporter releases (v0.28.0, 2025-12-06) y el tag
-          # en quay.io/prometheus/blackbox-exporter:
+          # verified 2026-08-19 against github.com/prometheus/
+          # blackbox_exporter releases (v0.28.0, 2025-12-06) and the
+          # tag on quay.io/prometheus/blackbox-exporter:
           image: quay.io/prometheus/blackbox-exporter:v0.28.0
           args: ["--config.file=/etc/blackbox_exporter/config.yml"]
           ports: [{name: http, containerPort: 9115}]
@@ -106,7 +109,7 @@ spec:
           livenessProbe:
             httpGet: {path: /-/healthy, port: 9115}
             initialDelaySeconds: 15
-          resources:            # fase-85 §10
+          resources:            # phase-85 §10
             requests: {cpu: 10m, memory: 16Mi}
             limits: {cpu: 100m, memory: 64Mi}
       volumes:

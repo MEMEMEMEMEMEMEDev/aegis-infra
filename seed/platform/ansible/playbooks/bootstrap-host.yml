@@ -1,35 +1,35 @@
-# bootstrap-host v2 — kernel + paquetes para K3s. Hereda los
-# patrones endurecidos de Hito 2 (A13): validations con
-# `when: not ansible_check_mode`, paths absolutos, sin callback yaml.
+# bootstrap-host v2 — kernel + packages for K3s. Inherits the
+# hardened patterns from Milestone 2 (A13): validations guarded by
+# `when: not ansible_check_mode`, absolute paths, no yaml callback.
 ---
-- name: Preparar host para K3s
+- name: Prepare host for K3s
   hosts: k3s_nodes
   become: true
 
   tasks:
-    - name: Assert distro soportada
+    - name: Assert supported distro
       ansible.builtin.assert:
         that:
           - ansible_facts['distribution'] == 'Ubuntu'
           - ansible_facts['distribution_version'] is version('24.04', '>=')
 
-    - name: Assert systemd es PID 1
+    - name: Assert systemd is PID 1
       ansible.builtin.assert:
         that: ansible_facts['service_mgr'] == 'systemd'
 
-    - name: Paquetes base
+    - name: Base packages
       ansible.builtin.apt:
         name: [curl, ca-certificates, iptables, jq, conntrack]
         state: present
         update_cache: true
 
-    - name: Módulos kernel (runtime + persistidos)
+    - name: Kernel modules (runtime + persisted)
       community.general.modprobe:
         name: "{{ item }}"
         state: present
       loop: [br_netfilter, overlay]
 
-    - name: Persistir módulos
+    - name: Persist the modules
       ansible.builtin.copy:
         dest: /etc/modules-load.d/aegis-k3s.conf
         content: |
@@ -37,7 +37,7 @@
           overlay
         mode: "0644"
 
-    - name: Sysctl para K3s (persistido)
+    - name: Sysctl for K3s (persisted)
       ansible.posix.sysctl:
         name: "{{ item }}"
         value: "1"
@@ -48,20 +48,20 @@
         - net.bridge.bridge-nf-call-ip6tables
         - net.ipv4.ip_forward
 
-    # ── inotify: el techo del host, no del cluster (2026-08-24) ─────
-    # El nvidia-device-plugin abre un FS watcher sobre
-    # /var/lib/kubelet/device-plugins/ y con el default de Ubuntu
-    # (fs.inotify.max_user_instances=128) muere al arrancar con "too
-    # many open files" — que NO es fd agotados, son INSTANCIAS de
-    # inotify de root. Medido el 2026-08-24: 424 reinicios en 6 días,
-    # el nodo anunciando nvidia.com/gpu: 0, y con eso los engines de AI
-    # imposibles de programar. El síntoma aparece lejos de la causa: la
-    # App gpu queda Progressing con sus tres recursos Synced.
+    # ── inotify: a host ceiling, not a cluster one (2026-08-24) ─────
+    # The nvidia-device-plugin opens an FS watcher over
+    # /var/lib/kubelet/device-plugins/ and with the Ubuntu default
+    # (fs.inotify.max_user_instances=128) it dies at startup with "too
+    # many open files" — which is NOT exhausted fds, they are root's
+    # inotify INSTANCES. Measured 2026-08-24: 424 restarts in 6 days,
+    # the node advertising nvidia.com/gpu: 0, and with that the AI
+    # engines impossible to schedule. The symptom shows up far from the
+    # cause: the gpu App sits Progressing, its three resources Synced.
     #
-    # Cada controlador, operador y kubelet del cluster abre lo suyo;
-    # 128 es un techo de escritorio, no de nodo. Los valores son los que
-    # recomienda k3s para nodos con muchos pods.
-    - name: Techo de inotify para un nodo de k3s (persistido)
+    # Every controller, operator and kubelet in the cluster opens its
+    # own; 128 is a desktop ceiling, not a node ceiling. The values are
+    # the ones k3s recommends for nodes with many pods.
+    - name: inotify ceiling for a k3s node (persisted)
       ansible.posix.sysctl:
         name: "{{ item.clave }}"
         value: "{{ item.valor }}"
@@ -71,24 +71,24 @@
         - {clave: fs.inotify.max_user_instances, valor: "1024"}
         - {clave: fs.inotify.max_user_watches, valor: "524288"}
 
-    # ── user namespaces sin privilegios (corrida #8, bug D) ─────────
-    # Ubuntu >= 23.10 trae kernel.apparmor_restrict_unprivileged_userns=1
-    # por DEFAULT: bloquea el user namespace rootless que buildah usa
-    # para overlay(fuse) → "overlay: failed to make mount private:
-    # permission denied" en el primer build (fase 50). El MISMO pod
-    # corre VERDE en WSL2 (apparmor deshabilitado, la key ni existe) —
-    # el manifest de buildah es config PROBADA (v1 vivo); el bug es
-    # del entorno Ubuntu, y pegará IGUAL en Hetzner (Ubuntu 24.04).
-    # Se restaura el comportamiento estándar pre-23.10 (userns
-    # unprivileged permitido — el default del resto de las distros).
-    # CONDICIONAL: la key solo existe en kernels con ese hardening
-    # (en WSL2 no existe y no hay nada que relajar):
-    - name: ¿el kernel restringe unprivileged userns (Ubuntu >= 23.10)?
+    # ── unprivileged user namespaces (run #8, bug D) ────────────────
+    # Ubuntu >= 23.10 ships kernel.apparmor_restrict_unprivileged_userns=1
+    # by DEFAULT: it blocks the rootless user namespace that buildah
+    # uses for overlay(fuse) → "overlay: failed to make mount private:
+    # permission denied" on the first build (phase 50). The SAME pod
+    # runs GREEN on WSL2 (apparmor disabled, the key does not exist) —
+    # the buildah manifest is PROVEN config (live in v1); the bug
+    # belongs to the Ubuntu environment, and it will hit Hetzner JUST
+    # THE SAME (Ubuntu 24.04). We restore the standard pre-23.10
+    # behaviour (unprivileged userns allowed — the default everywhere
+    # else). CONDITIONAL: the key only exists on kernels carrying that
+    # hardening (on WSL2 it does not exist, nothing to relax):
+    - name: Kernel restricts unprivileged userns (Ubuntu >= 23.10)?
       ansible.builtin.stat:
         path: /proc/sys/kernel/apparmor_restrict_unprivileged_userns
       register: userns_restrict
 
-    - name: Permitir user namespaces sin privilegios (buildah rootless)
+    - name: Allow unprivileged user namespaces (buildah rootless)
       ansible.posix.sysctl:
         name: kernel.apparmor_restrict_unprivileged_userns
         value: "0"
@@ -96,34 +96,34 @@
         reload: true
       when: userns_restrict.stat.exists
 
-    - name: Directorio de config de k3s
+    - name: k3s config directory
       ansible.builtin.file:
         path: /etc/rancher/k3s
         state: directory
         mode: "0755"
 
-    # ── DNS del cluster con systemd-resolved (corrida #7, bug B) ─────
-    # Ubuntu usa systemd-resolved: /etc/resolv.conf es el STUB
-    # (nameserver 127.0.0.53). k3s pasa ese stub a CoreDNS → dentro
-    # del pod 127.0.0.53 es el loopback vacío → CoreDNS no resuelve
-    # nada externo (i/o timeout) y el nodo entero se queda sin DNS
-    # tras cada restart de k3s (el de la fase 40 rompía el pipeline).
-    # Fix canónico de k3s: --resolv-conf apuntando al resolv.conf REAL
-    # de systemd-resolved. Vía config.yaml (NO INSTALL_K3S_EXEC): k3s
-    # lo re-lee en CADA arranque → sobrevive el restart de la fase 40.
-    # CONDICIONAL: solo si el path existe (portable — en un host sin
-    # systemd-resolved el default de k3s ya funciona; CLAUDE.md: el
-    # stack corre igual en el Ryzen que en un VPS).
-    - name: ¿systemd-resolved provee el resolv.conf real?
+    # ── cluster DNS with systemd-resolved (run #7, bug B) ────────────
+    # Ubuntu uses systemd-resolved: /etc/resolv.conf is the STUB
+    # (nameserver 127.0.0.53). k3s hands that stub to CoreDNS → inside
+    # the pod 127.0.0.53 is an empty loopback → CoreDNS resolves
+    # nothing external (i/o timeout) and the whole node loses DNS
+    # after every k3s restart (the phase 40 one broke the pipeline).
+    # Canonical k3s fix: --resolv-conf pointing at the REAL resolv.conf
+    # of systemd-resolved. Via config.yaml (NOT INSTALL_K3S_EXEC): k3s
+    # re-reads it on EVERY start → it survives the phase 40 restart.
+    # CONDITIONAL: only if the path exists (portable — on a host with
+    # no systemd-resolved the k3s default already works; CLAUDE.md: the
+    # stack runs the same on the Ryzen as on a VPS).
+    - name: Does systemd-resolved provide the real resolv.conf?
       ansible.builtin.stat:
         path: /run/systemd/resolve/resolv.conf
       register: resolved_real
 
-    - name: k3s config.yaml — resolv-conf al upstream real (idempotente)
+    - name: k3s config.yaml — resolv-conf to real upstream (idempotent)
       ansible.builtin.copy:
         dest: /etc/rancher/k3s/config.yaml
         mode: "0644"
         content: |
-          # gestionado por aegis-init (bootstrap-host) — bug B corrida #7
+          # managed by aegis-init (bootstrap-host) — bug B, run #7
           resolv-conf: /run/systemd/resolve/resolv.conf
       when: resolved_real.stat.exists

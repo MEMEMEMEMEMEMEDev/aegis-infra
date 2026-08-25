@@ -1,184 +1,186 @@
-# Checklist de rotación — LA MISMA FUENTE que la ceremonia del init
+# Rotation checklist — THE SAME SOURCE as the init's ceremony
 
-Salda C6. Principio (27 §2.3): el init greenfield EJECUTA esta
-lista entera por construcción (todo material nace nuevo); una
-rotación puntual ejecuta UN ítem. Un solo documento, dos usos.
+Settles C6. The principle (27 §2.3): a greenfield init EXECUTES this
+whole list by construction (all material is born new); a one-off
+rotation executes ONE item. One document, two uses.
 
-## ESTO YA NO SE EJECUTA A MANO (2026-08-12)
+## THIS IS NO LONGER RUN BY HAND (2026-08-12)
 
 ```
-init/aegis-rotate.sh          # el menú: elegís una o todas
+aegis rotate                  # the menu: pick one or all of them
 ```
 
-Hasta hoy este documento **era** el procedimiento: once ítems que una
-persona ejecutaba de memoria. Ahora es el *porqué*, y el *qué* lo hace
-la herramienta. La diferencia que importa no es la comodidad:
+Until today this document **was** the procedure: eleven items that a
+person executed from memory. Now it is the *why*, and the *what* is done
+by the tool. The difference that matters is not convenience:
 
-> El último paso de cada ítem —comprobar que el consumidor real volvió a
-> funcionar— no lo hacía nadie. Se rotaba, se veía que no explotaba nada
-> en los primeros treinta segundos, y se daba por buena. Eso es
-> exactamente la señal que no distingue "pasó" de "no se evaluó", y la
-> rotación la tenía en el centro.
+> The last step of every item —checking that the real consumer went
+> back to working— nobody did. You rotated, you saw that nothing blew
+> up in the first thirty seconds, and you called it good. That is
+> exactly the signal that does not tell "it passed" apart from "it was
+> not evaluated", and rotation had it right at its centre.
 
-`aegis-rotate.sh` ahora hace el ciclo entero: inventario con la EDAD y el
-RADIO de cada credencial, confirmación, invalidación del store
-(archivando el `.enc` anterior en `.previo/`, no borrándolo), corrida de
-la fase que regenera y sincroniza el tercero, y **verificación que puede
-fallar** — un ping de webhook que tiene que dar 200 *y* una firma
-inventada que tiene que dar 400; un `ssh -T` con la clave del Secret
-vivo; un login real en Jenkins; los hostnames comparados contra el
-snapshot previo.
+`aegis-rotate` now does the whole cycle: an inventory with the AGE and
+the BLAST RADIUS of every credential, confirmation, invalidation of the
+store (archiving the previous `.enc` into `.previo/`, not deleting it),
+a run of the phase that regenerates and synchronises the third party,
+and **a verification that can fail** — a webhook ping that has to give
+200 *and* a made-up signature that has to give 400; an `ssh -T` with the
+key from the live Secret; a real login into Jenkins; the hostnames
+compared against the previous snapshot.
 
-Tres cosas que conviene saber antes de correrlo:
+Three things worth knowing before running it:
 
-- **Preflight de red.** Si GitHub, Cloudflare, el cluster o la age key no
-  responden, la rotación **no arranca**. Sobre esta máquina —WiFi, MTU
-  #69, tormentas de k3s #73— arrancar con la red caída era el camino más
-  corto a dejar credenciales a medio sincronizar.
-- **Los reintentos son sólo de transporte.** Un timeout se reintenta; un
-  «Permission denied» no. El remoto contestó, y contestó que no:
-  reintentar eso es hacer tres veces lo incorrecto.
-- **Si la verificación falla no se revierte solo.** Para entonces el
-  tercero ya tiene la credencial nueva, y restaurar sólo el store
-  recrearía la desincronización. La herramienta dice en cuál de los
-  cuatro lugares —git, cluster, tercero, store— quedó cada mitad, y con
-  qué comando se cierra.
+- **Network preflight.** If GitHub, Cloudflare, the cluster or the age
+  key do not answer, the rotation **does not start**. On this machine
+  —WiFi, MTU #69, k3s storms #73— starting with the network down was the
+  shortest path to leaving credentials half synchronised.
+- **The retries are transport-only.** A timeout is retried; a
+  «Permission denied» is not. The remote answered, and it answered no:
+  retrying that is doing the wrong thing three times.
+- **If the verification fails, nothing rolls back on its own.** By then
+  the third party already has the new credential, and restoring only the
+  store would recreate the desynchronisation. The tool says in which of
+  the four places —git, cluster, third party, store— each half ended up,
+  and with which command it gets closed.
 
-El contrato viejo sigue andando (`aegis-rotate.sh [--yes] <name>...`), y
-`--continuar` retoma una tanda interrumpida.
+The old contract still works (`aegis rotate [--yes] <name>...`), and
+`aegis rotate continue` resumes an interrupted batch.
 
-**Lo que la herramienta se niega a hacer**, y por qué está bien:
+**What the tool refuses to do**, and why that is right:
 
-| | motivo |
+| | reason |
 |---|---|
-| `cosign_*` | invalida toda firma emitida; hay que re-firmar lo desplegado ANTES de que la pub nueva entre al ClusterPolicy → ítem 2 |
-| age key | es la raíz → `rotate-age-key.md`, escrito el 2026-08-12 (hasta ese día era una referencia colgada: el procedimiento del único irreducible no existía) |
-| `registry_pass` | vive en diez lugares; lo rota `aegis registry`, que descubre los destinos y se planta si no coinciden → ítem 4 |
-| `dk_app_rw` | rotarla RE-CREA la deploy key de escritura que #49 retiró; hay que arreglar la fase 15 primero (#83) |
-| commit y push | los da una persona, igual que en `aegis-registry` |
+| `cosign_*` | it invalidates every signature ever issued; whatever is deployed has to be re-signed BEFORE the new public half enters the ClusterPolicy → item 2 |
+| age key | it is the root → `rotate-age-key.md`, written on 2026-08-12 (until that day it was a dangling reference: the procedure for the one irreducible did not exist) |
+| `registry_pass` | it lives in ten places; `aegis registry rotate` rotates it, discovering the targets and refusing to move if they do not match → item 4 |
+| `dk_app_rw` | rotating it RE-CREATES the write deploy key that #49 withdrew; phase 15 has to be fixed first (#83) |
+| commit and push | a person gives them, the same as in `aegis registry` |
 
-Y un check nuevo, el **89** de `verify-static`, impide que la tabla
-envejezca: toda credencial que el init genera tiene que tener receta. Una
-que falte es FAIL, no un detalle.
+And a new check, the **89** of `aegis verify`, keeps the table from
+ageing: every credential the init generates has to have a recipe. A
+missing one is a FAIL, not a detail.
 
 ---
 
-Ítems (orden = sensibilidad). Siguen acá porque explican el PORQUÉ de
-cada receta, y porque los que la herramienta no cubre se hacen leyendo
-esto:
+Items (order = sensitivity). They are still here because they explain
+the WHY of each recipe, and because the ones the tool does not cover are
+done by reading this:
 
-1. **age key** — ceremonia fase 10 (3 resguardos + roundtrip).
-   Rotar además exige: recipient en .sops.yaml + `sops updatekeys`
-   sobre TODOS los cifrados + recrear Secret argocd-sops-age
-   (kubectl) + restart repo-server.
-2. **cosign keypair** — protocolo issue-cosign-keypair §5
-   (¡2 pasos! incluye RE-FIRMAR lo desplegado).
-3. **write key hello-aegis-repo** — ssh-keygen → GitHub deploy key
-   WRITE (retirar la vieja) → re-cifrar Secret repository →
-   verificar clone de ArgoCD Y push del Image Updater (2
-   consumidores).
-4. **htpasswd + 4 regcreds** — protocolo registry-credentials
-   (atómico o nada) + restart del pod registry.
-5. **GitHub App private key** — protocolo issue-github-app §5
-   (PKCS#8 + delete pod jenkins-0 + retirar key vieja).
-6. **HMAC webhook Jenkins** — cuatro pasos, y el cuarto es el que se
-   olvida:
+1. **age key** — phase 10 ceremony (3 safeguards + roundtrip).
+   Rotating it also demands: the recipient in .sops.yaml + `sops
+   updatekeys` over ALL the encrypted files + recreating the Secret
+   argocd-sops-age (kubectl) + restarting repo-server.
+2. **cosign keypair** — protocol issue-cosign-keypair §5
+   (2 steps! it includes RE-SIGNING whatever is deployed).
+3. **write key hello-aegis-repo** — ssh-keygen → GitHub WRITE deploy
+   key (withdraw the old one) → re-encrypt the repository Secret →
+   verify ArgoCD's clone AND the Image Updater's push (2 consumers).
+4. **htpasswd + 4 regcreds** — protocol registry-credentials
+   (atomic or nothing) + restart of the registry pod.
+5. **GitHub App private key** — protocol issue-github-app §5
+   (PKCS#8 + delete pod jenkins-0 + withdraw the old key).
+6. **Jenkins webhook HMAC** — four steps, and the fourth is the one
+   that gets forgotten:
 
    ```
-   aegis secret --rotar k8s/base/platform/jenkins-secrets/secret-github-webhook-hmac.enc.yaml
+   aegis secret rotate k8s/base/platform/jenkins-secrets/secret-github-webhook-hmac.enc.yaml
    git add ... && git commit && git push
-   bin/aegis-sync jenkins-secrets
-   bin/aegis-webhook --aplicar
+   aegis sync jenkins-secrets
+   aegis webhook apply
    ```
 
-   Sin restart: `secretText` se re-lee solo.
+   No restart needed: `secretText` is re-read on its own.
 
-   `aegis-secret --rotar` reemplaza al `openssl rand` a mano que decía
-   acá antes. La diferencia que importa no es la comodidad: ese Secret
-   lleva la etiqueta `jenkins.io/credentials-type: secretText`, que es
-   lo que hace que Jenkins lo TOME como credencial, y la herramienta
-   PRESERVA la metadata del documento al rotar. A mano, o con la
-   herramienta antes de #53, el material nuevo quedaba bien cifrado y
-   la credencial invisible, sin un solo error.
+   `aegis secret rotate` replaces the hand-run `openssl rand` this used
+   to say. The difference that matters is not convenience: that Secret
+   carries the label `jenkins.io/credentials-type: secretText`, which is
+   what makes Jenkins TAKE it as a credential, and the tool PRESERVES
+   the document's metadata when rotating. By hand, or with the tool
+   before #53, the new material came out correctly encrypted and the
+   credential invisible, without a single error.
 
-   `aegis-webhook --aplicar` reemplaza al "pegar en la App (UI)": el
-   comando deriva los repos de los jobs de Jenkins, lee el HMAC del
-   Secret VIVO —el que Jenkins valida de verdad— y lo reescribe en
-   todos. Reescribir siempre es deliberado: GitHub nunca devuelve
-   `config.secret`, así que "el hook ya existe" NO implica "está
-   sincronizado", y un hook firmando con el HMAC viejo da un 400
-   permanente que no dice por qué.
+   `aegis webhook apply` replaces "paste it into the App (UI)": the
+   command derives the repos from Jenkins' jobs, reads the HMAC from the
+   LIVE Secret —the one Jenkins really validates— and rewrites it on
+   every one of them. Always rewriting is deliberate: GitHub never
+   returns `config.secret`, so "the hook already exists" does NOT imply
+   "it is synchronised", and a hook signing with the old HMAC gives a
+   permanent 400 that does not say why.
 
-   **Y EL STORE DEL INIT**, que es el paso que falta en casi todas las
-   rotaciones. `init/.state-secrets/hmac_jenkins.enc` guarda el material
-   para que re-correr el init sea aburrido; si queda con el valor VIEJO,
-   una corrida futura lo RESTAURA y deshace la rotación en silencio. Dos
-   salidas:
+   **AND THE INIT'S STORE**, which is the step missing from almost every
+   rotation. `init/.state-secrets/hmac_jenkins.enc` keeps the material
+   so that re-running the init is boring; if it is left with the OLD
+   value, a future run RESTORES it and undoes the rotation in silence.
+   Two ways out:
 
-   - `init/aegis-rotate.sh --yes hmac_jenkins` lo invalida, y la próxima
-     corrida del init genera uno NUEVO — o sea que hay que volver a
-     hacer el paso de `aegis-webhook`.
-   - re-sembrarlo con el valor ya rotado deja los cuatro lugares (git,
-     cluster, GitHub, store) con el MISMO material, y re-correr el init
-     no cambia nada. Es lo que se hizo el 2026-08-07 y es lo preferible.
+   - `aegis rotate --yes hmac_jenkins` invalidates it, and the init's
+     next run generates a NEW one — which means the `aegis webhook
+     apply` step has to be done again.
+   - re-seeding it with the already-rotated value leaves the four places
+     (git, cluster, GitHub, store) with the SAME material, and
+     re-running the init changes nothing. That is what was done on
+     2026-08-07 and it is the preferable one.
 
-   Verificación, y que sea una que pueda fallar: `gh api -X POST
-   repos/<owner>/<repo>/hooks/<id>/pings` y leer la entrega. Tiene que
-   dar **200**. Comprobá además que una firma inventada dé **400** — si
-   no, el 200 no está diciendo nada.
-7. **HMAC webhook ArgoCD** — openssl rand → tokens.enc.yaml (lado
-   tofu apply de github-repos) + re-cifrar Secret github-webhook +
-   restart argocd-server + verificar webhook 200.
-8. **TUNNEL_TOKEN** — rotar vía API/recrear tunnel → re-cifrar
-   Secret → rollout cloudflared.
-9. **Tokens CF (x2) y PAT** — re-emitir en la UI (protocolos
-   issue-*) → tokens.enc.yaml / Secret KSOPS → REVOCAR los viejos.
-10. **deploy keys read (ops-stack, hello-aegis RO)** — ssh-keygen →
-    GitHub → re-cifrar → retirar viejas.
-10b. **deploy keys de las ORGANIZACIONES** (`secret-<app>-repo`, una
-    por repo declarado en un contrato). Faltaban en esta lista hasta
-    2026-08-05: se habían creado a mano, no las producía nadie y nadie
-    las rotaba (#48, #49). Ya son un comando:
+   Verification, and one that can fail: `gh api -X POST
+   repos/<owner>/<repo>/hooks/<id>/pings` and read the delivery. It has
+   to give **200**. Check as well that a made-up signature gives
+   **400** — otherwise the 200 is saying nothing.
+7. **ArgoCD webhook HMAC** — openssl rand → tokens.enc.yaml (the
+   github-repos tofu apply side) + re-encrypt the github-webhook
+   Secret + restart argocd-server + verify the webhook gives 200.
+8. **TUNNEL_TOKEN** — rotate via API / recreate the tunnel →
+   re-encrypt the Secret → roll out cloudflared.
+9. **CF tokens (x2) and PAT** — re-issue them in the UI (issue-*
+   protocols) → tokens.enc.yaml / KSOPS Secret → REVOKE the old ones.
+10. **read deploy keys (ops-stack, hello-aegis RO)** — ssh-keygen →
+    GitHub → re-encrypt → withdraw the old ones.
+10b. **the ORGANIZATIONS' deploy keys** (`secret-<app>-repo`, one per
+    repo declared in a contract). They were missing from this list
+    until 2026-08-05: they had been created by hand, nobody produced
+    them and nobody rotated them (#48, #49). They are a command now:
 
     ```
-    aegis secret --rotar k8s/base/platform/argocd-secrets/secret-<app>-repo.enc.yaml
+    aegis secret rotate k8s/base/platform/argocd-secrets/secret-<app>-repo.enc.yaml
     ```
 
-    Imprime la pública para registrarla. **SIN "Allow write access"**:
-    ArgoCD solo LEE, y una deploy key con escritura deja que quien
-    tenga el cluster escriba en el repo de la app — la dirección
-    equivocada. Las dos que existían eran read-write por el Image
-    Updater, retirado en #37.
+    It prints the public half for you to register. **NO "Allow write
+    access"**: ArgoCD only READS, and a deploy key with write access
+    lets whoever holds the cluster write into the app's repo — the
+    wrong direction. The two that existed were read-write because of
+    the Image Updater, withdrawn in #37.
 
-    **EL ORDEN NO ES OPCIONAL**, y es el que se siguió el 2026-08-05:
+    **THE ORDER IS NOT OPTIONAL**, and it is the one followed on
+    2026-08-05:
 
-    1. rotar (el archivo cifrado ya queda con la clave nueva)
-    2. registrar la pública en GitHub como **read-only**
-    3. commit + push + `bin/aegis-sync argocd-secrets`
-    4. esperar a que el Secret del cluster tenga la clave nueva
-    5. **probar que autentica** — no alcanza con que la App esté
-       Synced, porque mientras la vieja siga registrada cualquiera de
-       las dos sirve:
+    1. rotate (the encrypted file already ends up with the new key)
+    2. register the public half on GitHub as **read-only**
+    3. commit + push + `aegis sync argocd-secrets`
+    4. wait until the cluster's Secret has the new key
+    5. **prove that it authenticates** — the App being Synced is not
+       enough, because while the old one is still registered either of
+       the two works:
        ```
        kubectl get secret <app>-repo -n argocd -o jsonpath='{.data.sshPrivateKey}' \
          | base64 -d > /dev/shm/k && chmod 600 /dev/shm/k
        ssh -i /dev/shm/k -o IdentitiesOnly=yes -T git@github.com   # "Hi ORG/REPO!"
        shred -u /dev/shm/k
        ```
-    6. recién ahí `gh repo deploy-key delete <id> -R <owner>/<repo>`
-    7. refresh duro de la App y comprobar Synced + Healthy
+    6. only then `gh repo deploy-key delete <id> -R <owner>/<repo>`
+    7. a hard refresh of the App, and check Synced + Healthy
 
-    Al revés —borrar antes de comprobar— deja a ArgoCD sin poder leer
-    el repo.
-11. **jenkins-admin** — random nuevo → re-cifrar → verificar si el
-    chart re-lee existingSecret o exige restart (NO VERIFICADO —
-    marcar el resultado acá la primera vez que se haga).
+    The other way round —deleting before checking— leaves ArgoCD
+    unable to read the repo.
+11. **jenkins-admin** — new random → re-encrypt → check whether the
+    chart re-reads existingSecret or demands a restart (NOT VERIFIED —
+    write the result down here the first time it is done).
 
-**Pasos que el init NO cubre y la rotación SÍ** (27 §2.3): retirar
-credenciales VIEJAS del lado de los terceros (deploy keys/App keys
-en GitHub, tokens en CF) y el re-firmado de imágenes (ítem 2). Un
-init que corrió no deja residuos NUEVOS, pero rotar sobre un
-entorno vivo deja residuos VIEJOS activos si esta parte se saltea.
+**Steps the init does NOT cover and rotation DOES** (27 §2.3):
+withdrawing OLD credentials on the third parties' side (deploy
+keys/App keys on GitHub, tokens on CF) and the re-signing of images
+(item 2). An init that has run leaves no NEW residue, but rotating
+over a live environment leaves OLD residue active if this part is
+skipped.
 
-Trigger de la rotación en lote: primer cliente con SLA / exposición
-pública / corte a Hetzner. Revisar 1 semana antes.
+Trigger for the batch rotation: first customer with an SLA / public
+exposure / cut-over to Hetzner. Review 1 week beforehand.

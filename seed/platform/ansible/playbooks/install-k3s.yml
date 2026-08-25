@@ -1,19 +1,19 @@
-# install-k3s v2 — pin LITERAL desde group_vars (A12); flags
-# disable=traefik/servicelb (llegan declarativos por GitOps).
+# install-k3s v2 — LITERAL pin from group_vars (A12); flags
+# disable=traefik/servicelb (they arrive declaratively via GitOps).
 ---
-- name: Instalar K3s pinneado
+- name: Install pinned K3s
   hosts: k3s_nodes
   become: true
 
   tasks:
-    - name: ¿k3s ya instalado en la versión pinneada?
+    - name: Is k3s already installed at the pinned version?
       ansible.builtin.command: /usr/local/bin/k3s --version
       register: k3s_ver
       changed_when: false
       failed_when: false
-      check_mode: false          # lectura pura (A13)
+      check_mode: false          # pure read (A13)
 
-    - name: Instalar k3s {{ k3s_version }}
+    - name: Install k3s {{ k3s_version }}
       ansible.builtin.shell: |
         set -o pipefail
         curl -sfL https://get.k3s.io | \
@@ -22,22 +22,22 @@
       args: { executable: /bin/bash }
       when: k3s_version not in (k3s_ver.stdout | default(''))
 
-    - name: Esperar nodo Ready
+    - name: Wait for node Ready
       ansible.builtin.command: >-
         /usr/local/bin/k3s kubectl wait --for=condition=Ready
         node --all --timeout=300s
       changed_when: false
       when: not ansible_check_mode
 
-    # H4 corrida #15: el nodo se pone Ready ANTES de que el
-    # controlador de manifests CREE el deployment de coredns —
-    # `rollout status` con NotFound sale rc!=0 en 0.5s (el --timeout
-    # nunca aplica) y el playbook moría fatal; lo salvaba el retry
-    # genérico del wrapper DE CASUALIDAD y con etiqueta errónea
-    # ("¿red?"). Patrón existencia→estado (el mismo de argo_sync):
-    # (loop shell y no until/retries: la semántica de retries
-    #  agotados + failed_when varía entre versiones de ansible-core —
-    #  regla fuente-es-el-binario: no apostar; el sh es determinista)
+    # H4 run #15: the node turns Ready BEFORE the manifest controller
+    # CREATES the coredns deployment — `rollout status` on a NotFound
+    # exits rc!=0 in 0.5s (the --timeout never applies) and the
+    # playbook died fatal; the wrapper's generic retry rescued it BY
+    # ACCIDENT and under the wrong label ("network?"). Pattern
+    # existence→state (the same one as argo_sync):
+    # (a shell loop and not until/retries: the semantics of exhausted
+    #  retries + failed_when vary across ansible-core versions —
+    #  source-is-the-binary rule: do not bet; the sh is deterministic)
     - name: Esperar que el deployment coredns EXISTA (H4)
       ansible.builtin.shell: |
         for i in $(seq 1 60); do
@@ -45,13 +45,13 @@
             >/dev/null 2>&1 && exit 0
           sleep 3
         done
-        echo "kube-system/coredns NUNCA fue creado tras ~180s — el controlador de manifests de k3s no lo creó (mirar journalctl -u k3s); esto NO es red" >&2
+        echo "kube-system/coredns was NEVER created after ~180s — the k3s manifest controller did not create it (look at journalctl -u k3s); this is NOT a network problem" >&2
         exit 1
       args: { executable: /bin/bash }
       changed_when: false
       when: not ansible_check_mode
 
-    - name: Validar coredns
+    - name: Validate coredns
       ansible.builtin.command: >-
         /usr/local/bin/k3s kubectl -n kube-system rollout status
         deploy/coredns --timeout=180s

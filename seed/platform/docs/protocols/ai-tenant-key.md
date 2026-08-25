@@ -1,112 +1,115 @@
-# Protocolo: API key de un proyecto contra el gateway de AI
+# Protocol: a project's API key against the AI gateway
 
-Blast radius: quien tenga la key puede gastar la GPU dentro de los
-presupuestos del proyecto, invocando SOLO las tareas que lo nombran en
-el registro. No puede pedir prompts libres, no puede leer las
-conversaciones de otro proyecto, no puede tocar el cluster. Es una
-credencial de CONSUMO, no de control — deliberadamente aburrida.
+Blast radius: whoever holds the key can spend the GPU within the
+project's budgets, invoking ONLY the tasks that name it in the
+registry. It cannot ask for free-form prompts, it cannot read another
+project's conversations, it cannot touch the cluster. It is a
+CONSUMPTION credential, not a control one — deliberately boring.
 
-Referencia de diseño: `docs/architecture/ai-gateway.md` §7.1.
+Design reference: `docs/architecture/ai-gateway.md` §7.1.
 
-## La clave se parte en dos, a propósito
+## The key is split in two, on purpose
 
-| Mitad | Dónde vive | Por qué ahí |
+| Half | Where it lives | Why there |
 |---|---|---|
-| **hash** SHA-256 | `ai-system/ai-keys` (`keys.json`) | el gateway solo necesita verificar |
-| **claro** | `org-<proyecto>/ai-gateway-key` | rotarla es un acto del PROYECTO, no de la plataforma |
+| **hash** SHA-256 | `ai-system/ai-keys` (`keys.json`) | the gateway only needs to verify |
+| **cleartext** | `org-<project>/ai-gateway-key` | rotating it is an act of the PROJECT, not of the platform |
 
-El gateway nunca ve el claro guardado en ningún lado: lo recibe en el
-header y lo compara contra el hash. Perder el Secret del proyecto
-significa emitir una key nueva, no recuperar la vieja.
+The gateway never sees the cleartext stored anywhere: it receives it in
+the header and compares it against the hash. Losing the project's
+Secret means issuing a new key, not recovering the old one.
 
-## 1. Emitir (tmpfs, el claro no toca disco no cifrado)
+## 1. Issue it (tmpfs, the cleartext never touches unencrypted disk)
 
     D=$(mktemp -d /dev/shm/aegis-ai.XXXXXX) && chmod 700 "$D"
 
-    # El prefijo `aegisk_<proyecto>_` es DELIBERADO: hace que una key
-    # filtrada sea greppeable por un escáner de secretos. Ocultar el
-    # formato no protege nada —quien la tiene ya la tiene— y sí impide
-    # detectar la filtración.
-    KEY="aegisk_<proyecto>_$(head -c 24 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=')"
+    # The `aegisk_<project>_` prefix is DELIBERATE: it makes a leaked
+    # key greppable by a secret scanner. Hiding the format protects
+    # nothing —whoever has it already has it— and it does stop the
+    # leak from being detected.
+    KEY="aegisk_<project>_$(head -c 24 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=')"
     printf '%s' "$KEY" > "$D/clave"
     HASH=$(printf '%s' "$KEY" | sha256sum | cut -d' ' -f1)
 
-## 2. Escribir las dos mitades
+## 2. Write the two halves
 
-`kid` identifica QUÉ key se usó: aparece en cada línea de log y es lo
-que permite rotar sin adivinar quién sigue usando la vieja.
+`kid` identifies WHICH key was used: it shows up on every log line and
+it is what makes rotating possible without guessing who is still using
+the old one.
 
-    printf '{"claves":[{"tenant":"org-<proyecto>","kid":"<proy>-1","sha256":"%s"}]}\n' \
+    printf '{"claves":[{"tenant":"org-<project>","kid":"<proj>-1","sha256":"%s"}]}\n' \
       "$HASH" > "$D/keys.json"
 
-    # --from-file y no --from-literal: byte-preserving. Un stringData
-    # armado a mano agrega un byte por el folding YAML.
+    # --from-file and not --from-literal: byte-preserving. A stringData
+    # assembled by hand adds a byte from the YAML folding.
     kubectl create secret generic ai-keys -n ai-system \
       --from-file=keys.json="$D/keys.json" --dry-run=client -o yaml > "$D/s1.yaml"
-    kubectl create secret generic ai-gateway-key -n org-<proyecto> \
+    kubectl create secret generic ai-gateway-key -n org-<project> \
       --from-file=clave="$D/clave" --dry-run=client -o yaml > "$D/s2.yaml"
 
-    # mv al path del repo PRIMERO, sops DESPUÉS: la creation_rule
-    # matchea por path_regex y /dev/shm no matchea.
+    # mv to the repo's path FIRST, sops AFTERWARDS: the creation_rule
+    # matches by path_regex and /dev/shm does not match.
     mv "$D/s1.yaml" k8s/base/ai-system/secret-ai-keys.enc.yaml
-    mv "$D/s2.yaml" k8s/organizations/org-<proyecto>/secret-ai-gateway-key.enc.yaml
+    mv "$D/s2.yaml" k8s/organizations/org-<project>/secret-ai-gateway-key.enc.yaml
     sops -e --in-place k8s/base/ai-system/secret-ai-keys.enc.yaml
-    sops -e --in-place k8s/organizations/org-<proyecto>/secret-ai-gateway-key.enc.yaml
+    sops -e --in-place k8s/organizations/org-<project>/secret-ai-gateway-key.enc.yaml
 
     find "$D" -type f -exec shred -u {} \; && rmdir "$D"
 
-Agregar los dos archivos a los `secret-generator.yaml` correspondientes
-(lista explícita, A7: nada de globs).
+Add both files to the corresponding `secret-generator.yaml` (an
+explicit list, A7: no globs).
 
-## 3. Validar el roundtrip MIRANDO EL CÓDIGO DE SALIDA
+## 3. Validate the roundtrip BY LOOKING AT THE EXIT CODE
 
     export SOPS_AGE_KEY_FILE="$HOME/.config/sops/age/aegis.key"
-    sops -d <archivo> > /dev/null && echo OK || echo FALLA
+    sops -d <file> > /dev/null && echo OK || echo FAILED
 
-**No** validar con `sops -d ... | head -c 1`. Cuando sops falla escribe
-`Failed to get the data key...` por stderr, `head -c 1` imprime la `F`
-y el `&&` da verde: el chequeo confirma exactamente lo contrario de lo
-que pasó. Mordió el 2026-08-02 y es la misma clase que ya conocemos
-—*el chequeo atado a la letra en vez de al invariante*—, acá disfrazada
-de "pero si lo probé".
+Do **not** validate with `sops -d ... | head -c 1`. When sops fails it
+writes `Failed to get the data key...` to stderr, `head -c 1` prints
+the `F` and the `&&` goes green: the check confirms exactly the
+opposite of what happened. It bit on 2026-08-02 and it is the same
+class we already know —*the check tied to the letter instead of to the
+invariant*—, here disguised as "but I did test it".
 
-Ojo con el path: la identidad de esta instancia es `aegis.key`, no el
-`keys.txt` que sops busca por defecto. Sin `SOPS_AGE_KEY_FILE`, sops
-falla con "no such file or directory" aunque el archivo exista.
+Mind the path: this instance's identity is `aegis.key`, not the
+`keys.txt` sops looks for by default. Without `SOPS_AGE_KEY_FILE`, sops
+fails with "no such file or directory" even though the file exists.
 
-## 4. Autorizar la tarea Y la red
+## 4. Authorize the task AND the network
 
-Una key sola no alcanza. Hacen falta las dos:
+A key on its own is not enough. Both are needed:
 
-1. El proyecto tiene que estar en `tenants` de cada tarea del registro
+1. The project has to be in the `tenants` of every task in the registry
    (`k8s/base/ai-system/registro.yaml`).
-2. El namespace tiene que tener regla de NetworkPolicy hacia la puerta
-   interna: una en `ai-system` (`allow-tenants-a-gateway`) y otra de
-   egress en el propio tenant. Cada permiso nace con su consumidor.
+2. The namespace has to have a NetworkPolicy rule towards the internal
+   door: one in `ai-system` (`allow-tenants-a-gateway`) and an egress
+   one in the tenant itself. Every permission is born with its
+   consumer.
 
-Si falta (1) el gateway responde 403 y se ve. Si falta (2) la conexión
-muere por timeout y el síntoma es más feo — por eso van juntas.
+If (1) is missing the gateway answers 403 and it shows. If (2) is
+missing the connection dies by timeout and the symptom is uglier — that
+is why they travel together.
 
-## 5. Rotar (sin ventana de caída)
+## 5. Rotate (with no downtime window)
 
-El verificador acepta **varias keys a la vez**: esa es toda la
-maquinaria de rotación.
+The verifier accepts **several keys at once**: that is the whole
+rotation machinery.
 
-1. Emitir la nueva con `kid` distinto (`<proy>-2`) y agregarla al array
-   `claves` **sin sacar la vieja**.
-2. Actualizar el Secret del proyecto con el claro nuevo; el pod toma la
-   variable al reiniciar.
-3. Confirmar en los logs del gateway que ya no aparece el `kid` viejo
-   (`"kid":"<proy>-1"`).
-4. Recién ahí sacar la entrada vieja del array.
+1. Issue the new one with a different `kid` (`<proj>-2`) and add it to
+   the `claves` array **without removing the old one**.
+2. Update the project's Secret with the new cleartext; the pod picks
+   the variable up when it restarts.
+3. Confirm in the gateway's logs that the old `kid` no longer appears
+   (`"kid":"<proj>-1"`).
+4. Only then remove the old entry from the array.
 
-El gateway recarga el archivo de keys en caliente cada 30 s: no hace
-falta reiniciarlo en ningún paso. Y si el archivo nuevo está mal
-escrito, mantiene el anterior y lo grita en el log — una rotación con
-un typo no deja al servicio sin autenticar a nadie.
+The gateway reloads the keys file hot every 30 s: it does not have to
+be restarted at any step. And if the new file is badly written, it
+keeps the previous one and shouts about it in the log — a rotation with
+a typo does not leave the service authenticating nobody.
 
-## 6. Revocar de urgencia
+## 6. Emergency revocation
 
-Sacar la entrada del array y sincronizar. Efecto en ≤30 s, sin
-reinicios. Si hay que cortar TODO el consumo ya mismo, el corte real es
-`ai cerrar`: sin engine no hay nada que gastar.
+Remove the entry from the array and sync. Effect in ≤30 s, no
+restarts. If ALL consumption has to be cut right now, the real cut is
+`aegis ai stop`: with no engine there is nothing to spend.

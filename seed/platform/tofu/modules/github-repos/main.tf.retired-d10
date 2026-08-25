@@ -1,6 +1,6 @@
-# módulo github-repos v2 — settings del repo + webhook ArgoCD.
-# Default delete_branch_on_merge=FALSE (B4: en v1 el default true
-# del módulo era una mina — cualquier consumidor nuevo la pisaba).
+# module github-repos v2 — the repo's settings + the ArgoCD webhook.
+# Default delete_branch_on_merge=FALSE (B4: in v1 the module's default
+# of true was a landmine — every new consumer stepped on it).
 
 terraform {
   required_providers {
@@ -18,7 +18,7 @@ variable "visibility" {
   default = "private"
 }
 variable "delete_branch_on_merge" {
-  description = "REGLA OPERATIVA: false. El setting borra branches al mergear incluso sin --delete-branch (bache B4, 2026-06-17)."
+  description = "OPERATIONAL RULE: false. The setting deletes branches on merge even without --delete-branch (pothole B4, 2026-06-17)."
   type        = bool
   default     = false
 }
@@ -50,8 +50,9 @@ resource "github_repository" "this" {
   squash_merge_commit_message = "COMMIT_MESSAGES"
 
   lifecycle {
-    # greenfield lo crea; si el repo ya existe (re-bootstrap), se
-    # importa a mano ANTES del apply — el init v1 no importa (H5).
+    # greenfield creates it; if the repo already exists (re-bootstrap),
+    # it is imported by hand BEFORE the apply — init v1 does not
+    # import (H5).
     prevent_destroy = true
   }
 }

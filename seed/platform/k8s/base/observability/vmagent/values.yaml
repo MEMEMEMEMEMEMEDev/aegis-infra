@@ -1,58 +1,61 @@
-# values victoria-metrics-agent 0.46.0 — EL scraper (fase-85 §2:
-# vmsingle puede scrapear solo, pero vmagent da relabeling y buffer
-# en disco ante cortes — la red de dev se cae POR DISEÑO y perder el
-# buffer sería perder exactamente las muestras del incidente).
+# victoria-metrics-agent 0.46.0 values — THE scraper (phase-85 §2:
+# vmsingle can scrape on its own, but vmagent gives relabeling and an
+# on-disk buffer against outages — the dev network goes down BY DESIGN
+# and losing the buffer would be losing exactly the incident's
+# samples).
 #
-# scrape_configs ENUMERADOS (A7-espíritu): target nuevo = entry
-# nueva acá, no magia. Los jobs con kubernetes_sd van ACOTADOS a un
-# namespace + label + puerto concretos — descubren réplicas del
-# componente NOMBRADO, jamás «todo lo que tenga una annotation».
-# Sobrescribir `config.scrape_configs` REEMPLAZA la lista default
-# del chart (los jobs genéricos por annotation quedan fuera a
-# propósito).
+# scrape_configs ENUMERATED (the spirit of A7): a new target = a new
+# entry here, no magic. The jobs with kubernetes_sd are BOUNDED to a
+# concrete namespace + label + port — they discover replicas of the
+# NAMED component, never «everything that carries an annotation».
+# Overwriting `config.scrape_configs` REPLACES the chart's default
+# list (the generic by-annotation jobs are left out on purpose).
 fullnameOverride: vmagent
 
-# SIN esto, una sonda nueva NO SE RASPA. vmagent lee su config una vez
-# al arrancar; el kubelet refresca el ConfigMap montado en ~1 min, pero
-# vmagent no vuelve a mirarlo. O sea: aegis-org deriva el target,
-# ArgoCD dice «Synced», el archivo ESTÁ en el pod, y nadie lo raspa —
-# vigilancia que se cree desplegada y no lo está.
-# Es el MISMO vicio que tenía vmalert (arreglado el mismo día): en este
-# stack la recarga en caliente hay que pedirla, no viene.
+# WITHOUT this, a new probe IS NOT SCRAPED. vmagent reads its config
+# once at start-up; the kubelet refreshes the mounted ConfigMap in
+# ~1 min, but vmagent never looks at it again. That is: `aegis org`
+# derives the target, ArgoCD says «Synced», the file IS in the pod,
+# and nobody scrapes it — surveillance that believes itself deployed
+# and is not.
+# It is the SAME vice vmalert had (fixed the same day): in this stack
+# the hot reload has to be asked for, it does not come.
 extraArgs:
   promscrape.configCheckInterval: "60s"
 
 remoteWrite:
   - url: http://vmsingle.observability.svc:8428/api/v1/write
 
-# el buffer en disco que justifica a vmagent (ver arriba):
+# the on-disk buffer that justifies vmagent (see above):
 persistentVolume:
   enabled: true
   size: 1Gi
 
-# Recreate y NO RollingUpdate, y no es preferencia: el buffer de arriba
-# es un PVC ReadWriteOnce, y vmagent toma un lock exclusivo sobre él.
-# Con RollingUpdate el pod nuevo arranca ANTES de que el viejo muera,
-# no consigue el lock y entra en CrashLoopBackOff para siempre: vmagent
-# quedaba imposible de reiniciar, y cualquier cambio de su config se
-# trababa sin que nada lo dijera. Medido el 2026-08-22 al agregar la
-# recarga en caliente: «cannot acquire lock on file .../flock.lock».
-# El precio es unos segundos sin raspar, que el propio buffer cubre.
-# La clave es deployment.spec.strategy y no `strategy` ni
-# `updateStrategy` (esa última es la del StatefulSet): verificado con
-# `helm show values victoria-metrics-agent --version 0.46.0`. Escrita
-# mal, el chart la ignora en silencio y el Deployment se queda en
-# RollingUpdate sin que ArgoCD note nada — dice Synced igual.
+# Recreate and NOT RollingUpdate, and it is not a preference: the
+# buffer above is a ReadWriteOnce PVC, and vmagent takes an exclusive
+# lock on it. With RollingUpdate the new pod starts BEFORE the old one
+# dies, does not get the lock and enters CrashLoopBackOff for ever:
+# vmagent became impossible to restart, and any change to its config
+# jammed without anything saying so. Measured on 2026-08-22 when the
+# hot reload was added: «cannot acquire lock on file .../flock.lock».
+# The price is a few seconds without scraping, which the buffer itself
+# covers.
+# The key is deployment.spec.strategy and not `strategy` nor
+# `updateStrategy` (that last one belongs to the StatefulSet):
+# verified with `helm show values victoria-metrics-agent --version
+# 0.46.0`. Written wrong, the chart ignores it in silence and the
+# Deployment stays on RollingUpdate without ArgoCD noticing a thing —
+# it says Synced all the same.
 deployment:
   spec:
     strategy:
       type: Recreate
 
 rbac:
-  # el chart ya da nodes/nodes-metrics/pods/services; el job de
-  # cadvisor pasa por el PROXY del API server (TLS validado contra el
-  # CA del cluster — jamás insecure_skip_verify, la doctrina anti -k)
-  # y eso pide nodes/proxy:
+  # the chart already gives nodes/nodes-metrics/pods/services; the
+  # cadvisor job goes through the API server's PROXY (TLS validated
+  # against the cluster's CA — never insecure_skip_verify, the anti -k
+  # doctrine) and that asks for nodes/proxy:
   extraRules:
     - apiGroups: [""]
       resources: [nodes/proxy]
@@ -62,12 +65,12 @@ config:
   global:
     scrape_interval: 30s
     external_labels:
-      # identidad del dato, no comportamiento (design.md §4.3): un
-      # dashboard puede distinguir «sin dato» de «cero» según la
-      # semántica del perfil:
+      # the datum's identity, not behaviour (design.md §4.3): a
+      # dashboard can tell «no data» apart from «zero» according to
+      # the profile's semantics:
       aegis_profile: greenfield
   scrape_configs:
-    # ── el stack se mide a sí mismo (Services propios, estáticos) ──
+    # ── the stack measures itself (its own Services, static) ──────
     - job_name: vmagent
       static_configs:
         - targets: [localhost:8429]
@@ -82,10 +85,11 @@ config:
             - blackbox.observability.svc:9115
             - ntfy.observability.svc:9090
             - vector.observability.svc:9598
-    # ── cAdvisor del kubelet via API-server proxy (design.md §4.5:
-    #    CPU/mem por contenedor sin node-exporter/kube-state-metrics;
-    #    el proxy valida TLS contra el CA del cluster, a diferencia
-    #    del scrape directo al kubelet que exigiría skip_verify) ──
+    # ── the kubelet's cAdvisor via the API-server proxy (design.md
+    #    §4.5: CPU/mem per container with no node-exporter and no
+    #    kube-state-metrics; the proxy validates TLS against the
+    #    cluster's CA, unlike scraping the kubelet directly, which
+    #    would demand skip_verify) ──────────────────────────────────
     - job_name: kubernetes-nodes-cadvisor
       scheme: https
       tls_config:
@@ -103,10 +107,10 @@ config:
           regex: (.+)
           target_label: __metrics_path__
           replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
-    # ── los observados (hooks.md, un job por componente) ──────────
-    # ArgoCD: /metrics nativos (controller :8082, server :8083,
-    # repo-server :8084 — puertos de contenedor llamados así en el
-    # chart argo-cd; pide la entry en la netpol de argocd, fase-85 §7):
+    # ── the observed ones (hooks.md, one job per component) ───────
+    # ArgoCD: native /metrics (controller :8082, server :8083,
+    # repo-server :8084 — container ports named that way in the argo-cd
+    # chart; it asks for the entry in argocd's netpol, phase-85 §7):
     - job_name: argocd
       kubernetes_sd_configs:
         - role: pod
@@ -120,8 +124,8 @@ config:
           action: keep
         - source_labels: [__meta_kubernetes_pod_name]
           target_label: pod
-    # cert-manager :9402 — como CONTEXTO de B11 (la alerta sale del
-    # blackbox, no de acá — design.md §4.2b):
+    # cert-manager :9402 — as CONTEXT for B11 (the alert comes out of
+    # blackbox, not from here — design.md §4.2b):
     - job_name: cert-manager
       kubernetes_sd_configs:
         - role: pod
@@ -132,7 +136,7 @@ config:
           action: keep
         - source_labels: [__meta_kubernetes_pod_name]
           target_label: pod
-    # Kyverno :8000 (admisiones y latencia del webhook):
+    # Kyverno :8000 (admissions and the webhook's latency):
     - job_name: kyverno
       kubernetes_sd_configs:
         - role: pod
@@ -163,8 +167,8 @@ config:
           action: keep
         - source_labels: [__meta_kubernetes_pod_name]
           target_label: pod
-    # cloudflared :2000 (el flag --metrics + containerPort los agrega
-    # la fase 85 al Deployment — hooks.md, 2 líneas):
+    # cloudflared :2000 (the --metrics flag + containerPort are added
+    # to the Deployment by phase 85 — hooks.md, 2 lines):
     - job_name: cloudflared
       kubernetes_sd_configs:
         - role: pod
@@ -178,22 +182,23 @@ config:
           action: keep
         - source_labels: [__meta_kubernetes_pod_name]
           target_label: pod
-    # Jenkins: plugin `prometheus` (/prometheus sin API key —
-    # hooks.md; la línea en installPlugins la agrega la fase 85):
+    # Jenkins: the `prometheus` plugin (/prometheus with no API key —
+    # hooks.md; the line in installPlugins is added by phase 85):
     - job_name: jenkins
       metrics_path: /prometheus
       static_configs:
         - targets: [jenkins.jenkins-system.svc:8080]
-    # registry: debug.prometheus :5001 (el bloque en el ConfigMap y
-    # el puerto en el Service los agrega la fase 85 — hooks.md):
+    # registry: debug.prometheus :5001 (the block in the ConfigMap and
+    # the port in the Service are added by phase 85 — hooks.md):
     - job_name: registry
       static_configs:
         - targets: [registry.registry-system.svc:5001]
-    # ── sondas blackbox (lo SERVIDO, no lo declarado) ─────────────
-    # B11: de acá sale probe_ssl_earliest_cert_expiry — handshake
-    # real contra el CA (módulo registry_tls, blackbox.yaml). El
-    # relabel deja `instance` = host:puerto para que la regla y el
-    # gate (instance=~"registry.*") lean el destino, no la URL:
+    # ── blackbox probes (what is SERVED, not what is declared) ────
+    # B11: probe_ssl_earliest_cert_expiry comes out of here — a real
+    # handshake against the CA (the registry_tls module,
+    # blackbox.yaml). The relabel leaves `instance` = host:port so
+    # that the rule and the gate (instance=~"registry.*") read the
+    # destination and not the URL:
     - job_name: blackbox-registry
       metrics_path: /probe
       params: {module: [registry_tls]}
@@ -225,11 +230,12 @@ config:
         - target_label: __address__
           replacement: blackbox.observability.svc:9115
     # --- DERIVED by aegis-org (tenant probes): do not edit by hand ---
-    # Un probe por organización con dominio y ruta pública. Mide el
-    # camino COMPLETO que recorre un cliente: DNS, borde, túnel,
-    # traefik, middlewares y la app. Todo lo demás mide piezas.
-    # Este bloque se rederiva ENTERO en cada aegis org apply.
-    # (ninguna organización declara dominio con ruta pública)
+    # One probe per organization with a domain and a public path. It
+    # measures the COMPLETE path a customer walks: DNS, edge, tunnel,
+    # traefik, middlewares and the app. Everything else measures
+    # pieces.
+    # This block is re-derived WHOLE on every aegis org apply.
+    # (no organization declares a domain with a public path)
     # --- END DERIVED ---
 
 resources:                      # fase-85 §10

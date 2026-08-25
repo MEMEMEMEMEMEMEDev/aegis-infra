@@ -1,39 +1,40 @@
-# orgs/__ORG__.yaml — el contrato de tu organización.
+# orgs/__ORG__.yaml — your organization's contract.
 #
-# NACIÓ DE LA PLANTILLA `base` Y LA PLANTILLA YA NO IMPORTA. Desde este
-# momento este archivo es la ÚNICA verdad (journeys/design.md §0.1): todo
-# lo que la plataforma monta para vos —namespace, cuota, Application de
-# ArgoCD, NetworkPolicy, ruteo, job de CI, hostname del borde— se DERIVA
-# de estas líneas. Para cambiar algo no se busca a la plantilla: se edita
-# ESTE archivo y se re-corre `bin/aegis-org aplicar orgs/__ORG__.yaml`.
-# Sos un artesano más, igual que quien lo escribió a mano.
+# IT WAS BORN FROM THE `base` TEMPLATE AND THE TEMPLATE NO LONGER
+# MATTERS. From this moment on this file is the ONLY truth
+# (journeys/design.md §0.1): everything the platform builds for you
+# —namespace, quota, ArgoCD Application, NetworkPolicy, routing, CI job,
+# edge hostname— is DERIVED from these lines. To change something you do
+# not go back to the template: you edit THIS file and re-run
+# `aegis org apply orgs/__ORG__.yaml`. You are one more artisan, exactly
+# like whoever wrote it by hand.
 #
-# Leelo entero antes de firmar (commitear): es corto a propósito.
-version: 1                       # obligatoria; hoy solo existe la 1
-organizacion: __ORG__            # inmutable: cambiarla no renombra, crea OTRA
-dominio: __DOMINIO__             # el FQDN público; el CNAME del borde sale de acá
+# Read it whole before signing (committing): it is short on purpose.
+version: 1                       # required; only version 1 exists today
+organizacion: __ORG__            # immutable: changing it creates ANOTHER org
+dominio: __DOMINIO__             # the public FQDN; the edge CNAME comes from here
 
-# Un PLAN CON NOMBRE, nunca números. Los números viven en plans.yaml y
-# se reajustan para todas las organizaciones a la vez. `pequena` es el
-# punto de partida sano: subir de plan es editar UNA palabra.
+# A PLAN WITH A NAME, never numbers. The numbers live in plans.yaml and
+# are readjusted for every organization at once. `pequena` is the sane
+# starting point: moving up a plan is editing ONE word.
 cuota: pequena                   # pequena | mediana | grande
 
-# SIN `almacenamiento:` y SIN `ai:` a propósito: la plantilla `base` es
-# la mínima que compila y despliega. El día que los necesites, se
-# AGREGAN acá (mirá orgs/ejemplo.yaml, que usa los dos) y se reaplica —
-# no hay que volver a ninguna plantilla.
+# NO `almacenamiento:` and NO `ai:` on purpose: the `base` template is
+# the smallest one that compiles and deploys. The day you need them,
+# they are ADDED here (see orgs/ejemplo.yaml, which uses both) and it is
+# reapplied — there is no going back to any template.
 
 servicios:
-  # Un único servicio HTTP. La plataforma espera que escuche en el
-  # puerto declarado y lo expone como Service `__ORG__-app` en el 8080;
-  # el esqueleto sembrado ya cumple las dos cosas.
+  # A single HTTP service. The platform expects it to listen on the
+  # declared port and exposes it as the Service `__ORG__-app` on 8080;
+  # the seeded skeleton already does both.
   - nombre: app
     tipo: http
     puerto: 8080
-    publico: /                   # la raíz del dominio de arriba
-    repo: __REPO__               # de acá salen la Application, la deploy
-                                 # key y el job de Jenkins — un solo campo,
-                                 # tres derivaciones
-    # SIN `usa:`. Es una lista blanca de red: lo que no está, la
-    # NetworkPolicy lo bloquea. Se declara cuando haga falta
-    # (usa: [postgres, bucket, ai]) junto con su sección de arriba.
+    publico: /                   # the root of the domain above
+    repo: __REPO__               # from here come the Application, the
+                                 # deploy key and the Jenkins job — one
+                                 # field, three derivations
+    # NO `usa:`. It is a network allow-list: whatever is not there, the
+    # NetworkPolicy blocks. It is declared when needed
+    # (usa: [postgres, bucket, ai]) together with its section above.

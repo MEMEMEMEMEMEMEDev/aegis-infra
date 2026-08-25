@@ -1,154 +1,166 @@
-# La plataforma, para el equipo de desarrollo
+# The platform, for the development team
 
-Contexto de la infraestructura sobre la que corren tus aplicaciones. No cubre
-todo — cubre lo que necesitás saber para desplegar sin chocar. Si algo acá te
-frena y no sabés por qué, la respuesta casi siempre está en la sección
-"Reglas que te van a rechazar".
-
----
-
-## En una frase
-
-Es una plataforma de Kubernetes self-hosted con GitOps. Vos escribís código;
-la plataforma lo buildea, lo escanea, lo firma, lo despliega y lo expone a
-internet — sin que toques infraestructura. Tu trabajo termina en `git push`.
-
-No hay AWS/GCP/Azure detrás. Corre en hardware propio y está diseñada para ser
-portable (el mismo stack corre en un VPS si algún día migramos). Para vos eso
-es transparente.
+Context on the infrastructure your applications run on. It does not cover
+everything — it covers what you need to know in order to deploy without
+crashing into anything. If something here blocks you and you do not know
+why, the answer is almost always in the "Rules that will reject you"
+section.
 
 ---
 
-## El trato: qué ponés vos, qué hace la plataforma
+## In one sentence
 
-**Vos, en el repo de tu app:**
-- Tu código.
-- Un `Containerfile` (cómo se construye tu imagen).
-- Un `Jenkinsfile` — **te lo damos como template**, casi no lo tocás.
-- Los manifiestos K8s de tu app (Deployment, Service, etc.) — también con
-  plantilla.
+It is a self-hosted Kubernetes platform with GitOps. You write code; the
+platform builds it, scans it, signs it, deploys it and exposes it to the
+internet — without you touching infrastructure. Your job ends at
+`git push`.
 
-**La plataforma, sola, en cada push:**
-1. **Buildea** tu imagen (sin privilegios — build aislado y seguro).
-2. **Escanea** la imagen (Trivy). Vulnerabilidad grave con fix disponible =
-   build roja. No se despliega código con CVEs conocidos.
-3. **Firma** la imagen (cosign, por digest).
-4. La **publica** en el registry interno.
-5. **Despliega** vía GitOps (ArgoCD sincroniza el estado del repo al cluster).
-6. La **expone** con TLS y la publica a internet — vos no tocás DNS, ni
-   certificados, ni el túnel.
+There is no AWS/GCP/Azure behind it. It runs on our own hardware and is
+designed to be portable (the same stack runs on a VPS if we ever migrate).
+For you that is transparent.
 
 ---
 
-## El ciclo de vida de un push
+## The deal: what you put in, what the platform does
+
+**You, in your app's repo:**
+- Your code.
+- A `Containerfile` (how your image is built).
+- A `Jenkinsfile` — **we hand it to you as a template**, you barely touch
+  it.
+- Your app's K8s manifests (Deployment, Service, etc.) — templated as
+  well.
+
+**The platform, on its own, on every push:**
+1. **Builds** your image (unprivileged — an isolated, safe build).
+2. **Scans** the image (Trivy). A serious vulnerability with a fix
+   available = a red build. Code with known CVEs does not get deployed.
+3. **Signs** the image (cosign, by digest).
+4. **Publishes** it to the internal registry.
+5. **Deploys** it through GitOps (ArgoCD syncs the repo's state onto the
+   cluster).
+6. **Exposes** it with TLS and publishes it to the internet — you touch
+   no DNS, no certificates and no tunnel.
+
+---
+
+## The life cycle of a push
 
 ```
 git push
    │
    ▼
-webhook ──▶ Jenkins (build de tu rama)
+webhook ──▶ Jenkins (build of your branch)
               │
-              ├─ build de la imagen (sin privilegios)
-              ├─ scan de vulnerabilidades  ── CRITICAL/HIGH con fix ⇒ FALLA
-              ├─ push al registry interno
-              └─ firma (cosign)
+              ├─ image build (unprivileged)
+              ├─ vulnerability scan  ── CRITICAL/HIGH with a fix ⇒ FAILS
+              ├─ push to the internal registry
+              └─ signature (cosign)
                     │
                     ▼
-              ArgoCD detecta el cambio y sincroniza
+              ArgoCD detects the change and syncs
                     │
                     ▼
-              Kyverno admite SOLO imágenes firmadas por la plataforma
+              Kyverno admits ONLY images signed by the platform
                     │
                     ▼
-              tu app corriendo, con TLS, en tu-app.<dominio>
+              your app running, with TLS, at your-app.<dominio>
 ```
 
-Todo esto es automático. Si el build queda rojo, el log del stage en Jenkins
-te dice exactamente en qué paso (build / scan / push / firma) y por qué.
+All of this is automatic. If the build goes red, the stage log in Jenkins
+tells you exactly which step (build / scan / push / signature) and why.
 
 ---
 
-## Reglas que te van a rechazar (leé esto)
+## Rules that will reject you (read this)
 
-Estas son las barandas de la plataforma. No son negociables desde tu app — son
-del cluster. Conocerlas te ahorra horas de "por qué no arranca mi pod".
+These are the platform's guard rails. They are not negotiable from your
+app — they belong to the cluster. Knowing them saves you hours of "why
+does my pod not start".
 
-1. **Solo corren imágenes firmadas por la plataforma.**
-   No podés levantar `nginx:latest` de Docker Hub ni una imagen que armaste en
-   tu máquina. Si no pasó por el pipeline (build + scan + firma), el cluster la
-   **rechaza en admisión** citando la política de firma. Todo lo que corre,
-   corre porque la plataforma lo construyó y lo firmó.
+1. **Only images signed by the platform run.**
+   You cannot bring up `nginx:latest` from Docker Hub, nor an image you
+   put together on your own machine. If it did not go through the pipeline
+   (build + scan + signature), the cluster **rejects it at admission**,
+   citing the signature policy. Everything that runs, runs because the
+   platform built it and signed it.
 
-2. **El scan bloquea.**
-   Un CVE CRITICAL o HIGH con parche disponible rompe el build. La solución es
-   actualizar la dependencia, no saltear el scan. El scan es el que envejece
-   solo y te avisa cuando tu base quedó vieja.
+2. **The scan blocks.**
+   A CRITICAL or HIGH CVE with a patch available breaks the build. The fix
+   is to update the dependency, not to skip the scan. The scan is the part
+   that ages on its own and tells you when your base image has gone stale.
 
-3. **Todo container necesita `resources.limits`.**
-   Hay una cuota estricta por namespace. Un container sin `limits` (cpu y
-   memoria) **no se crea** — ni los init containers ni los sidecars. La
-   plantilla ya los trae; si agregás un container, agregale limits.
+3. **Every container needs `resources.limits`.**
+   There is a strict per-namespace quota. A container with no `limits`
+   (cpu and memory) **is not created** — not init containers, not sidecars
+   either. The template already carries them; if you add a container, add
+   limits to it.
 
-4. **La red arranca cerrada (default-deny).**
-   Tu app, por defecto, no puede hablar con nada salvo lo explícitamente
-   permitido (DNS y el borde que la expone). Si tu app necesita salir a otro
-   servicio (una DB, una API externa), eso se habilita con una regla de red
-   explícita — pedila, no asumas que hay salida abierta.
+4. **The network starts closed (default-deny).**
+   By default your app can talk to nothing except what is explicitly
+   allowed (DNS and the edge that exposes it). If your app needs to reach
+   another service (a DB, an external API), that is enabled with an
+   explicit network rule — ask for it, do not assume there is a way out.
 
-5. **Cada app vive en el namespace de su organización.**
-   No ves ni tocás las apps de otras organizaciones. El aislamiento es por
-   diseño: namespace, cuota y red propias por organización.
+5. **Every app lives in its organization's namespace.**
+   You neither see nor touch other organizations' apps. The isolation is
+   by design: its own namespace, quota and network per organization.
 
-6. **Nada de pods privilegiados.**
-   Tu app corre como un proceso normal, sin privilegios de nodo. Si tu imagen
-   necesita root para algo raro, hablémoslo antes — casi siempre hay otra forma.
+6. **No privileged pods.**
+   Your app runs as an ordinary process, with no node privileges. If your
+   image needs root for something unusual, let us talk it over first —
+   there is almost always another way.
 
-7. **Secrets nunca en claro en Git.**
-   Contraseñas, tokens, claves: nunca commiteados en texto plano. Hay un
-   mecanismo cifrado (SOPS+age) para eso. Si necesitás un secret para tu app,
-   se gestiona por ahí, no en un `.env` commiteado.
-
----
-
-## Lo que NO tenés que hacer (la plataforma se lo come)
-
-- No administrás el registry de imágenes.
-- No emitís ni renovás certificados TLS.
-- No configurás DNS ni el túnel de salida a internet.
-- No firmás imágenes a mano.
-- No tocás la infraestructura de Kubernetes ni el IaC.
-- No contratás ni pagás servicios cloud.
-
-Si te encontrás haciendo alguna de estas, algo se salió del carril — avisá.
+7. **Secrets never in cleartext in Git.**
+   Passwords, tokens, keys: never committed as plain text. There is an
+   encrypted mechanism (SOPS+age) for that. If you need a secret for your
+   app, it is managed through there, not in a committed `.env`.
 
 ---
 
-## El stack que te toca ver
+## What you do NOT have to do (the platform swallows it)
 
-| Pieza                 | Qué es para vos                                   |
-|-----------------------|---------------------------------------------------|
-| **GitHub**            | Donde vive tu código y desde donde disparás todo. |
-| **Jenkins**           | Donde ves el build de tu rama (logs, estado).     |
-| **Registry interno**  | Donde queda tu imagen (no lo tocás directo).      |
-| **ArgoCD**            | Lo que sincroniza tu repo → cluster (GitOps).     |
-| **Ingress + TLS**     | Lo que expone tu app con HTTPS (automático).      |
-| **Cloudflare**        | El borde que la publica a internet (automático).  |
+- You do not administer the image registry.
+- You do not issue or renew TLS certificates.
+- You do not configure DNS or the outbound tunnel to the internet.
+- You do not sign images by hand.
+- You do not touch the Kubernetes infrastructure or the IaC.
+- You do not contract or pay for cloud services.
 
-También hay **modelos de lenguaje locales** (Ollama y afines) disponibles como
-servicio si tu app los necesita — sin depender de OpenAI ni de un proveedor
-externo. Tu app los consume como una URL más (config por entorno); dónde corre
-la inferencia es transparente para vos.
+If you find yourself doing any of these, something has come off the rails
+— say so.
 
 ---
 
-## Cómo empezar
+## The stack you actually see
 
-1. Pedí tu repo y tu organización (namespace) en la plataforma.
-2. Partí del template: `Containerfile` + `Jenkinsfile` (el canónico vive en
-   `platform/docs/protocols/templates/Jenkinsfile.app`) + manifiestos de la app.
+| Piece                 | What it is for you                                 |
+|-----------------------|----------------------------------------------------|
+| **GitHub**            | Where your code lives; everything starts here.     |
+| **Jenkins**           | Where you see your branch's build (logs, status).  |
+| **Internal registry** | Where your image ends up (you do not touch it).    |
+| **ArgoCD**            | What syncs your repo → cluster (GitOps).           |
+| **Ingress + TLS**     | What exposes your app over HTTPS (automatic).      |
+| **Cloudflare**        | The edge that puts it on the internet (automatic). |
+
+There are also **local language models** (Ollama and the like) available
+as a service if your app needs them — without depending on OpenAI or any
+external provider. Your app consumes them as one more URL (configured per
+environment); where the inference runs is transparent to you.
+
+---
+
+## How to get started
+
+1. Ask for your repo and your organization (namespace) on the platform.
+2. Start from the template: `Containerfile` + `Jenkinsfile` (the canonical
+   one lives in `platform/docs/protocols/templates/Jenkinsfile.app`) + the
+   app's manifests.
 3. `git push`.
-4. Mirá el build en Jenkins.
-5. Tu app aparece en `tu-app.<dominio>`, con HTTPS, firmada y escaneada.
+4. Watch the build in Jenkins.
+5. Your app shows up at `your-app.<dominio>`, over HTTPS, signed and
+   scanned.
 
-El primer deploy es la mejor forma de entender el ciclo completo. Si algo falla,
-el log del stage en Jenkins es el primer lugar donde mirar; la causa está ahí.
+The first deploy is the best way to understand the whole cycle. If
+something fails, the stage log in Jenkins is the first place to look; the
+cause is there.

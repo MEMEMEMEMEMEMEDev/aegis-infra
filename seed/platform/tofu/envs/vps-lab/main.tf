@@ -1,25 +1,26 @@
-# env vps-lab — el túnel de ADMINISTRACIÓN del VPS de laboratorio.
+# env vps-lab — the ADMINISTRATION tunnel of the laboratory VPS.
 #
-# NO es infraestructura de la instancia: es del OPERADOR. `aegis
-# destroy` consume envs/cloudflare-tunnel y este env NO se toca (el
-# lab sobrevive al teardown de la plataforma — plan/07 §2 de v3 lo
-# lista como «lo que no se toca»).
+# It is NOT instance infrastructure: it belongs to the OPERATOR. `aegis
+# destroy` consumes envs/cloudflare-tunnel and this env is NOT touched
+# (the lab survives the platform teardown — plan/07 §2 of v3 lists it
+# under «what does not get touched»).
 #
-# Qué crea: un túnel aparte (`aegis-lab-admin` — convive con
-# `aegis-tunnel` de la fase 25: nombres distintos, cero colisión), su
-# config con UNA regla de ingress (ssh://localhost:22 DEL VPS: quien
-# corre cloudflared es el VPS, localhost es su loopback), el CNAME
-# `ssh-lab` en la zona raíz, y la app de Access que solo deja pasar al
-# operador. El hostname vive en la zona raíz existente porque no hay
-# zona de lab y crearla sería otro acto de panel; para la etapa D
-# (recrear e init completo en el lab) hará falta dominio propio o
-# zona de lab — los CNAMEs aegis/argocd/jenkins de la fase 25
-# chocarían con el cluster casero. Prerrequisito de D, no de esto.
+# What it creates: a separate tunnel (`aegis-lab-admin` — it coexists
+# with `aegis-tunnel` from phase 25: different names, zero collision),
+# its config with ONE ingress rule (ssh://localhost:22 OF THE VPS:
+# whoever runs cloudflared is the VPS, localhost is its loopback), the
+# `ssh-lab` CNAME in the root zone, and the Access app that lets only
+# the operator through. The hostname lives in the existing root zone
+# because there is no lab zone and creating one would be another act of
+# dashboard; for stage D (recreate plus a full init in the lab) a domain
+# of its own or a lab zone will be needed — the aegis/argocd/jenkins
+# CNAMEs of phase 25 would collide with the home cluster. A prerequisite
+# of D, not of this.
 #
-# Se aplica con el wrapper, como todo tofu (A14):
+# It is applied with the wrapper, like all tofu (A14):
 #   ./tofu-apply.sh -chdir=envs/vps-lab init|plan|apply
-# El token del túnel sale como output sensitive y lo consume
-# bin/aegis-vps (render/entregar) — jamás se imprime.
+# The tunnel token comes out as a sensitive output and is consumed by
+# bin/aegis-vps (render/entregar) — it is never printed.
 
 terraform {
   required_providers {
@@ -28,8 +29,8 @@ terraform {
       version = "~> 5.0"
     }
   }
-  # state local, cifrado por el wrapper a terraform.tfstate.enc.json
-  # (#46). Contiene el token del túnel del LAB — rotable vía
+  # local state, encrypted by the wrapper to terraform.tfstate.enc.json
+  # (#46). It contains the LAB tunnel's token — rotatable via
   # -replace=module.tunnel.random_id.tunnel_secret (vps-lab.md).
 }
 
@@ -37,8 +38,8 @@ provider "cloudflare" {
   api_token = var.cloudflare_api_token
 }
 
-# Mismo patrón que envs/cloudflare-tunnel (#76): el token del borde no
-# puede tocar Access, así que Access va con SU token y SU provider.
+# Same pattern as envs/cloudflare-tunnel (#76): the edge token must not
+# touch Access, so Access goes with ITS token and ITS provider.
 provider "cloudflare" {
   alias     = "access"
   api_token = var.cloudflare_access_token
@@ -50,7 +51,7 @@ module "tunnel" {
   account_id  = var.cloudflare_account_id
   zone_id     = var.cloudflare_zone_id
   root_domain = var.root_domain
-  tunnel_name = "aegis-lab-admin" # ≠ aegis-tunnel: conviven
+  tunnel_name = "aegis-lab-admin" # ≠ aegis-tunnel: they coexist
 
   ingress_service  = "ssh://localhost:22"
   public_hostnames = ["ssh-lab"]

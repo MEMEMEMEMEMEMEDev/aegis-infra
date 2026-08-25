@@ -1,421 +1,443 @@
-# ai-gateway — diseño
+# ai-gateway — design
 
-LA fuente canónica del sustrato de AI multiproyecto. Si este
-documento y el código divergen, ES UN BUG: se corrigen juntos.
+THE canonical source for the multi-project AI substrate. If this
+document and the code diverge, IT IS A BUG: they get fixed together.
 
-Estado: diseño cerrado 2026-08-02. Implementación en curso (#23).
-Precede a #24 (portafolio consume), #25 (Cloudflare), #26 (carril CPU).
-
----
-
-## 1. Qué es, y sobre todo qué NO es
-
-El gateway es **la única puerta** entre cualquier cliente y la única
-GPU del cluster. Los proyectos no corren AI en sus namespaces: le
-hablan al gateway por HTTP.
-
-Lo que NO es, y no va a ser:
-
-- **No es un proxy de LLM.** No existe, ni va a existir, un endpoint
-  que acepte un prompt libre. El cliente elige una **tarea del
-  registro** y llena huecos. El día que exista `/chat` con prompt
-  arbitrario, dejaste de tener un servicio de AI y tenés un proxy
-  gratis de OpenAI con tu nombre en el DNS.
-- **No es de alta disponibilidad.** Una GPU = una réplica. Dos
-  réplicas no dan disponibilidad, dan dos contadores de cuota que no
-  se hablan.
-- **No arranca solo.** Nada enciende la GPU salvo el operador. La
-  automatización solo APAGA (§5).
+Status: design closed 2026-08-02. Implementation under way (#23).
+It precedes #24 (the portfolio consumes it), #25 (Cloudflare),
+#26 (CPU lane).
 
 ---
 
-## 2. La asimetría que gobierna todo
+## 1. What it is, and above all what it is NOT
 
-Un `POST` le cuesta al atacante ~0 y cuesta **entre 2 y 7 segundos de
-GPU**. No es una API donde el techo es CPU y el abuso se paga en la
-factura: acá el techo es físico, hay uno solo, y es la misma placa con
-la que el operador trabaja.
+The gateway is **the only door** between any client and the
+cluster's single GPU. Projects do not run AI in their own
+namespaces: they talk to the gateway over HTTP.
 
-Corolarios que se aplican en todo el diseño:
+What it is NOT, and is never going to be:
 
-1. **Rechazar tiene que ser barato.** Si validar cuesta lo mismo que
-   servir, el guard ES el DoS. De ahí el orden de los filtros: lo que
-   descarta más por menos, primero (tamaño de body antes de leerlo
-   entero; caracteres antes que tokens; tarea inexistente antes que
-   presupuesto).
-2. **La moneda es el token, no la request.** 10 requests de 20 tokens
-   y 10 de 2000 no son el mismo consumo. Los presupuestos se llevan en
-   tokens de salida.
-3. **El activo a proteger es la máquina del operador**, no una
-   factura. Un abuso exitoso no cuesta dinero: cuesta poder usar la
-   computadora.
+- **It is not an LLM proxy.** There is no endpoint that accepts a
+  free-form prompt, and there never will be. The client picks a
+  **task from the registry** and fills in the blanks. The day a
+  `/chat` with an arbitrary prompt exists, you have stopped having
+  an AI service and you have a free OpenAI proxy with your name on
+  the DNS.
+- **It is not highly available.** One GPU = one replica. Two
+  replicas do not buy availability, they buy two quota counters
+  that do not talk to each other.
+- **It does not start by itself.** Nothing turns the GPU on except
+  the operator. The automation only SHUTS DOWN (§5).
 
 ---
 
-## 3. Los números que dimensionan los guards
+## 2. The asymmetry that governs everything
 
-Medidos en metal (`aegis-exploration/mediciones`, 2026-07-25) y
-confirmados en el cluster (2026-07-30). No son estimaciones.
+A `POST` costs the attacker ~0 and costs **between 2 and 7 seconds
+of GPU**. This is not an API where the ceiling is CPU and abuse is
+paid for on the invoice: here the ceiling is physical, there is
+exactly one of it, and it is the same card the operator works on.
 
-| Magnitud | Valor |
+Corollaries that apply throughout the design:
+
+1. **Rejecting has to be cheap.** If validating costs the same as
+   serving, the guard IS the DoS. Hence the order of the filters:
+   whatever discards most for least, first (body size before
+   reading the whole body; characters before tokens; a
+   non-existent task before a budget).
+2. **The currency is the token, not the request.** 10 requests of
+   20 tokens and 10 of 2,000 are not the same consumption. Budgets
+   are kept in output tokens.
+3. **The asset to protect is the operator's machine**, not an
+   invoice. Successful abuse does not cost money: it costs being
+   able to use the computer.
+
+---
+
+## 3. The numbers that size the guards
+
+MEASURED on bare metal (`aegis-exploration/mediciones`,
+2026-07-25) and confirmed in the cluster (2026-07-30). These are
+not estimates.
+
+| Quantity | Value |
 |---|---|
-| Throughput agregado, concurrencia 4 | **107 tok/s** = 6.420 tok/min |
-| TTFT en frío / con prefijo cacheado | <1 s / **25 ms** |
-| Arranque del engine (caché caliente) | **62 s** |
-| Respuesta de 40 tokens, caliente | 565–584 ms |
-| VRAM con el modelo cargado | 10,7 / 12,2 GB |
-| KV cache real en el cluster | **27.840 tokens** |
-| KV cache con VRAM limpia | 35.616 tokens |
+| Aggregate throughput, concurrency 4 | **107 tok/s** = 6,420 tok/min |
+| TTFT cold / with a cached prefix | <1 s / **25 ms** |
+| Engine startup (warm cache) | **62 s** |
+| 40-token response, warm | 565–584 ms |
+| VRAM with the model loaded | 10.7 / 12.2 GB |
+| Real KV cache in the cluster | **27,840 tokens** |
+| KV cache with clean VRAM | 35,616 tokens |
 
-### 3.1 El techo de concurrencia no es `max_num_seqs`
+### 3.1 The concurrency ceiling is not `max_num_seqs`
 
-`max_model_len` es 12.288 y el KV cache medido fue 27.840 tokens:
+`max_model_len` is 12,288 and the measured KV cache was 27,840
+tokens:
 
 ```
-27.840 / 12.288 = 2,26 conversaciones simultáneas
+27,840 / 12,288 = 2.26 simultaneous conversations
 ```
 
-Con contexto lleno **no entran 8 secuencias, entran 2**. El
-`max_num_seqs: 8` del perfil es una aspiración que solo se cumple si
-cada conversación es corta:
+With a full context **8 sequences do not fit, 2 do**. The
+profile's `max_num_seqs: 8` is an aspiration that only holds if
+every conversation is short:
 
-| Contexto por conversación | Secuencias que caben |
+| Context per conversation | Sequences that fit |
 |---|---|
-| 12.288 (máximo) | 2 |
-| 4.000 | 6 |
-| 2.000 | 8 (topa en max_num_seqs) |
+| 12,288 (maximum) | 2 |
+| 4,000 | 6 |
+| 2,000 | 8 (capped by max_num_seqs) |
 
-**Consecuencia de diseño:** el cap de contexto por tarea no es
-tacañería, es **lo que compra la concurrencia**. Un NPC con 1.500
-tokens de contexto permite 8 visitantes simultáneos; el mismo NPC con
-historial sin límite permite 2. Por eso el historial es del gateway y
-no del cliente (§7.3).
+**Design consequence:** the per-task context cap is not
+stinginess, it is **what buys the concurrency**. An NPC with 1,500
+tokens of context allows 8 simultaneous visitors; the same NPC
+with unbounded history allows 2. That is why the history belongs
+to the gateway and not to the client (§7.3).
 
-### 3.2 El streaming es obligatorio, no un lujo
+### 3.2 Streaming is mandatory, not a luxury
 
-107 tok/s repartidos en 4 streams = ~27 tok/s por stream. Una
-respuesta de 200 tokens tarda ~7,5 s en completarse. Sin streaming eso
-es un spinner de 7 segundos y parece roto. Con streaming, primer token
-en <1 s y 27 tok/s corre más rápido de lo que se lee (~7 tok/s).
+107 tok/s split across 4 streams = ~27 tok/s per stream. A
+200-token response takes ~7.5 s to complete. Without streaming
+that is a 7-second spinner and it looks broken. With streaming,
+the first token lands in <1 s and 27 tok/s runs faster than
+anybody reads (~7 tok/s).
 
-### 3.3 El prefix cache manda sobre el ORDEN del prompt
+### 3.3 The prefix cache dictates the ORDER of the prompt
 
-TTFT cae a 25 ms con prefijo cacheado: 40x. Eso impone una regla dura:
+TTFT drops to 25 ms with a cached prefix: 40x. That imposes a hard
+rule:
 
-> El system prompt de cada tarea es **idéntico byte a byte** en cada
-> request y va **primero**. Los datos variables (nombre del visitante,
-> hora, historial) van SIEMPRE al final.
+> Every task's system prompt is **byte-for-byte identical** on
+> every request and goes **first**. The variable data (visitor's
+> name, time of day, history) ALWAYS goes at the end.
 
-Meter algo variable arriba del prompt invalida el prefijo y multiplica
-el TTFT por 40. Es el error más fácil de cometer y el más difícil de
-notar: no falla nada, solo se pone lento.
+Putting anything variable above the prompt invalidates the prefix
+and multiplies TTFT by 40. It is the easiest mistake to make and
+the hardest to notice: nothing fails, it just gets slow.
 
 ---
 
-## 4. Topología
+## 4. Topology
 
 ```
                     ┌──────────────────── ai-system ────────────────────┐
                     │                                                   │
-navegador           │   ai-gateway                        engine-llm    │
+browser             │   ai-gateway                        engine-llm    │
    │                │   ┌──────────────┐                 ┌───────────┐  │
    ├─▶ portafolio.  │   │              │                 │  vLLM     │  │
    │   __ROOT_DOMAIN__ │   │  :8081  ─────┼────────────────▶│  :8000    │  │
-   │      │         │   │  interna     │                 │  0 ↔ 1    │  │
+   │      │         │   │  internal    │                 │  0 ↔ 1    │  │
    │      ▼         │   │              │                 └───────────┘  │
    │   BFF (Express)├──▶│              │                       ▲        │
    │   org-portaf.  │   │  :8080       │                       │        │
-   │   [API key]    │   │  pública     │                 ai-modo-       │
+   │   [API key]    │   │  public      │                 ai-modo-       │
    │                │   │  v1: /status │                 controller     │
-   └─▶ ai.example. ├──▶│  solamente   │                 [RBAC mínimo]  │
-       com          │   └──────┬───────┘                       ▲        │
-                    │          │ lee (volumen montado)         │ observa│
+   └─▶ ai.<domain>  ├──▶│  only        │                 [minimal RBAC] │
+                    │   └──────┬───────┘                       ▲        │
+                    │          │ reads (mounted volume)        │ watches│
                     │          └────────  ConfigMap ai-modo ───┘        │
                     └───────────────────────────────────────────────────┘
                                           ▲
-                                          │ escribe
-                                     CLI `ai`  (en la máquina del operador)
+                                          │ writes
+                                    `aegis ai` CLI  (on the operator's machine)
 ```
 
-### 4.1 Dos puertas físicamente distintas
+### 4.1 Two physically distinct doors
 
-| | :8080 pública | :8081 interna |
+| | :8080 public | :8081 internal |
 |---|---|---|
-| Quién llega | traefik ← túnel ← Cloudflare | namespaces de tenant nombrados |
-| Credencial | ticket con presupuesto (#25) | API key del proyecto |
-| Headers CF | se confían | se **ignoran** |
-| v1 sirve | solo `GET /status` | todo |
+| Who arrives | traefik ← tunnel ← Cloudflare | named tenant namespaces |
+| Credential | budgeted ticket (#25) | the project's API key |
+| CF headers | trusted | **ignored** |
+| v1 serves | only `GET /status` | everything |
 
-Dos **puertos** y no dos rutas porque así **la NetworkPolicy puede
-obligar a cada origen a usar la suya**. Sin eso, un pod comprometido de
-un tenant puede mandar `CF-Connecting-IP` falso y hacerse pasar por
-tráfico público; o un visitante intentar la ruta interna. Con dos
-puertos, la separación la impone el kernel y no un `if` en el código.
+Two **ports** and not two routes, because that way **the
+NetworkPolicy can force each origin onto its own**. Without it, a
+compromised tenant pod could send a forged `CF-Connecting-IP` and
+pass itself off as public traffic; or a visitor could try the
+internal route. With two ports, the separation is imposed by the
+kernel and not by an `if` in the code.
 
-### 4.2 Por qué la puerta pública nace casi vacía
+### 4.2 Why the public door is born almost empty
 
-En v1 la inferencia **no es alcanzable desde internet**. El navegador
-pasa por el BFF, que tiene la key del lado servidor. `ai.__ROOT_DOMAIN__`
-existe igual porque:
+In v1 inference is **not reachable from the internet**. The
+browser goes through the BFF, which holds the key server-side.
+`ai.__ROOT_DOMAIN__` exists anyway because:
 
-- da kill switch y reglas de WAF **independientes del portafolio** —
-  se apaga la AI y el sitio queda intacto;
-- le da a #25 un blanco al que atarse;
-- prueba el camino completo del borde antes de poner algo caro detrás;
-- es un chequeo de salud desde afuera del cluster.
+- it gives a kill switch and WAF rules **independent of the
+  portfolio** — the AI is switched off and the site is untouched;
+- it gives #25 a target to bind to;
+- it exercises the whole edge path before putting anything
+  expensive behind it;
+- it is a health check from outside the cluster.
 
-Lo único que sirve es un JSON de ~80 bytes, cacheable 10 s. Todo lo
-demás responde 404. El endpoint de tickets está **escrito y apagado**
-por bandera; #25 lo enciende sin tocar código.
+The only thing it serves is an ~80-byte JSON, cacheable for 10 s.
+Everything else answers 404. The ticket endpoint is **written and
+switched off** by a flag; #25 turns it on without touching code.
 
-### 4.3 Una imagen, dos binarios, dos ServiceAccounts
+### 4.3 One image, two binaries, two ServiceAccounts
 
-`cmd/gateway` y `cmd/controller` salen del mismo repo y de la MISMA
-imagen firmada. Son dos Deployments con `command` distinto y cuentas
-distintas: **el RBAC vive en la ServiceAccount, no en el binario**.
-Ahorra un pipeline entero sin debilitar la separación de §11.
+`cmd/gateway` and `cmd/controller` come out of the same repo and
+the SAME signed image. They are two Deployments with a different
+`command` and different accounts: **the RBAC lives in the
+ServiceAccount, not in the binary**. It saves an entire pipeline
+without weakening the separation of §11.
 
 ---
 
-## 5. El modo: la fuente única de verdad
+## 5. The mode: the single source of truth
 
-Un ConfigMap, `ai-modo`, en `ai-system`. Lo escribe el CLI `ai`, lo
-observa el controlador, lo lee el gateway por volumen montado.
+One ConfigMap, `ai-modo`, in `ai-system`. The `aegis ai` CLI
+writes it, the controller watches it, the gateway reads it through
+a mounted volume.
 
 ```yaml
 modo: cerrado          # cerrado | abierto | demo | max
-vence: ""              # RFC3339, solo en demo
-motivo: "jugando"      # texto libre, para el operador
+vence: ""              # RFC3339, only in demo
+motivo: "playing"      # free text, for the operator
 actualizado: "2026-08-02T14:03:11Z"
 ```
 
-| Modo | engine | Presupuestos | Vencimiento |
+| Mode | engine | Budgets | Expiry |
 |---|---|---|---|
-| `cerrado` | 0 | — (503 dormido) | — |
-| `abierto` | 1 | normales | ninguno |
-| `demo` | 1 | amplios | **60 min, auto-cierra** |
-| `max` | 1 | amplios | ninguno (requiere #25) |
+| `cerrado` | 0 | — (503, asleep) | — |
+| `abierto` | 1 | normal | none |
+| `demo` | 1 | wide | **60 min, closes itself** |
+| `max` | 1 | wide | none (requires #25) |
 
-### 5.1 La automatización solo APAGA
+### 5.1 The automation only SHUTS DOWN
 
-Regla dura, sin excepciones: **nada enciende la GPU salvo el
-operador**. Lo automático que existe:
+Hard rule, no exceptions: **nothing turns the GPU on except the
+operator**. What automation does exist:
 
-- vencimiento del `demo` → `cerrado`;
-- horario de cierre opcional → `cerrado`;
-- (futuro) tasa de error sostenida → `cerrado`.
+- expiry of `demo` → `cerrado`;
+- an optional closing time → `cerrado`;
+- (future) a sustained error rate → `cerrado`.
 
-No hay auto-abrir, no hay "encender bajo demanda", no hay
-scale-from-zero por request. Si alguien entra al portafolio a las 4 AM
-ve el mundo dormido, y eso es correcto.
+There is no auto-open, there is no "turn on on demand", there is
+no scale-from-zero per request. If somebody enters the portfolio
+at 4 AM they see the world asleep, and that is correct.
 
-### 5.2 El preflight de VRAM sucia lo hace el CLI
+### 5.2 The dirty-VRAM preflight is done by the CLI
 
-Arrancar el engine con el escritorio ocupando VRAM **recorta el KV
-cache de forma permanente** hasta que se reinicie (35.616 → 27.840
-tokens medidos, −22%), y con eso la concurrencia real a la mitad.
+Starting the engine with the desktop occupying VRAM **cuts the KV
+cache permanently** until it is restarted (35,616 → 27,840 tokens
+MEASURED, −22%), and with it halves the real concurrency.
 
-El chequeo NO va en el cluster: va en el CLI, que corre en la máquina
-del operador, donde `nvidia-smi` existe de verdad. `ai abrir` mira la
-VRAM libre, y si está sucia **se niega** y dice qué proceso la tiene.
-`--force` existe para el que sabe lo que hace.
+The check does NOT go in the cluster: it goes in the CLI, which
+runs on the operator's machine, where `nvidia-smi` really exists.
+`aegis ai open` looks at the free VRAM, and if it is dirty it
+**refuses** and says which process is holding it. `--force` exists
+for whoever knows what they are doing.
 
-Cero complejidad dentro del cluster para un problema que vive afuera.
+Zero complexity inside the cluster for a problem that lives
+outside it.
 
-### 5.2.1 El CLI
+### 5.2.1 The CLI
 
-Vive en `platform/bin/ai` y es lo ÚNICO que enciende. Escribe el
-ConfigMap y nada más: no escala, no toca pods, no le habla al gateway.
+It lives in `libexec/aegis-ai`, is reached as `aegis ai`, and is
+the ONLY thing that turns anything on. It writes the ConfigMap and
+nothing else: it does not scale, it does not touch pods, it does
+not talk to the gateway.
 
 ```
-ai status                  qué está pasando ahora
-ai abrir [--hasta HH:MM]   enciende (chequea la VRAM antes)
-ai demo [minutos]          amplio + TTL, default 60 min, se cierra solo
-ai max [--hasta HH:MM]     amplio sin TTL
-ai cerrar [motivo]         apaga
-ai log [-f] / ai engine-log
+aegis ai status                what is happening right now
+aegis ai open [--until HH:MM]  turns on (checks the VRAM first)
+aegis ai demo [minutes]        wide + TTL, default 60 min, self-closing
+aegis ai max [--until HH:MM]   wide, without a TTL
+aegis ai stop [reason]         turns off
+aegis ai logs [-f] / aegis ai engine-logs
 ```
 
-`--hasta` y el TTL de `demo` escriben el MISMO campo `vence`: un solo
-mecanismo para el vencimiento de una demo y para el cierre programado.
-Evita depender de tzdata, que una imagen `FROM scratch` no tiene.
+`--until` and the `demo` TTL write the SAME `vence` field: one
+single mechanism for a demo's expiry and for a scheduled close. It
+avoids depending on tzdata, which a `FROM scratch` image does not
+have.
 
-### 5.3 El kill switch funciona con el gateway muerto
+### 5.3 The kill switch works with the gateway dead
 
-El CLI escribe el ConfigMap; el controlador escala. El gateway no
-participa. Si el gateway está colgado, `ai cerrar` igual apaga la GPU.
-Y si el controlador también está caído, queda `kubectl scale` — que
-ArgoCD no revierte porque `spec.replicas` está en `ignoreDifferences`.
+The CLI writes the ConfigMap; the controller scales. The gateway
+takes no part. If the gateway is hung, `aegis ai stop` still turns
+the GPU off. And if the controller is down too, `kubectl scale`
+remains — which ArgoCD does not revert, because `spec.replicas` is
+in `ignoreDifferences`.
 
 ---
 
-## 6. El registro de tareas
+## 6. The task registry
 
-Un ConfigMap. Agregar un NPC es **un commit**, cero despliegue de
-código. Esta es la pieza que hace que el segundo proyecto tenga menos
-fricción que el primero.
+One ConfigMap. Adding an NPC is **one commit**, zero code
+deployment. This is the piece that makes the second project less
+friction than the first.
 
 ```yaml
 portafolio.npc.guardian:
   clase: interactive            # interactive | batch | cpu
   engine: llm
-  tenants: [org-portafolio]     # quién puede invocarla
+  tenants: [org-portafolio]     # who may invoke it
   system_prompt_ref: guardian.md
   max_output_tokens: 200
   max_context_tokens: 1500
   max_input_chars: 1000
   temperature: 0.8
   stop: ["\nVisitante:", "</fin>"]
-  peso: 1                       # cuánto descuenta del presupuesto
+  peso: 1                       # how much it draws from the budget
 ```
 
-Reglas del registro:
+Registry rules:
 
-1. **El cliente nunca manda un system prompt.** Manda `tarea` +
-   valores para los huecos. Si la tarea no está en el registro, 404
-   antes de tocar nada caro.
-2. **El prompt vive en el repo, no en el código ni en la base.** Su
-   historial de cambios es el historial de git.
-3. **Nada secreto en un system prompt.** El ConfigMap lo lee cualquiera
-   con lectura del cluster, y el modelo puede recitarlo.
-4. **`tenants` es una lista blanca.** Una key solo invoca las tareas
-   que la nombran.
-
----
-
-## 7. Credenciales y sesiones
-
-### 7.1 API key por proyecto (puerta interna)
-
-Secret de K8s, SOPS. Se guarda el **hash SHA-256**, nunca la key.
-Comparación en tiempo constante y recorrido completo de la lista sin
-cortar en el primer acierto (que el tiempo de respuesta no dependa de
-en qué posición está la key). Rotación: dos keys válidas a la vez
-durante la ventana.
-
-**Por qué SHA-256 pelado y no argon2/bcrypt** (el diseño decía HMAC con
-pepper; al implementar quedó claro que era ceremonia sin beneficio).
-Una API key de aegis no es una contraseña: son 32 bytes de
-`/dev/urandom`, no algo que alguien pueda recordar ni adivinar. Los KDF
-lentos existen para que un diccionario de contraseñas humanas no se
-pruebe entero; contra 256 bits de entropía no hay diccionario que
-probar. Y un hash rápido acá es además un requisito: verificar una key
-en un endpoint sin autenticar tiene que ser barato, o el propio
-verificador es el DoS (§2, corolario 1).
-
-Formato: `aegisk_<proyecto>_<aleatorio>`. El prefijo es deliberado —
-hace que una key filtrada sea **greppeable** por un escáner de
-secretos. Ocultar el formato no protege nada (quien la tiene ya la
-tiene) y sí impide detectar la filtración.
-
-Dónde vive cada mitad: el **hash** en `ai-system/ai-keys`, el **claro**
-en el namespace del proyecto (`org-portafolio/ai-gateway-key`), porque
-rotarla es un acto del proyecto y no de la plataforma.
-
-### 7.2 Ticket con presupuesto (puerta pública, #25)
-
-El navegador **nunca recibe una key**: recibe una **capacidad medida**
-— un ticket firmado, corto (15 min), con presupuesto embebido (20
-respuestas / 6.000 tokens). Robarlo sirve de poco: viene con techo y
-vencimiento. Se emite contra una prueba de humanidad enchufable
-(`none` en v1, `turnstile` desde #25, por bandera del ConfigMap).
-
-Está escrito en v1 pero **apagado**: sin Turnstile, un atacante
-decidido igual consume la cuota (§12.4).
-
-### 7.3 El historial lo guarda el gateway
-
-Si el cliente manda el historial, el cliente controla el costo: un
-script manda 12.000 tokens de "historial" y consume el máximo posible
-por request, además de tirar la concurrencia a 2 (§3.1).
-
-El gateway guarda la conversación por **`(proyecto, TAREA, sesion_id)`**,
-acotada por `max_context_tokens` y con TTL. El cliente manda solo el
-mensaje nuevo. **Es un cap de costo, no una comodidad.**
-
-La **tarea** entró en la clave el 2026-08-03, después de que el humo
-extremo a extremo mostrara a la guía del portafolio recordando lo que
-el visitante le había preguntado al NPC Guardián con el mismo id de
-sesión. Son personajes distintos y cada uno tiene que tener su propia
-memoria. Y además: los caps de contexto son POR TAREA, así que un
-historial compartido dejaba que una tarea de contexto chico heredara el
-historial largo de otra y se pasara de su propio techo — justo el cap
-que compra la concurrencia (§3.1).
-
-`DELETE /v1/sesion/{id}` borra **todas** las conversaciones de ese
-visitante, con todos los personajes: quien pide que lo olviden no está
-pensando en qué tarea invocó cada vez.
-
-Estado en memoria, sin Redis: con una réplica no hay a quién
-compartírselo, y reiniciar pierde contadores — aceptable, porque
-reiniciar también corta el abuso en curso.
+1. **The client never sends a system prompt.** It sends `tarea` +
+   values for the blanks. If the task is not in the registry: 404,
+   before touching anything expensive.
+2. **The prompt lives in the repo, not in the code and not in a
+   database.** Its change history is git's history.
+3. **Nothing secret in a system prompt.** Anyone with read access
+   to the cluster reads the ConfigMap, and the model can recite
+   it.
+4. **`tenants` is an allowlist.** A key only invokes the tasks
+   that name it.
 
 ---
 
-## 8. Guards, capa por capa
+## 7. Credentials and sessions
 
-| Capa | Frena | NO frena |
+### 7.1 One API key per project (internal door)
+
+A K8s Secret, SOPS. What is stored is the **SHA-256 hash**, never
+the key. Constant-time comparison and a full walk of the list
+without short-circuiting on the first hit (so that response time
+does not depend on where in the list the key sits). Rotation: two
+keys valid at once during the window.
+
+**Why bare SHA-256 and not argon2/bcrypt** (the design said HMAC
+with a pepper; on implementing it, it was clear that this was
+ceremony without benefit). An aegis API key is not a password: it
+is 32 bytes out of `/dev/urandom`, not something anyone can
+remember or guess. Slow KDFs exist so that a dictionary of human
+passwords cannot be tried in full; against 256 bits of entropy
+there is no dictionary to try. And a fast hash here is a
+requirement besides: verifying a key on an unauthenticated
+endpoint has to be cheap, or the verifier itself is the DoS (§2,
+corollary 1).
+
+Format: `aegisk_<proyecto>_<aleatorio>`. The prefix is deliberate
+— it makes a leaked key **greppable** by a secret scanner. Hiding
+the format protects nothing (whoever has it already has it) and
+does prevent the leak from being detected.
+
+Where each half lives: the **hash** in `ai-system/ai-keys`, the
+**cleartext** in the project's namespace
+(`org-portafolio/ai-gateway-key`), because rotating it is an act
+of the project and not of the platform.
+
+### 7.2 Budgeted ticket (public door, #25)
+
+The browser **never receives a key**: it receives a **measured
+capability** — a signed, short-lived ticket (15 min) with the
+budget embedded (20 responses / 6,000 tokens). Stealing it is
+worth little: it comes with a ceiling and an expiry. It is issued
+against a pluggable proof of humanity (`none` in v1, `turnstile`
+from #25 on, by a ConfigMap flag).
+
+It is written in v1 but **switched off**: without Turnstile, a
+determined attacker consumes the quota anyway (§12.4).
+
+### 7.3 The gateway is what keeps the history
+
+If the client sends the history, the client controls the cost: a
+script sends 12,000 tokens of "history" and consumes the maximum
+possible per request, on top of dropping the concurrency to 2
+(§3.1).
+
+The gateway keys the conversation by
+**`(proyecto, TAREA, sesion_id)`**, bounded by
+`max_context_tokens` and with a TTL. The client sends only the new
+message. **It is a cost cap, not a convenience.**
+
+The **task** entered the key on 2026-08-03, after the end-to-end
+smoke test showed the portfolio's guide remembering what the
+visitor had asked the Guardian NPC under the same session id. They
+are different characters and each one has to have its own memory.
+And on top of that: the context caps are PER TASK, so a shared
+history let a small-context task inherit another one's long
+history and blow past its own ceiling — precisely the cap that
+buys the concurrency (§3.1).
+
+`DELETE /v1/sesion/{id}` erases **all** of that visitor's
+conversations, with every character: whoever asks to be forgotten
+is not thinking about which task they invoked each time.
+
+State in memory, no Redis: with one replica there is nobody to
+share it with, and restarting loses counters — acceptable, because
+restarting also cuts off the abuse in progress.
+
+---
+
+## 8. Guards, layer by layer
+
+| Layer | Stops | Does NOT stop |
 |---|---|---|
-| Cloudflare (#25) | floods volumétricos, bots conocidos | un atacante paciente y lento |
-| Túnel | todo lo que no venga de CF: no hay puerto abierto | — |
-| Hostname propio | acopla el kill switch de la AI al del sitio | — |
-| Admisión | origen, tamaño de body, content-type, tarea inexistente, ticket vencido | `Origin` forjado por un no-navegador |
-| Presupuestos | granjeo sostenido (moneda = tokens) | el primer minuto de un atacante nuevo |
-| Cola acotada | que un pico degrade a todos | — |
-| Tarea cerrada | uso como LLM genérico | que el NPC diga una barbaridad en personaje |
-| **Modo** | **todo**: réplicas 0, no hay qué abusar | — |
-| K8s | cuota de GPU, PSS restricted, netpol, firma, SA sin token | — |
+| Cloudflare (#25) | volumetric floods, known bots | a patient, slow attacker |
+| Tunnel | anything not coming from CF: there is no open port | — |
+| Its own hostname | the AI's kill switch being tied to the site's | — |
+| Admission | origin, body size, content-type, non-existent task, expired ticket | an `Origin` forged by a non-browser |
+| Budgets | sustained farming (currency = tokens) | a new attacker's first minute |
+| Bounded queue | one spike degrading everybody | — |
+| Closed task | use as a generic LLM | the NPC saying something outrageous, in character |
+| **Mode** | **everything**: 0 replicas, there is nothing to abuse | — |
+| K8s | GPU quota, PSS restricted, netpol, signature, SA without a token | — |
 
-### 8.1 La cola es el arma principal
+### 8.1 The queue is the main weapon
 
-Bajo flood, el comportamiento correcto NO es aguantar: es **rechazar
-rápido**. 4 en vuelo (el óptimo medido), 8 esperando, y todo lo demás
-429 con `Retry-After` inmediato.
+Under a flood the correct behaviour is NOT to endure: it is to
+**reject fast**. 4 in flight (the MEASURED optimum), 8 waiting,
+and everything else 429 with an immediate `Retry-After`.
 
-Una cola sin techo no protege: convierte un pico en un colapso de
-latencia **para los usuarios legítimos**, que es peor que un rechazo
-honesto. La posición en la cola se informa por SSE: el visitante ve
-"3º en la fila", no un spinner mudo.
+An unbounded queue does not protect: it turns a spike into a
+latency collapse **for the legitimate users**, which is worse than
+an honest rejection. Queue position is reported over SSE: the
+visitor sees "3rd in line", not a mute spinner.
 
-### 8.2 Respuesta automática al abuso
+### 8.2 Automatic response to abuse
 
-N×429 o M tokens desde una IP en una ventana → **tempban corto (5–15
-min) en el gateway**. Corto a propósito: los bans largos por IP
-castigan NAT compartidos, universidades y redes móviles. Los bans
-permanentes viven en Cloudflare y los pone un humano.
+N×429 or M tokens from one IP within a window → **a short tempban
+(5–15 min) in the gateway**. Short on purpose: long per-IP bans
+punish shared NATs, universities and mobile networks. Permanent
+bans live in Cloudflare and a human puts them there.
 
-### 8.3 Logs: nunca el contenido
+### 8.3 Logs: never the content
 
-Se registra: tenant, tarea, IP hasheada, tokens in/out, espera en cola,
-duración, veredicto. **Nunca el prompt ni la respuesta.** Con voz
-(#26) esto deja de ser higiene y pasa a ser obligación. Un modo debug
-con TTL y apagado por default es el único camino para ver cuerpos, y
-jamás para audio.
+What is recorded: tenant, task, hashed IP, tokens in/out, queue
+wait, duration, verdict. **Never the prompt and never the
+response.** With voice (#26) this stops being hygiene and becomes
+an obligation. A debug mode with a TTL, off by default, is the
+only path to seeing bodies — and never for audio.
 
 ---
 
-## 9. Presupuestos v1
+## 9. v1 budgets
 
-| Límite | Valor | Por qué ese |
+| Limit | Value | Why that one |
 |---|---|---|
-| En vuelo global | 4 | óptimo medido; 8 degrada latencia sin subir throughput útil |
-| Cola | 8 | ~30 s de espera máxima al ritmo real |
-| Salida por respuesta (NPC) | 200 tok | ~7 s de GPU; es el techo de daño de una inyección |
-| Contexto por conversación | 1.500 tok | compra las 8 secuencias (§3.1) |
-| Entrada del visitante | 1.000 chars | se valida en caracteres: 1000x más barato que tokenizar |
-| Por IP | 600 tok salida/min | ≈5 respuestas/min: holgado para un humano, 10x lento para un script |
-| Por ticket | 20 resp / 6.000 tok / 15 min | después, prueba de humanidad de nuevo |
-| Timeout por request | 30 s | más que eso ya falló |
+| Global in flight | 4 | MEASURED optimum; 8 degrades latency without raising useful throughput |
+| Queue | 8 | ~30 s of maximum wait at the real rate |
+| Output per response (NPC) | 200 tok | ~7 s of GPU; it is the damage ceiling of an injection |
+| Context per conversation | 1,500 tok | buys the 8 sequences (§3.1) |
+| Visitor input | 1,000 chars | validated in characters: 1000x cheaper than tokenizing |
+| Per IP | 600 output tok/min | ≈5 responses/min: roomy for a human, 10x slow for a script |
+| Per ticket | 20 resp / 6,000 tok / 15 min | after that, proof of humanity again |
+| Timeout per request | 30 s | anything longer has already failed |
 
-Referencia para calibrar: el techo absoluto del cluster son ~53
-respuestas de NPC por minuto (6.420 tok/min ÷ ~120 tok). Una IP con
-600 tok/min consume ~9% de la capacidad total.
+Reference for calibration: the cluster's absolute ceiling is ~53
+NPC responses per minute (6,420 tok/min ÷ ~120 tok). One IP at 600
+tok/min consumes ~9% of the total capacity.
 
 ---
 
-## 10. Contrato HTTP
+## 10. HTTP contract
 
-**Puerta pública :8080** — v1
+**Public door :8080** — v1
 
 ```
 GET /status → 200, cacheable 10 s
@@ -424,115 +446,129 @@ GET /status → 200, cacheable 10 s
    engine: apagado | calentando | listo
 ```
 
-Reservado y apagado: `POST /v1/ticket`.
+Reserved and switched off: `POST /v1/ticket`.
 
-**Puerta interna :8081**
+**Internal door :8081**
 
 ```
 POST /v1/tarea
   Authorization: Bearer <key>
-  X-Aegis-Sesion: <id opaco>
-  X-Aegis-Cliente-IP: <ip del visitante final>
+  X-Aegis-Sesion: <opaque id>
+  X-Aegis-Cliente-IP: <ip of the end visitor>
   {"tarea":"portafolio.npc.guardian","entrada":{"mensaje":"..."},"stream":true}
   → text/event-stream  |  application/json
-  → 400 entrada inválida · 401 key · 403 tarea no permitida
-  → 404 tarea inexistente · 413 body · 429 cola/presupuesto (+Retry-After)
-  → 503 modo cerrado o engine no listo
+  → 400 invalid input · 401 key · 403 task not permitted
+  → 404 task does not exist · 413 body · 429 queue/budget (+Retry-After)
+  → 503 mode cerrado, or engine not ready
 
-GET    /v1/estado          estado extendido (cola, presupuestos, engine)
-DELETE /v1/sesion/{id}     olvidar una conversación
+GET    /v1/estado          extended state (queue, budgets, engine)
+DELETE /v1/sesion/{id}     forget a conversation
 ```
 
 ---
 
-## 11. RBAC: el gateway es CIEGO a la API de Kubernetes
+## 11. RBAC: the gateway is BLIND to the Kubernetes API
 
-El gateway es lo único alcanzable desde internet en `ai-system`. Darle
-permiso para escalar Deployments es entregarle a un eventual RCE la
-palanca directa sobre el cluster.
+The gateway is the only thing reachable from the internet in
+`ai-system`. Giving it permission to scale Deployments hands an
+eventual RCE the direct lever over the cluster.
 
-- **gateway**: SA propia, **cero permisos de API**. Lee el modo por
-  volumen montado — el kubelet actualiza los ConfigMaps montados solo,
-  no hace falta ni un `get`. `automountServiceAccountToken: false`.
-- **controlador**: SA propia con Role **namespaced** acotado a
-  `get/list/watch configmaps` y `get/patch deployments/scale` sobre
-  nombres explícitos (`engine-llm`, luego `engine-media`). No escucha
-  en ningún puerto público.
+- **gateway**: its own SA, **zero API permissions**. It reads the
+  mode from a mounted volume — the kubelet refreshes mounted
+  ConfigMaps by itself, not even a `get` is needed.
+  `automountServiceAccountToken: false`.
+- **controller**: its own SA with a **namespaced** Role scoped to
+  `get/list/watch configmaps` and `get/patch deployments/scale`
+  over explicit names (`engine-llm`, later `engine-media`). It
+  listens on no public port.
 
-**Cuidado con la NetworkPolicy del controlador:** necesita egress al
-apiserver, que NO es DNS ni tráfico intra-namespace. Es una regla
-`ipBlock` a la IP del nodo:6443 — y esa IP ya causó un incidente
-(#12, InternalIP fantasma). Va fijada, no descubierta.
-
----
-
-## 12. Lo que NO se defiende (dicho de frente)
-
-1. **La inyección de prompt no se previene, se contiene.** Alguien va
-   a lograr que el NPC rompa personaje. El techo de daño es: 200
-   tokens, en una burbuja de chat, sin herramientas, sin acceso a
-   datos, sin poder mandar nada a ningún lado. Lo peor que pasa es una
-   captura de pantalla incómoda. Blindarlo de verdad pide un
-   clasificador delante y no vale la pena a esta escala.
-2. **`Origin` es higiene, no control.** Un navegador lo respeta; `curl`
-   pone lo que quiera. Sirve para que un sitio ajeno no consuma la
-   cuota desde el navegador de un tercero, nada más.
-3. **La salida del LLM es entrada NO confiable.** Si el front la
-   renderiza como HTML o markdown con links, hay XSS servido por el
-   propio modelo. **Se renderiza como texto plano.** Restricción para
-   #24, escrita acá porque es donde se olvida.
-4. **Sin Turnstile, un atacante decidido consume la cuota.** Los
-   presupuestos por IP lo hacen lento y ruidoso, no imposible. Razón
-   real para no dejar `max` sin vigilancia antes de #25.
-5. **Una réplica es punto único de falla.** Si el gateway muere, la AI
-   del sitio cae y el sitio queda perfecto porque es estático. Esa es
-   exactamente la degradación buscada.
+**Careful with the controller's NetworkPolicy:** it needs egress
+to the apiserver, which is NOT DNS and is not intra-namespace
+traffic. It is an `ipBlock` rule to the node's IP:6443 — and that
+IP has already caused one incident (#12, phantom InternalIP). It
+is pinned, not discovered.
 
 ---
 
-## 13. Modos de falla anticipados
+## 12. What is NOT defended (said to your face)
 
-Se anotan ANTES de que pasen; los que efectivamente muerdan se
-promueven a `docs/failure-modes.md` con su clase.
-
-- **traefik bufferea SSE.** Necesita `flushInterval: -1`. Sin eso el
-  streaming llega en un bloque al final y parece que no anda nada.
-- **cloudflared corta streams largos** por timeout. Se fija junto al
-  hostname, en tofu.
-- **`/status` como vector de DoS**: lo pega cada carga de página. Tiene
-  que ser trivial, no tocar el engine, y cachearse ~10 s en CF.
-- **El estado por defecto del front ante CUALQUIER error es
-  "dormido"**, jamás un spinner. Gateway sin responder = mundo cerrado,
-  no roto.
-- **Modo abierto con engine frío = 62 s.** `/status` distingue
-  `apagado`/`calentando`/`listo` para que la isla no mienta.
-- **Prefijo invalidado** (§3.3): no falla nada, solo se pone 40x más
-  lento el TTFT. Solo se detecta midiendo.
-
----
-
-## 14. Huecos previstos
-
-- **#25 Cloudflare**: enciende `/v1/ticket` + Turnstile por bandera;
-  WAF y rate rules sobre `ai.__ROOT_DOMAIN__`; cache de `/status`.
-- **#26 carril CPU**: `engine-cpu` (whisper, embeddings) NUNCA toca la
-  GPU. Subir archivos es otra clase de amenaza — bombas de
-  descompresión, CVEs de ffmpeg. La puerta se diseña ahora: cap de 1 MB
-  / 30 s, sniffing del tipo REAL (no el declarado), cuota en **segundos
-  de audio** y no en requests, transcodificado en un pod sin red.
-- **engine-media** (imagen, música): excluyente con `engine-llm` por la
-  cuota de GPU (bajar uno ANTES de subir el otro). Pre-generación en
-  lote a Garage; jamás bajo demanda para un anónimo.
-- **#27 detección**: los logs por request de §8.3 son la materia prima.
+1. **Prompt injection is not prevented, it is contained.**
+   Somebody is going to get the NPC to break character. The damage
+   ceiling is: 200 tokens, in a chat bubble, with no tools, no
+   access to data, unable to send anything anywhere. The worst
+   that happens is an awkward screenshot. Armouring it for real
+   asks for a classifier in front, and it is not worth it at this
+   scale.
+2. **`Origin` is hygiene, not control.** A browser honours it;
+   `curl` puts whatever it likes. It is good for keeping somebody
+   else's site from consuming the quota out of a third party's
+   browser, nothing more.
+3. **The LLM's output is UNTRUSTED input.** If the front end
+   renders it as HTML, or as markdown with links, there is XSS
+   served by the model itself. **It is rendered as plain text.** A
+   constraint for #24, written here because this is where it gets
+   forgotten.
+4. **Without Turnstile, a determined attacker consumes the
+   quota.** The per-IP budgets make it slow and noisy, not
+   impossible. The real reason not to leave `max` unwatched before
+   #25.
+5. **One replica is a single point of failure.** If the gateway
+   dies, the site's AI goes down and the site stays perfect,
+   because it is static. That is exactly the degradation being
+   aimed for.
 
 ---
 
-## 15. Invariantes (candidatos a check que muerda)
+## 13. Anticipated failure modes
 
-1. No existe ningún endpoint que acepte un system prompt del cliente.
-2. La SA del gateway no tiene ningún permiso de API de K8s.
-3. `spec.replicas` de los engines está en `ignoreDifferences` de la App.
-4. Ninguna tarea del registro carece de `max_output_tokens`.
-5. El gateway tiene exactamente 1 réplica declarada.
-6. Ningún log de producción contiene cuerpos de request.
-7. La cuota `requests.nvidia.com/gpu` del namespace sigue siendo 1.
+They are written down BEFORE they happen; the ones that actually
+bite get promoted to `docs/failure-modes.md` with their class.
+
+- **traefik buffers SSE.** It needs `flushInterval: -1`. Without
+  that, the stream arrives as one block at the end and it looks
+  like nothing works.
+- **cloudflared cuts long streams** on timeout. It is set
+  alongside the hostname, in tofu.
+- **`/status` as a DoS vector**: every page load hits it. It has
+  to be trivial, it must not touch the engine, and it must be
+  cached ~10 s at CF.
+- **The front end's default state on ANY error is "asleep"**,
+  never a spinner. A gateway that does not answer = a closed
+  world, not a broken one.
+- **Mode `abierto` with a cold engine = 62 s.** `/status`
+  distinguishes `apagado`/`calentando`/`listo` so that the island
+  does not lie.
+- **Invalidated prefix** (§3.3): nothing fails, TTFT just gets 40x
+  slower. It is only detected by measuring.
+
+---
+
+## 14. Planned gaps
+
+- **#25 Cloudflare**: turns on `/v1/ticket` + Turnstile by flag;
+  WAF and rate rules over `ai.__ROOT_DOMAIN__`; caching of
+  `/status`.
+- **#26 CPU lane**: `engine-cpu` (whisper, embeddings) NEVER
+  touches the GPU. Uploading files is another class of threat —
+  decompression bombs, ffmpeg CVEs. The door is designed now: a
+  cap of 1 MB / 30 s, sniffing of the REAL type (not the declared
+  one), quota in **seconds of audio** and not in requests,
+  transcoding in a pod with no network.
+- **engine-media** (image, music): mutually exclusive with
+  `engine-llm` because of the GPU quota (bring one down BEFORE
+  bringing the other up). Batch pre-generation into Garage; never
+  on demand for an anonymous visitor.
+- **#27 detection**: the per-request logs of §8.3 are the raw
+  material.
+
+---
+
+## 15. Invariants (candidates for a check with teeth)
+
+1. There is no endpoint that accepts a system prompt from the client.
+2. The gateway's SA has no K8s API permission at all.
+3. The engines' `spec.replicas` is in the App's `ignoreDifferences`.
+4. No task in the registry lacks `max_output_tokens`.
+5. The gateway has exactly 1 declared replica.
+6. No production log contains request bodies.
+7. The namespace's `requests.nvidia.com/gpu` quota is still 1.

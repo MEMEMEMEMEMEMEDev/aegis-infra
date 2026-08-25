@@ -1,26 +1,27 @@
-# vps/ — el VPS de laboratorio
+# vps/ — the laboratory VPS
 
-**Qué es**: la definición reproducible de la máquina de laboratorio
-del operador — un VPS chico que nace por cloud-init con sshd en
-loopback, cero puertos públicos, y cloudflared + Cloudflare Access
-como único camino de entrada. Es el banco de pruebas del init
-(etapa D del plan de reconstrucción) y la máquina de desarrollo de
-la semilla v3: los agentes entran por Access, iteran ahí, y la
-instancia de casa no corre riesgo.
+**What it is**: the reproducible definition of the operator's
+laboratory machine — a small VPS that is born from cloud-init with
+sshd on loopback, zero public ports, and cloudflared + Cloudflare
+Access as the only way in. It is the test bench for the init (stage D
+of the rebuild plan) and the development machine for the v3 seed: the
+agents come in through Access, iterate there, and the home instance is
+never at risk.
 
-**Qué NO es**: no es el perfil `hetzner`, no es una instancia de
-aegis, y no es infraestructura de la plataforma — `aegis destroy` no
-lo toca. El init NO corre acá hasta que el lab tenga dominio o zona
-propios (los CNAMEs de la fase 25 chocarían con el cluster casero;
-ver `docs/protocols/vps-lab.md`).
+**What it is NOT**: it is not the `hetzner` profile, it is not an
+aegis instance, and it is not platform infrastructure — `aegis
+destroy` does not touch it. The init does NOT run here until the lab
+has a domain or a zone of its own (the phase 25 CNAMEs would collide
+with the home cluster; see `docs/protocols/vps-lab.md`).
 
-Piezas:
+Pieces:
 
-- `clouding-lab.cloud-init.yaml.tpl` — el user-data con placeholders;
-  lo renderiza `bin/aegis-vps render` a `/dev/shm` (el token del
-  túnel jamás toca el disco).
-- `../tofu/envs/vps-lab/` — túnel `aegis-lab-admin` + CNAME
-  `ssh-lab` + app de Access. Se aplica con el wrapper, como todo.
+- `clouding-lab.cloud-init.yaml.tpl` — the user-data with
+  placeholders; `bin/aegis-vps render` renders it into `/dev/shm` (the
+  tunnel token never touches disk).
+- `../tofu/envs/vps-lab/` — the `aegis-lab-admin` tunnel + the
+  `ssh-lab` CNAME + the Access app. Applied with the wrapper, like
+  everything else.
 - `../bin/aegis-vps` — render | entregar | shred.
-- `../docs/protocols/vps-lab.md` — el protocolo entero: excepción
-  D11, rescate, break-glass, rotación, deriva conocida.
+- `../docs/protocols/vps-lab.md` — the whole protocol: the D11
+  exception, rescue, break-glass, rotation, known drift.

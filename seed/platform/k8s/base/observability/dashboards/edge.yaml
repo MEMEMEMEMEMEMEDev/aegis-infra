@@ -1,6 +1,6 @@
-# Dashboard «borde» — design.md §4.4: Traefik RPS/códigos/latencia.
-# Provisionado DESDE GIT via sidecar (label grafana_dashboard —
-# design.md §4.1: ninguno nace a click; editable:false en el JSON).
+# «edge» dashboard — design.md §4.4: Traefik RPS/codes/latency.
+# Provisioned FROM GIT via the sidecar (grafana_dashboard label —
+# design.md §4.1: none is born by clicking; editable:false in the JSON).
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -14,8 +14,8 @@ data:
   borde.json: |
     {
       "uid": "aegis-edge",
-      "title": "Aegis · borde",
-      "description": "El borde visto desde adentro: RPS, códigos y latencia por entrypoint de Traefik.",
+      "title": "Aegis · edge",
+      "description": "The edge seen from inside: RPS, codes and latency per Traefik entrypoint.",
       "schemaVersion": 39,
       "editable": false,
       "timezone": "browser",
@@ -30,7 +30,7 @@ data:
       "panels": [
         {
           "id": 1,
-          "title": "RPS por código (entrypoint web)",
+          "title": "RPS by code (entrypoint web)",
           "type": "timeseries",
           "datasource": {
             "type": "prometheus",
@@ -62,7 +62,7 @@ data:
         },
         {
           "id": 2,
-          "title": "Latencia p95 (entrypoint web)",
+          "title": "p95 latency (entrypoint web)",
           "type": "timeseries",
           "datasource": {
             "type": "prometheus",
@@ -94,7 +94,7 @@ data:
         },
         {
           "id": 3,
-          "title": "4xx/5xx por servicio",
+          "title": "4xx/5xx by service",
           "type": "timeseries",
           "datasource": {
             "type": "prometheus",

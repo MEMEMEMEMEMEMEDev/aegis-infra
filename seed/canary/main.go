@@ -1,6 +1,6 @@
-// hello-aegis v2 — canary mínimo de la plataforma. Su único
-// propósito es ejercitar el camino completo: build → scan → push →
-// sign → deploy → write-back. REPO DESECHABLE.
+// hello-aegis v2 — the platform's minimal canary. Its only purpose is
+// to exercise the complete path: build → scan → push → sign → deploy
+// → write-back. DISPOSABLE REPO.
 package main
 
 import (

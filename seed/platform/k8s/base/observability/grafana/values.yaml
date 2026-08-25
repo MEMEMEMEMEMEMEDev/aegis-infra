@@ -1,26 +1,26 @@
-# values grafana 10.5.15 — el visor, provisionado 100% DESDE GIT
-# (design.md §4.1): datasources por provisioning, dashboards por
-# sidecar leyendo ConfigMaps del repo. NADA a click.
+# grafana 10.5.15 values — the viewer, provisioned 100% FROM GIT
+# (design.md §4.1): datasources by provisioning, dashboards by a
+# sidecar reading ConfigMaps out of the repo. NOTHING by clicking.
 fullnameOverride: grafana       # Service = `grafana` :80
 
-# SIN persistence, y es LA decisión (design.md §4.1): un dashboard
-# clickeado sería un huérfano invisible — no está en git, no lo
-# evalúa ArgoCD, muere con el pod. Sin PVC no hay dónde acumular
-# estado-a-click: la restricción como mecanismo, no como regla de
-# conducta.
+# NO persistence, and it is THE decision (design.md §4.1): a clicked
+# dashboard would be an invisible orphan — not in git, not evaluated
+# by ArgoCD, dead with the pod. With no PVC there is nowhere to pile
+# up click-state: the constraint as a mechanism, not as a rule of
+# conduct.
 persistence:
   enabled: false
 
 admin:
-  existingSecret: grafana-admin  # KSOPS (lo cifra la fase 85; keys
-  # admin-user/admin-password — el default del chart). Grafana queda
-  # tras Access PERO conserva su login: Access es la puerta, no la
-  # única cerradura (fase-85 §3).
+  existingSecret: grafana-admin  # KSOPS (phase 85 encrypts it; keys
+  # admin-user/admin-password — the chart's default). Grafana sits
+  # behind Access BUT keeps its login: Access is the door, not the
+  # only lock (phase-85 §3).
 
-# el datasource de VictoriaLogs es un plugin de Grafana; se baja al
-# arrancar el pod (egress a grafana.com — mismo trato que los
-# installPlugins de Jenkins). verificado 2026-08-19 contra
-# grafana.com/api/plugins: victoriametrics-logs-datasource, activo:
+# the VictoriaLogs datasource is a Grafana plugin; it comes down when
+# the pod starts (egress to grafana.com — same treatment as Jenkins'
+# installPlugins). verified 2026-08-19 against
+# grafana.com/api/plugins: victoriametrics-logs-datasource, active:
 plugins:
   - victoriametrics-logs-datasource
 
@@ -39,7 +39,7 @@ datasources:
         type: victoriametrics-logs-datasource
         access: proxy
         url: http://vlogs.observability.svc:9428
-      - name: VictoriaLogs eventos
+      - name: VictoriaLogs events
         uid: vlogs-events
         type: victoriametrics-logs-datasource
         access: proxy
@@ -48,14 +48,14 @@ datasources:
 sidecar:
   dashboards:
     enabled: true
-    label: grafana_dashboard    # los 4 ConfigMaps de dashboards/
+    label: grafana_dashboard    # the ConfigMaps in dashboards/
     searchNamespace: observability
   resources:
     requests: {cpu: 25m, memory: 32Mi}
     limits: {cpu: 100m, memory: 128Mi}
 
 testFramework:
-  enabled: false                # sin pod de test: superficie sin uso
+  enabled: false                # no test pod: surface with no use
 
 grafana.ini:
   server:
@@ -64,6 +64,6 @@ grafana.ini:
     reporting_enabled: false
     check_for_updates: false
 
-resources:                      # fase-85 §10
+resources:                      # phase-85 §10
   requests: {cpu: 100m, memory: 128Mi}
   limits: {cpu: 500m, memory: 512Mi}

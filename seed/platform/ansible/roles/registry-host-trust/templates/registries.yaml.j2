@@ -1,7 +1,7 @@
-# /etc/rancher/k3s/registries.yaml — mirror del registry interno.
-# ClusterIP FIJA ({{ registry_cluster_ip }}) pareada con el SAN
-# ipAddresses del cert (A24/A30). Renderizado por Ansible; no editar
-# a mano.
+# /etc/rancher/k3s/registries.yaml — mirror of the internal registry.
+# FIXED ClusterIP ({{ registry_cluster_ip }}) paired with the
+# ipAddresses SAN of the cert (A24/A30). Rendered by Ansible; do not
+# edit by hand.
 mirrors:
   "registry.registry-system.svc.cluster.local:{{ registry_port }}":
     endpoint:

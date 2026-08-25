@@ -1,8 +1,8 @@
-# Dashboard «bootstrap» — la pregunta de design.md §1 capa 1
-# («¿dónde se atasca un bootstrap?») respondida en pantalla, sobre el
-# gates.jsonl que la fase 85 ingesta a vlogs-events.
-# Provisionado DESDE GIT via sidecar (label grafana_dashboard —
-# design.md §4.1: ninguno nace a click; editable:false en el JSON).
+# «bootstrap» dashboard — the question of design.md §1 layer 1
+# («where does a bootstrap get stuck?») answered on screen, over the
+# gates.jsonl that phase 85 ingests into vlogs-events.
+# Provisioned FROM GIT via the sidecar (grafana_dashboard label —
+# design.md §4.1: none is born by clicking; editable:false in the JSON).
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -17,7 +17,7 @@ data:
     {
       "uid": "aegis-bootstrap",
       "title": "Aegis · bootstrap",
-      "description": "Capa 1 de design.md §1: el bootstrap mismo como sistema observado.",
+      "description": "Layer 1 of design.md §1: the bootstrap itself as an observed system.",
       "schemaVersion": 39,
       "editable": false,
       "timezone": "browser",
@@ -32,7 +32,7 @@ data:
       "panels": [
         {
           "id": 1,
-          "title": "Gates de las corridas del init (gates.jsonl)",
+          "title": "Gates of the init runs (gates.jsonl)",
           "type": "logs",
           "datasource": {
             "type": "victoriametrics-logs-datasource",
@@ -58,11 +58,11 @@ data:
             "defaults": {},
             "overrides": []
           },
-          "description": "La historia completa de los bootstraps: cada línea es un gate con ts, fase, resultado y duración. Responde «¿dónde se atascó el último bootstrap?»."
+          "description": "The full history of the bootstraps: every line is a gate with ts, phase, result and duration. It answers «where did the last bootstrap get stuck?»."
         },
         {
           "id": 2,
-          "title": "Gates FALLADOS (todas las corridas)",
+          "title": "FAILED gates (all runs)",
           "type": "logs",
           "datasource": {
             "type": "victoriametrics-logs-datasource",
@@ -91,7 +91,7 @@ data:
         },
         {
           "id": 3,
-          "title": "Eventos ingestados por día",
+          "title": "Events ingested per day",
           "type": "timeseries",
           "datasource": {
             "type": "victoriametrics-logs-datasource",
@@ -106,7 +106,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "_stream: {source=\"aegis-init\"} | stats by (_time:1d) count() filas",
+              "expr": "_stream: {source=\"aegis-init\"} | stats by (_time:1d) count() rows",
               "datasource": {
                 "type": "victoriametrics-logs-datasource",
                 "uid": "vlogs-events"

@@ -1,21 +1,21 @@
-# Exposición de grafana y ntfy — en observability-base (patrón
-# argocd: la exposición vive junto al expuesto; fase-85 §5). Los
-# hostnames los declara edge.yaml (`platform:`) y de ahí DERIVA
-# tofu los CNAMEs y el ingress del túnel — nadie edita main.tf a
-# mano (la lección de ai.__ROOT_DOMAIN__).
+# Exposure of grafana and ntfy — in observability-base (the argocd
+# pattern: the exposure lives next to what it exposes; phase-85 §5).
+# The hostnames are declared by edge.yaml (`platform:`) and from
+# there tofu DERIVES the CNAMEs and the tunnel ingress — nobody edits
+# main.tf by hand (the lesson of ai.__ROOT_DOMAIN__).
 #
-# - grafana: SIN middlewares de tenant — va TRAS Access (como
-#   argocd/jenkins hoy), y conserva su login propio: Access es la
-#   puerta, no la única cerradura (fase-85 §3).
-# - ntfy: SIN Access (la app del teléfono no puede presentar service
-#   token ni pasar el login de Access; su cerradura es el deny-all
-#   propio — ntfy.yaml). Por ser la primera ruta pública de
-#   plataforma sin Access delante, lleva los TRES middlewares del
-#   borde (#81/#90), copiados BYTE A BYTE de los que emite
-#   `aegis-org` (render_routes) — como hace el canario. El check 91
-#   hoy solo barre platform/k8s/organizations/; extenderlo a
-#   observability es parte de B4 (fase-85 §5) para que esta copia
-#   sin comparador no se desincronice.
+# - grafana: NO tenant middlewares — it goes BEHIND Access (like
+#   argocd/jenkins today), and keeps its own login: Access is the
+#   door, not the only lock (phase-85 §3).
+# - ntfy: NO Access (the phone app can present neither a service
+#   token nor get through the Access login; its lock is its own
+#   deny-all — ntfy.yaml). Being the first public platform route
+#   with no Access in front, it carries the THREE edge middlewares
+#   (#81/#90), copied BYTE FOR BYTE from the ones `aegis-org` emits
+#   (render_routes) — the way the canary does. Check 91 today only
+#   sweeps platform/k8s/organizations/; extending it to observability
+#   is part of B4 (phase-85 §5) so that this copy with no comparator
+#   does not drift out of sync.
 ---
 apiVersion: traefik.io/v1alpha1
 kind: Middleware

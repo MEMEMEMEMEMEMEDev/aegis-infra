@@ -1,21 +1,21 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# SIN ingressroute.yaml, y no es un olvido (#54).
+# NO ingressroute.yaml, and it is not an oversight (#54).
 #
-# La ruta del canario la pone ahora la PLATAFORMA, en
-# k8s/organizations/org-canary/routes.yaml. Este repo ya no puede
-# escribirla: IngressRoute está en el namespaceResourceBlacklist de
+# The canary's route is now placed by the PLATFORM, in
+# k8s/organizations/org-canary/routes.yaml. This repo can no longer
+# write it: IngressRoute is in the namespaceResourceBlacklist of
 # aegis-tenant-canary.
 #
-# El motivo: un AppProject filtra por *kind* y jamás por el valor de un
-# campo, así que no hay forma de decir "IngressRoutes sí, pero solo con
-# TU Host". Mientras un inquilino pudiera crear una, podía reclamar el
-# hostname del vecino — medido el 2026-08-06 sobre la instancia, y el
-# ladrón ganaba. La única forma de acotarlo por kind es que el kind no
-# le pertenezca a nadie de este lado.
+# The reason: an AppProject filters by *kind* and never by the value of
+# a field, so there is no way to say "IngressRoutes yes, but only with
+# YOUR Host". As long as a tenant could create one, it could claim the
+# neighbor's hostname — measured on 2026-08-06 against the instance, and
+# the thief won. The only way to bound it by kind is for the kind to
+# belong to nobody on this side.
 #
-# Al canario le toca igual que a los demás A PROPÓSITO. Es la prueba de
-# que el camino del inquilino funciona; si se lo exceptuara de los
-# controles, dejaría de probar el camino que de verdad recorren.
+# The canary gets the same treatment as everybody else ON PURPOSE. It is
+# the proof that the tenant's path works; if it were exempted from the
+# controls, it would stop testing the path they really walk.
 resources:
   - deployment.yaml

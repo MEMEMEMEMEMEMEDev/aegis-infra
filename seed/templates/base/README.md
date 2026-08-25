@@ -1,44 +1,47 @@
-# Plantilla `base` — un servicio HTTP pelado
+# Template `base` — a bare HTTP service
 
-La mínima que compila y despliega (journeys/design.md §4). Existe para
-que `aegis-app nueva <org> --plantilla base` te deje, en una corrida y
-sin tocar el mundo, todo lo que el camino artesano escribe a mano.
+The smallest one that compiles and deploys (journeys/design.md §4). It
+exists so that `aegis app new <org> --template base` leaves you, in one
+run and without touching the world, everything the artisan path writes
+by hand.
 
-## Qué levanta
+## What it stands up
 
-| pieza | de dónde sale |
+| piece | where it comes from |
 |---|---|
-| `orgs/<org>.yaml` | `contract.yaml.tpl`, con `__ORG__`/`__DOMINIO__`/`__REPO__` resueltos |
-| `.aegis-app/<org>/app/` | `repos/app/` — el esqueleto del repo de la app |
-| manifiestos de `k8s/organizations/org-<org>/` + jobs + borde | NO son de esta plantilla: los deriva `bin/aegis-org` DEL CONTRATO |
-| secretos `.enc.yaml` | tampoco: los crea `aegis secret create` |
+| `orgs/<org>.yaml` | `contract.yaml.tpl`, with `__ORG__`/`__DOMINIO__`/`__REPO__` resolved |
+| `.aegis-app/<org>/app/` | `repos/app/` — the skeleton of the app's repo |
+| manifests of `k8s/organizations/org-<org>/` + jobs + edge | NOT from this template: `aegis org` derives them FROM THE CONTRACT |
+| `.enc.yaml` secrets | not those either: `aegis secret create` creates them |
 
-El esqueleto es Go con **cero dependencias externas** a propósito
-(caminos §5, presupuesto de podredumbre): un árbol de dependencias
-vacío no puede pudrirse. Trae `main.go` + `go.mod`, `Containerfile`
-no-root (PSS restricted), `k8s/base/` + `k8s/overlays/dev/` con el
-digest-marcador que el pipeline reescribe, y `ci/write-digest.mjs`
-(copiado del canónico en `docs/protocols/templates/`). El `Jenkinsfile`
-**no** vive acá: lo instancia `aegis-org` desde el template canónico al
-mismo staging (caminos §2b) — un solo template, cero CHANGEME copiados.
+The skeleton is Go with **zero external dependencies** on purpose
+(journeys §5, rot budget): an empty dependency tree cannot rot. It
+brings `main.go` + `go.mod`, a non-root `Containerfile` (PSS
+restricted), `k8s/base/` + `k8s/overlays/dev/` with the digest marker
+the pipeline rewrites, and `ci/write-digest.mjs` (copied from the
+canonical one in `docs/protocols/templates/`). The `Jenkinsfile` does
+**not** live here: `aegis org` instantiates it from the canonical
+template into the same staging area (journeys §2b) — one single
+template, zero copied CHANGEMEs.
 
-## Que se evapora tras instanciar
+## What evaporates once instantiated
 
-La plantilla genera el contrato y el código inicial y **desaparece de
-tu vida** (caminos §0.3): nada de lo generado recuerda de dónde vino ni
-vuelve a leerla. No hay "upgrade de plantilla", no sos "una app base":
-sos un artesano con un contrato y un repo, igual que quien los escribió
-a mano. Editar esta carpeta no cambia ninguna organización ya creada.
+The template generates the contract and the initial code and
+**disappears from your life** (journeys §0.3): nothing it generated
+remembers where it came from, nor ever reads it again. There is no
+"template upgrade", you are not "a base app": you are an artisan with a
+contract and a repo, just like whoever wrote them by hand. Editing this
+folder changes no organization already created.
 
-## Cómo se personaliza después (el camino artesano)
+## How it is customized afterwards (the artisan path)
 
-Editando **el contrato**, que es la única verdad, y reaplicando:
+By editing **the contract**, which is the only truth, and reapplying:
 
-    $EDITOR orgs/<org>.yaml          # sumar postgres, bucket, ai, otro servicio…
-    bin/aegis-org aplicar orgs/<org>.yaml
-    aegis secret create orgs/<org>.yaml   # si aparecieron secretos nuevos
+    $EDITOR orgs/<org>.yaml          # add postgres, bucket, ai, another service…
+    aegis org apply orgs/<org>.yaml
+    aegis secret create orgs/<org>.yaml   # if new secrets appeared
 
-(`bin/aegis-app nueva <org>` sin `--plantilla` corre exactamente esos
-dos pasos por vos.) El código de la app se personaliza en SU repo, como
-cualquier repo: la referencia viva de un camino más completo —dos
-imágenes, base, bucket, AI— es `ejemplo-app` (orgs/ejemplo.yaml).
+(`aegis app new <org>` without `--template` runs exactly those two
+steps for you.) The app's code is customized in ITS repo, like any
+other repo: the living reference for a fuller path —two images,
+database, bucket, AI— is `ejemplo-app` (orgs/ejemplo.yaml).

@@ -1,32 +1,32 @@
-# Nota A17 (HCL): descriptions sin interpolación $${} problemática.
+# Note A17 (HCL): descriptions with no problematic $${} interpolation.
 variable "cloudflare_api_token" {
-  description = "Token CF con Account:Cloudflare Tunnel:Edit + Zone:DNS:Edit. Inyectado por el wrapper (TF_VAR). Sin default: sin wrapper el plan ABORTA en vez de planear destroys fantasma (A14)."
+  description = "CF token with Account:Cloudflare Tunnel:Edit + Zone:DNS:Edit. Injected by the wrapper (TF_VAR). No default: without the wrapper the plan ABORTS instead of planning phantom destroys (A14)."
   type        = string
   sensitive   = true
 }
 
 variable "cloudflare_account_id" {
-  description = "ID de cuenta (publico, T1). Inyectado por el wrapper desde aegis-init.conf (corrida #4: sin esto, tofu lo pedia interactivo)."
+  description = "Account ID (public, T1). Injected by the wrapper from aegis-init.conf (run #4: without this, tofu asked for it interactively)."
   type        = string
 }
 
 variable "cloudflare_zone_id" {
-  description = "ID de la zona del dominio raiz (publico, T1)"
+  description = "ID of the root domain's zone (public, T1)"
   type        = string
 }
 
 variable "root_domain" {
-  description = "Dominio raiz (ADR-0005: la UNICA fuente del valor)"
+  description = "Root domain (ADR-0005: the ONLY source of the value)"
   type        = string
 }
 
 variable "operador_email" {
-  description = "Mail del operador que puede entrar a argocd/jenkins por Access (#76). Inyectado por el wrapper desde ACME_EMAIL de aegis-init.conf: es el mismo humano y no hay razon para tener dos fuentes."
+  description = "Mail of the operator who may enter argocd/jenkins through Access (#76). Injected by the wrapper from ACME_EMAIL in aegis-init.conf: it is the same human and there is no reason to keep two sources."
   type        = string
 }
 
 variable "cloudflare_access_token" {
-  description = "Token CF acotado a Access (Apps and Policies + Service Tokens, Write). SEPARADO del api_token a proposito (#76): el job edge-apply recibe solo el del borde, asi que un CI comprometido no puede desactivar Access. Medido 2026-08-12: este token da 403 al crear tunel y al crear DNS."
+  description = "CF token scoped to Access (Apps and Policies + Service Tokens, Write). SEPARATE from api_token on purpose (#76): the edge-apply job receives only the edge one, so a compromised CI cannot disable Access. Measured 2026-08-12: this token returns 403 when creating a tunnel and when creating DNS."
   type        = string
   sensitive   = true
 }

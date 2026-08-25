@@ -1,28 +1,29 @@
 #cloud-config
-# clouding-lab.cloud-init.yaml.tpl — el VPS de laboratorio NACE así,
-# o no nació: sshd solo en loopback, cero puertos públicos, cloudflared
-# como único camino de entrada (Access con OTP delante). La causa raíz
-# del archivo del 2026-08-22 era «hay un 22 público»; acá el 22 público
-# no existe desde el primer boot.
+# clouding-lab.cloud-init.yaml.tpl — the laboratory VPS is BORN this
+# way, or it was not born at all: sshd on loopback only, zero public
+# ports, cloudflared as the only way in (Access with OTP in front of
+# it). The root cause in the record of 2026-08-22 was «there is a
+# public port 22»; here that public port does not exist from the very
+# first boot.
 #
-# Placeholders (dueño: bin/aegis-vps render — check 3):
-#   __SSH_PUBKEY_RSA__      ~/.ssh/aegis_vps_rsa.pub (el form de
-#                           Clouding solo acepta prefijo ssh-rsa)
+# Placeholders (owner: bin/aegis-vps render — check 3):
+#   __SSH_PUBKEY_RSA__      ~/.ssh/aegis_vps_rsa.pub (the Clouding
+#                           form only accepts the ssh-rsa prefix)
 #   __SSH_PUBKEY_ED25519__  ~/.ssh/aegis_vps.pub
-#   __CF_TUNNEL_TOKEN__     output sensitive del env vps-lab; entra
-#                           por render a /dev/shm y muere con shred.
-#                           El runcmd final borra la copia que
-#                           cloud-init deja en disco.
+#   __CF_TUNNEL_TOKEN__     sensitive output of the vps-lab env; it
+#                           comes in through render into /dev/shm and
+#                           dies with shred. The final runcmd deletes
+#                           the copy cloud-init leaves on disk.
 #
-# Sin herramienta de baneos por IP: con sshd en loopback todo llega
-# desde 127.0.0.1 y un baneador banearía al loopback. Access filtra
-# ANTES de que el paquete exista.
+# No per-IP banning tool: with sshd on loopback everything arrives from
+# 127.0.0.1 and such a tool would end up banning the loopback. Access
+# filters BEFORE the packet exists.
 hostname: aegis-vps
 users:
   - name: aegis
     groups: [sudo]
     shell: /bin/bash
-    sudo: "ALL=(ALL) NOPASSWD:ALL" # gate del preflight (ansible sin become-pass)
+    sudo: "ALL=(ALL) NOPASSWD:ALL" # preflight gate (ansible without become-pass)
     lock_passwd: true
     ssh_authorized_keys:
       - "__SSH_PUBKEY_RSA__"
@@ -53,11 +54,12 @@ write_files:
       Unattended-Upgrade::Automatic-Reboot "true";
       Unattended-Upgrade::Automatic-Reboot-Time "04:30";
 
-# El orden importa: primero el keyring y cloudflared (mientras el 22
-# aún no recibió a nadie: la máquina recién nace y ufw todavía no
-# levantó), después el cierre, al final el túnel. Si cloudflared no
-# instala, la máquina queda cerrada e inaccesible por diseño — se
-# destruye y se recrea, que es el punto de nacer por cloud-init.
+# The order matters: first the keyring and cloudflared (while port 22
+# has not yet received anybody: the machine is newly born and ufw has
+# not come up yet), then the lockdown, and the tunnel last. If
+# cloudflared does not install, the machine is left closed and
+# unreachable by design — it gets destroyed and recreated, which is the
+# whole point of being born from cloud-init.
 runcmd:
   - curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /usr/share/keyrings/cloudflare-main.gpg
   - apt-get update

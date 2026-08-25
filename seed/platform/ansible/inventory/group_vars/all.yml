@@ -1,63 +1,64 @@
-# Pins CON CONSUMIDOR DE CÓDIGO en este archivo; nada más (A12:
-# literales, no channels; A42: el scan de Trivy vigila el
-# envejecimiento — bumpear LÍNEAS soportadas).
+# Pins WITH A CODE CONSUMER in this file; nothing else (A12:
+# literals, not channels; A42: the Trivy scan watches for
+# ageing — bump SUPPORTED LINES).
 #
-# REGLA DE FUENTE ÚNICA (sin espejos): cada pin vive SOLO donde se
-# consume. Acá: k3s (install-k3s.yml), userland (fase 05), cilium
-# (fase 20 hetzner). Los pines de CHARTS viven en los Application
-# de k8s/argocd-apps/*.yaml — el manifest que ArgoCD aplica es la
-# fuente; la fase 30 DERIVA de core.yaml el contrato completo de
-# argocd (chart+versión+release+values). Los pines de IMÁGENES
-# viven en el manifest/Containerfile/Jenkinsfile consumidor.
-# Un bloque "resumen de pines" acá sería un espejo sin consumidor:
-# drift garantizado (la lección del pin duplicado de argocd).
-# Índice de pines: grep -rn 'targetRevision\|image:' plataforma.
+# SINGLE-SOURCE RULE (no mirrors): every pin lives ONLY where it is
+# consumed. Here: k3s (install-k3s.yml), userland (phase 05), cilium
+# (phase 20 hetzner). CHART pins live in the Application objects
+# under k8s/argocd-apps/*.yaml — the manifest ArgoCD applies is the
+# source; phase 30 DERIVES from core.yaml the complete argocd
+# contract (chart+version+release+values). IMAGE pins live in the
+# consuming manifest/Containerfile/Jenkinsfile.
+# A "pin summary" block here would be a mirror with no consumer:
+# guaranteed drift (the lesson of the duplicated argocd pin).
+# Pin index: grep -rn 'targetRevision\|image:' across the platform.
 
 k3s_version: "v1.35.4+k3s1"
 
 userland_pins:
-  # NOTA drift (corrida #10): tofu y age se instalan con installers que
-  # traen LA ÚLTIMA de su línea (deb repo de get.opentofu.org / apt de
-  # Ubuntu) — el pin acá NO fija qué se instala, fija qué se ESPERA.
-  # El drift va a reaparecer con el tiempo; el gate_red de la fase 05
-  # es el punto de decisión y el pin se realinea en la corrida que lo
-  # detecte. Realineado 2026-07: tofu 1.12.3 ejecutó la fase 25 entera
-  # (edge e2e) en la corrida #10 — evidencia en vivo, no release notes.
-  tofu: "1.12.3"        # verificar state-encryption contra ESTE binario
+  # drift NOTE (run #10): tofu and age are installed by installers that
+  # pull THE LATEST of their line (deb repo from get.opentofu.org / apt
+  # from Ubuntu) — the pin here does NOT fix what gets installed, it
+  # fixes what is EXPECTED. The drift will come back over time; the
+  # gate_red of phase 05 is the decision point and the pin is realigned
+  # in the run that detects it. Realigned 2026-07: tofu 1.12.3 ran the
+  # whole of phase 25 (edge e2e) in run #10 — live evidence, not
+  # release notes.
+  tofu: "1.12.3"        # verify state-encryption against THIS binary
   sops: "3.9.4"
   age: "1.2.1"
-  kubectl: "1.35.4"     # alineado a k3s
+  kubectl: "1.35.4"     # aligned to k3s
   helm: "3.17.0"
-  gh: "apt"             # PREREQUISITO del operador (instalado y
-                        # autenticado ANTES del init — es LA
-                        # credencial GitHub, D10); "apt" = presencia
-                        # basta, sin comparación de versión
-  cosign: "2.6.3"       # host: ceremonia+verify fase 80; NO v3 (A43);
-                        # mantener alineado a ci-images/cosign/
+  gh: "apt"             # operator PREREQUISITE (installed and
+                        # authenticated BEFORE init — it is THE
+                        # GitHub credential, D10); "apt" = presence
+                        # is enough, no version comparison
+  cosign: "2.6.3"       # host: ceremony+verify phase 80; NOT v3 (A43);
+                        # keep aligned with ci-images/cosign/
   direnv: "apt"
   jq: "apt"
-  git: "apt"            # H1 validación #1: el loop de fase 05 los
-  openssl: "apt"        # instala y el pin DEBE existir (fallo limpio
-                        # si falta, no KeyError)
+  git: "apt"            # H1 validation #1: the phase 05 loop installs
+  openssl: "apt"        # them and the pin MUST exist (clean failure if
+                        # missing, not a KeyError)
 
-# k3s flags (2026-04-30:96-112): traefik/servicelb llegan declarativos
-# write-kubeconfig-mode 600, NO 644 (hallazgo de la corrida en Linux
-# nativo, 2026-07-25): /etc/rancher/k3s/k3s.yaml lleva el
-# client-certificate + client-key de CLUSTER-ADMIN. Con 644 cualquier
-# usuario o proceso local del host es admin del cluster. En una VM
-# desechable no importaba; en un host real es escalada directa.
-# ACOPLADO con 20-k3s.sh: la copia a ~/.kube/config DEBE hacerse con
-# privilegio, porque un cp de usuario ya no puede leer el origen.
-# Guardado por el check 85 de verify-static.sh.
+# k3s flags (2026-04-30:96-112): traefik/servicelb arrive declaratively
+# write-kubeconfig-mode 600, NOT 644 (finding from the native Linux
+# run, 2026-07-25): /etc/rancher/k3s/k3s.yaml carries the
+# CLUSTER-ADMIN client-certificate + client-key. With 644 any local
+# user or process on the host is an admin of the cluster. On a
+# disposable VM that did not matter; on a real host it is direct
+# escalation. COUPLED with 20-k3s.sh: the copy to ~/.kube/config MUST
+# be done with privilege, because a user-level cp can no longer read
+# the source. Guarded by check 85 of verify-static.sh.
 k3s_install_flags: >-
   --write-kubeconfig-mode 600
   --disable=traefik
   --disable=servicelb
   --node-name=aegis-primary
 
-# Cilium — SOLO perfil hetzner (ADR-0014: kube-router no enforce
-# NetPol; decisión Cilium). PIN CENTINELA a propósito: la fase 20
-# aborta si no se verificó contra helm.cilium.io (regla: fuente =
-# el chart real, no memoria de entrenamiento — nunca se desplegó
-# Cilium en v1, no hay pin heredado válido).
+# Cilium — hetzner profile ONLY (ADR-0014: kube-router does not
+# enforce NetPol; decision: Cilium). SENTINEL PIN on purpose: phase 20
+# aborts if it has not been verified against helm.cilium.io (rule:
+# the source is the real chart, not training memory — Cilium was
+# never deployed in v1, there is no valid inherited pin).
 cilium_chart_version: "VERIFICAR-ANTES-DE-HETZNER"

@@ -1,13 +1,13 @@
-// __ORG__-app — el servicio HTTP inicial de la organización __ORG__.
+// __ORG__-app — the initial HTTP service of the __ORG__ organization.
 //
-// Nació de la plantilla `base` de aegis y desde ese momento es TUYO:
-// la plantilla no vuelve a tocarlo. Cero dependencias externas a
-// propósito (la stdlib de Go alcanza para servir HTTP): un árbol de
-// dependencias vacío es un árbol que no se pudre.
+// It was born from aegis's `base` template and from that moment on it
+// is YOURS: the template never touches it again. Zero external
+// dependencies on purpose (Go's stdlib is enough to serve HTTP): an
+// empty dependency tree is a tree that does not rot.
 //
-// Lo único que la plataforma le pide a este proceso es que escuche en
-// el puerto que declara el contrato (8080) y responda /healthz — el
-// readinessProbe del Deployment lo consulta. El resto es tu app.
+// The only thing the platform asks of this process is that it listen
+// on the port the contract declares (8080) and answer /healthz — the
+// Deployment's readinessProbe queries it. The rest is your app.
 package main
 
 import (
@@ -19,7 +19,7 @@ import (
 func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		host, _ := os.Hostname()
-		fmt.Fprintf(w, "__ORG__ — app inicial de la plantilla base, pod %s\n", host)
+		fmt.Fprintf(w, "__ORG__ — initial app of the base template, pod %s\n", host)
 	})
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

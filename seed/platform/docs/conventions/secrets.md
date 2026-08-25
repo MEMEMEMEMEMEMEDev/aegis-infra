@@ -1,49 +1,50 @@
-# Convención de secretos v2
+# v2 secrets convention
 
-Consolida las reglas que en v1 vivían dispersas (salda C4/C7/C8).
+Consolidates the rules that lived scattered in v1 (settles C4/C7/C8).
 
-## Clasificación
+## Classification
 
-- **TIPO 1** (conocido): certs públicos, dominios, host keys,
-  pins, IDs de cuenta → declarativo en git, desde fuente oficial.
-- **TIPO 2** (secreto): tokens, private keys, passwords → SOPS+age,
-  flujo con el operador. Sub-clases: T2-A (autogenerable:
+- **TYPE 1** (known): public certs, domains, host keys,
+  pins, account IDs → declarative in git, from an official source.
+- **TYPE 2** (secret): tokens, private keys, passwords → SOPS+age,
+  a flow with the operator. Sub-classes: T2-A (self-generable:
   `openssl rand`, `ssh-keygen`, `age-keygen`, `cosign
-  generate-key-pair`) y T2-E (lo emite un tercero).
-- **JAMÁS TOFU**: prohibido StrictHostKeyChecking=no,
-  insecure-skip-tls-verify, accept-first-connection, keyscan en
-  init containers.
+  generate-key-pair`) and T2-E (issued by a third party).
+- **NEVER TOFU** (trust on first use): StrictHostKeyChecking=no,
+  insecure-skip-tls-verify, accept-first-connection and keyscan
+  in init containers are all forbidden.
 
-## Reglas duras (cada una nació de un incidente)
+## Hard rules (each one was born out of an incident)
 
-1. Secrets K8s por `data:` byte-preserving (`kubectl create secret
-   --from-file --dry-run=client -o yaml`). NUNCA `stringData`
-   armado a mano: el folding YAML agrega 1 byte y rompe HMACs.
-2. **SOPS: `mv` al path del repo PRIMERO, `sops -e --in-place`
-   DESPUÉS.** La creation_rule matchea por path_regex; /dev/shm no
-   matchea. Validar SIEMPRE con roundtrip `sops -d | head -c1`.
-3. Material en claro SOLO en tmpfs (/dev/shm), chmod 700, shred al
-   salir. Nunca /tmp, nunca el repo, nunca el home.
-4. Secretos JAMÁS en argv (`/proc/PID/cmdline` es legible):
+1. K8s Secrets through byte-preserving `data:` (`kubectl create
+   secret --from-file --dry-run=client -o yaml`). NEVER a
+   hand-built `stringData`: YAML folding adds 1 byte and breaks
+   HMACs.
+2. **SOPS: `mv` to the repo path FIRST, `sops -e --in-place`
+   AFTER.** The creation_rule matches by path_regex; /dev/shm does
+   not match. ALWAYS validate with a `sops -d | head -c1` roundtrip.
+3. Cleartext material ONLY in tmpfs (/dev/shm), chmod 700, shred on
+   the way out. Never /tmp, never the repo, never the home.
+4. Secrets NEVER in argv (`/proc/PID/cmdline` is readable):
    `--from-file`, `htpasswd -nBi` (stdin), `jq --rawfile`.
-5. Nunca imprimir valores — ni base64. Shape-checks: SOLO longitud
-   (`wc -c` sobre archivo). `kubectl get secret <n>` sin `-o`.
-6. Credenciales compartidas (htpasswd↔regcreds, HMAC↔webhook):
-   UN origen, derivación en el MISMO proceso, UN commit.
-7. `type` de un Secret es INMUTABLE: para cambiarlo, `kubectl
-   delete` + selfHeal recrea desde git. Jamás Replace=true
-   permanente en la App.
-8. KSOPS generators: LISTA EXPLÍCITA de files. App Synced+Healthy
-   NO garantiza los Secrets — validar `kubectl get secret`
-   post-sync SIEMPRE.
-9. La age key: path custom (`~/.config/sops/age/aegis.key`), jamás
-   `keys.txt`; `SOPS_AGE_KEY_FILE` exportada EXPLÍCITA en todo
-   shell non-interactive (direnv no llega ahí).
-10. Excepción de exposición deliberada: la CEREMONIA (age, cosign)
-    muestra el valor UNA vez para resguardo del operador, con gate
-    ROJO antes y validación por roundtrip después. Es la única.
-11. Irreemplazables (age, cosign, write key): resguardo VALIDADO
-    (canary cifrado/firmado con la copia resguardada), no
-    confirmación verbal.
-12. Del lado del host: python3+pyyaml, no yq. Pasos de
-    revert/cleanup NUNCA con `&&`.
+5. Never print values — not even base64. Shape checks: length ONLY
+   (`wc -c` over a file). `kubectl get secret <n>` without `-o`.
+6. Shared credentials (htpasswd↔regcreds, HMAC↔webhook): ONE
+   origin, derivation in the SAME process, ONE commit.
+7. A Secret's `type` is IMMUTABLE: to change it, `kubectl delete` +
+   selfHeal recreates it from git. Never a permanent Replace=true
+   on the App.
+8. KSOPS generators: an EXPLICIT LIST of files. An App that is
+   Synced+Healthy does NOT guarantee the Secrets — ALWAYS validate
+   `kubectl get secret` after the sync.
+9. The age key: a custom path (`~/.config/sops/age/aegis.key`),
+   never `keys.txt`; `SOPS_AGE_KEY_FILE` exported EXPLICITLY in
+   every non-interactive shell (direnv does not reach in there).
+10. The deliberate-exposure exception: the CEREMONY (age, cosign)
+    shows the value ONCE for the operator to back up, with a RED
+    gate before and roundtrip validation after. It is the only one.
+11. The irreplaceable ones (age, cosign, write key): a VALIDATED
+    backup (a canary encrypted/signed with the backed-up copy), not
+    a verbal confirmation.
+12. On the host side: python3+pyyaml, not yq. Revert/cleanup steps
+    NEVER with `&&`.

@@ -1,53 +1,55 @@
-# Protocolo: keypair cosign (la autoridad de firma del cluster)
+# Protocol: cosign keypair (the cluster's signing authority)
 
-Salda C3. Blast radius: quien tenga `cosign.key` + password firma
-imágenes "válidas" para Kyverno => decide QUÉ CORRE en el cluster.
-Tratarla como la age key: ceremonia con validación real.
+Settles C3. Blast radius: whoever holds `cosign.key` + password
+signs images that are "valid" for Kyverno => decides WHAT RUNS in
+the cluster. Treat it like the age key: a ceremony with real
+validation.
 
-## 1. Generar (tmpfs, ownership correcto)
+## 1. Generate it (tmpfs, correct ownership)
 
     mkdir -p /dev/shm/cosign-gen && cd /dev/shm/cosign-gen
-    # password random (NO elegida — patrón random+Bitwarden):
+    # random password (NOT chosen — the random+Bitwarden pattern):
     openssl rand -base64 32 | tr -d '\n' > pass
-    # bache conocido: en container el keypair queda owned por uid
-    # 65532 — SIEMPRE --user:
+    # known snag: inside a container the keypair ends up owned by
+    # uid 65532 — ALWAYS --user:
     docker run --rm -it --user "$(id -u):$(id -g)" \
       -v /dev/shm/cosign-gen:/work -w /work \
       -e COSIGN_PASSWORD="$(cat pass)" \
       ghcr.io/sigstore/cosign/cosign:v2.6.3 generate-key-pair
-    # (con cosign nativo en el host: cosign generate-key-pair a secas)
+    # (with cosign native on the host: plain cosign generate-key-pair)
 
-## 2. Ceremonia de resguardo (como la age)
+## 2. Safekeeping ceremony (like the age one)
 
-- Password → Bitwarden AHORA ("aegis cosign password").
-- VALIDAR el resguardo con roundtrip REAL (no "sí, la guardé"):
-  re-tipear la password DESDE Bitwarden y firmar+verificar un blob:
+- Password → Bitwarden NOW ("aegis cosign password").
+- VALIDATE the safekeeping with a REAL roundtrip (not "yes, I saved
+  it"): retype the password FROM Bitwarden and sign+verify a blob:
 
-      COSIGN_PASSWORD=<retipeada> cosign sign-blob --key cosign.key \
+      COSIGN_PASSWORD=<retyped> cosign sign-blob --key cosign.key \
         --tlog-upload=false --output-signature s.sig blob
       cosign verify-blob --key cosign.pub --signature s.sig blob
 
-## 3. Destinos
+## 3. Destinations
 
 - `cosign.key` + password → Secret `cosign-signing-key`
-  (jenkins-system) vía flujo KSOPS (data/--from-file, mv-antes-de-
-  sops, roundtrip).
-- `cosign.pub` es T1 → al repo en claro
-  (`k8s/base/platform/cosign/cosign.pub`) Y inline en la
-  ClusterPolicy de Kyverno.
-- shred del directorio tmpfs completo.
+  (jenkins-system) through the KSOPS flow (data/--from-file,
+  mv-before-sops, roundtrip).
+- `cosign.pub` is T1 → into the repo in the clear
+  (`k8s/base/platform/cosign/cosign.pub`) AND inline in Kyverno's
+  ClusterPolicy.
+- shred the whole tmpfs directory.
 
-## 4. Uso en pipeline (referencia para consumidores)
+## 4. Use in a pipeline (reference for consumers)
 
 `cosign sign --yes --key <mounted>/cosign.key --tlog-upload=false
---registry-cacert <ca> <registry>/<img>@<DIGEST>` — SIEMPRE por
-digest (--digestfile de buildah), NUNCA por tag (TOCTOU). cosign v2
-mientras el registry sea distribution 3.x (v3 exige referrers API).
+--registry-cacert <ca> <registry>/<img>@<DIGEST>` — ALWAYS by
+digest (buildah's --digestfile), NEVER by tag (TOCTOU). cosign v2
+for as long as the registry is distribution 3.x (v3 demands the
+referrers API).
 
-## 5. Rotación (2 PASOS — más compleja que las demás)
+## 5. Rotation (2 STEPS — more involved than the rest)
 
-1. Nuevo keypair + ceremonia + re-cifrar el Secret.
-2. Actualizar cosign.pub en git Y la policy de Kyverno, y
-   **RE-FIRMAR todas las imágenes desplegadas** que la policy
-   cubra — si no, el próximo restart de un pod viejo es rechazado.
-   Orden seguro: policy en Audit → re-firmar → volver a Enforce.
+1. New keypair + ceremony + re-encrypt the Secret.
+2. Update cosign.pub in git AND Kyverno's policy, and **RE-SIGN
+   every deployed image** the policy covers — otherwise the next
+   restart of an old pod is rejected. Safe order: policy to Audit →
+   re-sign → back to Enforce.

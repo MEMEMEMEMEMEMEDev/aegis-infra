@@ -1,137 +1,138 @@
-# Rotar la age key — la raíz de confianza
+# Rotating the age key — the root of trust
 
-**Escrito el 2026-08-12.** Cuatro lugares del stack lo citaban —dos de
-ellos por sección concreta (`§A`, `§A.8/A.9`)— y el archivo no existía.
-El procedimiento de rotación del único irreducible del sistema era una
-referencia colgada.
+**Written on 2026-08-12.** Four places in the stack cited it —two of
+them by a specific section (`§A`, `§A.8/A.9`)— and the file did not
+exist. The rotation procedure for the one irreducible of the system was
+a dangling reference.
 
-| lo citaba | desde |
+| what cited it | from |
 |---|---|
-| `docs/protocols/rotation-checklist.md` | ítem 1 y la tabla de negativas |
-| `init/phases/10-age-ceremony.sh:3` | «generaliza rotate-age-key.md §A» |
-| `init/lib/secrets.sh:21` | «patrón rotate-age-key.md §A» |
+| `docs/protocols/rotation-checklist.md` | item 1 and the table of refusals |
+| `init/phases/10-age-ceremony.sh:3` | «generalizes rotate-age-key.md §A» |
+| `init/lib/secrets.sh:21` | «pattern rotate-age-key.md §A» |
 | `init/lib/secrets.sh:406` | «rotate-age-key.md §A.8/A.9» |
 
 ---
 
-## Por qué esta rotación es distinta a todas las demás
+## Why this rotation is unlike all the others
 
-Todo el modelo de secretos de aegis se apoya en una frase:
+aegis' whole model of secrets rests on a single sentence:
 
-> La age key descifra todo, así que es lo único que el operador
-> resguarda. El resto es recuperable.
+> The age key decrypts everything, so it is the only thing the operator
+> safeguards. The rest is recoverable.
 
-Eso convierte a esta rotación en la única que **no se puede recuperar
-desde el propio sistema**. Si `sops updatekeys` queda a medias, hay
-material que ya no descifra con la clave vieja (porque se le quitó) ni
-con la nueva (porque no se le llegó a agregar). No hay backup que
-ayude: el backup también está cifrado con la clave que se rompió.
+That makes this the only rotation that **cannot be recovered from the
+system itself**. If `sops updatekeys` is left half done, there is
+material that no longer decrypts with the old key (because it was taken
+away from it) nor with the new one (because it never got added to it).
+No backup helps: the backup is encrypted with the key that broke too.
 
-De ahí la forma del protocolo: **se agrega la clave nueva antes de
-quitar la vieja**, y entre esos dos momentos hay una verificación que
-puede fallar. Durante toda la fase A los dos juegos de claves sirven, así
-que no existe un instante en el que un fallo deje material ilegible.
+Hence the shape of the protocol: **the new key is added before the old
+one is taken away**, and between those two moments there is a
+verification that can fail. Throughout the whole of phase A both sets of
+keys work, so there is no instant at which a failure leaves material
+unreadable.
 
 ---
 
-## Alcance medido (2026-08-12)
+## Measured scope (2026-08-12)
 
 ```
-platform/**/*.enc.yaml, *.enc.json ..... 39 archivos
-init/.state-secrets/*.enc ............... 18 archivos
+platform/**/*.enc.yaml, *.enc.json ..... 39 files
+init/.state-secrets/*.enc ............... 18 files
                                           ──
-                                          57 re-cifrados
+                                          57 re-encryptions
 ```
 
-Más tres lugares que apuntan a la clave y hay que mover con ella:
+Plus three places that point at the key and have to move with it:
 
-| dónde | qué es |
+| where | what it is |
 |---|---|
-| `platform/.sops.yaml` | **tres** `creation_rules`, cada una con su `age:` |
-| `init/.age-public` | de acá sale `$AGE_PUBLIC` para todo el init |
-| `argocd/argocd-sops-age` (Secret, clave `keys.txt`) | lo que usa KSOPS en el cluster para descifrar |
+| `platform/.sops.yaml` | **three** `creation_rules`, each with its own `age:` |
+| `init/.age-public` | this is where `$AGE_PUBLIC` comes from for the whole init |
+| `argocd/argocd-sops-age` (Secret, key `keys.txt`) | what KSOPS uses in the cluster to decrypt |
 
-`init/.state-secrets/.sops.yaml` **no se edita a mano**: `persist_secret`
-lo reescribe en cada llamada a partir de `$AGE_PUBLIC`. Se mueve solo
-cuando se mueve `init/.age-public`.
+`init/.state-secrets/.sops.yaml` **is not edited by hand**:
+`persist_secret` rewrites it on every call out of `$AGE_PUBLIC`. It
+moves only when `init/.age-public` moves.
 
 ---
 
-## Antes de empezar
+## Before starting
 
 ```bash
 export SOPS_AGE_KEY_FILE=$HOME/.config/sops/age/aegis.key
-export AEGIS_BACKUPS=/mnt/e/aegis-backups   # montado (#85)
-aegis state backup          # ROUNDTRIP verificado, no «tenemos backups»
+export AEGIS_BACKUPS=/mnt/e/aegis-backups   # mounted (#85)
+aegis state backup          # ROUNDTRIP verified, not «we have backups»
 ```
 
-El bundle queda cifrado con la clave **vieja**. Es deliberado: mientras
-la vieja siga siendo válida —toda la fase A— ese backup es utilizable. Al
-terminar la fase C hay que **volver a respaldar**, porque el bundle viejo
-deja de abrirse.
+The bundle ends up encrypted with the **old** key. That is deliberate:
+as long as the old one is still valid —the whole of phase A— that backup
+is usable. Once phase C is over you have to **back up again**, because
+the old bundle stops opening.
 
-Y una condición que no es negociable: la copia resguardada de la clave
-vieja tiene que estar a mano y **probada**, no supuesta. Si no podés
-descifrar algo con ella ahora mismo, no empieces.
+And one condition that is not negotiable: the safeguarded copy of the
+old key has to be at hand and **proven**, not assumed. If you cannot
+decrypt something with it right now, do not start.
 
 ---
 
-## Fase A — la clave nueva entra, la vieja se queda
+## Phase A — the new key comes in, the old one stays
 
-**A.1** Generar la clave nueva en tmpfs y derivar su pública.
+**A.1** Generate the new key in tmpfs and derive its public half.
 
 ```bash
 umask 077
-NUEVA=/dev/shm/age-nueva.key
-age-keygen -o "$NUEVA"
-PUB_NUEVA="$(age-keygen -y "$NUEVA")"
-PUB_VIEJA="$(cat init/.age-public)"
-echo "vieja: $PUB_VIEJA"
-echo "nueva: $PUB_NUEVA"
+NEW=/dev/shm/age-new.key
+age-keygen -o "$NEW"
+PUB_NEW="$(age-keygen -y "$NEW")"
+PUB_OLD="$(cat init/.age-public)"
+echo "old: $PUB_OLD"
+echo "new: $PUB_NEW"
 ```
 
-Las públicas **sí** se pueden mirar e imprimir. La privada no: vive en
-`/dev/shm` hasta que la resguardes.
+The public halves **can** be looked at and printed. The private one
+cannot: it lives in `/dev/shm` until you put it in safekeeping.
 
-**A.2** Resguardar la clave nueva **desde otra terminal**, nunca en este
-pane. Es la regla W-01/EV-01, y viene de un incidente real: una age key
-quedó en un log de tmux y esa instancia se declaró comprometida
-(`HISTORIA.md:199`).
+**A.2** Put the new key in safekeeping **from another terminal**, never
+in this pane. That is rule W-01/EV-01, and it comes from a real
+incident: an age key ended up in a tmux log and that instance was
+declared compromised (`HISTORIA.md:199`).
 
 ```
-# en OTRA terminal:
-cat /dev/shm/age-nueva.key      # guardala donde guardes tus secretos
+# in ANOTHER terminal:
+cat /dev/shm/age-new.key        # store it wherever you store your secrets
 ```
 
-**A.3** Agregar la pública nueva como **segundo** recipient, sin quitar
-la vieja. Las tres reglas de `platform/.sops.yaml`:
+**A.3** Add the new public half as a **second** recipient, without
+taking the old one away. The three rules of `platform/.sops.yaml`:
 
 ```bash
-sed -i "s|age: $PUB_VIEJA|age: $PUB_VIEJA,$PUB_NUEVA|g" platform/.sops.yaml
+sed -i "s|age: $PUB_OLD|age: $PUB_OLD,$PUB_NEW|g" platform/.sops.yaml
 
-# contar ESTRUCTURALMENTE, no con grep: todas las reglas tienen que
-# haber quedado con la clave nueva
+# count STRUCTURALLY, not with grep: every rule has to have ended up
+# with the new key
 python3 - <<PY
 import yaml
-reglas = yaml.safe_load(open("platform/.sops.yaml"))["creation_rules"]
-con = [r for r in reglas if "$PUB_NUEVA" in r.get("age","")]
-print(f"reglas: {len(reglas)}   con la clave nueva: {len(con)}")
-assert len(con) == len(reglas), "hay reglas SIN la clave nueva"
+rules = yaml.safe_load(open("platform/.sops.yaml"))["creation_rules"]
+with_new = [r for r in rules if "$PUB_NEW" in r.get("age","")]
+print(f"rules: {len(rules)}   with the new key: {len(with_new)}")
+assert len(with_new) == len(rules), "there are rules WITHOUT the new key"
 PY
 ```
 
-Que estén **todas** no es cosmético: si una regla queda sin la clave
-nueva, los archivos que matchea sólo ese `path_regex` se quedan atrás y
-el fallo aparece recién cuando alguien los toque.
+That **all** of them have it is not cosmetic: if one rule is left
+without the new key, the files matched by that one `path_regex` stay
+behind, and the failure only shows up when somebody touches them.
 
-Y el conteo va por YAML a propósito. `grep -c "$PUB_NUEVA"` sobre este
-archivo devuelve **4** y no 3, porque la cabecera del `.sops.yaml`
-menciona la clave en un comentario. Es exactamente el bache que el
-stack ya tiene catalogado en H4 / check 41 —«un guard sobre YAML se
-hace estructural, nunca con `grep` sobre un nombre, porque matchea
-comentarios»— y esta guía cayó en él en su primera escritura.
+And the count goes through YAML on purpose. `grep -c "$PUB_NEW"` over
+this file returns **4** and not 3, because the header of `.sops.yaml`
+mentions the key in a comment. It is exactly the pothole the stack
+already has catalogued as H4 / check 41 —«a guard over YAML is done
+structurally, never with `grep` over a name, because it matches
+comments»— and this guide fell into it on its first writing.
 
-**A.4** Re-cifrar los 39 del repo.
+**A.4** Re-encrypt the 39 in the repo.
 
 ```bash
 cd platform
@@ -139,237 +140,243 @@ find . \( -name '*.enc.yaml' -o -name '*.enc.json' \) -print0 \
   | xargs -0 -n1 sops updatekeys --yes
 ```
 
-`updatekeys` **no descifra el contenido**: reescribe sólo la lista de
-recipients de la cabecera. Por eso puede correr sobre los 39 sin
-exponer nada.
+`updatekeys` **does not decrypt the content**: it rewrites only the
+header's list of recipients. That is why it can run over all 39 without
+exposing anything.
 
-**A.5** Re-cifrar los 18 del store. El store usa su propio config, así
-que primero se le pone el recipient doble:
+**A.5** Re-encrypt the 18 in the store. The store uses a config of its
+own, so it gets the double recipient first:
 
 ```bash
-printf 'creation_rules:\n  - age: %s,%s\n' "$PUB_VIEJA" "$PUB_NUEVA" \
+printf 'creation_rules:\n  - age: %s,%s\n' "$PUB_OLD" "$PUB_NEW" \
   > init/.state-secrets/.sops.yaml
 for f in init/.state-secrets/*.enc; do
   sops updatekeys --yes "$f"
 done
 ```
 
-**A.6 — LA VERIFICACIÓN QUE PUEDE FALLAR.** Los dos juegos tienen que
-abrir los 57. Con `--yes` en el paso anterior es fácil que algo haya
-fallado sin que nadie mire.
+**A.6 — THE VERIFICATION THAT CAN FAIL.** Both sets have to open all
+57. With `--yes` in the previous step it is easy for something to have
+failed without anybody looking.
 
 ```bash
-for K in "$HOME/.config/sops/age/aegis.key" /dev/shm/age-nueva.key; do
-  echo "── con $(basename $K) ──"; malos=0
+for K in "$HOME/.config/sops/age/aegis.key" /dev/shm/age-new.key; do
+  echo "── with $(basename $K) ──"; bad=0
   for f in $(find platform -name '*.enc.yaml' -o -name '*.enc.json') \
            init/.state-secrets/*.enc; do
-    SOPS_AGE_KEY_FILE="$K" sops -d "$f" >/dev/null 2>&1 || { echo "  NO ABRE: $f"; malos=$((malos+1)); }
+    SOPS_AGE_KEY_FILE="$K" sops -d "$f" >/dev/null 2>&1 || { echo "  DOES NOT OPEN: $f"; bad=$((bad+1)); }
   done
-  echo "  ilegibles: $malos"
+  echo "  unreadable: $bad"
 done
 ```
 
-**Las dos pasadas tienen que dar 0.** Si alguna no da 0, **parar acá**:
-todavía no se quitó nada, así que el estado sigue siendo recuperable.
-Arreglar y repetir A.4/A.5.
+**Both passes have to give 0.** If either one does not, **stop here**:
+nothing has been taken away yet, so the state is still recoverable. Fix
+it and repeat A.4/A.5.
 
-**A.7** Commit. En este punto el repo está en un estado seguro y vale la
-pena dejarlo grabado aunque después haya que seguir.
+**A.7** Commit. At this point the repo is in a safe state and it is
+worth putting that on the record even if there is more to do afterwards.
 
 ```bash
-cd platform && git add -A && git commit -m "chore(age): recipient doble — fase A de la rotación" && git push
+cd platform && git add -A && git commit -m "chore(age): double recipient — phase A of the rotation" && git push
 ```
 
 ---
 
-## Fase B — el cluster y el operador pasan a la clave nueva
+## Phase B — the cluster and the operator move to the new key
 
-**B.1** El Secret que usa KSOPS:
+**B.1** The Secret that KSOPS uses:
 
 ```bash
 kubectl -n argocd create secret generic argocd-sops-age \
-  --from-file=keys.txt=/dev/shm/age-nueva.key \
+  --from-file=keys.txt=/dev/shm/age-new.key \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n argocd rollout restart deploy/argocd-repo-server
 kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=180s
 ```
 
-**B.2** La clave del operador. La vieja **no se borra todavía**: se
-guarda al lado, porque la fase C aún necesita comprobar que deja de
-servir.
+**B.2** The operator's key. The old one is **not deleted yet**: it is
+kept alongside, because phase C still needs to prove that it has stopped
+working.
 
 ```bash
-cp -a ~/.config/sops/age/aegis.key ~/.config/sops/age/aegis.key.vieja
-install -m 600 /dev/shm/age-nueva.key ~/.config/sops/age/aegis.key
-echo -n "$PUB_NUEVA" > init/.age-public
+cp -a ~/.config/sops/age/aegis.key ~/.config/sops/age/aegis.key.old
+install -m 600 /dev/shm/age-new.key ~/.config/sops/age/aegis.key
+echo -n "$PUB_NEW" > init/.age-public
 ```
 
-**B.3** Verificar que el cluster sigue vivo — con una señal que pueda
-fallar. Un repo-server que no descifra deja las Apps sin reconciliar,
-y eso no siempre se ve rápido:
+**B.3** Verify that the cluster is still alive — with a signal that can
+fail. A repo-server that cannot decrypt leaves the Apps unreconciled,
+and that is not always visible quickly:
 
 ```bash
-platform/bin/aegis-sync --fuera-de-linea
+aegis sync --drifted
 kubectl get applications -n argocd -o custom-columns=\
 'N:.metadata.name,S:.status.sync.status,H:.status.health.status' | grep -v Synced
 ```
 
-Ninguna App debería quedar `Unknown` ni `Degraded`. Un `ComparisonError`
-en el repo-server es la firma de «no puede descifrar».
+No App should be left `Unknown` or `Degraded`. A `ComparisonError` in
+the repo-server is the signature of «it cannot decrypt».
 
 ---
 
-## Fase C — la clave vieja deja de servir
+## Phase C — the old key stops working
 
-Esta es la fase que convierte «agregué una clave» en «roté la clave».
-Sin ella el sistema queda con dos raíces de confianza válidas, que es
-peor que antes: la vieja —la que se quiso retirar— sigue abriendo todo.
+This is the phase that turns «I added a key» into «I rotated the key».
+Without it the system is left with two valid roots of trust, which is
+worse than before: the old one —the one you meant to retire— still opens
+everything.
 
-**C.1** Sacar la pública vieja de los cuatro sitios:
+**C.1** Take the old public half out of the four places:
 
 ```bash
-sed -i "s|age: $PUB_VIEJA,$PUB_NUEVA|age: $PUB_NUEVA|g" platform/.sops.yaml
+sed -i "s|age: $PUB_OLD,$PUB_NEW|age: $PUB_NEW|g" platform/.sops.yaml
 
 python3 - <<PY
 import yaml
-reglas = yaml.safe_load(open("platform/.sops.yaml"))["creation_rules"]
-quedan = [r for r in reglas if "$PUB_VIEJA" in r.get("age","")]
-print(f"reglas que TODAVÍA llevan la vieja: {len(quedan)}")
-assert not quedan, "queda al menos una regla con la clave vieja"
+rules = yaml.safe_load(open("platform/.sops.yaml"))["creation_rules"]
+left = [r for r in rules if "$PUB_OLD" in r.get("age","")]
+print(f"rules that STILL carry the old one: {len(left)}")
+assert not left, "at least one rule is left with the old key"
 PY
 
-printf 'creation_rules:\n  - age: %s\n' "$PUB_NUEVA" > init/.state-secrets/.sops.yaml
+printf 'creation_rules:\n  - age: %s\n' "$PUB_NEW" > init/.state-secrets/.sops.yaml
 ```
 
-El comentario de cabecera de `.sops.yaml` sigue nombrando a la clave
-vieja: es documentación de la fase 10, no un recipient. Por eso el
-chequeo va por YAML y no por `grep` (ver A.3).
+The header comment of `.sops.yaml` still names the old key: it is
+documentation of phase 10, not a recipient. That is why the check goes
+through YAML and not through `grep` (see A.3).
 
-**C.2** Re-cifrar los 57 otra vez (mismos comandos de A.4 y A.5).
+**C.2** Re-encrypt the 57 again (the same commands as A.4 and A.5).
 
-**C.3 — EL DIENTE NEGATIVO.** Con la clave nueva todo abre; con la vieja
-**nada** tiene que abrir. La segunda mitad es la que importa: sin ella,
-«roté» y «agregué una clave y me olvidé de quitar la otra» dan
-exactamente la misma señal verde.
+**C.3 — THE NEGATIVE TOOTH.** With the new key everything opens; with
+the old one **nothing** must open. The second half is the one that
+matters: without it, «I rotated» and «I added a key and forgot to take
+the other one away» give exactly the same green signal.
 
 ```bash
-echo "── con la NUEVA (esperado: 0 ilegibles) ──"; malos=0
+echo "── with the NEW one (expected: 0 unreadable) ──"; bad=0
 for f in $(find platform -name '*.enc.yaml' -o -name '*.enc.json') init/.state-secrets/*.enc; do
-  sops -d "$f" >/dev/null 2>&1 || { echo "  NO ABRE: $f"; malos=$((malos+1)); }
-done; echo "  ilegibles: $malos"
+  sops -d "$f" >/dev/null 2>&1 || { echo "  DOES NOT OPEN: $f"; bad=$((bad+1)); }
+done; echo "  unreadable: $bad"
 
-echo "── con la VIEJA (esperado: TODOS ilegibles) ──"; abren=0
+echo "── with the OLD one (expected: ALL unreadable) ──"; open=0
 for f in $(find platform -name '*.enc.yaml' -o -name '*.enc.json') init/.state-secrets/*.enc; do
-  SOPS_AGE_KEY_FILE=~/.config/sops/age/aegis.key.vieja sops -d "$f" >/dev/null 2>&1 \
-    && { echo "  TODAVÍA ABRE: $f"; abren=$((abren+1)); }
-done; echo "  siguen abriendo: $abren"
+  SOPS_AGE_KEY_FILE=~/.config/sops/age/aegis.key.old sops -d "$f" >/dev/null 2>&1 \
+    && { echo "  STILL OPENS: $f"; open=$((open+1)); }
+done; echo "  still opening: $open"
 ```
 
-Lo correcto es **0 ilegibles con la nueva** y **0 que sigan abriendo con
-la vieja**. Cualquier archivo en la segunda lista es un archivo que la
-rotación no alcanzó.
+What is correct is **0 unreadable with the new one** and **0 still
+opening with the old one**. Any file in the second list is a file the
+rotation did not reach.
 
-**C.4** Respaldar de nuevo. El bundle de «antes de empezar» ya no se
-abre con la clave que ahora tenés.
+**C.4** Back up again. The bundle from «before starting» no longer opens
+with the key you now have.
 
 ```bash
 aegis state backup
 ```
 
-**C.5 — RETIRAR LA CLAVE VIEJA. Y retirar NO es destruir.**
+**C.5 — WITHDRAW THE OLD KEY. And withdrawing is NOT destroying.**
 
-La primera versión de este documento decía `shred -u` acá, sin más. Está
-mal, y el error es de los que sólo se descubren cuando ya es tarde: los
-respaldos se cifran con `age -r $AGE_PUBLIC`, así que **destruir la
-clave vieja vuelve irrecuperable todo bundle hecho antes de la
-rotación**. Al 2026-08-12 son 14 bundles (7 en `legado/`, 5 en
-`plataforma/`, 2 en `org-ejemplo/`), más los `.enc` archivados en
-`init/.state-secrets/.previo/`.
+The first version of this document said `shred -u` here, and nothing
+more. That is wrong, and it is the kind of mistake you only discover
+once it is too late: the backups are encrypted with
+`age -r $AGE_PUBLIC`, so **destroying the old key makes every bundle
+taken before the rotation unrecoverable**. As of 2026-08-12 that is 14
+bundles (7 in `legado/`, 5 in `plataforma/`, 2 in `org-ejemplo/`), plus
+the `.enc` files archived in `init/.state-secrets/.previo/`.
 
-Hay dos caminos y el primero es el bueno.
+There are two paths and the first one is the good one.
 
-**C.5a — re-cifrar lo alcanzable (preferido).** Son 152K: tarda
-segundos. Y es lo único que permite destruir la vieja *limpiamente*, sin
-dejar por ahí una clave capaz de abrir material del sistema.
+**C.5a — re-encrypt what you can reach (preferred).** It is 152K: it
+takes seconds. And it is the only thing that allows destroying the old
+one *cleanly*, without leaving a key lying around that can open the
+system's material.
 
 ```bash
-VIEJA=~/.config/sops/age/aegis.key.vieja
+OLD=~/.config/sops/age/aegis.key.old
 for b in "$AEGIS_BACKUPS"/*/*.age; do
-  age -d -i "$VIEJA" "$b" | age -r "$PUB_NUEVA" -o "$b.nuevo" || { echo "FALLÓ: $b"; continue; }
-  # roundtrip ANTES del mv: no se declara re-cifrado sin volver a abrirlo
-  if age -d -i ~/.config/sops/age/aegis.key "$b.nuevo" >/dev/null 2>&1; then
-    mv "$b.nuevo" "$b"; echo "  ok  $b"
+  age -d -i "$OLD" "$b" | age -r "$PUB_NEW" -o "$b.new" || { echo "FAILED: $b"; continue; }
+  # roundtrip BEFORE the mv: nothing is declared re-encrypted without opening it again
+  if age -d -i ~/.config/sops/age/aegis.key "$b.new" >/dev/null 2>&1; then
+    mv "$b.new" "$b"; echo "  ok  $b"
   else
-    rm -f "$b.nuevo"; echo "  ROUNDTRIP FALLÓ, se deja el original: $b"
+    rm -f "$b.new"; echo "  ROUNDTRIP FAILED, the original is kept: $b"
   fi
 done
 ```
 
-Los `.enc` de `.previo/` van con `sops updatekeys` como el resto —
-están bajo el `.sops.yaml` del store, así que C.2 ya los alcanzó si el
-glob los incluyó. **Verificalo**: `ls init/.state-secrets/.previo/`.
+The `.enc` files in `.previo/` go through `sops updatekeys` like the
+rest — they sit under the store's `.sops.yaml`, so C.2 has already
+reached them if the glob included them. **Verify that**:
+`ls init/.state-secrets/.previo/`.
 
-Recién con todo re-cifrado y verificado:
+Only once everything has been re-encrypted and verified:
 
 ```bash
-shred -u "$VIEJA"
-shred -u /dev/shm/age-nueva.key      # ya está en ~/.config y resguardada
+shred -u "$OLD"
+shred -u /dev/shm/age-new.key      # already in ~/.config and safeguarded
 ```
 
-**C.5b — retirar sin destruir (cuando hay copias inalcanzables).** Si
-hay bundles offsite, en frío, o en un disco que no está conectado
-—cualquier copia que C.5a no pueda tocar— entonces la clave vieja **no
-se destruye**. Se retira, que es otra cosa, y tiene requisitos:
+**C.5b — withdraw without destroying (when there are copies you cannot
+reach).** If there are bundles offsite, in cold storage, or on a disk
+that is not plugged in —any copy C.5a cannot touch— then the old key is
+**not destroyed**. It is withdrawn, which is a different thing, and it
+has requirements:
 
-- **Sale de todos los sitios operativos igual**: las tres
-  `creation_rules` de `.sops.yaml`, el Secret `argocd-sops-age`,
-  `~/.config/sops/age/`. Archivada **no** significa en uso: nada nuevo
-  se cifra con ella y ningún proceso la tiene a mano.
-- **Va al resguardo offline del operador**, con una etiqueta que diga
-  qué abre, desde y hasta qué fecha, y cuándo puede morir. Una clave sin
-  etiqueta, a los seis meses, es indistinguible de una clave viva — y
-  nadie se anima a borrarla, así que se queda para siempre.
-- **NUNCA dentro del árbol de respaldos que descifra.** Es circular:
-  quien consiga ese disco tendría el candado y la llave juntos, y el
-  cifrado deja de proteger absolutamente nada. Va donde vive el
-  resguardo de la clave *actual*, que es otro lugar por definición.
+- **It comes out of every operational place all the same**: the three
+  `creation_rules` of `.sops.yaml`, the `argocd-sops-age` Secret,
+  `~/.config/sops/age/`. Archived does **not** mean in use: nothing new
+  is encrypted with it and no process has it at hand.
+- **It goes into the operator's offline safeguard**, with a label saying
+  what it opens, from and until what date, and when it may die. A key
+  with no label is, six months later, indistinguishable from a live key
+  — and nobody dares delete it, so it stays forever.
+- **NEVER inside the backup tree it decrypts.** That is circular:
+  whoever gets hold of that disk would have the padlock and the key
+  together, and the encryption stops protecting absolutely anything. It
+  goes where the safeguard of the *current* key lives, which is a
+  different place by definition.
 
-La regla de fondo, y aplica a cualquier clave del sistema, no sólo a
-esta: **invalidar para todo uso nuevo es obligatorio; destruir es una
-decisión aparte, y sólo se puede tomar cuando ya nada cifrado con ella
-importa.**
+The underlying rule, and it applies to any key in the system, not only
+to this one: **invalidating for all new use is mandatory; destroying is
+a separate decision, and it can only be taken once nothing encrypted
+with it matters any more.**
 
-**C.6** Commit y push.
+**C.6** Commit and push.
 
 ---
 
-## Si algo sale mal
+## If something goes wrong
 
-| dónde | qué pasa | qué hacer |
+| where | what happens | what to do |
 |---|---|---|
-| fase A | nada es irreversible: la clave vieja sigue siendo recipient de todo | arreglar y repetir A.4/A.5 |
-| fase B | el cluster no descifra, pero el repo está bien | volver el Secret `argocd-sops-age` a la clave vieja y reiniciar repo-server |
-| fase C, antes de C.5 | la clave vieja todavía existe | volver a poner los dos recipients y re-correr updatekeys |
-| fase C, tras C.5a | **la clave vieja ya no existe** | sólo sirve el resguardo de la nueva; por eso A.2 va antes que todo |
-| fase C, tras C.5b | la vieja existe pero está archivada offline | recuperarla del resguardo abre los bundles antiguos; nada más |
+| phase A | nothing is irreversible: the old key is still a recipient of everything | fix it and repeat A.4/A.5 |
+| phase B | the cluster cannot decrypt, but the repo is fine | put the `argocd-sops-age` Secret back to the old key and restart repo-server |
+| phase C, before C.5 | the old key still exists | put both recipients back and re-run updatekeys |
+| phase C, after C.5a | **the old key no longer exists** | only the safeguard of the new one helps; that is why A.2 comes before everything |
+| phase C, after C.5b | the old one exists but is archived offline | recovering it from the safeguard opens the old bundles; nothing else |
 
-El orden de este documento no es estético. Cada paso está donde está
-para que el anterior siga siendo reversible.
+The order of this document is not aesthetic. Every step is where it is
+so that the previous one stays reversible.
 
 ---
 
-## Lo que este protocolo NO cubre
+## What this protocol does NOT cover
 
-- **Los `.enc` que no estén en los dos árboles medidos.** Si aparece un
-  cuarto sitio con material cifrado, este protocolo lo deja atrás en
-  silencio. El conteo de 39 + 18 es de 2026-08-12: **verificalo antes de
-  empezar**, no lo copies.
-- **Copias de respaldo que no estén montadas o accesibles** en el
-  momento de C.5a. El bucle sólo alcanza lo que ve. Si tenés bundles
-  offsite, entrás por C.5b, y eso es una decisión que se escribe — no
-  un descuido que se descubre el día que hace falta restaurar.
-- **Ejercitarlo.** Al 2026-08-12 este documento está escrito y sus
-  comandos verificados uno por uno contra la instancia viva, pero la
-  rotación completa **todavía no se corrió de punta a punta**. Hasta que
-  se corra, esto es un plan, no un procedimiento probado. Anotá acá la
-  fecha la primera vez que se ejecute.
+- **The `.enc` files that are not in the two measured trees.** If a
+  fourth site with encrypted material turns up, this protocol leaves it
+  behind in silence. The count of 39 + 18 is from 2026-08-12:
+  **verify it before starting**, do not copy it.
+- **Backup copies that are not mounted or reachable** at the moment of
+  C.5a. The loop only reaches what it can see. If you have offsite
+  bundles, you go in through C.5b, and that is a decision that gets
+  written down — not an oversight discovered the day a restore is
+  needed.
+- **Exercising it.** As of 2026-08-12 this document is written and its
+  commands verified one by one against the live instance, but the full
+  rotation **has still not been run end to end**. Until it is run, this
+  is a plan, not a proven procedure. Write down the date here the first
+  time it is executed.

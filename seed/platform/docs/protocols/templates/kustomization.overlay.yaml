@@ -1,43 +1,43 @@
-# Overlay de despliegue — copiar a k8s/overlays/dev/kustomization.yaml
-# y reemplazar CHANGEME.
+# Deploy overlay — copy it to k8s/overlays/dev/kustomization.yaml
+# and replace CHANGEME.
 #
-# La etapa `desplegar` del pipeline escribe acá, así que este archivo no
-# es opcional: sin él, `node ci/write-digest.mjs` corta con "no
-# encontré estas imágenes" y el build falla. Falla a propósito — un
-# despliegue que no encuentra dónde escribir el digest tiene que gritar,
-# no seguir de largo dejando la versión vieja corriendo.
+# The pipeline's `desplegar` stage writes here, so this file is not
+# optional: without it, `node ci/write-digest.mjs` stops with "I could
+# not find these images" and the build fails. It fails on purpose — a
+# deploy that cannot find where to write the digest has to shout, not
+# carry on and leave the old version running.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ../../base
 
-# LAS IMÁGENES VAN POR DIGEST, NO POR TAG.
+# THE IMAGES GO BY DIGEST, NOT BY TAG.
 #
-# Kyverno reescribe la imagen agregándole el digest verificado al admitir
-# el pod. Con un TAG acá, lo desplegado y lo deseado difieren SIEMPRE, y
-# para que ArgoCD no quede OutOfSync eterno había que ignorar el campo
-# `image` — lo que APAGABA el auto-sync: si la única diferencia es la
-# imagen y la imagen está ignorada, ArgoCD no ve nada que hacer y nada se
-# despliega. Medido el 2026-08-03 (#36): 4 syncs en 8 días, ninguno por
-# una imagen nueva.
+# Kyverno rewrites the image, adding the verified digest to it when it
+# admits the pod. With a TAG here, what is deployed and what is desired
+# differ ALWAYS, and to keep ArgoCD from sitting OutOfSync forever the
+# `image` field had to be ignored — which TURNED OFF the auto-sync: if
+# the only difference is the image and the image is ignored, ArgoCD sees
+# nothing to do and nothing gets deployed. Measured on 2026-08-03 (#36):
+# 4 syncs in 8 days, none for a new image.
 #
-# Con el digest acá, la mutación de Kyverno es un no-op —verificado por
-# admisión, entrada idéntica a salida—, no hay deriva, y el auto-sync
-# vuelve.
+# With the digest here, Kyverno's mutation is a no-op —verified at
+# admission, input identical to output—, there is no drift, and the
+# auto-sync comes back.
 #
-# EL DIGEST DE ABAJO ES UN MARCADOR de sesenta y cuatro ceros, y es
-# deliberado que sea obviamente falso: hasta que el pipeline corra por
-# primera vez, ninguna imagen de esta app existe, y un digest inventado
-# que PAREZCA real es peor que uno que grita.
+# THE DIGEST BELOW IS A MARKER of sixty-four zeros, and it is deliberate
+# that it be obviously false: until the pipeline runs for the first
+# time, no image of this app exists, and an invented digest that LOOKS
+# real is worse than one that shouts.
 #
-# EL ORDEN DE ALTA lo evita del todo: primero corre el pipeline —que
-# construye, escanea, firma y escribe acá el digest de verdad— y RECIÉN
-# DESPUÉS se sincroniza la Application. Así el cluster nunca ve estos
-# ceros. Si los ve, alguien invirtió el orden, y el pod queda en
-# ImagePullBackOff — que es exactamente el aviso que corresponde.
+# THE ORDER OF ONBOARDING avoids it altogether: first the pipeline runs
+# —building, scanning, signing and writing the real digest here— and
+# ONLY THEN is the Application synced. That way the cluster never sees
+# these zeros. If it does, somebody inverted the order, and the pod ends
+# up in ImagePullBackOff — which is exactly the right warning.
 #
-# El nombre TIENE que ser el mismo que usa el Jenkinsfile en
-# ${REGISTRY}/${IMAGE}, o write-digest.mjs no lo encuentra.
+# The name HAS to be the same one the Jenkinsfile uses in
+# ${REGISTRY}/${IMAGE}, or write-digest.mjs will not find it.
 images:
   - name: registry.registry-system.svc.cluster.local:5000/CHANGEME-app
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
