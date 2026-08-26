@@ -97,6 +97,19 @@ controller:
                 orphanedItemStrategy {
                   discardOldItems { numToKeep(10) }
                 }
+                // The scan on a timer, in BOTH profiles, and for
+                // opposite reasons. Under EDGE=cloudflare the webhook
+                // is what fires a build and this is only a net: a
+                // delivery lost while Jenkins was restarting stops
+                // being a commit that never builds. Under EDGE=local
+                // there IS no webhook —GitHub cannot reach a loopback
+                // or a private address— and this is the ONLY thing
+                // that notices a push. 2m is the plan's figure (04 §6).
+                triggers {
+                  periodicFolderTrigger {
+                    interval('2m')
+                  }
+                }
                 configure { node ->
                   def traits = node / sources / data / 'jenkins.branch.BranchSource' / source / traits
                   traits << 'org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait' {

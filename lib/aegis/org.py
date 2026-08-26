@@ -2522,6 +2522,18 @@ def render_jobs_block():
                 orphanedItemStrategy {{
                   discardOldItems {{ numToKeep(10) }}
                 }}
+                // The same timer the platform's own job carries: a net
+                // under EDGE=cloudflare, and the ONLY thing that
+                // notices a push under EDGE=local, where GitHub cannot
+                // reach the edge to deliver a webhook. Without it a
+                // tenant's repo would have no CI at all on a local
+                // edge, while hello-aegis did — a difference nobody
+                // asked for and nothing would have reported.
+                triggers {{
+                  periodicFolderTrigger {{
+                    interval('2m')
+                  }}
+                }}
                 configure {{ node ->
                   def traits = node / sources / data / 'jenkins.branch.BranchSource' / source / traits
                   traits << 'org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait' {{

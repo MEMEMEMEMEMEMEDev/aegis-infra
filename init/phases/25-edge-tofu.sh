@@ -355,11 +355,62 @@ else
     # there is a backend that answers).
 fi
 
+# ── under local, the tunnel does not belong to this instance ────────
+# The SEED is identical in both profiles, on purpose: a manifest that
+# changes shape with the conf is a manifest three checks have to learn
+# to look for. The INSTANCE is where the profiles differ — which is the
+# product's own model, producto != instancia — and this is the one place
+# it costs something.
+#
+# The cloudflare-tunnel Application is declared with selfHeal, hanging
+# off root. Left in place under EDGE=local, ArgoCD deploys cloudflared
+# with the EMPTY token that phase 15 writes (empty and not absent, so
+# that the KSOPS generator still builds — A7), and the rehearsal ends
+# with a pod in CrashLoopBackOff that means nothing except that nobody
+# removed it. A red that is not a defect is worse than no red: it
+# teaches the operator to ignore the colour.
+#
+# So the App and its directory leave THIS INSTANCE's repo. The seed
+# still carries both, untouched, for the edge that uses them.
+if [[ "${EDGE:-cloudflare}" == local ]]; then
+    CORE_APPS="$PLATFORM_DIR/k8s/argocd-apps/core.yaml"
+    TUNNEL_DIR="$PLATFORM_DIR/k8s/base/ingress/cloudflare-tunnel"
+    if [[ -f "$CORE_APPS" ]]; then
+        # By document and not by line: a YAML round-trip would rewrite
+        # the whole file and every comment in it would be lost.
+        run_cmd python3 - "$CORE_APPS" <<'PYDOC'
+import sys
+p = sys.argv[1]
+docs = open(p).read().split("\n---\n")
+kept = [d for d in docs if "\n  name: cloudflare-tunnel\n" not in d]
+if len(kept) != len(docs):
+    open(p, "w").write("\n---\n".join(kept))
+    print(f"removed {len(docs) - len(kept)} Application(s) named cloudflare-tunnel")
+else:
+    print("no cloudflare-tunnel Application to remove (already gone)")
+PYDOC
+    fi
+    [[ -d "$TUNNEL_DIR" ]] && run_cmd rm -rf "$TUNNEL_DIR"
+    _tunnel_is_gone() {
+        ! grep -q '^  name: cloudflare-tunnel$' "$CORE_APPS" 2>/dev/null \
+            && [[ ! -d "$TUNNEL_DIR" ]]
+    }
+    if [[ "$CHECK_MODE" == "true" ]]; then
+        gate_no_subject "edge-tunnel-app-retirada" \
+          "--check removed nothing, so there is nothing to measure: NOT EVALUATED, which is a warning and not a pass"
+    else
+        gate_diag "edge-tunnel-app-retirada" \
+          "grep -n 'cloudflare-tunnel' '$CORE_APPS' 2>&1 | head -10; ls -la '$TUNNEL_DIR' 2>&1 | head -5" \
+          _tunnel_is_gone
+    fi
+fi
+
 # ── commit the encrypted material of phases 15+25 to the repo ──────
 # Both edges pass through here. Under local phase 25 contributes
 # nothing of its own —the bridge lives in /etc/systemd, not in the
 # repo— but phase 15's encrypted material still has to reach the
 # remote: everything that follows reads from there and not from disk.
+# Under local it also carries the removal of the tunnel's App above.
 log_info "committing encrypted secrets + tfvars to the platform repo"
 # class F audit: no || true — an empty staged set is a legitimate
 # no-op, a FAILED commit with staged changes kills the phase here

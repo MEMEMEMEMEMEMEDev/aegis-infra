@@ -167,14 +167,20 @@ check_bootstrap_bins() {
 # effective resolver, not an arbitrary DNS):
 check_egress_dns() {
     local h bad=()
-    for h in github.com api.cloudflare.com get.k3s.io docker.io; do
+    # api.cloudflare.com ONLY under the edge that talks to it. With
+    # EDGE=local nothing in the whole init ever calls that API, and a
+    # hard gate over a host the run will never touch is a lab machine
+    # failing the preflight for a reason that does not exist.
+    local hosts=(github.com get.k3s.io docker.io)
+    [[ "${EDGE:-cloudflare}" == cloudflare ]] && hosts+=(api.cloudflare.com)
+    for h in "${hosts[@]}"; do
         retry_net 3 bash -c "getent ahosts '$h' >/dev/null" || bad+=("$h")
     done
     if ((${#bad[@]})); then
         log_error "do not resolve: ${bad[*]} — check the PER-INTERFACE resolver ('resolvectl status'): in the real run the host-only NIC pointed at a dead DNS and the global one covered the hole now and then"
         return 1
     fi
-    log_ok "the effective DNS resolves github/cloudflare/k3s/docker"
+    log_ok "the effective DNS resolves ${hosts[*]}"
 }
 
 # IPv6 trap (fixed BY HAND in the real run): the host advertises IPv6
