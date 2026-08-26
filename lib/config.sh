@@ -20,6 +20,11 @@ _v_email()   { [[ "$1" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]; }
 _v_reponame(){ [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]]; }
 _v_hex32()   { [[ "$1" =~ ^[0-9a-f]{32}$ ]]; }
 _v_nonempty(){ [[ -n "$1" ]]; }
+_v_edge()    { [[ "$1" == cloudflare || "$1" == local ]]; }
+_v_ip()      { [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && python3 -c "
+import ipaddress, sys
+try: ipaddress.ip_address('$1'); sys.exit(0)
+except ValueError: sys.exit(1)"; }
 _v_path()    { [[ "$1" == /* || "$1" == "\$HOME"* || "$1" == "$HOME"* ]]; }
 _v_svc_ip()  {  # inside k3s's default service CIDR (10.43/16)
     python3 -c "
@@ -67,6 +72,29 @@ config_wizard() {
     printf 'Everything here is T1 (public/known) — ZERO secrets.\n'
     printf 'Enter accepts the default in brackets.\n'
 
+    # ── the edge, FIRST: it decides which questions follow ──────────
+    # 02 §3.2: the local profile is not another branch of the init, it is
+    # ANOTHER VALUE of the conf. Everything downstream reads EDGE; no
+    # phase asks "which profile am I".
+    ask EDGE "cloudflare" _v_edge \
+      "How the platform is reached from outside:" \
+      "  cloudflare — a zone of yours, a tunnel and Access in front" \
+      "               (needs an active zone and its two IDs)." \
+      "  local      — no zone and no tunnel: a bridge on the host," \
+      "               names through sslip.io and TLS from aegis' own" \
+      "               internal CA. This is the profile of the lab VPS" \
+      "               and of any machine with no domain."
+
+    if [[ "$EDGE" == local ]]; then
+        ask EDGE_BIND_IP "127.0.0.1" _v_ip \
+          "Address the host's bridge listens on (80/443)." \
+          "  127.0.0.1  loopback: reachable only from this machine," \
+          "             or through an SSH tunnel. The safe default." \
+          "  <LAN IP>   opt-in: reachable from your network too."
+    else
+        EDGE_BIND_IP=""
+    fi
+
     # GH_OWNER: inferred from the already-authenticated gh session (the
     # phase 00 gate demands it; here it may not have run yet → best
     # effort)
@@ -87,11 +115,23 @@ config_wizard() {
       "writes builds to it and commits the digest of every deploy)." \
       "Same isolation: do NOT point it at the real hello-aegis."
 
-    ask ROOT_DOMAIN "" _v_domain \
-      "Root domain (e.g. mydomain.com). It MUST be an active zone" \
-      "in your Cloudflare account (the tunnel and the DNS live there)." \
-      "Subdomains the init is going to use: argocd.<domain>," \
-      "jenkins.<domain>."
+    if [[ "$EDGE" == local ]]; then
+        # sslip.io resolves <a-b-c-d>.sslip.io to a.b.c.d with no zone
+        # of your own and nothing to configure in CoreDNS. It is a
+        # NAME for an address, not a domain you own.
+        ask ROOT_DOMAIN "${EDGE_BIND_IP//./-}.sslip.io" _v_domain \
+          "Name the platform answers to. With EDGE=local the default" \
+          "resolves through sslip.io to ${EDGE_BIND_IP} without owning" \
+          "any zone: argocd.<name>, jenkins.<name> all land on the" \
+          "host's bridge. If sslip.io is unreachable from this machine," \
+          "any name works with an /etc/hosts entry."
+    else
+        ask ROOT_DOMAIN "" _v_domain \
+          "Root domain (e.g. mydomain.com). It MUST be an active zone" \
+          "in your Cloudflare account (the tunnel and the DNS live there)." \
+          "Subdomains the init is going to use: argocd.<domain>," \
+          "jenkins.<domain>."
+    fi
 
     local git_email=""
     git_email="$(git config --global user.email 2>/dev/null || true)"
@@ -115,20 +155,29 @@ config_wizard() {
       "The operator's workspace (for direnv's .envrc after the init)." \
       "On a validation VM the default is fine."
 
-    printf '\nThe TWO Cloudflare IDs are public, but you have to go\n'
-    printf 'looking for them: dash.cloudflare.com → click your zone (%s)\n' \
-        "${ROOT_DOMAIN}"
-    printf '→ Overview tab → right-hand column, "API" section:\n'
-    printf '  - Zone ID\n  - Account ID\nBoth are 32 hex.\n'
-    ask CF_ACCOUNT_ID "" _v_hex32 \
-      "Cloudflare Account ID (32 hex, API section of the Overview)."
-    ask CF_ZONE_ID "" _v_hex32 \
-      "Zone ID of the ${ROOT_DOMAIN} zone (32 hex, same section)."
+    if [[ "$EDGE" == local ]]; then
+        # Asked for and left empty ON PURPOSE, not omitted: the conf has
+        # ONE shape, and a variable that exists empty says "this profile
+        # does not use it". A variable that is missing says nothing, and
+        # every consumer would have to guess with ${CF_ZONE_ID:-}.
+        CF_ACCOUNT_ID="" CF_ZONE_ID=""
+        printf '\nEDGE=local: no Cloudflare account and no zone are asked for.\n'
+    else
+        printf '\nThe TWO Cloudflare IDs are public, but you have to go\n'
+        printf 'looking for them: dash.cloudflare.com → click your zone (%s)\n' \
+            "${ROOT_DOMAIN}"
+        printf '→ Overview tab → right-hand column, "API" section:\n'
+        printf '  - Zone ID\n  - Account ID\nBoth are 32 hex.\n'
+        ask CF_ACCOUNT_ID "" _v_hex32 \
+          "Cloudflare Account ID (32 hex, API section of the Overview)."
+        ask CF_ZONE_ID "" _v_hex32 \
+          "Zone ID of the ${ROOT_DOMAIN} zone (32 hex, same section)."
+    fi
 
     # ── summary + confirmation ──────────────────────────────────────
     printf '\n\033[1m════ SUMMARY ════\033[0m\n'
     local v
-    for v in GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN ACME_EMAIL \
+    for v in EDGE EDGE_BIND_IP GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN ACME_EMAIL \
              KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP AEGIS_WORKSPACE \
              CF_ACCOUNT_ID CF_ZONE_ID; do
         printf '  %-22s = %s\n' "$v" "${!v}"
@@ -144,10 +193,14 @@ config_wizard() {
         echo "# aegis-init.conf — GENERATED by the wizard ($(date -u +%F))."
         echo "# Edit by hand only for automation/re-runs;"
         echo "# regenerate with: $AEGIS_ROOT/init/aegis-init.sh --configure"
-        for v in GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN ACME_EMAIL \
-                 KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP \
+        for v in EDGE EDGE_BIND_IP GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN \
+                 ACME_EMAIL KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP \
                  CF_ACCOUNT_ID CF_ZONE_ID; do
-            printf '%s="%s"\n' "$v" "${!v}"
+            # ${!v:-}: under EDGE=local the two Cloudflare ids and, under
+            # cloudflare, EDGE_BIND_IP are deliberately EMPTY. They are
+            # still WRITTEN, so the conf has one shape and no consumer has
+            # to guess whether a variable is missing or empty.
+            printf '%s="%s"\n' "$v" "${!v:-}"
         done
         # AEGIS_WORKSPACE may contain $HOME on purpose (no hard
         # quoting — it expands when sourced):
@@ -162,11 +215,28 @@ config_validate() {
     # shellcheck source=/dev/null
     source "$CONF_FILE"
     local missing=() v
+    # A conf with no EDGE was written before 2026-08-26: it is cloudflare,
+    # which is the only thing it could have been.
+    EDGE="${EDGE:-cloudflare}"
+    _v_edge "$EDGE" || { log_warn "EDGE must be cloudflare or local (it says '$EDGE')"; return 1; }
     for v in GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN ACME_EMAIL \
-             KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP \
-             CF_ACCOUNT_ID CF_ZONE_ID; do
+             KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP; do
         [[ -n "${!v:-}" ]] || missing+=("$v")
     done
+    # The two Cloudflare ids are REQUIRED under cloudflare and must be
+    # EMPTY under local: a leftover zone id in a local conf is a phase
+    # reaching for a zone nobody asked it to touch.
+    if [[ "$EDGE" == cloudflare ]]; then
+        for v in CF_ACCOUNT_ID CF_ZONE_ID; do
+            [[ -n "${!v:-}" ]] || missing+=("$v")
+        done
+    else
+        [[ -n "${EDGE_BIND_IP:-}" ]] || missing+=(EDGE_BIND_IP)
+        if [[ -n "${CF_ACCOUNT_ID:-}${CF_ZONE_ID:-}" ]]; then
+            log_warn "EDGE=local but CF_ACCOUNT_ID/CF_ZONE_ID carry a value — a local edge must not name a zone"
+            return 1
+        fi
+    fi
     if ((${#missing[@]})); then
         log_warn "incomplete conf — missing: ${missing[*]}"
         return 1

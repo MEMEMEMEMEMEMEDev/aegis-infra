@@ -6,19 +6,31 @@
 # Regenerate interactively: ./aegis-init.sh --configure
 #
 # All T1: domains, names, public IDs. ZERO secrets.
+# How the platform is reached from outside. It decides which of the
+# variables below are used, and no phase asks "which profile am I":
+#   cloudflare — a zone of yours, the tunnel and Access in front.
+#   local      — no zone and no tunnel: a bridge on the host, names
+#                through sslip.io, TLS from aegis' own internal CA.
+EDGE="cloudflare"
+# Address the host bridge listens on, EDGE=local only (empty under
+# cloudflare). 127.0.0.1 = reachable from this machine or an SSH
+# tunnel; a LAN address exposes it to the network:
+EDGE_BIND_IP=""
 GH_OWNER="mi-org"
 # ISOLATION: DISPOSABLE v2 work repos — init CREATES them and
 # writes to them (commits, tags, settings, webhooks). NEVER
 # point at the real v1 repos (ops-stack / hello-aegis):
 PLATFORM_REPO="ops-stack-v2"
 APP_REPO="hello-aegis-v2"
-ROOT_DOMAIN="example.com"                # zone active in Cloudflare
+ROOT_DOMAIN="example.com"                # cloudflare: an active zone
+                                         # local: <ip-with-dashes>.sslip.io
 ACME_EMAIL="operador@example.com"        # Let's Encrypt registration
 KUBE_CONTEXT_EXPECTED="default"          # k3s default context
 REGISTRY_CLUSTER_IP="10.43.179.123"      # in 10.43.0.0/16; paired
                                          # with the cert's SAN
 AEGIS_WORKSPACE="$HOME/aegis"
 # Cloudflare IDs (public, 32 hex): dash.cloudflare.com → your zone
-# → Overview → right-hand column, "API" section:
+# → Overview → right-hand column, "API" section.
+# With EDGE=local both stay EMPTY, and the validation demands it:
 CF_ACCOUNT_ID=""
 CF_ZONE_ID=""

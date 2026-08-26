@@ -55,7 +55,23 @@ phase_todo() { log_warn "TODO: $*"; }
 # One marker file per completed phase. Cheap, legible idempotence.
 mark_done()   { mkdir -p "$AEGIS_STATE_DIR"; : > "$AEGIS_STATE_DIR/$1.done"; }
 is_done()     { [[ -f "$AEGIS_STATE_DIR/$1.done" ]]; }
-clear_state() { rm -rf "$AEGIS_STATE_DIR"; }
+# --reset-state forgets the GATES, not the HISTORY. runs/ holds the
+# dossier of every run made so far, and until 2026-08-26 this was a plain
+# `rm -rf "$AEGIS_STATE_DIR"`: the flag whose whole job is "start over"
+# also destroyed the only record of what had happened before — including
+# the dossier of the run that made you want to start over. The gates being
+# forgotten are ARCHIVED, not deleted: "what did it say last time" is a
+# question that has to survive a reset (plan/04 §5).
+clear_state() {
+    [[ -d "$AEGIS_STATE_DIR" ]] || return 0
+    local runs="$AEGIS_STATE_DIR/runs" stamp
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    if [[ -f "$AEGIS_STATE_DIR/gates.jsonl" ]]; then
+        mkdir -p "$runs/_reset-$stamp"
+        mv "$AEGIS_STATE_DIR/gates.jsonl" "$runs/_reset-$stamp/gates.jsonl"
+    fi
+    find "$AEGIS_STATE_DIR" -mindepth 1 -maxdepth 1 ! -name runs -exec rm -rf {} +
+}
 
 # ── check mode ──────────────────────────────────────────────────────
 # run_cmd: in CHECK_MODE it shows without executing. ONLY for commands

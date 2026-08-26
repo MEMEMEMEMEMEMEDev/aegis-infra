@@ -199,6 +199,14 @@ for p in "${PHASES[@]}"; do
     # (the phases are idempotent by design; --only already behaved this
     # way). The LATER ones keep respecting their markers.
     force_run=false
+    # --configure re-asks the configuration, and the wizard has ONE owner:
+    # phase 00 calls ensure_config. Until 2026-08-26 the flag was consumed
+    # by nobody on an instance that had already run: the loop skipped phase
+    # 00 by its marker BEFORE ensure_config could ever see FORCE_CONFIGURE,
+    # so `aegis init --configure` on any initialised instance did exactly
+    # nothing, and said nothing about it. Asking to reconfigure IS asking
+    # for the phase that configures to run.
+    $FORCE_CONFIGURE && [[ "$name" == 00-* ]] && force_run=true
     if [[ -n "$ONLY_PHASE" ]]; then
         [[ "$name" == "$ONLY_PHASE"* ]] || continue
     elif [[ -n "$FROM_PHASE" && $started == false ]]; then
