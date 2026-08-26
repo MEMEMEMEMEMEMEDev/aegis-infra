@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # aegis-summary: Runs the init leaving a dossier of the whole run
 # aegis-group:   setup
+# aegis-help:
+# Usage: aegis init-log [the same flags as `aegis init`]
+#
+# Runs `aegis init` under `script`, leaving a dossier of the WHOLE
+# run in <instance>/.init-state/runs/<timestamp>-<profile>.log. The
+# dossier path is printed BEFORE the run starts, so it is known even
+# if the run dies. Every flag is passed through to the init untouched.
+
 #
 # Minimal stage C: NO run of the init without a dossier. Today the
 # init's stderr is lost with the terminal, and a failure three hours in
@@ -31,6 +39,9 @@ source "$AEGIS_ROOT/lib/paths.sh"
 
 RUNS="$AEGIS_STATE_DIR/runs"
 mkdir -p "$RUNS"
+
+usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
+for a in "$@"; do case "$a" in -h|--help) usage; exit 0 ;; esac; done
 
 # the profile only to name the file; if it does not come, it shows.
 PROFILE="no-profile"

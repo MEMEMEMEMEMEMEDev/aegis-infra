@@ -20,7 +20,7 @@
 #
 # ── the file the gateway reads does NOT come from here ────────────
 #
-# `bin/aegis-org` combines this with plans.yaml and with the `ai.plan`
+# `aegis org` combines this with plans.yaml and with the `ai.plan`
 # of each contract, and writes k8s/base/ai-system/routes.yaml. That file
 # is GENERATED and carries its hash: it is not edited by hand.
 

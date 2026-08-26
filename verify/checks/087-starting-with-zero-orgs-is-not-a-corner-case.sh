@@ -1,7 +1,7 @@
 # title: starting with ZERO organizations is not a corner case
 # origin: verify-static.sh (v2) ══ 87
 check() {
-# The two organization manifests are DERIVED by `bin/aegis-org` from
+# The two organization manifests are DERIVED by `aegis org` from
 # orgs/*.yaml, and a freshly started instance has no contracts: the two
 # exist with their header and without a single document. That is day
 # one's normal state, not an anomaly.

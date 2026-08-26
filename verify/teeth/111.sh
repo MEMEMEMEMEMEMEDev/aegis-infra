@@ -46,3 +46,21 @@ control_1() {
     printf '\n# history: this used to be called rutas.py and planes.yaml\n' \
         >> "$AEGIS_ROOT/lib/aegis/paths.py"
 }
+
+# The boundary, in the direction that used to be wrong: a retired word
+# that only survives INSIDE longer identifiers is not «back in the
+# code». `para` has zero bare occurrences and ~30 as a substring
+# (parameter, paragraph). Before 2026-08-26 this row turned the check
+# red on the spot, which is why the coordinated rename could not start.
+control_2() {
+    sed -i 's#^| `marcas\.py` | `markers\.py` | |$#&\n| `para` | `for` | |#' \
+        "$AEGIS_ROOT/docs/glossary.md"
+}
+
+# ...and the same row with the bare word actually written into code
+# has to bite: the boundary must not have blinded the check.
+red_4() {
+    sed -i 's#^| `marcas\.py` | `markers\.py` | |$#&\n| `para` | `for` | |#' \
+        "$AEGIS_ROOT/docs/glossary.md"
+    printf '\nPARA = "para"\n' >> "$AEGIS_ROOT/lib/aegis/paths.py"
+}

@@ -1,6 +1,24 @@
 #!/usr/bin/env bash
 # aegis-summary: Brings up the whole platform, phase by phase
 # aegis-group:   setup
+# aegis-help:
+# Usage: aegis init [--profile greenfield|hetzner] [--from N] [--only N]
+#                   [--check] [--configure] [--list] [--reset-state]
+#                   [--non-interactive]
+#
+# The orchestrator: brings the platform up phase by phase, recording
+# a gate per step in the instance's .init-state/. Re-running converges:
+# phases already passed are skipped unless --from/--only say otherwise.
+#
+#   --profile P        the target (default greenfield)
+#   --from N           start at phase N (skip the earlier ones)
+#   --only N           run phase N alone
+#   --check            measure, change nothing
+#   --configure        re-ask the configuration even if it exists
+#   --list             print the phases and exit
+#   --reset-state      forget every gate and start over
+#   --non-interactive  never prompt (same as AEGIS_ASSUME_YES=true)
+
 # aegis-init — the orchestrator of aegis' whole bootstrap.
 #
 # USAGE:
@@ -59,7 +77,9 @@ export PROFILE=greenfield CHECK_MODE=false FORCE_CONFIGURE=false
 export AEGIS_NONINTERACTIVE="${AEGIS_ASSUME_YES:-false}"
 FROM_PHASE="" ONLY_PHASE="" DO_LIST=false DO_RESET=false
 
+usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
 while (($#)); do case "$1" in
+    -h|--help)     usage; exit 0 ;;
     --profile)     PROFILE="$2"; shift 2 ;;
     --from)        FROM_PHASE="$2"; shift 2 ;;
     --only)        ONLY_PHASE="$2"; shift 2 ;;

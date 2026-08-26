@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # aegis-summary: Undoes what the init created outside (cloud and repos)
 # aegis-group:   setup
+# aegis-help:
+# Usage: aegis destroy [--yes] [--purge-secrets] [--k3s]
+#
+# Undoes the EXTERNAL footprint the init created: Cloudflare (tunnel,
+# DNS, Access) and the GitHub repos. Without --yes it is a DRY-RUN
+# that only says what it would remove.
+#
+#   --yes             act (default: dry-run)
+#   --purge-secrets   also wipe the instance's secret store
+#   --k3s             also uninstall k3s from this host
+
 # aegis-destroy — teardown of the EXTERNAL footprint the init creates and
 # that survives a snapshot revert (W-10 / R5). Today the only cleanup is
 # COUPLED to the creation path (25-edge-tofu only deletes the "dirty cloud"
@@ -48,9 +59,11 @@ CONF="$AEGIS_HOME/aegis.conf"
 say()  { printf '[destroy] %s\n' "$*"; }
 die()  { printf '[destroy] FATAL: %s\n' "$*" >&2; exit 1; }
 
+usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
 YES=0; PURGE_SECRETS=0; K3S=0
 for a in "$@"; do
   case "$a" in
+    -h|--help)        usage; exit 0 ;;
     --yes)            YES=1 ;;
     --purge-secrets)  PURGE_SECRETS=1 ;;
     --k3s)            K3S=1 ;;

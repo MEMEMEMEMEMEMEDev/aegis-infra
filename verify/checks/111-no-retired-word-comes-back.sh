@@ -16,6 +16,17 @@ check() {
 # in the doc is exactly the pair that drifts apart — and the day they
 # drift, the one nobody reads wins.
 #
+# WHOLE words (-w: letters, digits and underscore are word characters).
+# Until 2026-08-26 this was a substring match, and it could not express
+# the rename it exists for: retiring `usa` would have flagged `usage`
+# in share/exit-codes.txt and in cAdvisor's metric names, retiring
+# `organizacion` would have flagged `aegis-organizaciones`, and so on
+# for 49 living compounds. A hyphen IS a boundary on purpose: the
+# hyphenated compounds (`sin-nombre`, `obs-ntfy-publico-responde`) are
+# Spanish themselves and pending, while every false positive found was
+# a suffix extension. The price: a plural or a derived form escapes,
+# and needs its own row.
+#
 # Only the lines that are NOT comments are looked at. A comment, and a
 # document, MAY name a retired word when they are telling the story:
 # several do, and that narration is the most valuable thing this code
@@ -39,7 +50,7 @@ while IFS= read -r word; do
     # regression they watch. Putting them in scope would make the
     # ratchet bite the teeth that test it. Its own tooth discovered
     # this, on the first run.
-    HITS="$(command grep -rIn --exclude-dir=.git --exclude-dir=teeth --exclude='*.md' -F -- "$word" \
+    HITS="$(command grep -rIn --exclude-dir=.git --exclude-dir=teeth --exclude='*.md' -Fw -- "$word" \
                 "$AEGIS_ROOT/bin" "$LIBS" "$LIBEXEC" "$AEGIS_ROOT/init" \
                 "$AEGIS_ROOT/verify" "$AEGIS_ROOT/share" "$SEED" 2>/dev/null \
             | grep -vE ':[0-9]+:[[:space:]]*(#|//)' || true)"

@@ -56,7 +56,7 @@ Applications, the AppProject's sourceRepos and the credentials. Fourth
 consumer of the same source, and for the same reason as always: two lists
 computed apart is how they go out of sync. The webhooks are not listed
 here: their honest source is Jenkins's values, and that invariant already
-has an owner (bin/aegis-webhook) — it is delegated, not duplicated.
+has an owner (`aegis webhook`) — it is delegated, not duplicated.
 
 THREE OUTCOMES PER STEP (the house doctrine)
 ────────────────────────────────────────────
@@ -67,11 +67,11 @@ everything done ends up as pure «already» — converge, do not execute
 (journeys/design.md §0.4). It holds for both subcommands: `new` re-run
 with everything done also ends up as pure «already».
 
-    bin/aegis-app new tienda --template base   # contract + skeleton + derive
-    bin/aegis-app new tienda                   # artisan: the contract is already
-                                               # there, it only re-derives (re-entry)
-    bin/aegis-app apply orgs/ejemplo.yaml      # converges against GitHub
-    bin/aegis-app apply ejemplo --check        # says what it would do, without touching
+    aegis app new tienda --template base   # contract + skeleton + derive
+    aegis app new tienda                   # artisan: the contract is already
+                                           # there, it only re-derives (re-entry)
+    aegis app apply orgs/ejemplo.yaml      # converges against GitHub
+    aegis app apply ejemplo --check        # says what it would do, without touching
 
 It returns 0 if everything was or has been done, 1 if something is left to
 do (--check), 2 if something COULD NOT BE EVALUATED or aborted.
@@ -380,7 +380,7 @@ def _templates_dir():
             f"  instance nested inside it. This clone looks loose, without the\n"
             f"  product around it. Ways out: run from a checkout of the product,\n"
             f"  or the artisan path — write orgs/<org>.yaml by hand and run\n"
-            f"  `bin/aegis-app new <org>` WITHOUT --template, which only derives.")
+            f"  `aegis app new <org>` WITHOUT --template, which only derives.")
     return d
 
 
@@ -539,7 +539,7 @@ def _derive(path, tot):
         rc = subprocess.run(cmd).returncode
         if rc != 0:
             raise Error(f"{step} ended with rc {rc} — sort that out and re-run "
-                        f"`bin/aegis-app new ...`, which converges")
+                        f"`aegis app new ...`, which converges")
         mark(tot, "done", step, "detail above")
 
 
@@ -560,7 +560,7 @@ def new(org, template, tot):
                 f"orgs/{org}.yaml ALREADY EXISTS and a live contract is not trampled: it\n"
                 f"  is edited by hand (it is the only truth, journeys §0.1). If what\n"
                 f"  you want is to re-derive whatever is missing, run this very thing\n"
-                f"  WITHOUT --template: `bin/aegis-app new {org}`")
+                f"  WITHOUT --template: `aegis app new {org}`")
         d = _template(template)
         values = _values_for(org)
         # ── steps 2 and 3: contract + skeletons ───────────────────
@@ -574,7 +574,7 @@ def new(org, template, tot):
                 f"orgs/{org}.yaml does not exist. Without --template this command does\n"
                 f"  not invent contracts: write it by hand (the artisan path — look at\n"
                 f"  orgs/ejemplo.yaml) or ask a template for one:\n"
-                f"  `bin/aegis-app new {org} --template base`")
+                f"  `aegis app new {org} --template base`")
         mark(tot, "already", "contract", f"orgs/{org}.yaml is yours — it is not touched")
 
     # ── steps 4 and 5: derive and encrypt ─────────────────────────
@@ -707,7 +707,7 @@ def apply_repo(c, url, name, write, tot):
 
 
 def apply_webhooks(write, tot):
-    """Delegated ENTIRELY to bin/aegis-webhook, which owns the invariant.
+    """Delegated ENTIRELY to `aegis webhook`, which owns the invariant.
 
     Its list comes out of Jenkins's values (every repo with a job, not
     only the ones of these contracts) and that is correct: the invariant

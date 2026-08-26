@@ -1,12 +1,30 @@
 #!/usr/bin/env bash
 # aegis-summary: Leaves the machine in the state the init needs
 # aegis-group:   setup
+# aegis-help:
+# Usage: aegis preflight
+#
+# Leaves this machine in the state `aegis init` needs: sudo NOPASSWD,
+# IPv6 off, per-interface DNS, clock, packages, git identity. It
+# takes no arguments, and it ACTS — every step repairs what it can
+# (with sudo) and reports OK / FAIL / WARN. Idempotent: re-running
+# must end all OK.
+
 # aegis-preflight — leaves a VM in the state aegis-init needs before running
 # (environment fixes discovered in the real runs). Idempotent: re-running
 # must give all OK. Auto-repairs what it can (clock, DNS, packages, git
 # identity via prompt). Nothing here is tied to a particular user, domain or
 # account: the customization lives in init/aegis-init.conf.
 set -u
+AEGIS_ROOT="${AEGIS_ROOT:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)}"
+usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
+# Parsed BEFORE anything else: this command installs things with sudo,
+# and until 2026-08-26 `aegis preflight --help` ran the whole
+# installation instead of describing it.
+for a in "$@"; do case "$a" in
+    -h|--help) usage; exit 0 ;;
+    *) echo "${AEGIS_CMD:-aegis} preflight takes no arguments (got '$a'); try --help" >&2; exit 3 ;;
+esac; done
 NAT_IF="${NAT_IF:-enp0s3}"                               # VirtualBox NAT NIC
 HOST_IF="${HOST_IF:-enp0s8}"                             # host-only/bridge NIC
 NAT_DNS="${NAT_DNS:-10.0.2.3}"                           # DNS of VirtualBox's NAT

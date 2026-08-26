@@ -20,7 +20,7 @@
 # It is applied with the wrapper, like all tofu (A14):
 #   ./tofu-apply.sh -chdir=envs/vps-lab init|plan|apply
 # The tunnel token comes out as a sensitive output and is consumed by
-# bin/aegis-vps (render/entregar) — it is never printed.
+# `aegis vps` (render/entregar) — it is never printed.
 
 terraform {
   required_providers {

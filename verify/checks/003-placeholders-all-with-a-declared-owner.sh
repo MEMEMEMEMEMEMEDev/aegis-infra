@@ -6,7 +6,7 @@ check() {
 # observability ones are DERIVED from \$PROFILE, table in common.sh) +
 # generated-class (owners: phase 10 AGE_PUBLIC, phase 80
 # COSIGN_PUB/AEGIS_CA_PEM, phase 85 OBS_CA_PEM and the 2 bcrypt hashes
-# of ntfy) + vps-class (owner: bin/aegis-vps render, which builds the
+# of ntfy) + vps-class (owner: `aegis vps render`, which builds the
 # lab's user-data in /dev/shm: CF_TUNNEL_TOKEN and the operator's two
 # public keys — checks 94/95).
 #

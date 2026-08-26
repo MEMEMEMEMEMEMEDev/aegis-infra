@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # aegis-summary: The lab VPS: user-data, tunnel token, shred
 # aegis-group:   infra
+# aegis-help:
+# Usage: aegis vps render     # cloud-init user-data for the lab VPS
+#        aegis vps entregar   # hand the tunnel token over (stdin/env, never argv)
+#        aegis vps shred      # wipe the lab VPS's secrets locally
+#
+# The lab VPS. The tunnel token travels through a VARIABLE and through
+# STDIN only: it is never printed and never appears in argv.
+
 # aegis-subcommands: render entregar shred
 # aegis-hidden:  true
 # aegis-vps — render | entregar | shred
@@ -30,6 +38,11 @@ TPL="$ROOT/vps/clouding-lab.cloud-init.yaml.tpl"
 
 die() { printf '%s vps: %s\n' "${AEGIS_CMD:-aegis}" "$*" >&2; exit "${2:-1}"; }
 
+# --help answers BEFORE the wrapper precondition: asking what a command
+# does must not require standing inside the live checkout.
+AEGIS_ROOT="${AEGIS_ROOT:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)}"
+usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
+case "${1:-}" in -h|--help) usage; exit 0 ;; esac
 [[ -x "$WRAPPER" ]] || die "the wrapper $WRAPPER does not exist — are you in the live checkout (platform/)? The vps-lab env and its state live there, not in the seed" 2
 
 read_token() {

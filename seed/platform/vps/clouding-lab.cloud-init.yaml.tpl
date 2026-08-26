@@ -6,7 +6,7 @@
 # public port 22»; here that public port does not exist from the very
 # first boot.
 #
-# Placeholders (owner: bin/aegis-vps render — check 3):
+# Placeholders (owner: `aegis vps render` — check 3):
 #   __SSH_PUBKEY_RSA__      ~/.ssh/aegis_vps_rsa.pub (the Clouding
 #                           form only accepts the ssh-rsa prefix)
 #   __SSH_PUBKEY_ED25519__  ~/.ssh/aegis_vps.pub

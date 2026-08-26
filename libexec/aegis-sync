@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # aegis-summary: Fires an ArgoCD sync without breaking the app
 # aegis-group:   operate
+# aegis-help:
+# Usage: aegis sync <app> [<app> ...]
+#        aegis sync --drifted
+#
+# Fires an ArgoCD sync of the named Application(s) WITHOUT passing
+# syncOptions, so the app's own (RespectIgnoreDifferences among them)
+# stay in force. --drifted syncs every app that is not Synced.
+
 # aegis-sync — fires an ArgoCD sync WITHOUT breaking the app.
 #
 # ── why it exists ─────────────────────────────────────────────────
@@ -29,11 +37,10 @@ set -euo pipefail
 red=$'\033[31m'; green=$'\033[32m'; gray=$'\033[90m'; reset=$'\033[0m'
 [[ -t 1 ]] || { red=""; green=""; gray=""; reset=""; }
 
-if [[ $# -eq 0 ]]; then
-    echo "usage: ${AEGIS_CMD:-aegis} sync <app> [<app> ...]" >&2
-    echo "       ${AEGIS_CMD:-aegis} sync --drifted    # every one that is not Synced" >&2
-    exit 2
-fi
+AEGIS_ROOT="${AEGIS_ROOT:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)}"
+usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
+for a in "$@"; do case "$a" in -h|--help) usage; exit 0 ;; esac; done
+if [[ $# -eq 0 ]]; then usage >&2; exit 3; fi
 
 apps=("$@")
 if [[ "${1:-}" == "--drifted" ]]; then

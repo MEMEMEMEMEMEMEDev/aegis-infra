@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # aegis-summary: The round: measures reality against what is declared
 # aegis-group:   operate
+# aegis-help:
+# Usage: aegis check
+#
+# The routine round. It takes no arguments and WRITES NOTHING: it
+# measures the live cluster against what the instance declares
+# (signature enforcement, backups per organization, drift) and
+# reports each subject as done / already / COULD NOT EVALUATE.
+
 # aegis-check — the routine round, the one you run when coming back
 # from a shutdown or before starting to touch anything.
 #
@@ -48,6 +56,12 @@ fi
 export AEGIS_ROOT
 # shellcheck source=../lib/paths.sh
 source "$AEGIS_ROOT/lib/paths.sh"
+
+usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
+for a in "$@"; do case "$a" in
+    -h|--help) usage; exit 0 ;;
+    *) echo "${AEGIS_CMD:-aegis} check takes no arguments (got '$a'); try --help" >&2; exit 3 ;;
+esac; done
 # aegis_exec (rule 5.1) lives in common.sh. The round does not need the
 # rest of the init, but it does need to invoke other commands WITHOUT an
 # absent command turning into «no failures».

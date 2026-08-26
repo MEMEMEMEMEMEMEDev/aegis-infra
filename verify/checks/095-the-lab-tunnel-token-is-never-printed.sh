@@ -2,7 +2,7 @@
 # origin: verify-static.sh (v2) ══ 95
 check() {
 # The token is a long-lived credential that grants network entry to the
-# VPS. bin/aegis-vps moves it through a VARIABLE and through STDIN:
+# VPS. `aegis vps` moves it through a VARIABLE and through STDIN:
 # never argv (visible in /proc), never the screen, never disk outside
 # /dev/shm. We already lost a token by pasting it into a transcript
 # (2026-08-19); this class of leak is not re-audited by eye: it is

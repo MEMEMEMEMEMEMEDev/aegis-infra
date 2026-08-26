@@ -168,51 +168,94 @@ these move, and each entry names who compares it. Nothing here is a
 §3 row yet — a word graduates to §3 only once it is gone from the
 code, and none of these are.
 
-The order matters. Groups 1 and 2 move as single commits; the rest can
-go one at a time.
+It is split in TWO inventories, and the split is the point. §5A is
+renames of CODE: a check sees them, `git revert` undoes them, the worst
+case is a loud red. They go through the ratchet of §3b → §3. §5B is
+renames of LIVE OBJECTS and ON-DISK FORMATS: no check sees them, git
+does not undo them, and they break things that already exist. Those
+are not translation — they are migration, and they belong to the
+teardown-and-rebuild (T-06/T-08), not to a language pass. Until
+2026-08-26 the two were one list, and a reader could not tell a
+one-commit rename from a change that orphans every tenant's
+Application.
 
-### 1. The contract's vocabulary — the most expensive
+The instrument was corrected the same day: check 111 now matches WHOLE
+words. Under the old substring match, retiring `usa` flagged `usage`,
+retiring `organizacion` flagged `aegis-organizaciones`, and the first
+group below could not even begin.
 
-`organizacion` `dominio` `cuota` `servicios` `nombre` `tipo` `puerto`
-`publico` `usa` `almacenamiento` `ai` `plan` `tareas` `capacidad`
-`prompt`, and the values `pequena|mediana|grande`,
-`basico|estandar|intensivo`, `estatico|http|postgres|worker`.
+### 5A. Renames of code — through the ratchet
 
-Moves together: `lib/aegis/org.py` (`_only()` REJECTS unknown keys, so
-a half-rename does not degrade — it refuses every contract),
-`seed/platform/plans.yaml`, `seed/templates/base/contract.yaml.tpl`,
-`seed/platform/orgs/README.md`, `libexec/dev/test-types` (~35 uses),
-`libexec/aegis-{app,check,data,secret}`, checks 004/055/091/106 and
-`init/phases/85` (the `organizacion` label on tenant probes).
+#### 1. The contract's vocabulary — the most expensive
+
+The keys, as `_only()` in `lib/aegis/org.py` accepts them (measured
+2026-08-26, six call sites): contract = `version organizacion dominio
+cuota repo almacenamiento ai servicios`; `almacenamiento.bucket`;
+`ai.plan` and `ai.tareas[]` = `nombre capacidad prompt`; `servicios[]`
+= `nombre tipo repo puerto publico usa`. And the values
+`pequena|mediana|grande`, `basico|estandar|intensivo`,
+`estatico|http|postgres|worker`. (`ai`, `plan`, `prompt` and `repo`
+are already English: nothing to move.)
+
+498 occurrences in 26 files. Moves together, in ONE commit:
+
+- `lib/aegis/org.py` — `_only()` REJECTS unknown keys, so a
+  half-rename does not degrade: it refuses every contract. Three
+  sites inside the file are NOT the contract key and a blind
+  substitution breaks them silently: the Prometheus label
+  `organizacion` on the tenant probes (`org.py:2599`, consumed by
+  `vmalert-rules.yaml:210`); the `registro.json` keys `capacidad` and
+  `tareas` read by the AI gateway, which does not travel in the seed;
+  and `module: [sitio_publico]`, which check 092 reads as text.
+- `seed/platform/services.yaml:77` — `puerto: 5432` under
+  `tipos.postgres`, read as `t['puerto']` in `org.py:539,574`.
+  **Missing from this inventory until 2026-08-26**: renaming `puerto`
+  without it makes `aegis org apply` die with `KeyError` while
+  rendering postgres.
+- `seed/platform/plans.yaml` (`cuota:` and the six plan names),
+  `seed/templates/base/contract.yaml.tpl` (check 055 greps
+  `publico:` in it), `seed/platform/orgs/README.md`.
+- `libexec/dev/test-types` — 52 lines, coupled TWICE: the YAML
+  fragments carry the keys, and the third field of every tuple is the
+  literal error text of `org.py`. No safe order: same commit.
+- `libexec/aegis-{app,check,data,secret}` — read the keys. In
+  `aegis-data`, ONLY `sources()` (lines 258–265) is contract; the
+  other 19 hits are the bundle manifest and belong to §5B.
+- checks 055, 091b (its synthetic contract) and 106.
+
+NOT in this group, contrary to what this section said before
+2026-08-26: check 004 has zero hits (its `ai` is a path), and
+`init/phases/85` has zero (its `publico` is the gate
+`obs-ntfy-publico-responde`, group 5).
 
 This is the only rename in the whole product where a mistake leaves
 the product unable to read its own contract.
 
-### 2. The AI configuration's vocabulary
+#### 2. The AI configuration's vocabulary
 
 `capacidades` `proveedor` `modelo` `contexto_max` `clases` `tareas`
 `peso` in `seed/platform/ai/{routes,tasks}.yaml`, plus the capability
 names `chat.rapido` `chat.largo` `traduccion` `transcripcion` and the
 file `docs/architecture/capacidad-ai.md` (linked by name from
-`attach-ai-subsystem.md`). Read by `org.py` at load time.
+`attach-ai-subsystem.md`). Read by `org.py` at load time. The values
+also leave the product as `ruteo.json`/`registro.json` toward the AI
+gateway, which is declared absent from the seed: that is the one
+place in this group no check can see.
 
-### 3. Names emitted into the cluster
+#### 3. Names emitted into the cluster — the ones that are code
 
 | Name | Who compares it |
 |---|---|
 | `{org}-cabeceras` · `-ritmo` · `-cuerpo` · `-ruteo` | check 091 (twice), 091b, `org.py`, org-canary's hand copies |
-| `aegis-organizaciones` (AppProject) | `appprojects.yaml`, `org.py`, `libexec/aegis-check:786` |
 | `aegis.dev/component: datos` | `libexec/aegis-data:264` selects by it |
 | `aegis.dev/rol: aprovisionar-bucket` | garage's netpol ↔ `org.py` |
-| `secret-{n}-credenciales`, key `usuario` | `org.py`, `aegis secret` |
+| `secret-{n}-credenciales`, key `usuario` | `org.py`, `aegis secret` — moves with the NEXT rotation, since the live Secret carries the key |
 | `ai-registro`/`registro.json`, `ai-ruteo`/`ruteo.json` | `org.py`, the gateway |
 | `aprovisionar-bucket.mjs` → mounted as `aprovisionar.mjs` | `org.py` (3 places), the equivalence harness |
-| `vmalert-reglas` (ConfigMap) | `vmalert/values.yaml`, `libexec/aegis-check:1176` — a LIVE object: renaming it leaves vmalert with no rules |
 | `medir-y-pushear` (container) | `trivy-db-age.yaml` |
-| `operador` · `puente` (ntfy identities) | real credentials the bridge authenticates with |
 | `desplegar` (Jenkins stage) | `org.py:725`, `init/phases/70:149` — nothing compares a stage name, so a rename fails silently |
 
-### 4. Observability
+#### 4. Observability — the ones that are code
 
 The 17 alert names (`DeadmanAegis`, `TunelSinConexion`,
 `SitioDeInquilinoCaido`, `InquilinoAlLimiteDeMemoria`,
@@ -222,8 +265,9 @@ The 17 alert names (`DeadmanAegis`, `TunelSinConexion`,
 `RegistryCertServidoPorExpirar`, `RegistryProbeFalla`,
 `TrivyHealthzFalla`, `BlackboxSinMedida`, `TunelSinScrape`,
 `SitioDeInquilinoSinSonda`) — check 092 holds six of them in a
-`NO_GUARD` table and cross-checks BOTH directions; 087 and
-`libexec/dev/seed` name others.
+`NO_GUARD` table and cross-checks BOTH directions, and since
+2026-08-26 its §10 names the absence of `JobDeScrapeDesaparecido`
+instead of comparing nothing; 087 and `libexec/dev/seed` name others.
 
 The blackbox module `sitio_publico` and the derived `job_name:
 sitio-{org}` — check 092 reads them OUT OF `org.py` as text.
@@ -232,39 +276,43 @@ Dashboard uids `aegis-plataforma` and `aegis-consumo`, the ConfigMap
 data keys `borde.json` · `plataforma.json` · `consumo.json` and the
 ConfigMap names `dashboard-borde` · `dashboard-plataforma` ·
 `dashboard-consumo`. The FILENAMES are already English; the identities
-inside are not, and the mismatch is the confusing part.
+inside are not. Nothing in `verify/` compares them.
 
 Vector's component ids (`marca_tiempo`, `metricas_propias`, `eventos`,
 `eventos_json`, `metricas`, `vlogs_eventos`) and the field
 `ts_colector`, which is also hardcoded in a sink URI
 (`_time_field=ts_colector`) — wired together by `inputs:`, so renaming
-one alone silently detaches a pipeline stage.
+one alone silently detaches a pipeline stage. Nothing in `verify/`
+compares them either.
 
-The `"origen"` key inside the AEGIS_EVENT JSON of
-`mirror-images/Jenkinsfile`: it is a log contract already ingested
-into vlogs-events. Renaming it changes the meaning of a year of
-records retroactively.
+#### 5. The init's gates
 
-### 5. The init's gates
+Roughly half of the gate names are Spanish, and around thirty of them
+are grepped by a check. (The exact denominators vary with how the
+gates built from variables — `instalado-$x`, `kyverno-restart-$x` —
+are counted; two independent surveys gave 76/134 and 65/138.) They
+land in `gates.jsonl` and the bootstrap dashboard reads them.
+Examples: `nodos-ready`, `reloj-sin-skew`, `host-confia-en-el-CA`,
+`los-6-secrets`, `clusterip-coincide-con-el-service`,
+`obs-ntfy-publico-responde`.
 
-**76 of the 134 gate names are Spanish, and 31 of them are grepped by
-a check.** They land in `gates.jsonl` and the bootstrap dashboard
-reads them. Examples: `nodos-ready`, `reloj-sin-skew`,
-`host-confia-en-el-CA`, `los-6-secrets`, `clusterip-coincide-con-el-service`.
-
-Two are singled out because a check compares more than the string:
-`clusterip-coincide-con-el-service` (check 070 and its tooth) and the
-ansible task `coredns EXISTA` (check 071 compares the LINE ORDER
-around it, so even moving it up a line turns it red).
+Every check that greps a gate name does it in the safe form
+(`grep -q 'X' || D=...`): a renamed gate turns the check RED, not
+blind. Two are singled out because a check compares more than the
+string: `clusterip-coincide-con-el-service` (check 070 and its tooth)
+and the ansible task `coredns EXISTA` (check 071 compares the LINE
+ORDER around it, so even moving it up a line turns it red).
 
 This block was invisible to every measurement made during the
 translation, and the reason is worth writing down: the survey looked
 for Spanish FUNCTION WORDS (`que`, `para`, `del`…), and an identifier
-like `nodos-ready` contains none. A measurement of «how much is left»
-that only counts prose reports zero while a third of the product's
-vocabulary is still in the other language.
+like `nodos-ready` contains none. The 2026-08-26 survey with a lexicon
+detector counts 442 Spanish-signal lines in 67 files of `seed/`, 170
+of them carrying a term this section does not list. A measurement of
+«how much is left» that only counts prose reports zero while a third
+of the product's vocabulary is still in the other language.
 
-### 6. Small ones with no dependencies
+#### 6. Small ones with no dependencies
 
 `VERIFICAR-ANTES-DE-HETZNER` (check 012a and its tooth) ·
 `item.clave`/`item.valor` in ansible's bootstrap-host loop (both sides
@@ -272,3 +320,27 @@ or neither) · `CLARO`, `CIFRADO`, `HUELLA_ANTES`, `huella()` in
 `tofu-apply.sh` (nothing outside that file names them) · the `aegis
 vps entregar` subcommand · `transcripcion` in the pending-capabilities
 list.
+
+### 5B. Live objects and on-disk formats — migration, not translation
+
+None of these can be verified by a check, reverted by git, or moved in
+a commit. Each one changes the meaning of something that already
+exists outside the repository. They move during the teardown and
+rebuild (T-06 → T-08), where the old object is destroyed and the new
+one born, or they do not move at all.
+
+| Name | What renaming it does to the LIVE instance |
+|---|---|
+| `aegis-organizaciones` (AppProject) | orphans the Application of every tenant: ArgoCD refuses an app whose project does not exist. Also in `appprojects.yaml`, `org.py`, `libexec/aegis-check:786` |
+| `vmalert-reglas` (ConfigMap) | vmalert keeps running with NO rules until it is restarted against the new name. `vmalert/values.yaml`, `libexec/aegis-check:1176` |
+| `operador` · `puente` (ntfy identities) | they are real credentials the bridge authenticates with; renaming means a rotation, not an edit |
+| `aegis-alertas` (ntfy topic) | every subscribed phone stops receiving |
+| `"origen"` in the `AEGIS_EVENT` JSON of `mirror-images/Jenkinsfile` | a log contract already ingested into vlogs-events: changes the meaning of a year of records retroactively |
+| **the backup format** — `MANIFIESTO.json`, `.aegis-destino`, and ~30 JSON keys (`nombre`, `archivo`, `tablas`, `bases`, `objetos`…) in `libexec/aegis-data` | makes every `.age` bundle already written UNREADABLE by `list`/`restore`. The file declares this itself (`aegis-data:455`) — but a comment protects nothing; this row does. Moves only with a format version and a reader for both |
+| the rotation diary — `.previo/`, `delegada`, `*.parcial` under `.init-state/` | state the next rotation resumes from; a rename strands a rotation in progress |
+| `aegis-plataforma` / `aegis-consumo` (dashboard uids) | Grafana keys saved views and links by uid: bookmarks and the bootstrap dashboard's cross-links die |
+| the `secret-*-credenciales` key `usuario` | lives inside Secrets already in the cluster (listed in 5A.3 for the code side: the code moves with the next rotation, the object with it) |
+
+Rule for 5B: a row leaves this table only with a destroy-and-rebuild
+where the old object never coexists with the new one, or with a
+versioned format that reads both. Never by a rename in the code alone.

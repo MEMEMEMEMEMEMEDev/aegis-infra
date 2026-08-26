@@ -302,9 +302,15 @@ for where, expr in readers:
                        "and it is not a pattern aegis-org knows how to derive either")
 
 # ── 10. the baked-in threshold is derived, not remembered ───────────
+# Guarded against the alert simply not being there: a loop over zero
+# matches compares nothing and passes, which is the blindness this
+# check exists to prevent (the NO_GUARD table above names the same
+# alert; fixing one occurrence and not this one left it measuring nothing).
+threshold_seen = False
 for fname, name, expr in alerts:
     if name != "JobDeScrapeDesaparecido":
         continue
+    threshold_seen = True
     m = re.search(r"<\s*(\d+)", expr)
     if not m:
         bad.append("JobDeScrapeDesaparecido stopped comparing against a number of jobs")
@@ -312,6 +318,9 @@ for fname, name, expr in alerts:
         bad.append(f"JobDeScrapeDesaparecido expects {m.group(1)} jobs and vmagent declares "
                    f"{len(jobs_base)} platform ones: the threshold went stale, so it either "
                    "screams too much or covers up a lost job")
+if not threshold_seen:
+    bad.append("the alert JobDeScrapeDesaparecido is gone: nothing compares the number of "
+               "scrape jobs against vmagent any more, and a lost job goes unnoticed")
 
 # ── 11. hot reload and the rollout strategy ─────────────────────────
 if vmag.get("extraArgs", {}).get("promscrape.configCheckInterval") is None:

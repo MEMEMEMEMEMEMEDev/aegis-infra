@@ -22,7 +22,7 @@ CONF="$AEGIS_HOME/aegis.conf"; source "$CONF"
 #   appprojects.yaml           the substrate (bootstrap, platform) and
 #                              what does not come from a contract
 #                              (canary, inherited ones)
-#   appprojects-tenants.yaml   DERIVED by `bin/aegis-org` from the
+#   appprojects-tenants.yaml   DERIVED by `aegis org` from the
 #                              contracts that declare a repo
 # Without the second one, the organizations' Applications start up and
 # ArgoCD leaves them at "project not found" (#19).
