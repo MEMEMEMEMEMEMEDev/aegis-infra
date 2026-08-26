@@ -41,7 +41,12 @@
 # is the one 113 cannot reach.
 set -u
 : "${AEGIS_ROOT:?}"
-V2="${AEGIS_V2:-$HOME/Escritorio/workspace/aegis-v2}"
+# No default pointing at anybody's home directory: the reference tree
+# is somewhere different on every machine, and a path with a person's
+# name in it is a product that was written for that person. Without the
+# variable this harness says it COULD NOT EVALUATE, which is the honest
+# answer and the one it already knows how to give.
+V2="${AEGIS_V2:-$(cd "$AEGIS_ROOT/../aegis-v2" 2>/dev/null && pwd || echo "")}"
 ORG_V2="$V2/platform/bin/aegis-org"
 PLAT="$V2/platform"
 CONF="$V2/init/aegis-init.conf"

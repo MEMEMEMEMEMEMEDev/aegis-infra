@@ -25,7 +25,7 @@ The problem is not copying files, it is that copying WITHOUT un-rendering
 bakes an instance inside the product:
 
     SEED:      repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
-    INSTANCE:  repoURL: git@github.com:ejemplo-org/ops-stack-v2.git
+    INSTANCE:  repoURL: git@github.com:<owner>/<platform repo>.git
 
 and the failure does not show up here: it shows up at the next startup, on
 another machine, with a repo that does not exist. `pull` does that inverse

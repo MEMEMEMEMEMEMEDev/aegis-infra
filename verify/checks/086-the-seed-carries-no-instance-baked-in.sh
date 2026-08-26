@@ -9,7 +9,7 @@ check() {
 # exist.
 #
 # It already happened: until 2026-08-11 the seed's org-canary/bundle.yaml
-# pointed at git@github.com:ejemplo-org/hello-aegis-v2.git. An
+# pointed at git@github.com:<a real owner>/<a real repo>.git. An
 # instance born from that seed cloned ANOTHER owner's canary.
 #
 # The check measures by SHAPE, not against aegis-init.conf, because that

@@ -7,7 +7,7 @@
 # runs if there is an instance — and discovering that in v3 it no
 # longer found it was this tooth's doing.
 red_1() {
-    printf '\n# the repo: git@github.com:ejemplo-org/ops-stack-v2.git\n' \
+    printf '\n# the repo: git@github.com:somebody/their-platform.git\n' \
         >> "$AEGIS_ROOT/seed/platform/edge.yaml"
 }
 # control: the CORRECT way of naming the same thing in the artifact

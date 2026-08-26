@@ -20,6 +20,11 @@
 # filters BEFORE the packet exists.
 hostname: aegis-vps
 users:
+  # The admin user of the VM is a ROLE, not a person. Until 2026-08-26
+  # this template shipped with the name of the operator who first wrote
+  # it, so anybody installing aegis got a machine carrying a stranger's
+  # username. `aegis` says what the account is FOR, which is what a
+  # name on a machine is supposed to do.
   - name: aegis
     groups: [sudo]
     shell: /bin/bash

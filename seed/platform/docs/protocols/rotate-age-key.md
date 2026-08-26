@@ -62,7 +62,7 @@ moves only when `init/.age-public` moves.
 
 ```bash
 export SOPS_AGE_KEY_FILE=$HOME/.config/sops/age/aegis.key
-export AEGIS_BACKUPS=/mnt/e/aegis-backups   # mounted (#85)
+export AEGIS_BACKUPS=/mnt/<your backup disk>/aegis-backups   # mounted (#85)
 aegis state backup          # ROUNDTRIP verified, not «we have backups»
 ```
 
