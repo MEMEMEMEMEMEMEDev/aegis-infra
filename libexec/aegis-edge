@@ -175,6 +175,20 @@ def main():
     root_domain = edge["root_domain"]
     expected = {f"{e}.{root_domain}" for e in g.edge_labels()}
 
+    # The edge with no zone has NO SUBJECT here, and that is different
+    # from "the credential is missing". Under EDGE=local there is no
+    # Cloudflare account, no zone and no CNAMEs: this comparison cannot
+    # be made, and it never will be. Saying "the token is missing" would
+    # send the operator hunting for a secret that by design does not
+    # exist — a message that is technically true and practically a lie.
+    if (from_conf("EDGE") or "cloudflare") == "local":
+        print(f"  {yellow}!{reset} edge NOT EVALUATED — EDGE=local: this instance "
+              f"has no Cloudflare zone")
+        print(f"    {gray}There are no CNAMEs to compare: the platform is reached\n"
+              f"    through the host bridge, not through a tunnel and a zone.\n"
+              f"    This is NOT approval: it is a check with no subject on this edge.{reset}")
+        return 2
+
     token, zone = credentials()
     # It does NOT fall silent, and it does not give itself the benefit
     # of the doubt. "Could not evaluate" is a different result from "it

@@ -15,7 +15,7 @@ data:
     {
       "uid": "aegis-edge",
       "title": "Aegis · edge",
-      "description": "The edge seen from inside: RPS, codes and latency per Traefik entrypoint.",
+      "description": "The edge seen from inside: RPS, codes and latency across Traefik's entrypoints. Both are matched on purpose: with EDGE=cloudflare the tunnel delivers plain HTTP on `web` and nothing reaches `websecure`; with EDGE=local the host bridge hands 443 to traefik and EVERYTHING arrives on `websecure`. A board filtered to one of them renders empty on the other edge, and an empty panel reads exactly like a healthy one.",
       "schemaVersion": 39,
       "editable": false,
       "timezone": "browser",
@@ -30,7 +30,7 @@ data:
       "panels": [
         {
           "id": 1,
-          "title": "RPS by code (entrypoint web)",
+          "title": "RPS by code (entrypoints web + websecure)",
           "type": "timeseries",
           "datasource": {
             "type": "prometheus",
@@ -45,7 +45,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(traefik_entrypoint_requests_total{entrypoint=\"web\"}[5m])) by (code)",
+              "expr": "sum(rate(traefik_entrypoint_requests_total{entrypoint=~\"web|websecure\"}[5m])) by (code)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "vmsingle"
@@ -62,7 +62,7 @@ data:
         },
         {
           "id": 2,
-          "title": "p95 latency (entrypoint web)",
+          "title": "p95 latency (entrypoints web + websecure)",
           "type": "timeseries",
           "datasource": {
             "type": "prometheus",
@@ -77,7 +77,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "histogram_quantile(0.95, sum(rate(traefik_entrypoint_request_duration_seconds_bucket{entrypoint=\"web\"}[5m])) by (le))",
+              "expr": "histogram_quantile(0.95, sum(rate(traefik_entrypoint_request_duration_seconds_bucket{entrypoint=~\"web|websecure\"}[5m])) by (le))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "vmsingle"

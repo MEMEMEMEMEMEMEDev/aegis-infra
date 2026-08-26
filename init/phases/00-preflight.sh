@@ -70,7 +70,12 @@ check_clock_ntp   # informational (weak signal with chrony — H1)
 # and every URL of the platform is a dead end. Cheap to see here,
 # expensive to discover in phase 90.
 if [[ "${EDGE:-cloudflare}" == local ]]; then
-    log_warn "GATE ns-en-cloudflare has NO SUBJECT — EDGE=local: there is no zone of yours to delegate, $ROOT_DOMAIN is a name for an address (sslip.io / /etc/hosts), no nameserver of yours answers for it and there is no tunnel or Access in front. The delegation cannot be checked because there is no delegation; what is gated in its place is that the name resolves here"
+    # Through gate_no_subject and not a bare log_warn: the human log is
+    # not the channel that survives. A gate that only says it in prose
+    # leaves gates.jsonl with NOTHING, and a line that is missing there
+    # reads exactly like one that passed.
+    gate_no_subject "ns-en-cloudflare" \
+      "EDGE=local: there is no zone of yours to delegate. $ROOT_DOMAIN is a name for an address (sslip.io / /etc/hosts), no nameserver of yours answers for it, and there is no tunnel or Access in front. The delegation cannot be checked because there is no delegation; what is gated in its place is that the name resolves HERE (edge-name-resolves)"
     # getent = the system's EFFECTIVE resolver, the same criterion as
     # check_egress_dns: what the browser and the kubelet will see, not
     # what an arbitrary server answers. ahostsv4 because EDGE_BIND_IP

@@ -98,7 +98,14 @@ CF_ACCESS_FILE="$STATE_SECRETS/cf_access_token.enc"
 # reaches EDGE_BIND_IP reaches argocd's and jenkins' login screens with
 # nothing but their own passwords in between. That is the trade of the
 # local profile, and the reason its default bind is the loopback.
-if [[ "$EDGE" == local ]]; then
+# ${EDGE:-cloudflare} and NOT "$EDGE": every phase runs in its own
+# subshell (`( source "$p" )`), so the default config_validate applies
+# does not survive phase 00. With a conf written before EDGE existed the
+# variable is simply absent, and under `set -u` a bare "$EDGE" does not
+# fall back to cloudflare — it kills the phase with «unbound variable».
+# A conf with no EDGE is a cloudflare conf, which is the only thing it
+# could ever have been.
+if [[ "${EDGE:-cloudflare}" == local ]]; then
     log_info "EDGE=local: the 3 scoped Cloudflare tokens are NOT minted — there is no account to mint them against, and no zone, no tunnel and no Access for them to drive"
     log_warn "GATE cf-permission-groups has NO SUBJECT under EDGE=local: the permission groups are not read because no master credential is asked for. This is not the gate passing — it is the gate having nothing to look at"
     # The two Secrets these tokens feed are still WRITTEN below, empty:
@@ -331,7 +338,7 @@ EOF
 # insecure_ssl "0", as it must be. A hook that can never deliver is not
 # a hook: it is a red delivery on every push, forever, and a phase 60
 # that gates on a link that was never going to close.
-if [[ "$EDGE" == cloudflare ]]; then
+if [[ "${EDGE:-cloudflare}" == cloudflare ]]; then
     make_repo_webhook "$PLATFORM_REPO" "https://argocd.$ROOT_DOMAIN/api/webhook" "$HMAC_ARGO"
     make_repo_webhook "$APP_REPO"      "https://jenkins.$ROOT_DOMAIN/github-webhook/" "$HMAC_JENK"
 else
@@ -383,7 +390,7 @@ GH_USER_F="$(materialize gh_user "$GH_OWNER")"
 # be worse than not writing it: tofu-apply.sh dies saying "empty", and
 # that death would look like a broken instance instead of a profile
 # that does not use tofu.
-if [[ "$EDGE" == cloudflare ]]; then
+if [[ "${EDGE:-cloudflare}" == cloudflare ]]; then
     python3 - "$CF_API" "$CF_ACCESS" > "$SECRETS_TMP/tokens.yaml" <<'EOF'
 import sys, yaml
 api = open(sys.argv[1]).read().strip()
@@ -403,7 +410,8 @@ EOF
     gate "tokens-roundtrip" check_sops_roundtrip "$TOKENS_DIR/tokens.enc.yaml"
 else
     log_info "EDGE=local: tokens.enc.yaml is NOT written — its only reader is the tofu wrapper of the edge, and with no Cloudflare zone there is no tofu of the edge to apply"
-    log_warn "GATE tokens-roundtrip has NO SUBJECT under EDGE=local: there is no file to encrypt, so there is no roundtrip to validate. Nothing was checked here — it is not that the encryption is fine"
+    gate_no_subject "tokens-roundtrip" \
+      "EDGE=local: tokens.enc.yaml is never written, so there is no file to encrypt and no roundtrip to validate. Nothing was checked here — it is NOT that the encryption is fine"
 fi
 
 # the dns token → a Secret the ClusterIssuers reference:
@@ -415,7 +423,7 @@ fi
 # kustomize build (A7). Empty is honest here — the letsencrypt issuers
 # solve DNS-01 against a zone that does not exist, and the wildcard
 # this instance actually serves is issued by the internal CA.
-if [[ "$EDGE" == cloudflare ]]; then
+if [[ "${EDGE:-cloudflare}" == cloudflare ]]; then
     make_enc_secret cloudflare-dns-token cert-manager \
         "$B/ingress/cert-manager-issuers/secret-cloudflare-dns-token.enc.yaml" \
         "api-token=$CF_DNS"
@@ -458,7 +466,7 @@ CF_ZONE_DESC="Cloudflare Zone ID (an identifier, not a secret)."
 # the reason belongs, because that is where it will be seen. (The two
 # ids come out empty on their own: the conf writes them empty and the
 # validation rejects a local conf that names a zone.)
-if [[ "$EDGE" == local ]]; then
+if [[ "${EDGE:-cloudflare}" == local ]]; then
     CF_JENKINS_DESC="EMPTY under EDGE=local: there is no Cloudflare account, so there is no token. The edge-chequeo job has no zone to read either. The Secret exists because the KSOPS generator lists it in both profiles."
     CF_ACCOUNT_DESC="EMPTY under EDGE=local: this instance names no Cloudflare account."
     CF_ZONE_DESC="EMPTY under EDGE=local: this instance names no Cloudflare zone."
@@ -535,7 +543,7 @@ make_enc_secret ops-stack-repo argocd \
     "sshPrivateKey=$DK_OPS" "url=$OPS_URL" \
     "name=$OPS_NAME" "type=$REPO_TYPE"
 
-if [[ "$EDGE" == cloudflare ]]; then
+if [[ "${EDGE:-cloudflare}" == cloudflare ]]; then
     log_ok "AUTOMATIC third parties complete: CF tokens minted over the API, \
 3 deploy keys registered via gh, 2 webhooks created, CI credential \
 from the gh token — zero browser, zero files moved by hand"

@@ -174,6 +174,12 @@ _build_triggered() {
 # gets its own name and its own patience: a webhook is instantaneous,
 # polling is not — 2× the interval plus the scan's own time.
 if [[ "${EDGE:-cloudflare}" == local ]]; then
+    # The name of a gate IS its contract, so the substitution is
+    # declared and not left implicit: whoever reads gates.jsonl looking
+    # for build-disparado-por-webhook on a local run has to find out
+    # that there was no webhook, not find nothing at all.
+    gate_no_subject "build-disparado-por-webhook" \
+      "EDGE=local: GitHub cannot deliver to this edge, so no webhook fires a build. What notices a push here is the periodic scan, gated as build-por-sondeo-disparado"
     gate_diag "build-por-sondeo-disparado" \
       'jenkins_get "/job/hello-aegis-mb/job/main/api/json" 2>/dev/null | jq "{nextBuildNumber, inQueue: (.inQueueItem != null)}";
        jenkins_get "/job/hello-aegis-mb/config.xml" 2>/dev/null | grep -iE "periodicfoldertrigger|<spec>|interval" | head -n 5;

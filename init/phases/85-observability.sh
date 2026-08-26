@@ -95,7 +95,14 @@ fi
 # host bridge on EDGE_BIND_IP, and its login is the ONLY lock there is.
 # The address the bridge listens on IS the whole perimeter.
 GRTF="$PLATFORM_DIR/tofu/modules/cloudflare-access/grafana.tf"
-if [[ "$EDGE" == cloudflare ]]; then
+# ${EDGE:-cloudflare} and NOT "$EDGE": every phase runs in its own
+# subshell (`( source "$p" )`), so the default config_validate applies
+# does not survive phase 00. With a conf written before EDGE existed the
+# variable is simply absent, and under `set -u` a bare "$EDGE" does not
+# fall back to cloudflare — it kills the phase with «unbound variable».
+# A conf with no EDGE is a cloudflare conf, which is the only thing it
+# could ever have been.
+if [[ "${EDGE:-cloudflare}" == cloudflare ]]; then
     if [[ ! -f "$GRTF" ]]; then
         if [[ -f "$PLATFORM_SEED/tofu/modules/cloudflare-access/grafana.tf" ]]; then
             run_cmd cp -a "$PLATFORM_SEED/tofu/modules/cloudflare-access/grafana.tf" "$GRTF"
@@ -398,7 +405,7 @@ gate "obs-sourcerepos-aplicados" bash -c \
 # WHAT IS LOST: those two hostnames stop being reachable from the
 # internet and stop being covered by Access. That is the trade of this
 # edge, not an oversight of this phase.
-if [[ "$EDGE" == cloudflare ]]; then
+if [[ "${EDGE:-cloudflare}" == cloudflare ]]; then
     run_cmd "${AEGIS_CMD:-aegis}" org edge
     gate "obs-borde-derivado" bash -c \
       "grep -E 'public_hostnames *= *\[' '$TUNNEL_ENV/main.tf' | grep -q '\"grafana\"' \
@@ -477,7 +484,7 @@ EOF
 # know about the edge does NOT live in this phase — the rules and the
 # scrape job are seed manifests, identical under both edges — and it is
 # reported as a change owed by another file.
-if [[ "$EDGE" == cloudflare ]]; then
+if [[ "${EDGE:-cloudflare}" == cloudflare ]]; then
     _cloudflared_metrics_ok || run_cmd _hook_up_cloudflared
     gate "obs-enchufe-cloudflared" _cloudflared_metrics_ok
 else
@@ -647,7 +654,7 @@ argo_sync grafana 900
 # infra-edge/cloudflared to converge, and what hands the host over to
 # traefik is the systemd bridge of phase 25 — which is not an App and
 # does not sync from git.
-if [[ "$EDGE" == cloudflare ]]; then
+if [[ "${EDGE:-cloudflare}" == cloudflare ]]; then
     argo_sync cloudflare-tunnel 600
     gate "obs-cloudflared-convergido" wait_rollout infra-edge deploy/cloudflared 600
 else
@@ -777,7 +784,7 @@ fi
 # Under cloudflare NOTHING is exported: there those hostnames are
 # served by Cloudflare with a public certificate, and the stock store
 # is exactly the right one to validate it against.
-if [[ "$EDGE" == local ]]; then
+if [[ "${EDGE:-cloudflare}" == local ]]; then
     _obs_ca_pem || die "EDGE=local: the CA could not be read from cert-manager/aegis-internal-ca, and the gates of grafana and ntfy go out over TLS issued by it — with no CA there is no honest way to validate the handshake"
     export CURL_CA_BUNDLE="$SECRETS_TMP/obs-aegis-ca.pem"
 fi
@@ -812,7 +819,7 @@ OBS_TARGETS_MIN=18
 # JobDeScrapeDesaparecido counts jobs instead of reading values) — it
 # shows up as one less in the count of up==1. A floor left at 18 would
 # fail this gate for the one reason that is not a fault.
-if [[ "$EDGE" == local ]]; then
+if [[ "${EDGE:-cloudflare}" == local ]]; then
     OBS_TARGETS_MIN=17
 fi
 _metrics_flowing() {
@@ -901,7 +908,7 @@ if [[ "$NTFY_OPERATOR_NEW" == "true" ]]; then
         "1. Install the ntfy app (F-Droid / Play / App Store)."
         "2. Subscribe to the topic:  server https://ntfy.$ROOT_DOMAIN — topic aegis-alertas"
     )
-    if [[ "$EDGE" == local ]]; then
+    if [[ "${EDGE:-cloudflare}" == local ]]; then
         NTFY_STEPS+=(
            "   EDGE=local: that address is this machine's bridge (${EDGE_BIND_IP:-127.0.0.1})."
            "   On 127.0.0.1 the channel does NOT leave this host: no phone reaches it"
@@ -981,7 +988,7 @@ gate_diag "obs-grafana-provisionado" \
 # an interception, and with no service token in the store it says so
 # and goes the direct way), and a DIFFERENT name, because a gate's name
 # is its contract.
-if [[ "$EDGE" == cloudflare ]]; then
+if [[ "${EDGE:-cloudflare}" == cloudflare ]]; then
     gate_diag "obs-grafana-tras-access" \
         'kubectl -n infra-edge logs deploy/cloudflared --tail=15 2>/dev/null' \
         poll 600 10 edge_origin_responds "https://grafana.$ROOT_DOMAIN" '^(200|30[12])$'
@@ -1018,7 +1025,7 @@ _ntfy_public_ok() {
 # in between is cloudflared, under local the host bridge. A diagnosis
 # that prints nothing is a mute timeout with extra steps (H7):
 NTFY_DIAG='kubectl -n observability logs deploy/ntfy --tail=15 2>/dev/null; kubectl -n infra-edge logs deploy/cloudflared --tail=10 2>/dev/null'
-if [[ "$EDGE" == local ]]; then
+if [[ "${EDGE:-cloudflare}" == local ]]; then
     NTFY_DIAG='kubectl -n observability logs deploy/ntfy --tail=15 2>/dev/null; systemctl status aegis-edge-https.socket aegis-edge-https.service --no-pager --lines=10 2>/dev/null'
 fi
 gate_diag "obs-ntfy-publico-responde" "$NTFY_DIAG" \
@@ -1027,7 +1034,7 @@ gate_diag "obs-ntfy-publico-responde" "$NTFY_DIAG" \
 # The closing line says what THIS instance got, and not what the other
 # edge would have got: a summary that names a door nobody installed is
 # the cheapest lie there is, and it is the one that gets believed.
-if [[ "$EDGE" == cloudflare ]]; then
+if [[ "${EDGE:-cloudflare}" == cloudflare ]]; then
     OBS_CLOSING="Grafana provisioned 100% from git behind Access"
 else
     OBS_CLOSING="Grafana provisioned 100% from git, reachable only through the host bridge on ${EDGE_BIND_IP:-127.0.0.1} and with no Access in front (its login is the only lock); no tunnel, so the cloudflared family of rules has no subject"

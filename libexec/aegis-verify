@@ -56,7 +56,22 @@ esac; done
 # profiles" is running exactly the same thing twice: double the time
 # and — worse — a check count that suggests coverage which does not
 # exist. When T-04 lands, this turns itself on.
-has_local_profile() { grep -rqI '__EDGE_' "$AEGIS_ROOT/seed" 2>/dev/null; }
+# Does this artifact IMPLEMENT the local edge? Two derived facts, and
+# both from their owners: the config validator accepts `local` as a
+# value of EDGE (lib/config.sh's _v_edge is what decides whether a conf
+# is valid, so it is the only honest source), and the bridge that serves
+# that edge ships.
+#
+# Until 2026-08-26 it asked whether the seed carried __EDGE_*__
+# placeholders — the shape T-04 was ASSUMED to take. The shape it took
+# keeps the seed identical on both edges and puts the difference in the
+# phases, so the old question kept answering "the local profile does not
+# exist yet" about an artifact that implements it. An instrument that
+# lies about its subject is worse than one that says nothing.
+has_local_profile() {
+    grep -qE '^_v_edge\(\).*==[[:space:]]*local' "$AEGIS_ROOT/lib/config.sh" 2>/dev/null \
+        && [[ -f "$AEGIS_ROOT/share/systemd/aegis-edge-http.socket" ]]
+}
 PROFILE_NOTICE=""
 case "${PROFILES:=both}" in
     cloudflare) PROFILE_LIST=(cloudflare) ;;
@@ -71,7 +86,7 @@ case "${PROFILES:=both}" in
         if has_local_profile; then PROFILE_LIST=(cloudflare local)
         else
             PROFILE_LIST=(cloudflare)
-            PROFILE_NOTICE="the local profile does not exist in the artifact yet (T-04): only cloudflare was verified"
+            PROFILE_NOTICE="the artifact does not implement the local edge (no _v_edge accepting it, or no bridge in share/systemd): only cloudflare was verified"
         fi ;;
     *) echo "${AEGIS_CMD:-aegis} verify: --profile must be cloudflare, local or both" >&2; exit 3 ;;
 esac

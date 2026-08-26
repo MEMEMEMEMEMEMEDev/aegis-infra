@@ -160,6 +160,29 @@ argocd_server_secretkey|manual|-|-|-|-|ALL ArgoCD sessions are closed
 TABLA
 )
 
+# ── the edge, and the recipes that have no subject on it ────────────
+# Three recipes rotate credentials of Cloudflare. With EDGE=local this
+# instance has no Cloudflare account: those secrets were never minted
+# (phase 15 says so as it skips them) and the store does not hold them.
+# Offering to rotate them would be offering to rotate something that
+# does not exist, and reporting them as a failure in `--check` would be
+# reporting a defect where there is only an edge that does not use them.
+#
+# It is DERIVED from the table's own «external system» column, not from
+# a list of names written here: the day a fourth Cloudflare credential
+# appears it is already covered.
+edge_of_instance() {
+    [[ -f "$CONF" ]] || { printf 'cloudflare\n'; return; }
+    local v
+    v="$(sed -n 's/^EDGE=["'"'"']\{0,1\}\([a-z]*\).*/\1/p' "$CONF" | head -1)"
+    printf '%s\n' "${v:-cloudflare}"
+}
+recipe_has_subject() {   # <recipe line> → 0 if it applies on this edge
+    local third; third="$(printf '%s' "$1" | cut -d'|' -f6)"
+    [[ "$third" == "Cloudflare" && "$(edge_of_instance)" == "local" ]] && return 1
+    return 0
+}
+
 recipe_for() {   # <name> → the line, or empty
     printf '%s\n%s\n' "$RECIPES" "$RECIPES_EXTRA" \
         | awk -F'|' -v n="$1" '$1 == n {print; exit}'
@@ -997,6 +1020,11 @@ rotate_one() {   # <name>
     local n="$1" line class phase app verifier third radius rc=0
     line="$(recipe_for "$n")"
     [[ -n "$line" ]] || die "'$n' has no recipe. If it is a new credential, add it to RECIPES (and the verify-static check was going to demand it of you anyway)."
+    if ! recipe_has_subject "$line"; then
+        printf '  %-22s %sNOT EVALUATED — EDGE=local: this instance has no Cloudflare account, so %s was never minted and there is nothing to rotate%s\n' \
+            "$n" "$yellow" "$n" "$reset"
+        return 2
+    fi
     class="$(field "$line" 2)"; phase="$(field "$line" 3)"
     app="$(field "$line" 4)";   verifier="$(field "$line" 5)"
     third="$(field "$line" 6)"; radius="$(field "$line" 7)"
@@ -1281,6 +1309,11 @@ if (( CHECK )); then
     for n in "${NAMES[@]}"; do
         line="$(recipe_for "$n")"
         [[ -n "$line" ]] || { printf '  %-22s %sno recipe%s\n' "$n" "$red" "$reset"; continue; }
+        if ! recipe_has_subject "$line"; then
+            printf '  %-22s %sNOT EVALUATED (EDGE=local: no Cloudflare account on this instance)%s\n' \
+                "$n" "$yellow" "$reset"
+            continue
+        fi
         v="$(field "$line" 5)"
         [[ "$v" != "-" && -n "$v" ]] || { printf '  %-22s %s— (it has no verifier)%s\n' "$n" "$gray" "$reset"; continue; }
         # the tunnel's snapshot is taken right here: verifying without
