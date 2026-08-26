@@ -65,7 +65,7 @@ metadata:
   namespace: observability
   labels: {aegis.dev/part-of: aegis-platform}
 spec:
-  entryPoints: [web]
+  entryPoints: [web, websecure]
   routes:
     - kind: Rule
       match: Host(`ntfy.__ROOT_DOMAIN__`)
@@ -83,7 +83,7 @@ metadata:
   namespace: observability
   labels: {aegis.dev/part-of: aegis-platform}
 spec:
-  entryPoints: [web]
+  entryPoints: [web, websecure]
   routes:
     - kind: Rule
       match: Host(`grafana.__ROOT_DOMAIN__`)

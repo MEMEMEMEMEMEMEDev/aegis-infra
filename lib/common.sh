@@ -124,6 +124,30 @@ _gate_record() {   # <gate> <pass|fail> <duration_s>
 }
 
 # ── gates ───────────────────────────────────────────────────────────
+# gate_no_subject: the gate has NOTHING TO LOOK AT under this edge.
+#
+# It is the third outcome applied to a gate, and it exists because the
+# alternative is worse than a red: a gate that simply STOPS being
+# written disappears from gates.jsonl, and three months later a missing
+# line reads exactly like a green one. Whoever reads the record has to
+# be able to tell "it passed" from "nobody asked the question".
+#
+# It is NOT an approval, and the log says so out loud. The reason is
+# written whole — "EDGE=local: there is no zone to write a record into"
+# and never "skipped" — because the reason is the only thing that makes
+# the absence auditable later.
+#
+# It landed here on 2026-08-26 after two phases wrote the same helper,
+# separately, with the same name and the same signature: two copies of
+# one idea is how the vocabulary drifts, and the day they drift the
+# record has two words for the same silence.
+gate_no_subject() {   # <gate> <reason...>
+    local name="$1"; shift
+    _gate_record "$name" not-evaluated 0
+    log_warn "GATE $name NOT EVALUATED — $*"
+    log_warn "  (this is a NOTICE, not an approval: nobody measured it)"
+}
+
 # gate: a check with evidence. It fails the phase if the gate fails.
 # The name stays in the log — the gates are each phase's contract.
 gate() {

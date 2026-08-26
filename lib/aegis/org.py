@@ -1065,10 +1065,16 @@ metadata:
   namespace: {ns}
   labels: {{aegis.dev/part-of: aegis-organizaciones}}
 spec:
-  # `web` and not `websecure`: TLS is terminated by Cloudflare and the
-  # tunnel delivers plain HTTP in here. A certificate in traefik would
-  # be a second place for one to expire.
-  entryPoints: [web]
+  # `web` AND `websecure`, both profiles, one manifest. Under
+  # EDGE=cloudflare the tunnel delivers plain HTTP on `web` and nothing
+  # ever reaches 443, so `websecure` is inert. Under EDGE=local there is
+  # no tunnel: the host's bridge hands 443 straight to traefik, which
+  # serves it with the wildcard of aegis' own internal CA (the default
+  # TLSStore of k8s/base/ingress/edge-tls). Listing both is what lets the
+  # SAME route serve both edges — the alternative was a placeholder in
+  # every routes.yaml, which check 049 reads literally and check 003
+  # would have to grow an owner for.
+  entryPoints: [web, websecure]
   routes:"""]
     for s in public_svcs:
         # PathPrefix only when the path is not the root: `PathPrefix(/)`

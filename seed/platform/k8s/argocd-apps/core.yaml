@@ -137,6 +137,23 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
+  name: edge-tls
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    targetRevision: main
+    path: k8s/base/ingress/edge-tls
+  destination: {server: https://kubernetes.default.svc, namespace: infra-edge}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
   name: cloudflare-tunnel
   namespace: argocd
   labels: {aegis.dev/part-of: aegis-platform}

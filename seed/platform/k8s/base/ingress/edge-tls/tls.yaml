@@ -1,0 +1,50 @@
+# The edge's default certificate, for the 443 that EDGE=local serves.
+#
+# WHY IT EXISTS IN BOTH PROFILES. Under cloudflare nothing reaches 443
+# (the tunnel delivers plain HTTP on `web`) and these two objects are
+# inert. They are here all the same, because the alternative was a
+# manifest that only exists under one profile — and a seed that changes
+# shape with the conf is a seed where checks 005, 049 and 113 have to
+# learn to look for something that may not be there. One shape, one
+# answer: the profiles differ in the PHASES, not in the manifests.
+#
+# WHY THE INTERNAL CA AND NOT LET'S ENCRYPT. A local edge has no public
+# name and no zone: DNS-01 has nowhere to write and HTTP-01 has nobody
+# to answer. aegis already carries its own CA for exactly this class of
+# SAN (aegis-ca-issuer/pki.yaml, ECDSA, 10 years), the host already
+# trusts it for containerd (phase 40), and the operator's browser is
+# told about it at the end of the init. The cost is honest and stated:
+# a certificate the world does not trust, on an edge the world does not
+# reach.
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: aegis-edge-wildcard
+  namespace: infra-edge
+spec:
+  secretName: aegis-edge-wildcard
+  # The wildcard covers argocd., jenkins., grafana., ntfy., aegis. and
+  # every tenant the generator derives, with no certificate per route.
+  # The apex is listed too: sslip.io answers it as well.
+  commonName: "*.__ROOT_DOMAIN__"
+  dnsNames:
+    - "*.__ROOT_DOMAIN__"
+    - "__ROOT_DOMAIN__"
+  duration: 8760h           # 1 year
+  renewBefore: 720h         # 30 days
+  privateKey: {algorithm: ECDSA, size: 256}
+  issuerRef: {name: aegis-internal-ca, kind: ClusterIssuer}
+---
+# The DEFAULT store: traefik serves this certificate for any `websecure`
+# route that does not name one of its own. Without it, traefik answers
+# 443 with its self-signed placeholder and every browser sees a name
+# that matches nothing.
+apiVersion: traefik.io/v1alpha1
+kind: TLSStore
+metadata:
+  name: default
+  namespace: infra-edge
+spec:
+  defaultCertificate:
+    secretName: aegis-edge-wildcard

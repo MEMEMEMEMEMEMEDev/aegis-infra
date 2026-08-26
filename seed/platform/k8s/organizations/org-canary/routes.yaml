@@ -95,7 +95,7 @@ metadata:
   namespace: org-canary
   labels: {aegis.dev/part-of: aegis-organizaciones}
 spec:
-  entryPoints: [web]
+  entryPoints: [web, websecure]
   routes:
     - kind: Rule
       match: Host(`aegis.__ROOT_DOMAIN__`)

@@ -18,8 +18,25 @@
 # Idempotence (bug 6): every generated secret goes to the encrypted
 # store (gen_or_restore) — a --from here REUSES, it does not
 # regenerate.
+#
+# THE EDGE (2026-08-26). Half of what this phase does is Cloudflare:
+# three scoped tokens minted against an account, the file the tofu
+# wrapper reads, the DNS token cert-manager would solve with, and the
+# four values the edge job reads the zone with. With EDGE=local there
+# is no account, no zone and no tunnel, so none of that has a subject
+# — and each omitted step says so below, with the reason whole.
+# What is NOT Cloudflare does NOT change in either profile: the two
+# HMACs, the three deploy keys, their registration through gh and
+# their three gates, and the CI credential out of the gh session. All
+# of those hang off GitHub, and GitHub is there whichever way the
+# platform is reached from outside.
 set -euo pipefail
 CONF="$AEGIS_HOME/aegis.conf"; source "$CONF"
+# A conf written before 2026-08-26 carries no EDGE, and it could only
+# have been cloudflare — the same reading config_validate does. It is
+# spelled out here because with nounset alive a bare $EDGE would kill
+# the phase on those confs instead of telling anyone why.
+EDGE="${EDGE:-cloudflare}"
 secrets_workdir
 
 TOKENS_DIR="$PLATFORM_DIR/tofu/secrets"
@@ -66,7 +83,35 @@ CF_DNS_FILE="$STATE_SECRETS/cf_dns_token.enc"
 # minted together or not at all. An instance with 2 of 3 asking for
 # the master is correct, not an edge case.
 CF_ACCESS_FILE="$STATE_SECRETS/cf_access_token.enc"
-if [[ -f "$CF_API_FILE" && -f "$CF_DNS_FILE" && -f "$CF_ACCESS_FILE" ]]; then
+# EDGE=local: there is no Cloudflare account to mint anything against,
+# so this whole step is left without a subject. The three tokens exist
+# to drive a zone that does not exist here: the tunnel one (cloudflared
+# and the DNS records, phase 25), the DNS one (the DNS-01 solver of the
+# letsencrypt ClusterIssuers) and the Access one (the identity plane in
+# front of argocd and jenkins, #88). With a local edge the platform is
+# reached through the host bridge onto traefik's fixed ClusterIP and
+# the TLS is issued by the instance's own internal CA.
+#
+# What is LOST, said whole and not as "skipped": these names are
+# published nowhere outside this machine, no certificate is public, and
+# there is NO Cloudflare Access in front of the operator apps — whoever
+# reaches EDGE_BIND_IP reaches argocd's and jenkins' login screens with
+# nothing but their own passwords in between. That is the trade of the
+# local profile, and the reason its default bind is the loopback.
+if [[ "$EDGE" == local ]]; then
+    log_info "EDGE=local: the 3 scoped Cloudflare tokens are NOT minted — there is no account to mint them against, and no zone, no tunnel and no Access for them to drive"
+    log_warn "GATE cf-permission-groups has NO SUBJECT under EDGE=local: the permission groups are not read because no master credential is asked for. This is not the gate passing — it is the gate having nothing to look at"
+    # The two Secrets these tokens feed are still WRITTEN below, empty:
+    # their file names are listed in the seed's KSOPS generators, which
+    # are identical in both profiles, and an entry with no producer
+    # breaks the kustomize build of its App (A7) — cert-manager-issuers
+    # and jenkins-secrets would never sync. An empty and annotated
+    # Secret says "this profile has no Cloudflare"; a missing file says
+    # nothing and takes two Apps down with it.
+    CF_API="$(materialize cf_api_token_empty "")"
+    CF_DNS="$(materialize cf_dns_token_empty "")"
+    CF_ACCESS=""   # no consumer under local: tokens.enc.yaml is not written
+elif [[ -f "$CF_API_FILE" && -f "$CF_DNS_FILE" && -f "$CF_ACCESS_FILE" ]]; then
     log_info "scoped CF tokens already in the store — not asking for the master (re-run)"
     CF_API="$(restore_secret cf_api_token)"
     CF_DNS="$(restore_secret cf_dns_token)"
@@ -275,8 +320,29 @@ EOF
 }
 # GitHub accepts URLs that are still unreachable (the edge arrives in
 # phase 35; the redeliver/e2e gates close the loop afterwards):
-make_repo_webhook "$PLATFORM_REPO" "https://argocd.$ROOT_DOMAIN/api/webhook" "$HMAC_ARGO"
-make_repo_webhook "$APP_REPO"      "https://jenkins.$ROOT_DOMAIN/github-webhook/" "$HMAC_JENK"
+#
+# The hooks are the one piece of this phase that is GitHub's on the
+# outside and the edge's underneath: what they need is not a repo, it
+# is a URL GitHub's delivery infrastructure can reach and trust. Under
+# EDGE=local it cannot. The name resolves through sslip.io to
+# EDGE_BIND_IP, which is the loopback by default; and even bound to a
+# routable address the certificate is issued by the instance's internal
+# CA, which GitHub does not trust — the hook is created with
+# insecure_ssl "0", as it must be. A hook that can never deliver is not
+# a hook: it is a red delivery on every push, forever, and a phase 60
+# that gates on a link that was never going to close.
+if [[ "$EDGE" == cloudflare ]]; then
+    make_repo_webhook "$PLATFORM_REPO" "https://argocd.$ROOT_DOMAIN/api/webhook" "$HMAC_ARGO"
+    make_repo_webhook "$APP_REPO"      "https://jenkins.$ROOT_DOMAIN/github-webhook/" "$HMAC_JENK"
+else
+    log_info "EDGE=local: the 2 GitHub webhooks are NOT created — GitHub would have to reach https://argocd.$ROOT_DOMAIN and https://jenkins.$ROOT_DOMAIN, which resolve to ${EDGE_BIND_IP:-the host bridge} and are served with a certificate from the instance's internal CA that GitHub does not trust"
+    log_warn "EDGE=local: what is LOST is the INSTANT push, not the sync — ArgoCD keeps reconciling on its own polling interval and Jenkins keeps scanning its branches on its own schedule; a push simply takes as long as those cycles"
+    # The two HMACs above are generated ALL THE SAME, on purpose: both
+    # receivers load their Secret at boot (argocd/github-webhook and
+    # jenkins-system/github-webhook-hmac, listed in the seed in both
+    # profiles), and material that exists is material that does not
+    # have to be invented the day this instance grows a real edge.
+fi
 
 # ═══ 15.5 CI credential for Jenkins (D11: gh token, not an App) ═══
 # github-branch-source scans with a username+password credential
@@ -309,7 +375,16 @@ GH_USER_F="$(materialize gh_user "$GH_OWNER")"
 # holds the separation up is that CI never has the age key, so it
 # cannot open this file. Jenkins' edge-apply job receives its token as
 # a Jenkins credential, and it receives ONLY the tunnel's one.
-python3 - "$CF_API" "$CF_ACCESS" > "$SECRETS_TMP/tokens.yaml" <<'EOF'
+#
+# EDGE=local: nobody reads this file. Its only consumer is
+# tofu/tofu-apply.sh, which exports the two tokens so that the tofu of
+# the edge (tunnel, DNS records, Access apps) can apply — machinery
+# that has no subject with no zone. Writing it with empty values would
+# be worse than not writing it: tofu-apply.sh dies saying "empty", and
+# that death would look like a broken instance instead of a profile
+# that does not use tofu.
+if [[ "$EDGE" == cloudflare ]]; then
+    python3 - "$CF_API" "$CF_ACCESS" > "$SECRETS_TMP/tokens.yaml" <<'EOF'
 import sys, yaml
 api = open(sys.argv[1]).read().strip()
 access = open(sys.argv[2]).read().strip()
@@ -317,20 +392,40 @@ yaml.safe_dump({"cloudflare": {"api_token": {"value": api},
                                "access_token": {"value": access}}},
                sys.stdout, default_flow_style=False)
 EOF
-# the destination has a versioned .gitkeep, but an `mv` into a
-# nonexistent dir kills the phase dead (the bug of the run on native
-# Linux, 2026-07-25: git does not version empty dirs and the VM was
-# populated by copying, not by cloning). Defence in depth — cheap and
-# with no effect if it already exists:
-mkdir -p "$TOKENS_DIR"
-mv "$SECRETS_TMP/tokens.yaml" "$TOKENS_DIR/tokens.enc.yaml"   # A5: mv first
-sops_encrypt_repo "$TOKENS_DIR/tokens.enc.yaml"   # explicit --config (pattern A)
-gate "tokens-roundtrip" check_sops_roundtrip "$TOKENS_DIR/tokens.enc.yaml"
+    # the destination has a versioned .gitkeep, but an `mv` into a
+    # nonexistent dir kills the phase dead (the bug of the run on
+    # native Linux, 2026-07-25: git does not version empty dirs and the
+    # VM was populated by copying, not by cloning). Defence in depth —
+    # cheap and with no effect if it already exists:
+    mkdir -p "$TOKENS_DIR"
+    mv "$SECRETS_TMP/tokens.yaml" "$TOKENS_DIR/tokens.enc.yaml"   # A5: mv first
+    sops_encrypt_repo "$TOKENS_DIR/tokens.enc.yaml"   # explicit --config (pattern A)
+    gate "tokens-roundtrip" check_sops_roundtrip "$TOKENS_DIR/tokens.enc.yaml"
+else
+    log_info "EDGE=local: tokens.enc.yaml is NOT written — its only reader is the tofu wrapper of the edge, and with no Cloudflare zone there is no tofu of the edge to apply"
+    log_warn "GATE tokens-roundtrip has NO SUBJECT under EDGE=local: there is no file to encrypt, so there is no roundtrip to validate. Nothing was checked here — it is not that the encryption is fine"
+fi
 
 # the dns token → a Secret the ClusterIssuers reference:
-make_enc_secret cloudflare-dns-token cert-manager \
-    "$B/ingress/cert-manager-issuers/secret-cloudflare-dns-token.enc.yaml" \
-    "api-token=$CF_DNS"
+#
+# Under EDGE=local the Secret is written EMPTY and says why in an
+# annotation. It cannot simply not be written: its name is listed in
+# the KSOPS generator of cert-manager-issuers, the seed is identical in
+# both profiles, and a listed file with no producer breaks that App's
+# kustomize build (A7). Empty is honest here — the letsencrypt issuers
+# solve DNS-01 against a zone that does not exist, and the wildcard
+# this instance actually serves is issued by the internal CA.
+if [[ "$EDGE" == cloudflare ]]; then
+    make_enc_secret cloudflare-dns-token cert-manager \
+        "$B/ingress/cert-manager-issuers/secret-cloudflare-dns-token.enc.yaml" \
+        "api-token=$CF_DNS"
+else
+    make_enc_secret cloudflare-dns-token cert-manager \
+        "$B/ingress/cert-manager-issuers/secret-cloudflare-dns-token.enc.yaml" \
+        --annotation "aegis.dev/no-subject=EDGE=local: EMPTY on purpose. There is no Cloudflare account, so there is no DNS token: the letsencrypt ClusterIssuers cannot solve DNS-01 here and the TLS of this instance is issued by the aegis-internal-ca ClusterIssuer. The Secret exists because the KSOPS generator lists it in both profiles." \
+        "api-token=$CF_DNS"
+    log_warn "EDGE=local: Secret cert-manager/cloudflare-dns-token written EMPTY (annotated) — the letsencrypt issuers have no zone to solve against; the instance's certificates come from the internal CA"
+fi
 
 # ── Jenkins credentials for the edge (#48) ────────────────────────
 # ADDED on 2026-08-05. The four Secrets had existed in the repo since
@@ -354,6 +449,21 @@ make_enc_secret cloudflare-dns-token cert-manager \
 # the mechanism is a single one: an exception saying "this one does
 # not need encrypting" is an exception you then have to remember.
 CF_JENKINS_DESC="Cloudflare API token. Used by the edge-chequeo job (it only READS the zone) and by the operator via tofu-apply.sh. The age key does NOT enter CI."
+CF_ACCOUNT_DESC="Cloudflare Account ID (an identifier, not a secret)."
+CF_ZONE_DESC="Cloudflare Zone ID (an identifier, not a secret)."
+# EDGE=local: the four keep their place in the generator —the seed is
+# the same in both profiles— but three of them arrive EMPTY, and an
+# empty credential whose description still says what it is for is a
+# lie the operator reads in Jenkins' own UI. The description is where
+# the reason belongs, because that is where it will be seen. (The two
+# ids come out empty on their own: the conf writes them empty and the
+# validation rejects a local conf that names a zone.)
+if [[ "$EDGE" == local ]]; then
+    CF_JENKINS_DESC="EMPTY under EDGE=local: there is no Cloudflare account, so there is no token. The edge-chequeo job has no zone to read either. The Secret exists because the KSOPS generator lists it in both profiles."
+    CF_ACCOUNT_DESC="EMPTY under EDGE=local: this instance names no Cloudflare account."
+    CF_ZONE_DESC="EMPTY under EDGE=local: this instance names no Cloudflare zone."
+    log_warn "EDGE=local: the 3 Cloudflare credentials of jenkins-system are written EMPTY (each one annotated with why) — the edge-chequeo job that consumes them has no zone to check"
+fi
 make_enc_secret cloudflare-api-token jenkins-system \
     "$B/platform/jenkins-secrets/secret-cloudflare-api-token.enc.yaml" \
     --label jenkins.io/credentials-type=secretText \
@@ -362,12 +472,12 @@ make_enc_secret cloudflare-api-token jenkins-system \
 make_enc_secret cloudflare-account-id jenkins-system \
     "$B/platform/jenkins-secrets/secret-cloudflare-account-id.enc.yaml" \
     --label jenkins.io/credentials-type=secretText \
-    --annotation "jenkins.io/credentials-description=Cloudflare Account ID (an identifier, not a secret)." \
+    --annotation "jenkins.io/credentials-description=$CF_ACCOUNT_DESC" \
     "text=$(materialize cf_account_id "$CF_ACCOUNT_ID")"
 make_enc_secret cloudflare-zone-id jenkins-system \
     "$B/platform/jenkins-secrets/secret-cloudflare-zone-id.enc.yaml" \
     --label jenkins.io/credentials-type=secretText \
-    --annotation "jenkins.io/credentials-description=Cloudflare Zone ID (an identifier, not a secret)." \
+    --annotation "jenkins.io/credentials-description=$CF_ZONE_DESC" \
     "text=$(materialize cf_zone_id "$CF_ZONE_ID")"
 make_enc_secret root-domain jenkins-system \
     "$B/platform/jenkins-secrets/secret-root-domain.enc.yaml" \
@@ -425,6 +535,13 @@ make_enc_secret ops-stack-repo argocd \
     "sshPrivateKey=$DK_OPS" "url=$OPS_URL" \
     "name=$OPS_NAME" "type=$REPO_TYPE"
 
-log_ok "AUTOMATIC third parties complete: CF tokens minted over the API, \
+if [[ "$EDGE" == cloudflare ]]; then
+    log_ok "AUTOMATIC third parties complete: CF tokens minted over the API, \
 3 deploy keys registered via gh, 2 webhooks created, CI credential \
 from the gh token — zero browser, zero files moved by hand"
+else
+    log_ok "AUTOMATIC third parties complete (EDGE=local): 3 deploy keys \
+registered via gh, CI credential from the gh token, HMACs and the 8 \
+Secrets in place. NOT done, for want of a subject: 3 Cloudflare tokens, \
+tokens.enc.yaml and 2 GitHub webhooks"
+fi

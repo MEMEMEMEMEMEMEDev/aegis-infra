@@ -1,0 +1,27 @@
+[Unit]
+Description=aegis edge bridge (https): proxy to traefik's ClusterIP
+Documentation=file:///usr/local/share/aegis/systemd/README.md
+Requires=aegis-edge-https.socket
+After=aegis-edge-https.socket
+
+[Service]
+# AEGIS_EDGE_UPSTREAM is traefik's FIXED ClusterIP, written by phase 25.
+# It is read from a file and not baked in here so that re-pointing the
+# bridge is editing one line, not reinstalling the unit.
+EnvironmentFile=/etc/aegis/edge.env
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd ${AEGIS_EDGE_UPSTREAM}:443
+# The privileged part is opening the port, and systemd did that already
+# when it created the socket. What is left forwards bytes and needs
+# nothing: no user of its own, no filesystem, no new privileges.
+DynamicUser=yes
+NoNewPrivileges=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+MemoryMax=64M
+Restart=on-failure
+RestartSec=2

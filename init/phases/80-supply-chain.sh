@@ -526,9 +526,16 @@ _failclosed_gates() {
 if [[ "${AEGIS_VALIDATE_FAILCLOSED:-}" == "1" || "${AEGIS_VALIDATE_FAILCLOSED:-}" == "true" ]]; then
     _failclosed_gates
 else
-    _gate_record "failclosed-org-canary-rechaza" skipped 0
-    _gate_record "failclosed-argocd-admite" skipped 0
-    log_warn "force-kill fail-closed gates: SKIPPED (RECORDED, not silent) — run with AEGIS_VALIDATE_FAILCLOSED=1 in the validation; without that the fail-closed property is NOT measured (EV-03)"
+    # Through the ONE helper (lib/common.sh), which is what every phase
+    # uses since 2026-08-26 to say "this gate had nothing to look at".
+    # Until then this phase spoke its own dialect —_gate_record with the
+    # word `skipped`— and check 083 grepped for that literal: one word
+    # here, another in the phases the local edge added, and a check tied
+    # to whichever of the two it had seen first.
+    for _fc in failclosed-org-canary-rechaza failclosed-argocd-admite; do
+        gate_no_subject "$_fc" \
+            "AEGIS_VALIDATE_FAILCLOSED is not set: the fail-closed property is NOT measured (EV-03). Run the validation with AEGIS_VALIDATE_FAILCLOSED=1 to exercise it"
+    done
 fi
 
 log_ok "SUPPLY-CHAIN COMPLETE: blocking scan + signature + bounded \

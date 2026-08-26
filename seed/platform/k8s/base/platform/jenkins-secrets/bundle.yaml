@@ -60,7 +60,7 @@ metadata:
   name: jenkins
   namespace: jenkins-system
 spec:
-  entryPoints: [web]
+  entryPoints: [web, websecure]
   routes:
     - match: Host(`jenkins.__ROOT_DOMAIN__`)
       kind: Rule

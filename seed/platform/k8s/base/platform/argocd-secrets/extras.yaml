@@ -22,7 +22,7 @@ metadata:
   name: argocd-server
   namespace: argocd
 spec:
-  entryPoints: [web]
+  entryPoints: [web, websecure]
   routes:
     - match: Host(`argocd.__ROOT_DOMAIN__`)
       kind: Rule

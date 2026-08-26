@@ -9,10 +9,29 @@ service:
   # (run #5; verified against helm template of the real chart):
   spec:
     type: ClusterIP      # traffic COMES IN via cloudflared, not an LB
+    # A FIXED ClusterIP, and the reason is EDGE=local: there the traffic
+    # does not come from a pod but from a bridge ON THE HOST, and a unit
+    # in /etc/systemd cannot ask the apiserver where traefik is today. A
+    # ClusterIP that changes on every re-creation is a bridge that points
+    # nowhere after the first `destroy`. Under cloudflare it is inert
+    # (cloudflared resolves by Service name) — one value, both profiles.
+    # It has to be free inside k3s' service CIDR: .1 is kubernetes and
+    # .10 is kube-dns.
+    clusterIP: 10.43.0.80
 ports:
   web:
     forwardedHeaders:
       trustedIPs: ["10.42.0.0/16"]   # /16: covers multi-node hetzner
+  websecure:
+    # Serving TLS here is what EDGE=local needs and what EDGE=cloudflare
+    # never exercises: with the tunnel in front, nothing reaches 443.
+    # The certificate is NOT configured per-route: the default TLSStore
+    # of k8s/base/ingress/edge-tls carries the wildcard, so a route that
+    # lists `websecure` is served without naming a secret.
+    tls:
+      enabled: true
+    forwardedHeaders:
+      trustedIPs: ["10.42.0.0/16"]
 deployment:
   replicas: 1
 resources:

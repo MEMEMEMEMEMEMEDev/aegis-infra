@@ -48,7 +48,73 @@ gate "dns-efectivo" check_egress_dns
 # external source (hard gate); timedatectl stays informational only:
 gate "reloj-sin-skew" check_clock_skew
 check_clock_ntp   # informational (weak signal with chrony — H1)
-gate "ns-en-cloudflare" check_domain_on_cloudflare "$ROOT_DOMAIN"
+# ── the zone's NS: a question that belongs to CLOUDFLARE ────────────
+# With EDGE=cloudflare the whole edge lives inside a zone of YOURS:
+# phase 25 writes the tunnel's CNAMEs there and Access publishes its
+# app there. A domain whose NS point somewhere else does not fail
+# here — it fails THERE, half a cluster in, which is the very thing
+# this preflight exists to prevent.
+# With EDGE=local there is no zone at all: ROOT_DOMAIN is a NAME FOR
+# AN ADDRESS (sslip.io, or a line in /etc/hosts), delegated by nobody
+# and owned by nobody, so "do its NS point at Cloudflare" has no
+# subject — asking 1.1.1.1 for the NS of 127-0-0-1.sslip.io answers
+# about sslip.io's zone, which is somebody else's, not about this
+# instance. What is LOST with local is that early warning about the
+# delegation; there is nothing to warn about because there is nothing
+# delegated.
+# What DOES apply under local is the other half of the same worry,
+# and nothing else in the init covers it: that the name RESOLVES from
+# this host, and that it resolves to the address the bridge is going
+# to listen on. sslip.io needs egress to answer, and a machine with
+# no way out resolves nothing: the cluster comes up perfectly healthy
+# and every URL of the platform is a dead end. Cheap to see here,
+# expensive to discover in phase 90.
+if [[ "${EDGE:-cloudflare}" == local ]]; then
+    log_warn "GATE ns-en-cloudflare has NO SUBJECT — EDGE=local: there is no zone of yours to delegate, $ROOT_DOMAIN is a name for an address (sslip.io / /etc/hosts), no nameserver of yours answers for it and there is no tunnel or Access in front. The delegation cannot be checked because there is no delegation; what is gated in its place is that the name resolves here"
+    # getent = the system's EFFECTIVE resolver, the same criterion as
+    # check_egress_dns: what the browser and the kubelet will see, not
+    # what an arbitrary server answers. ahostsv4 because EDGE_BIND_IP
+    # is IPv4 by validation. The root AND one subdomain, because
+    # sslip.io answers for every label but /etc/hosts HAS NO WILDCARD,
+    # and the trap of the by-hand remedy is exactly a root that
+    # resolves with an argocd. that does not.
+    _edge_name_resolves() {
+        local host addrs dead=() elsewhere=()
+        for host in "$ROOT_DOMAIN" "argocd.$ROOT_DOMAIN"; do
+            # No 2>/dev/null: retry_net's notices go to stderr (every
+            # log_* does) and only stdout is captured, so the wait is
+            # never mute — the same as check_egress_dns.
+            addrs="$(retry_net 3 bash -c "getent ahostsv4 '$host'" \
+                     | awk '{print $1}' | sort -u | tr '\n' ' ')" || addrs=""
+            if [[ -z "${addrs// /}" ]]; then dead+=("$host"); continue; fi
+            grep -qFw -- "$EDGE_BIND_IP" <<< "$addrs" || elsewhere+=("$host -> ${addrs% }")
+        done
+        if ((${#dead[@]})); then
+            log_error "does NOT resolve on this host: ${dead[*]} — with EDGE=local nobody publishes this name for you. Remedy: an sslip.io name (<ip-with-dashes>.sslip.io resolves to that IP with no zone and no configuration, as long as this machine reaches the Internet), or your own resolver answering the wildcard (dnsmasq: address=/$ROOT_DOMAIN/$EDGE_BIND_IP). /etc/hosts also works, but it HAS NO WILDCARD: the line must name every host, '$EDGE_BIND_IP $ROOT_DOMAIN argocd.$ROOT_DOMAIN jenkins.$ROOT_DOMAIN grafana.$ROOT_DOMAIN ntfy.$ROOT_DOMAIN aegis.$ROOT_DOMAIN'"
+            return 1
+        fi
+        # WHICH address it resolves to is a separate verdict, and a
+        # WEAK one: with EDGE_BIND_IP=0.0.0.0 the bridge answers on
+        # every address of the host and the comparison has no subject,
+        # so it is stated as NOT EVALUATED and never as a pass. A
+        # mismatch is a warning and not a failure for the same reason
+        # check_domain_on_cloudflare only fails on positive evidence:
+        # a host with several addresses can be legitimately reachable
+        # by an address that is not this one.
+        if [[ "$EDGE_BIND_IP" == 0.0.0.0 ]]; then
+            log_warn "resolution OK, but WHICH address it resolves to was NOT EVALUATED: EDGE_BIND_IP=0.0.0.0 means the bridge answers on every address of the host, so there is no single address to compare against (this is a notice, not an approval)"
+        elif ((${#elsewhere[@]})); then
+            log_warn "resolves to an address that is NOT the bridge's ($EDGE_BIND_IP): ${elsewhere[*]} — the URLs of the platform will land somewhere else unless that address also reaches this host"
+        else
+            log_ok "$ROOT_DOMAIN and argocd.$ROOT_DOMAIN resolve to $EDGE_BIND_IP (the bridge's address)"
+            return 0
+        fi
+        log_ok "$ROOT_DOMAIN and argocd.$ROOT_DOMAIN resolve from this host (the address they resolve to is in the notice above)"
+    }
+    gate "edge-name-resolves" _edge_name_resolves
+else
+    gate "ns-en-cloudflare" check_domain_on_cloudflare "$ROOT_DOMAIN"
+fi
 
 # 1c. sudo EARLY (P0.4): with neither NOPASSWD nor an operator, the
 #     run died in phase 20 (~30 min). -K purges the cache (the false

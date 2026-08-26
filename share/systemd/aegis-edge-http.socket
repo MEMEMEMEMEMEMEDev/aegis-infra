@@ -1,0 +1,15 @@
+[Unit]
+Description=aegis edge bridge (http): the host's 80, handed to traefik
+Documentation=file:///usr/local/share/aegis/systemd/README.md
+
+[Socket]
+# The DEFAULT is loopback: reachable from this machine, or through an
+# SSH tunnel, and from nowhere else. Exposing it to the network is an
+# explicit choice the operator makes in the wizard (EDGE_BIND_IP), and
+# it arrives as a drop-in that overrides this line.
+ListenStream=127.0.0.1:80
+# Without this, two connections at once queue behind one proxy process.
+Accept=no
+
+[Install]
+WantedBy=sockets.target
