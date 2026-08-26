@@ -4,9 +4,17 @@
 # at the root carrying the lab VPS's public IP, four times, next to its
 # break-glass procedure.
 
-# the address comes back where it was
+# the address comes back where it was.
+#
+# A DIFFERENT address from the one that was actually there, and that is
+# the point: this tooth proves the check bites ANY public address, and
+# writing the real one would have carried the operator's VPS in the
+# product forever — in the teeth, which are excluded from the sweep, so
+# nothing would ever have said so. Found on 2026-08-26 while rehearsing
+# the purge of the history: the record came out clean and one blob did
+# not, and the blob was this file.
 red_1() {
-    printf '\n HostName <IP-DEL-VPS>\n' >> "$AEGIS_ROOT/Problema-vps-ssh-seguridad.md"
+    printf '\n HostName 51.15.42.7\n' >> "$AEGIS_ROOT/Problema-vps-ssh-seguridad.md"
 }
 
 # and in a place nobody would think to look: a comment inside a phase.
