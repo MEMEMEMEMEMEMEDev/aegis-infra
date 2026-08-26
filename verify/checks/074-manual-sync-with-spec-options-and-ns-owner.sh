@@ -109,6 +109,7 @@ EOF
                 -e 's/__ROOT_DOMAIN__/example.com/g' \
                 -e 's/__REGISTRY_CLUSTER_IP__/10.43.0.99/g' \
                 -e 's/__ACME_EMAIL__/a@example.com/g' \
+                -e 's/__OBS_SCRAPE_JOBS_MIN__/12/g' \
                 "$P/$vf" > "$TMP/$app-values.yaml"
             VAL_ARGS=(-f "$TMP/$app-values.yaml")
         fi

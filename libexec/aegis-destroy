@@ -24,6 +24,8 @@
 #     TF_VARs, avoiding phantom destroys of count-gated resources).
 #   - the local tfstate (with TUNNEL_TOKEN in the clear).
 #   - optional --purge-secrets: the .state-secrets store + .init-state.
+#   - the EDGE=local host bridge: the four systemd units, their
+#     drop-ins and /etc/aegis/edge.env, freeing ports 80 and 443.
 #   - optional --k3s: k3s-uninstall.sh (nuke of the local cluster).
 #
 # The k3s cluster, if you do not pass --k3s, is cleaned by reverting the
@@ -116,7 +118,52 @@ if [[ $PURGE_SECRETS -eq 1 ]]; then
   fi
 fi
 
-# ── 4) optional teardown of k3s ──────────────────────────────────────────
+# ── 4) the host bridge (EDGE=local) ──────────────────────────────────────
+# The bridge is the only thing the local edge leaves OUTSIDE the cluster
+# and outside the repo: four units in /etc/systemd/system, an env file,
+# and two sockets HOLDING ports 80 and 443 of this host. A teardown that
+# leaves them behind leaves the machine answering on the edge's ports for
+# a cluster that no longer exists — and the next init finds them there,
+# already listening, which is the dirtiest possible starting point for
+# the re-install this command exists to make possible.
+#
+# It runs regardless of EDGE and asks the DISK, not the conf: the whole
+# point of a teardown is that it works on a machine whose conf may
+# already be gone, or may say something the host no longer reflects.
+EDGE_UNITS=(aegis-edge-http.socket aegis-edge-http.service
+            aegis-edge-https.socket aegis-edge-https.service)
+BRIDGE_FOUND=0
+for u in "${EDGE_UNITS[@]}"; do
+  [[ -f "/etc/systemd/system/$u" ]] && BRIDGE_FOUND=1
+done
+[[ -f /etc/aegis/edge.env ]] && BRIDGE_FOUND=1
+if [[ $BRIDGE_FOUND -eq 1 ]]; then
+  if [[ $YES -eq 1 ]]; then
+    say "host bridge: stopping and removing the units that hold 80/443…"
+    # stop the SOCKETS first: stopping only the service leaves systemd
+    # holding the port, ready to start it again on the next connection.
+    sudo systemctl disable --now aegis-edge-http.socket aegis-edge-https.socket 2>/dev/null || true
+    sudo systemctl stop aegis-edge-http.service aegis-edge-https.service 2>/dev/null || true
+    for u in "${EDGE_UNITS[@]}"; do
+      sudo rm -rf "/etc/systemd/system/$u" "/etc/systemd/system/$u.d"
+    done
+    sudo rm -f /etc/aegis/edge.env
+    sudo rmdir /etc/aegis 2>/dev/null || true
+    sudo systemctl daemon-reload
+    sudo systemctl reset-failed 2>/dev/null || true
+    if ss -ltn 2>/dev/null | grep -qE ':(80|443) '; then
+      say "WARNING: something is STILL listening on 80/443 — it is not aegis' bridge any more, but check what it is before re-installing"
+    else
+      say "host bridge removed: 80 and 443 are free"
+    fi
+  else
+    say "[DRY-RUN] would stop and remove the host bridge (4 units + drop-ins + /etc/aegis/edge.env) and free ports 80/443"
+  fi
+else
+  say "no host bridge on this machine (EDGE=cloudflare, or already removed)"
+fi
+
+# ── 5) optional teardown of k3s ──────────────────────────────────────────
 if [[ $K3S -eq 1 ]]; then
   UNINSTALL="$(command -v k3s-uninstall.sh || echo /usr/local/bin/k3s-uninstall.sh)"
   if [[ $YES -eq 1 ]]; then

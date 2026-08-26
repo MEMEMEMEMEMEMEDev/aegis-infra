@@ -46,6 +46,30 @@
         mode: "0644"
       register: ca_file
 
+    - name: Install aegis' CA into the SYSTEM trust store
+      # /etc/rancher/k3s/aegis-ca.pem above is read by ONE consumer:
+      # containerd, told about it by registries.yaml. Nothing else on
+      # the host knows that file exists — so `curl https://argocd.…`
+      # and any browser on this machine reject the certificate, and the
+      # operator learns to click through the warning. Under
+      # EDGE=cloudflare that only affects internal names; under
+      # EDGE=local it is EVERY name the platform answers to, because
+      # the whole edge is served with this CA's wildcard.
+      #
+      # The extension MUST be .crt: update-ca-certificates ignores
+      # anything else in that directory, silently, and the trust simply
+      # never appears.
+      ansible.builtin.copy:
+        content: "{{ ca_pem.stdout }}"
+        dest: /usr/local/share/ca-certificates/aegis-internal-ca.crt
+        mode: "0644"
+      register: ca_system
+
+    - name: Refresh the system trust store
+      ansible.builtin.command: update-ca-certificates
+      when: ca_system.changed
+      changed_when: ca_system.changed
+
     - name: "Render registries.yaml (https mirror via fixed ClusterIP + ca_file — the kubelet does not resolve .svc — A30)"
       ansible.builtin.template:
         src: ../roles/registry-host-trust/templates/registries.yaml.j2

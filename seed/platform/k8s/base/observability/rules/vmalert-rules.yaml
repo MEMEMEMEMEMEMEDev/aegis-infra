@@ -180,7 +180,7 @@ data:
               summary: "a scrape target has not answered for 15m"
               description: "The job {{ $labels.job }} does not answer at {{ $labels.instance }}. Every panel and every alert that depend on those metrics are mute, not green."
           - alert: JobDeScrapeDesaparecido
-            expr: count(count by (job) (up)) < 12
+            expr: count(count by (job) (up)) < __OBS_SCRAPE_JOBS_MIN__
             for: 20m
             labels: {severity: critical}
             annotations:

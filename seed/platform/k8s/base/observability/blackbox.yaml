@@ -55,8 +55,21 @@ data:
       # init's check 90: do not measure the edge believing you are
       # measuring the app.
       #
-      # No tls_config: here the issuer is Cloudflare, not the internal
-      # CA.
+      # tls_config against a bundle that carries BOTH trust stores, and
+      # the reason is the edge. Under EDGE=cloudflare the certificate is
+      # Cloudflare's and validates against the public roots; under
+      # EDGE=local it is the wildcard aegis' own CA issued, which no
+      # public store has ever heard of. With no tls_config at all this
+      # module used the image's system roots implicitly — right for one
+      # edge and, for the other, a probe that rejects a perfectly good
+      # site and reports it DOWN. The only measurement that represents a
+      # real person, lying, on the profile where it is the only one left.
+      #
+      # The bundle is system-roots + aegis' CA, built by the init
+      # container below. NEVER insecure_skip_verify: `-k` would give the
+      # same green for a certificate served by somebody else, which is
+      # exactly the sin P2.4 banished from phase 40 and the reason
+      # registry_tls validates too.
       sitio_publico:
         prober: http
         timeout: 10s
@@ -67,6 +80,8 @@ data:
           valid_status_codes: [200]
           no_follow_redirects: true
           fail_if_not_ssl: true
+          tls_config:
+            ca_file: /etc/blackbox/trust/bundle.crt
 ---
 apiVersion: v1
 kind: Service
@@ -92,6 +107,43 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: blackbox}
     spec:
+      # The trust bundle: the image's public roots PLUS aegis' own CA,
+      # concatenated into an emptyDir. blackbox's `ca_file` REPLACES the
+      # trust pool, it does not add to it — so pointing sitio_publico at
+      # the internal CA alone would break the cloudflare edge, and
+      # leaving it at the system roots breaks the local one. The union is
+      # the only file that serves both.
+      #
+      # The SAME image on purpose: it is the digest that is already
+      # mirrored, scanned and signed. A new image just to run one `cat`
+      # would cost a pipeline, a signature and one more digest to audit
+      # (the same reasoning as the initContainer of engine-charla).
+      initContainers:
+        - name: build-trust-bundle
+          image: quay.io/prometheus/blackbox-exporter:v0.28.0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              cat /etc/ssl/certs/ca-certificates.crt /etc/blackbox/ca/ca.crt \
+                > /etc/blackbox/trust/bundle.crt
+              # Loud on purpose: a bundle that silently came out with
+              # only one of the two halves is a probe that fails on one
+              # whole edge and blames the site.
+              echo "trust bundle: $(grep -c 'BEGIN CERTIFICATE' /etc/blackbox/trust/bundle.crt) certificates"
+              grep -q 'BEGIN CERTIFICATE' /etc/blackbox/ca/ca.crt
+          volumeMounts:
+            - {name: aegis-ca, mountPath: /etc/blackbox/ca, readOnly: true}
+            - {name: trust, mountPath: /etc/blackbox/trust}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 32Mi}
       containers:
         - name: blackbox-exporter
           # verified 2026-08-19 against github.com/prometheus/
@@ -103,6 +155,7 @@ spec:
           volumeMounts:
             - {name: config, mountPath: /etc/blackbox_exporter, readOnly: true}
             - {name: aegis-ca, mountPath: /etc/blackbox/ca, readOnly: true}
+            - {name: trust, mountPath: /etc/blackbox/trust, readOnly: true}
           readinessProbe:
             httpGet: {path: /-/healthy, port: 9115}
             initialDelaySeconds: 5
@@ -117,3 +170,5 @@ spec:
           configMap: {name: blackbox-config}
         - name: aegis-ca
           configMap: {name: aegis-ca}
+        - name: trust
+          emptyDir: {}

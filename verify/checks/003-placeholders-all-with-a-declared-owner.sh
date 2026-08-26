@@ -35,10 +35,25 @@ if [[ -z "$TEMPLATE_VALUES" ]]; then
     return
 fi
 TEMPLATE_CLASS="$(printf '%s\n' $TEMPLATE_VALUES | sed -e 's/^__//' -e 's/__$//' | paste -sd'|')"
+
+# The config class is DERIVED from its owner too, and for the same
+# reason as the template class: until 2026-08-26 the same names lived
+# written by hand here, in lib/common.sh (_CONFIG_PLACEHOLDERS) and in
+# check 074's dummy renderer — three copies, so adding a placeholder to
+# two of them left this check approving an orphan, or failing over one
+# that has a perfectly good owner.
+CONFIG_OWNER="$LIBS/common.sh"
+CONFIG_CLASS="$(sed -n "s/^_CONFIG_PLACEHOLDERS='__.\\(\\(.*\\)\\)__'\$/\\1/p" "$CONFIG_OWNER" \
+    | tr -d '\\\\' | sed 's/^(//; s/)$//')"
+if [[ -z "$CONFIG_CLASS" ]]; then
+    skip "cannot derive config-class: _CONFIG_PLACEHOLDERS not readable in $(basename "$CONFIG_OWNER")"
+    return
+fi
 ORPHANS="$(grep -rhoI '__[A-Z0-9_]\+__' "$SEED" 2>/dev/null \
   | sort -u \
   | grep -v -E "^__($TEMPLATE_CLASS)__\$" \
-  | grep -v -E '^__(GH_OWNER|PLATFORM_REPO|APP_REPO|ROOT_DOMAIN|REGISTRY_CLUSTER_IP|ACME_EMAIL|AEGIS_PROFILE|OBS_RETENCION_METRICAS|OBS_RETENCION_LOGS|OBS_CF_CAIDO_FOR|OBS_DEADMAN_REPEAT|AGE_PUBLIC|COSIGN_PUB|AEGIS_CA_PEM|OBS_CA_PEM|OBS_NTFY_OPERADOR_HASH|OBS_NTFY_PUENTE_HASH|CF_TUNNEL_TOKEN|SSH_PUBKEY_RSA|SSH_PUBKEY_ED25519)__$' \
+  | grep -v -E "^__($CONFIG_CLASS)__\$" \
+  | grep -v -E '^__(AGE_PUBLIC|COSIGN_PUB|AEGIS_CA_PEM|OBS_CA_PEM|OBS_NTFY_OPERADOR_HASH|OBS_NTFY_PUENTE_HASH|CF_TUNNEL_TOKEN|SSH_PUBKEY_RSA|SSH_PUBKEY_ED25519)__$' \
   || true)"
 if [[ -n "$ORPHANS" ]]; then fail "placeholders with no owner: $ORPHANS"
 else pass "placeholders: all with an owner (config, generated, vps or template — the last one derived from $(basename "$TEMPLATE_OWNER"))"; fi

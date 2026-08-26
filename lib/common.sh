@@ -336,15 +336,45 @@ gate_red() {
 #   __OBS_DEADMAN_REPEAT__      24h         6h       the deadman's route (repeat_interval) — at 6h in dev
 #                                                    the operator would learn to ignore the nightly gap
 #
+# And ONE that varies by EDGE and not by profile:
+#
+#   __OBS_SCRAPE_JOBS_MIN__     cloudflare 12 · local 11
+#
+# It is the floor of JobDeScrapeDesaparecido, the alert whose job is to
+# notice that the watch STOPPED WATCHING something — a target that
+# disappears does not go up==0, it produces nothing, and its silence
+# reads the same as health. It counts: "there have to be at least N".
+# Under EDGE=local the `cloudflared` job discovers no targets, because
+# there is no cloudflared, so there are 11 — and a floor of 12 makes the
+# alert fire every day, correct by its own arithmetic and wrong about
+# reality. An alert that cries wolf is worse than no alert: it teaches
+# the operator to silence the channel.
+# The two numbers are DECLARED here and VERIFIED by check 092 against
+# vmagent's real job list — neither of the two is allowed to drift alone.
+#
 # (the retention of events, 1y, is NOT a placeholder: it does not vary
 #  by profile — a constant value dressed up as a variable is a lie
 #  about flexibility)
-_CONFIG_PLACEHOLDERS='__\(GH_OWNER\|PLATFORM_REPO\|APP_REPO\|ROOT_DOMAIN\|REGISTRY_CLUSTER_IP\|ACME_EMAIL\|AEGIS_PROFILE\|OBS_RETENCION_METRICAS\|OBS_RETENCION_LOGS\|OBS_CF_CAIDO_FOR\|OBS_DEADMAN_REPEAT\)__'
+# THE list of config-class placeholders, and the only one: check 003
+# derives its allowlist from this variable and check 074 derives its
+# dummy values from it too. Until 2026-08-26 the same names were written
+# out by hand in three files, which is three chances for the fourth
+# person to add a placeholder in two of them.
+_CONFIG_PLACEHOLDERS='__\(GH_OWNER\|PLATFORM_REPO\|APP_REPO\|ROOT_DOMAIN\|REGISTRY_CLUSTER_IP\|ACME_EMAIL\|AEGIS_PROFILE\|OBS_RETENCION_METRICAS\|OBS_RETENCION_LOGS\|OBS_CF_CAIDO_FOR\|OBS_DEADMAN_REPEAT\|OBS_SCRAPE_JOBS_MIN\)__'
+# The floor of JobDeScrapeDesaparecido per edge (see the table above).
+# Declared, and verified by check 092 against vmagent's job list.
+_obs_scrape_jobs_min() {
+    case "${EDGE:-cloudflare}" in
+        local) echo 11 ;;   # the same list minus cloudflared, which does not exist
+        *)     echo 12 ;;
+    esac
+}
 render_platform_placeholders() {
     : "${GH_OWNER:?}" "${PLATFORM_REPO:?}" "${APP_REPO:?}" \
       "${ROOT_DOMAIN:?}" "${REGISTRY_CLUSTER_IP:?}" "${ACME_EMAIL:?}" \
       "${PROFILE:?}"
-    local obs_ret_metrics obs_ret_logs obs_cf_down_for obs_deadman_repeat
+    local obs_ret_metrics obs_ret_logs obs_cf_down_for obs_deadman_repeat obs_jobs_min
+    obs_jobs_min="$(_obs_scrape_jobs_min)"
     case "$PROFILE" in
         hetzner) obs_ret_metrics=90d obs_ret_logs=30d
                  obs_cf_down_for=5m  obs_deadman_repeat=6h ;;
@@ -365,6 +395,7 @@ render_platform_placeholders() {
             -e "s|__OBS_RETENCION_LOGS__|$obs_ret_logs|g" \
             -e "s|__OBS_CF_CAIDO_FOR__|$obs_cf_down_for|g" \
             -e "s|__OBS_DEADMAN_REPEAT__|$obs_deadman_repeat|g" \
+            -e "s|__OBS_SCRAPE_JOBS_MIN__|$obs_jobs_min|g" \
             "$f"
         log_info "render: ${f#"$PLATFORM_DIR"/}"
     done < <(grep -rl "$_CONFIG_PLACEHOLDERS" "$PLATFORM_DIR" \

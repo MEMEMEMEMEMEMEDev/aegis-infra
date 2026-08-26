@@ -306,18 +306,51 @@ for where, expr in readers:
 # matches compares nothing and passes, which is the blindness this
 # check exists to prevent (the NO_GUARD table above names the same
 # alert; fixing one occurrence and not this one left it measuring nothing).
+# The jobs that DO NOT EXIST on a given edge. Declared here, next to the
+# other tables of this check, because nothing in a manifest says it: the
+# `cloudflared` job scrapes a Deployment that EDGE=local never installs,
+# and a job that discovers no targets does not produce up==0 — it
+# produces nothing, so the count simply comes out one lower.
+JOBS_ABSENT_ON = {"local": {"cloudflared"}, "cloudflare": set()}
+
 threshold_seen = False
 for fname, name, expr in alerts:
     if name != "JobDeScrapeDesaparecido":
         continue
     threshold_seen = True
-    m = re.search(r"<\s*(\d+)", expr)
-    if not m:
-        bad.append("JobDeScrapeDesaparecido stopped comparing against a number of jobs")
-    elif int(m.group(1)) != len(jobs_base):
-        bad.append(f"JobDeScrapeDesaparecido expects {m.group(1)} jobs and vmagent declares "
-                   f"{len(jobs_base)} platform ones: the threshold went stale, so it either "
-                   "screams too much or covers up a lost job")
+    ph = "__OBS_SCRAPE_JOBS_MIN__"
+    if ph in expr:
+        # The floor is a placeholder, so what is verified is its OWNER:
+        # the two numbers lib/common.sh derives have to be the ones
+        # vmagent's job list actually produces on each edge. Reading the
+        # literal would have been reading a number nobody renders.
+        owner = (P.parent.parent/"lib"/"common.sh") if (P.parent.parent/"lib"/"common.sh").exists() \
+                else pathlib.Path(os.environ["AEGIS_ROOT"])/"lib"/"common.sh"
+        body = owner.read_text()
+        m2 = re.search(r"_obs_scrape_jobs_min\(\)\s*\{(.*?)\n\}", body, re.S)
+        if not m2:
+            bad.append("the floor of JobDeScrapeDesaparecido is a placeholder and "
+                       "lib/common.sh does not derive it: nobody renders that number")
+        else:
+            derived = dict(re.findall(r"(local|\*)\)\s*echo\s+(\d+)", m2.group(1)))
+            for edge, key in (("local", "local"), ("cloudflare", "*")):
+                want = len(jobs_base) - len(JOBS_ABSENT_ON[edge] & set(jobs_base))
+                got = derived.get(key)
+                if got is None:
+                    bad.append(f"lib/common.sh does not derive the floor for edge {edge}")
+                elif int(got) != want:
+                    bad.append(f"the floor of JobDeScrapeDesaparecido for edge {edge} is {got} "
+                               f"and vmagent declares {want} jobs there: the threshold went "
+                               "stale, so on that edge it either screams every day or covers "
+                               "up a lost job")
+    else:
+        m = re.search(r"<\s*(\d+)", expr)
+        if not m:
+            bad.append("JobDeScrapeDesaparecido stopped comparing against a number of jobs")
+        elif int(m.group(1)) != len(jobs_base):
+            bad.append(f"JobDeScrapeDesaparecido expects {m.group(1)} jobs and vmagent declares "
+                       f"{len(jobs_base)} platform ones: the threshold went stale, so it either "
+                       "screams too much or covers up a lost job")
 if not threshold_seen:
     bad.append("the alert JobDeScrapeDesaparecido is gone: nothing compares the number of "
                "scrape jobs against vmagent any more, and a lost job goes unnoticed")
