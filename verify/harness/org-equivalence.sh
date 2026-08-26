@@ -201,6 +201,31 @@ def key(d):
     return (d.get("kind"), m.get("namespace", ""), m.get("name", ""))
 
 
+# ── DELIBERATE divergences from v2 ──────────────────────────────────
+# This harness measures "v3 emits what v2 emits", and that premise has
+# an expiry date written in its own header: the day v3 improves on v2,
+# the difference is the POINT and not the defect. What must never happen
+# is that such a difference goes unnoticed — so it is DECLARED here,
+# with the reason, and anything not on this list is still a failure.
+#
+# A row is (path suffix, why). It only silences the exact path.
+DELIBERATE = [
+    (".spec.entryPoints",
+     "v3 emits [web, websecure] on both edges and v2 only [web]: with "
+     "EDGE=local the host bridge hands 443 to traefik and the route has "
+     "to be served there. Under cloudflare nothing reaches 443, so the "
+     "extra entryPoint is inert — the manifest serves both edges, which "
+     "is what lets the seed stay one shape (T-04a, 2026-08-26)"),
+]
+
+
+def deliberate(path):
+    for suffix, why in DELIBERATE:
+        if path.endswith(suffix):
+            return why
+    return None
+
+
 def diff(want, got, path):
     if isinstance(want, dict) and isinstance(got, dict):
         for k in sorted(set(want) | set(got)):
@@ -214,6 +239,10 @@ def diff(want, got, path):
         return None
     if isinstance(want, list) and isinstance(got, list):
         if len(want) != len(got):
+            why = deliberate(path)
+            if why:
+                DECLARED.append((path, why))
+                return None
             return f"{path}: v2 has {len(want)} items, v3 has {len(got)}"
         for i, (a, b) in enumerate(zip(want, got)):
             d = diff(a, b, f"{path}[{i}]")
@@ -221,11 +250,16 @@ def diff(want, got, path):
                 return d
         return None
     if want != got:
+        why = deliberate(path)
+        if why:
+            DECLARED.append((path, why))
+            return None
         return f"{path}: v2 {want!r} · v3 {got!r}"
     return None
 
 
 compared, bad = 0, []
+DECLARED = []
 for f3 in sorted(v3.glob(GLOB)):
     if SKIP in f3.parts:
         continue
@@ -268,6 +302,16 @@ if compared == 0:
     print("  \033[1;31m✗\033[0m NOT ONE generated file was compared: both "
           "generators left the tree as it was, so this measured nothing")
     sys.exit(1)
+
+# The declared divergences are PRINTED, never swallowed. A silenced
+# difference that nobody sees is the same as no comparison at all —
+# which is exactly the state this harness spent a day in.
+seen = set()
+for path, why in DECLARED:
+    if why in seen:
+        continue
+    seen.add(why)
+    print(f"  \033[1;33m~\033[0m DELIBERATE divergence from v2 ({path}): {why}")
 
 for m in bad[:8]:
     print(f"  \033[1;31m✗\033[0m {m}")

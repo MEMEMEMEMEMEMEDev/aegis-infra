@@ -142,13 +142,29 @@ cat > "$TMP/verify/checks/008-profile.sh" <<'C'
 # title: any old check
 check() { pass "nothing"; }
 C
-mkdir -p "$TMP/seed"
+# What makes the local edge EXIST is derived from two owners: the config
+# validator accepting it, and the bridge that serves it shipping. The
+# harness has to simulate the SAME two facts — until 2026-08-26 it planted
+# an `__EDGE_MODE__` marker in a fake seed, which was the old signal, and
+# it went red the day the signal started asking the right question. A
+# harness that simulates a mechanism has to move with it, or it measures
+# a world that no longer exists.
+mkdir -p "$TMP/seed" "$TMP/lib" "$TMP/share/systemd"
 V --only 008 --profile local >/dev/null 2>&1
-[[ $? == 2 ]] && ok "a profile the artifact does not have yet = rc 2" \
-    || bad "--profile local with no local profile in the tree did NOT give rc 2"
-printf '__EDGE_MODE__\n' > "$TMP/seed/profile-marker.yaml"
+[[ $? == 2 ]] && ok "an edge the artifact does not implement = rc 2" \
+    || bad "--profile local with no local edge in the tree did NOT give rc 2"
+
+# half the evidence is not evidence: the validator accepts the edge, but
+# nothing serves it
+printf '_v_edge()    { [[ "$1" == cloudflare || "$1" == local ]]; }\n' > "$TMP/lib/config.sh"
 V --only 008 --profile local >/dev/null 2>&1
-[[ $? == 0 ]] && ok "with the profile present in the artifact, it runs" \
-    || bad "--profile local did NOT run with the profile present"
+[[ $? == 2 ]] && ok "the conf accepts the edge but no bridge serves it = still rc 2" \
+    || bad "--profile local ran with a validator that accepts local and NO bridge"
+
+# and with both halves it runs
+touch "$TMP/share/systemd/aegis-edge-http.socket"
+V --only 008 --profile local >/dev/null 2>&1
+[[ $? == 0 ]] && ok "with the edge implemented (validator + bridge), it runs" \
+    || bad "--profile local did NOT run with the local edge implemented"
 
 exit $FAILURES
