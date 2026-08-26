@@ -41,7 +41,7 @@ grep -qE '^\s*if\s+yaml_has_docs\s+"\$PLATFORM_DIR/k8s/bootstrap/appprojects-ten
 #    one probe per organization into it, between two markers.
 #
 #    Here un-rendering is NOT enough and that is why this point was
-#    needed. `traer` turned blog.example.com into blog.__ROOT_DOMAIN__
+#    needed. `traer` turned blog.<the operator's domain> into blog.__ROOT_DOMAIN__
 #    —the aegis dev seed guard passed happily, this instance's value was
 #    no longer there— but the organizations' NAMES stayed. The seed was
 #    left probing blog, ejemplo, portafolio and shop: four sites that do

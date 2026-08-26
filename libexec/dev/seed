@@ -252,7 +252,7 @@ DELIBERATE = [
 # file is product and has to travel.
 #
 # Without this table, `pull` copied the whole file: the un-rendering
-# turned blog.example.com into blog.__ROOT_DOMAIN__ and the guard passed
+# turned blog.<the operator's domain> into blog.__ROOT_DOMAIN__ and the guard passed
 # happily, because THIS instance's value was no longer there. But the
 # NAMES were: the seed was left with probes to blog, ejemplo, portafolio
 # and shop —four organizations that only exist here— and a new instance
