@@ -65,20 +65,15 @@ spec:
   syncPolicy:
     automated: {selfHeal: true}
     syncOptions: [ServerSideApply=true]
-  # Same reason as in org-portafolio: the signing policy has
-  # mutateDigest and adds the verified digest to the image at
-  # admission, so the live object will never match the one in git.
-  # Without this the app stays OutOfSync forever and the traffic light
-  # stops warning. See the long comment in org-portafolio/bundle.yaml.
-  #
-  # The effect is NOT visible here yet, for a reason worth recording:
-  # the hello-aegis pod running today was admitted WITHOUT going
-  # through the policy (it carries no kyverno.io/verify-images
-  # annotation), so its Deployment brings no digest. It will bring one
-  # as soon as it is recreated. This is put in place now so the fix
-  # arrives before the problem.
-  ignoreDifferences:
-    - group: apps
-      kind: Deployment
-      jqPathExpressions:
-        - .spec.template.spec.containers[].image
+  # NO ignoreDifferences on the image — deliberately. This App used to
+  # ignore .spec.template.spec.containers[].image, for the reason the
+  # tenants once had: the signing policy has mutateDigest and appends
+  # the digest at admission, so with a TAG in git desired != live
+  # forever. But the pipeline writes the DIGEST into git
+  # (ci/write-digest.mjs), the mutation is a no-op, and ignoring the
+  # image then hides the one change that matters: a new digest. On the
+  # first clean instance (2026-08-27) the signed build wrote its digest,
+  # ArgoCD compared, saw "no difference", skipped the auto-sync, and the
+  # canary stayed on the unsigned image that Kyverno rightly refused to
+  # restart. Finding #36, the same one the tenants' generator records —
+  # the canary had been left behind.

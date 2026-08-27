@@ -57,6 +57,11 @@ nc "$PHASES/70-deploy-auto.sh" | grep -q 'tag-efectivo-en-registry' \
 # and failed a Running canary (2026-08-27, first clean instance):
 nc "$PHASES/70-deploy-auto.sh" | grep -q '/v2/hello-aegis/manifests/\$EFF_REF' \
     || D71="$D71 H6: phase 70's effective-image gate does not check a digest-pinned image against the registry's manifests (it only knows tags);"
+# …and phase 80 waits for THE signed digest, not for any '@sha256:'
+# (the pipeline pins by digest from build one, so the unsigned image
+# already had that shape and the gate passed on it — 2026-08-27):
+nc "$PHASES/80-supply-chain.sh" | tr '\n' ' ' | grep -q 'canary-pineado-a-digest.*grep -qF .@\$DIGEST' \
+    || D71="$D71 H6: phase 80's canary-pineado-a-digest does not compare the Deployment's image with the signed \$DIGEST (any @sha256: passes, the unsigned one included);"
 # H4: coredns must EXIST before the rollout status, in the playbook
 # (awk over NON-comment lines: the raw grep -n anchored on the COMMENT
 # that documents the fix — mention≠use, inside the check itself, for the

@@ -20,3 +20,14 @@ assert t.count(old) == 1
 open(p, "w").write(t.replace(old, '"https://$REGISTRY_CLUSTER_IP:5000/v2/hello-aegis/tags/list")', 1))
 PY
 }
+
+# 2026-08-27: phase 80 goes back to accepting any '@sha256:'
+red_3() {
+    python3 - "$AEGIS_ROOT/init/phases/80-supply-chain.sh" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = "   | grep -qF '@$DIGEST'\"\n"
+assert t.count(old) == 1, t.count(old)
+open(p, "w").write(t.replace(old, "   | grep -q '@sha256:'\"\n", 1))
+PY
+}

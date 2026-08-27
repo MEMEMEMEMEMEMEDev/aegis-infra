@@ -302,14 +302,21 @@ gate "webhooks-scopeados" poll 180 5 bash -c \
 # DENIED pods (a race that unjams itself but dirties the gate). Wait
 # for the IU→ArgoCD cycle to deploy the signed image (Kyverno's
 # autogen mutates the Deployment to a digest at admission):
+# "Pinned to a digest" means pinned to THIS digest — the one the signed
+# build produced and cosign just verified. Any '@sha256:' is not enough:
+# the pipeline pins by digest from its very first build, so the
+# unsigned image already matched that shape, the gate passed on it, and
+# the rollout restart below asked Kyverno to admit an unsigned pod —
+# which it refused, correctly (first clean instance, 2026-08-27).
 gate_diag "canary-pineado-a-digest" \
   'kubectl -n org-canary get deploy hello-aegis \
-     -o jsonpath="{.spec.template.spec.containers[0].image}"; echo;
+     -o jsonpath="{.spec.template.spec.containers[0].image}"; echo "  (expected @'"$DIGEST"')";
+   kubectl -n argocd get app hello-aegis -o jsonpath="sync={.status.sync.status} rev={.status.sync.revision} ignore={.spec.ignoreDifferences}"; echo;
    kubectl -n argocd logs deploy/argocd-repo-server --since=15m 2>/dev/null | tail -n 20' \
   poll 900 15 bash -c \
   "kubectl -n org-canary get deploy hello-aegis \
      -o jsonpath='{.spec.template.spec.containers[0].image}' \
-   | grep -q '@sha256:'"
+   | grep -qF '@$DIGEST'"
 # positive: the canary's rollout admitted and MUTATED to a digest.
 # Pattern B (in-VM report #14) here too: on failure it must be
 # possible to DISTINGUISH "denied by Kyverno" from "rollout timeout" —
