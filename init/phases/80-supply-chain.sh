@@ -553,5 +553,21 @@ fi
 # every image that needs a newer tag — not just the first.
 gate "mirror-images-build-verde" jenkins_build_retry mirror-images 2700 2
 
+# ── 80.7 the bases aegis owns, built here so nothing stands on a sample ──
+# base-images builds every member (nginx for the static fronts, node for
+# the backends AND for the platform's own bucket-provisioner Job) and,
+# through its propagate stage, rewrites services.yaml's
+# `bucket.aprovisionador` tag+digest in the platform repo — the seed
+# only carries a sample there, because a digest that is born in this
+# registry cannot be known before this line runs. It takes the public
+# alpine by digest and needs the cosign key: hence after 80.2 and after
+# the mirror. A gate for the same reason as the mirror's: a base that
+# fails its scan does not exist, and an init that went on would leave
+# the provisioner on a reference nobody built.
+gate "base-images-build-verde" jenkins_build_retry base-images 2700 2
+# The propagate stage just pushed to the platform repo: pull it in
+# before anything below commits on top of a stale clone.
+platform_repo_sync
+
 log_ok "SUPPLY-CHAIN COMPLETE: blocking scan + signature + bounded \
 fail-closed Enforce. The init is done: the v2 platform end to end."

@@ -430,18 +430,16 @@ it means the watch enumerating what runs (the tenants' Deployments)
 instead of what is listed — a different job, deliberately not this
 one.
 
-**The platform's own node consumer still stands on the mirrored
-runtime.** The bucket provisioner Job (`bucket.aprovisionador` in
-`services.yaml`) runs on `nodejs-distroless` — the image whose
-`libssl3t64` carried CVE-2026-14456 on 2026-08-27, with no patched
-candidate upstream (§3.1). It is not a repo, so `consumers.txt` cannot
-list it and the loop cannot bump it: it is a `digest:` in
-`services.yaml` that a human moves (§2, step 4). It is a candidate to
-move to `aegis-base-node` — same uid, same `ENTRYPOINT`, the script
-path as `CMD`, one line — and from that day it is a base the loop
-rebuilds. Until then the watch reports the mirror every morning, and
-the exposure is what §0 measured for the fronts: a Job speaking plain
-HTTP to Garage inside the cluster, no TLS, no QUIC.
+- **The platform's own node consumer is in the loop too.** The bucket
+  provisioner Job (`bucket.aprovisionador` in `services.yaml`) stands on
+  `aegis-base-node` since 2026-08-27. It is not a tenant repo, so it is
+  not in `consumers.txt`: the `base-images` job treats the platform repo
+  as an implicit consumer and rewrites the `tag:` and `digest:` lines of
+  that block after every successful build of the member. The Job is an
+  ArgoCD sync hook recreated on every sync, so the next sync runs it on
+  the rebuilt base. The seed carries a SAMPLE tag+digest (a digest born
+  in a registry cannot be known before phase 80 builds it there); check
+  138 holds the shape, phase 80 and the job hold the value.
 
 **Fan-out.** One base rebuild → N consumer commits → N app builds,
 5000m each. Under the `jenkins-system` quota the pods QUEUE; they do

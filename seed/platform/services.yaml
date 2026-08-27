@@ -104,19 +104,26 @@ bucket:
   admin: http://garage.garage-system.svc.cluster.local:3903
   region: garage
   # The image of the Job that creates the bucket and grants the
-  # organization's key access to it. It is nodejs-distroless, which is
-  # ALREADY mirrored and signed: Node does HTTP without a single
-  # dependency, so there is no need to pull and sign a new image just to
-  # talk to an API.
+  # organization's key access to it. Since 2026-08-27 it is
+  # aegis-base-node, the base the platform BUILDS (base-images/node):
+  # the day CVE-2026-14456 showed up in nodejs-distroless and its
+  # upstream candidate was measured unpatched, the platform's own node
+  # consumer moved with the tenants' backends. Node does HTTP without a
+  # single dependency, so the script needs nothing on top of the base.
   #
-  # And it is distroless: no shell, no package manager. A Job that
-  # handles the storage admin token is exactly where you do not want an
-  # `sh` available.
+  # THE VALUES BELOW ARE INSTANCE VALUES, and the seed carries a
+  # sample. The tag and digest are born in each instance's registry
+  # when its base-images job builds the member (phase 80 fires it);
+  # they cannot be known here. What keeps them true: the base-images
+  # job treats the platform repo as a consumer and rewrites these two
+  # lines (tag, digest) after every successful build of aegis-base-node,
+  # the same commit-and-sync path a tenant's FROM gets. The Job is a
+  # sync hook recreated on every sync, so the next sync runs it on the
+  # rebuilt base. The sample: the first build on the instance that
+  # wrote this, so that the generator renders a well-formed reference
+  # before any base was built.
   aprovisionador:
-    imagen: nodejs-distroless
-    # From the INTERNAL REGISTRY, not from images.txt: they are
-    # different numbers. The one in images.txt (a2723a28...) pins the
-    # public origin.
-    digest: sha256:70d1eb571029aa736d99ee9c8caf1eaa190dfdc45b8c58584e5d73efc74ee66d
-    tag_origen: "22"
+    imagen: aegis-base-node
+    tag: "3.22-000002"
+    digest: sha256:db01b470e7d851eda4b6e5fc7b51e83983522317d9941c9b44a12a58790b45d3
 

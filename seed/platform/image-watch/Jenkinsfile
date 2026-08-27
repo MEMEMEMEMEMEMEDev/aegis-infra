@@ -56,6 +56,8 @@
 
 // The wall clock, read where it is measured. Two shapes: seconds for
 // the metrics, ISO for the events (`_time_field=ts`).
+import groovy.transform.Field   // used by the @Field declarations further down (imports go first in a Groovy script)
+
 def nowEpoch() { return sh(returnStdout: true, script: 'date -u +%s').trim() }
 def nowIso()   { return sh(returnStdout: true, script: 'date -u +%Y-%m-%dT%H:%M:%SZ').trim() }
 
@@ -185,6 +187,17 @@ def pullAndScan(String ref, boolean withIgnorefile) {
     sh 'rm -f watch.tar watch-scan.txt || true'
   }
 }
+
+// Script-level state shared between stages. Declared as fields ON
+// PURPOSE: a bare `NAME = value` inside a stage makes Jenkins warn
+// «WorkflowScript seems to be setting a field named NAME … did you
+// forget the def keyword?» on every run (measured on the first build
+// of base-images, 2026-08-27), and a `def` inside the stage would die
+// with it. @Field is the declared shape of a script global.
+@Field def TARGETS = []
+@Field def STATE = [:]
+@Field def IGNORE_METRICS = []
+@Field def TRIGGERED = ''
 
 pipeline {
   agent {

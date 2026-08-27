@@ -38,6 +38,17 @@
 // Job defined in JCasC job-dsl (D9), next to mirror-images. It declares
 // the MEMBERS parameter; so does this file, so that a manual "Build
 // with Parameters" shows the same thing the DSL says.
+// Script-level state shared between stages. Declared as fields ON
+// PURPOSE: a bare `NAME = value` inside a stage makes Jenkins warn
+// «WorkflowScript seems to be setting a field named NAME … did you
+// forget the def keyword?» on every run (measured on the first build
+// of base-images, 2026-08-27), and a `def` inside the stage would die
+// with it. @Field is the declared shape of a script global.
+import groovy.transform.Field
+@Field def MEMBERS_TO_BUILD = []
+@Field def BUILT = []
+@Field def FAILED = []
+
 pipeline {
   agent {
     kubernetes {
@@ -526,8 +537,26 @@ spec:
             }
             consumers << slug
           }
+          // THE PLATFORM REPO IS A CONSUMER TOO, and it is not in
+          // consumers.txt because it is not a tenant: services.yaml
+          // names the base the bucket-provisioner Job runs on
+          // (`bucket.aprovisionador`, imagen aegis-base-node). That Job
+          // is a sync hook recreated on every sync, so bumping its
+          // tag+digest here is what puts a rebuilt base under it — the
+          // same commit-and-let-ArgoCD-deploy path the tenants get. The
+          // URL is the one this very checkout came from.
+          def platformUrl = scm.userRemoteConfigs[0].url
+          def platformSlug = platformUrl
+            .replaceFirst(/^git@github\.com:/, '')
+            .replaceFirst(/^https:\/\/github\.com\//, '')
+            .replaceFirst(/\.git$/, '')
+          if (platformSlug ==~ /[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/ && !consumers.contains(platformSlug)) {
+            consumers << platformSlug
+          } else if (!(platformSlug ==~ /[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/)) {
+            echo "NOTICE: cannot read <owner>/<repo> out of this job's own remote (${platformUrl}) — services.yaml will NOT be bumped"
+          }
           if (consumers.isEmpty()) {
-            echo 'propagate: consumers.txt lists no repository — nothing to propagate (aegis org apply fills the block from the contracts)'
+            echo 'propagate: no repository to propagate to'
             return
           }
           echo "${consumers.size()} consumer(s): ${consumers.join(' ')}"
@@ -589,13 +618,30 @@ spec:
                   # front may live at the root, under front/, anywhere):
                   # the file is FOUND by what it says, never assumed.
                   FILES="$(grep -rl --include=Containerfile -E "aegis-base-${M}(:[^@ ]+)?@sha256:" . || true)"
-                  if [ -z "${FILES}" ]; then
-                    echo "NOTICE: no Containerfile in ${REPO_SLUG} names aegis-base-${M}@sha256:... — not a consumer of this base"
+                  MATCHED=0
+                  if [ -n "${FILES}" ]; then
+                    MATCHED=1
+                    echo "${FILES}" | sed 's/^/  matches: /'
+                    echo "${FILES}" | xargs sed -i -E \
+                      "s#(aegis-base-${M})(:[^@ ]+)?@sha256:[0-9a-f]{64}#\\1:${TAG}@${DIGEST}#g"
+                  fi
+                  # The platform's own consumer: services.yaml names the
+                  # base under `imagen:` and carries `tag:` + `digest:`
+                  # on the next lines of that block. Rewritten by block,
+                  # never by line number.
+                  if [ -f services.yaml ] && grep -qE "^[[:space:]]*imagen:[[:space:]]*aegis-base-${M}[[:space:]]*$" services.yaml; then
+                    MATCHED=1
+                    echo "  matches: services.yaml (imagen: aegis-base-${M})"
+                    awk -v m="aegis-base-${M}" -v tag="${TAG}" -v dg="${DIGEST}" '
+                      /^[[:space:]]*imagen:[[:space:]]*/ { inblk = ($2 == m) }
+                      inblk && /^[[:space:]]*tag:/    { sub(/tag:.*/, "tag: \\"" tag "\\"") }
+                      inblk && /^[[:space:]]*digest:/ { sub(/digest:.*/, "digest: " dg); inblk = 0 }
+                      { print }' services.yaml > services.yaml.bump && mv services.yaml.bump services.yaml
+                  fi
+                  if [ "${MATCHED}" = 0 ]; then
+                    echo "NOTICE: nothing in ${REPO_SLUG} names aegis-base-${M} — not a consumer of this base"
                     exit 20
                   fi
-                  echo "${FILES}" | sed 's/^/  matches: /'
-                  echo "${FILES}" | xargs sed -i -E \
-                    "s#(aegis-base-${M})(:[^@ ]+)?@sha256:[0-9a-f]{64}#\\1:${TAG}@${DIGEST}#g"
 
                   if git diff --quiet; then
                     echo "${REPO_SLUG} is already at ${TAG}@${DIGEST}"
@@ -603,13 +649,16 @@ spec:
                   fi
 
                   # THE GUARD: only Containerfiles, one line out and one
-                  # line in each. Anything else means the sed did more
-                  # than it was told, and nothing leaves this pod.
+                  # line in each — or services.yaml with at most its two
+                  # lines (tag, digest). Anything else means the sed did
+                  # more than it was told, and nothing leaves this pod.
                   git diff --numstat | tee numstat.txt
                   if ! awk -F'\\t' '
-                        $1 != "1" || $2 != "1" || $3 !~ /(^|\\/)Containerfile$/ { bad = 1 }
+                        $3 ~ /(^|\\/)Containerfile$/ { if ($1 != "1" || $2 != "1") bad = 1; next }
+                        $3 == "services.yaml"         { if ($1 != $2 || $1 > 2) bad = 1; next }
+                        { bad = 1 }
                         END { exit bad }' numstat.txt; then
-                    echo "GUARD: the diff is not one line per Containerfile — refusing to push"
+                    echo "GUARD: the diff is not one line per Containerfile (or the two lines of services.yaml) — refusing to push"
                     git diff | head -80
                     exit 21
                   fi

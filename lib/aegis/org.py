@@ -2308,7 +2308,13 @@ def render_provisioning():
     """
     cat = yaml.safe_load(open(SERVICES, encoding="utf-8"))
     b = cat["bucket"]
-    image = f"{cat['registro']}/{b['aprovisionador']['imagen']}@{b['aprovisionador']['digest']}"
+    prov = b["aprovisionador"]
+    # `name:tag@digest` when services.yaml carries a tag (an owned base:
+    # the tag says which build, the digest is what gets pulled), the
+    # digest-only form otherwise. Kyverno verifies and keeps the digest
+    # either way.
+    tag = f":{prov['tag']}" if prov.get("tag") else ""
+    image = f"{cat['registro']}/{prov['imagen']}{tag}@{prov['digest']}"
 
     with_bucket = orgs_with_bucket()
     if not with_bucket:

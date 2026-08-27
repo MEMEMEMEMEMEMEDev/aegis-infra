@@ -22,6 +22,15 @@
 // it, crane pushes it, cosign signs it. The order matters: the scan runs
 // BEFORE the push, just like in Jenkinsfile.app — an image that did not
 // pass the scan never comes to exist in the registry.
+// Script-level state shared between stages. Declared as fields ON
+// PURPOSE: a bare `NAME = value` inside a stage makes Jenkins warn
+// «WorkflowScript seems to be setting a field named NAME … did you
+// forget the def keyword?» on every run (measured on the first build
+// of base-images, 2026-08-27), and a `def` inside the stage would die
+// with it. @Field is the declared shape of a script global.
+import groovy.transform.Field
+@Field def MIRROR_ENTRIES = []
+
 pipeline {
   agent {
     kubernetes {

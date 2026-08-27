@@ -84,6 +84,31 @@ for cf in "$B"/*/Containerfile; do
             || D138="$D138 $m: installs $pkg and never runs \`$human\` at build time: $why;"
     done < <(printf '%s\n' "${SERVERS[@]}")
 done
+# ── the platform's OWN consumer: the bucket provisioner ─────────────
+# services.yaml names the Job's image. It must be a member that exists,
+# with a tag of the scheme and a digest — the seed carries a sample and
+# phase 80 / the base-images job rewrite it, but the SHAPE is the
+# product's promise. Found on 2026-08-27: the Job stood on
+# nodejs-distroless with the same CVE the tenants had just left behind.
+if python3 - "$P/services.yaml" "$B" <<'EOF'
+import sys, yaml, os, re
+cat = yaml.safe_load(open(sys.argv[1])) or {}
+prov = ((cat.get("bucket") or {}).get("aprovisionador")) or {}
+img, tag, dg = prov.get("imagen", ""), str(prov.get("tag", "")), prov.get("digest", "")
+bad = []
+if not img.startswith("aegis-base-"):
+    bad.append(f"bucket.aprovisionador.imagen is {img!r}: the platform's own node Job must stand on a base aegis builds (aegis-base-<member>), not on a third party nobody can patch")
+elif not os.path.isfile(os.path.join(sys.argv[2], img[len("aegis-base-"):], "Containerfile")):
+    bad.append(f"bucket.aprovisionador.imagen names {img!r} and base-images/{img[len('aegis-base-'):]}/Containerfile does not exist")
+if not re.fullmatch(r"[0-9]+\.[0-9]+-[0-9]{6}", tag):
+    bad.append(f"bucket.aprovisionador.tag is {tag!r}: expected <alpine-minor>-<build padded 6>")
+if not re.fullmatch(r"sha256:[0-9a-f]{64}", dg or ""):
+    bad.append(f"bucket.aprovisionador.digest is {dg!r}: expected sha256:<64 hex>")
+for b in bad: print("    " + b)
+sys.exit(1 if bad else 0)
+EOF
+then :; else D138="$D138 the platform's own bucket-provisioner Job does not stand on an owned base with tag and digest (see above);"; fi
+
 (( members > 0 )) || D138="$D138 base-images/ has no <member>/Containerfile: a job that builds nothing and reports success (the seed ships nginx and node);"
 [[ -f "$B/Jenkinsfile" ]] || D138="$D138 base-images/Jenkinsfile does not exist: nothing asserts the contract before the push, nothing propagates the digest;"
 C="$B/consumers.txt"

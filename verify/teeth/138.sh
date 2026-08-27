@@ -135,3 +135,18 @@ assert n[1] == 1
 open(p, "w").write(n[0])
 PY
 }
+
+# the platform's own Job back on a third-party base
+red_7() {
+    sed -i -E 's/^(\s*imagen:\s*)aegis-base-node\s*$/\1nodejs-distroless/' "$AEGIS_ROOT/seed/platform/services.yaml"
+    grep -q 'imagen: nodejs-distroless' "$AEGIS_ROOT/seed/platform/services.yaml"
+}
+# a tag that is not of the scheme (a floating one)
+red_8() {
+    sed -i -E 's/^(\s*tag:\s*)"3\.22-[0-9]{6}"\s*$/\1"latest"/' "$AEGIS_ROOT/seed/platform/services.yaml"
+    grep -q 'tag: "latest"' "$AEGIS_ROOT/seed/platform/services.yaml"
+}
+# control: the instance rewrote the sample with another build of the same shape
+control_5() {
+    sed -i -E 's/^(\s*tag:\s*)"3\.22-[0-9]{6}"\s*$/\1"3.22-000009"/; s/^(\s*digest:\s*)sha256:[0-9a-f]{64}\s*$/\1sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/' "$AEGIS_ROOT/seed/platform/services.yaml"
+}
