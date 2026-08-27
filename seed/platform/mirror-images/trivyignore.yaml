@@ -128,3 +128,56 @@ vulnerabilities:
     paths: ["usr/local/bin/gosu"]
     statement: "mime is not linked into the binary (0 symbols). Measured 2026-07-26."
     expired_at: 2027-01-31
+
+  # ============================================================
+  # CVE-2026-14456 — OpenSSL, DoS in the QUIC SERVER (unbounded
+  # memory growth). Found on the first clean instance (2026-08-27):
+  # five of seven mirrored images carry it, and upstream had not
+  # rebuilt them (redis/postgres/golang-alpine unchanged; python and
+  # nodejs-distroless rebuilt and STILL carrying it). None of them
+  # runs a QUIC server: redis and postgres speak their own TCP
+  # protocols, python and node are runtimes for HTTP/1.1 services
+  # behind traefik, golang-alpine is a build image. The paths are
+  # the exact scan targets measured that day — a new distro build
+  # is a new measurement, not a free pass.
+  # ============================================================
+  - id: CVE-2026-14456   # HIGH — openssl: DoS via unbounded memory growth in QUIC server
+    paths: ["mirror.tar (alpine 3.23.5)", "mirror.tar (alpine 3.24.1)", "mirror.tar (debian 13.6)"]
+    statement: "QUIC-server DoS; no mirrored image runs a QUIC server (redis, postgres, python, node, golang-alpine). Upstream not rebuilt. Measured 2026-08-27."
+    expired_at: 2026-11-30
+  # ============================================================
+  # gosu again — seven Go stdlib CVEs published after the 2026-07-26
+  # measurement, same binary (postgres:17.10-alpine did not move:
+  # gosu 1769900 bytes, go1.24.6). Re-measured 2026-08-27 on the
+  # binary extracted from a running postgres pod: 0 symbols of every
+  # accused package; the controls show up (syscall.Setuid 2,
+  # os/exec 15). Not unreachable — not compiled in.
+  # ============================================================
+  - id: CVE-2026-33818   # encoding/asn1: DoS decoding
+    paths: ["usr/local/bin/gosu"]
+    statement: "encoding/asn1 is not linked into the binary (0 symbols; controls syscall.Setuid 2, os/exec 15). Measured 2026-08-27."
+    expired_at: 2027-02-28
+  - id: CVE-2026-39821   # x/net/idna: DoS parsing IDNA
+    paths: ["usr/local/bin/gosu"]
+    statement: "x/net/idna is not linked into the binary (0 symbols; controls syscall.Setuid 2, os/exec 15). Measured 2026-08-27."
+    expired_at: 2027-02-28
+  - id: CVE-2026-56853   # net/http: unencrypted HTTP/2 upgrade
+    paths: ["usr/local/bin/gosu"]
+    statement: "net/http is not linked into the binary (0 symbols; controls syscall.Setuid 2, os/exec 15). Measured 2026-08-27."
+    expired_at: 2027-02-28
+  - id: CVE-2026-56858   # html/template: XSS in template escaping
+    paths: ["usr/local/bin/gosu"]
+    statement: "html/template is not linked into the binary (0 symbols; controls syscall.Setuid 2, os/exec 15). Measured 2026-08-27."
+    expired_at: 2027-02-28
+  - id: CVE-2026-56859   # encoding/xml: DoS decoding XML
+    paths: ["usr/local/bin/gosu"]
+    statement: "encoding/xml is not linked into the binary (0 symbols; controls syscall.Setuid 2, os/exec 15). Measured 2026-08-27."
+    expired_at: 2027-02-28
+  - id: CVE-2026-56860   # net/url: DoS parsing
+    paths: ["usr/local/bin/gosu"]
+    statement: "net/url is not linked into the binary (0 symbols; controls syscall.Setuid 2, os/exec 15). Measured 2026-08-27."
+    expired_at: 2027-02-28
+  - id: CVE-2026-56862   # crypto/tls: DoS via handshake
+    paths: ["usr/local/bin/gosu"]
+    statement: "crypto/tls is not linked into the binary (0 symbols; controls syscall.Setuid 2, os/exec 15). Measured 2026-08-27."
+    expired_at: 2027-02-28
