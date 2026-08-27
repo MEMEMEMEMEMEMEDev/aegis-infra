@@ -730,7 +730,10 @@ def apply_webhooks(write, tot):
     # register): one accent less over there broke the table over here, and
     # the symptom appeared in another command. Now the CONTRACT is read:
     # every step emits its state and --json returns them as a document.
-    from aegis import cli
+    # (`cli` is the module-level import: a second `from aegis import cli`
+    #  HERE made the name local to the whole function, and the print
+    #  above it crashed with UnboundLocalError — first `aegis app apply`
+    #  on a clean instance, 2026-08-27)
     try:
         rc, doc = cli.run_json("webhook", *(["apply"] if write else []))
     except cli.CouldNotEvaluate as e:
