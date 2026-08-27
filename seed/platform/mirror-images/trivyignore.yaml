@@ -139,10 +139,16 @@ vulnerabilities:
   # protocols, python and node are runtimes for HTTP/1.1 services
   # behind traefik, golang-alpine is a build image. The paths are
   # the exact scan targets measured that day — a new distro build
-  # is a new measurement, not a free pass.
+  # is a new measurement, not a free pass. The tar name is a glob:
+  # mirror-images scans mirror.tar and image-watch scans watch.tar,
+  # and trivy matches `paths` against "<tar> (<distro>)" for OS
+  # packages — the first version named mirror.tar and the watch, the
+  # same afternoon, reported the CVE the mirror had just excused.
+  # `purls` narrows it further to the OpenSSL packages themselves.
   # ============================================================
   - id: CVE-2026-14456   # HIGH — openssl: DoS via unbounded memory growth in QUIC server
-    paths: ["mirror.tar (alpine 3.23.5)", "mirror.tar (alpine 3.24.1)", "mirror.tar (debian 13.6)"]
+    paths: ["*.tar (alpine 3.23.5)", "*.tar (alpine 3.24.1)", "*.tar (debian 13.6)"]
+    purls: ["pkg:apk/alpine/libcrypto3", "pkg:apk/alpine/libssl3", "pkg:deb/debian/libssl3t64", "pkg:deb/debian/openssl", "pkg:deb/debian/openssl-provider-legacy"]
     statement: "QUIC-server DoS; no mirrored image runs a QUIC server (redis, postgres, python, node, golang-alpine). Upstream not rebuilt. Measured 2026-08-27."
     expired_at: 2026-11-30
   # ============================================================

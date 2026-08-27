@@ -1217,7 +1217,11 @@ except Exception:
   #     organization with a domain and without a probe was born blind
   #     all over again.
   with_domain=$(grep -lE '^dominio:' "$ROOT_P"/orgs/*.yaml 2>/dev/null | wc -l)
-  probes=$(_vm_num 'count(count by (job) (probe_success{job=~"sitio-.*"}))')
+  # `or vector(0)`: with no tenant declaring a domain there is no probe
+  # series at all, count() of nothing is NO series, and the round used
+  # to say "could not evaluate" about a measurement that is simply 0
+  # (first clean instance, 2026-08-27)
+  probes=$(_vm_num 'count(count by (job) (probe_success{job=~"sitio-.*"})) or vector(0)')
   if [[ -z "$probes" ]]; then
       notice "COULD NOT EVALUATE: I could not count the tenant probes"
   elif [[ "$with_domain" -gt 0 && "$probes" -lt "$with_domain" ]]; then

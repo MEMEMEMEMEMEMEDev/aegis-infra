@@ -150,6 +150,12 @@ spec:
   destination: {server: https://kubernetes.default.svc, namespace: kyverno}
   syncPolicy:
     automated: {selfHeal: true}
+    # ServerSideApply: kyverno's CRDs are bigger than the 256 KiB the
+    # last-applied annotation may hold — a client-side PATCH fails with
+    # "metadata.annotations: Too long" and the App stays OutOfSync with
+    # every sync SyncFailed (first clean instance, 2026-08-27; at home
+    # the CRDs had been CREATED once and never patched).
+    syncOptions: [ServerSideApply=true]
     syncOptions: [ServerSideApply=true]
 ---
 # THE LAST one enabled (D5): Enforce only with a signature in place.
@@ -220,27 +226,10 @@ spec:
   syncPolicy:
     automated: {selfHeal: true}
     syncOptions: [ServerSideApply=true, CreateNamespace=true]
----
-# The canary: the ONLY App that reads from the APP repo (not from
-# the platform one). The dev overlay carries the tag the CI produces
-# and the Image Updater updates (write-back). The credential is the
-# hello-aegis-repo repository Secret (phase 15). Phase 70 triggers
-# the sync, AFTER the first build (the overlay's tag must exist in
-# the registry). Gap caught in session 4: phase 70 was syncing an App
-# that was not declared anywhere.
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: hello-aegis
-  namespace: argocd
-  labels: {aegis.dev/part-of: aegis-platform}
-spec:
-  project: aegis-tenant-canary
-  source:
-    repoURL: git@github.com:__GH_OWNER__/__APP_REPO__.git
-    targetRevision: main
-    path: k8s/overlays/dev
-  destination: {server: https://kubernetes.default.svc, namespace: org-canary}
-  syncPolicy:
-    automated: {selfHeal: true}
-    syncOptions: [ServerSideApply=true]
+# The canary's App (hello-aegis) is NOT declared here: it lives in
+# k8s/organizations/org-canary/bundle.yaml, nested under the org-canary
+# App like every tenant's (ADR-0004/7). Until 2026-08-27 a second copy
+# stood here — from the day phase 70 synced an App nobody declared —
+# and the two drifted apart: the first clean instance showed root
+# OutOfSync with "Application/hello-aegis is part of applications
+# argocd/root and org-canary". One object, one owner.

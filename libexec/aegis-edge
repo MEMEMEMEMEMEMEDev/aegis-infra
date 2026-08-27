@@ -60,9 +60,6 @@ from aegis import cli, paths             # noqa: E402
 # grep».
 PLATFORM = str(paths.platform_dir())
 TOKENS = os.path.join(PLATFORM, "tofu", "secrets", "tokens.enc.yaml")
-CONF = os.environ.get(
-    "AEGIS_INIT_CONF", os.path.join(PLATFORM, "..", "init", "aegis-init.conf"))
-
 red = "\033[31m"; green = "\033[32m"; yellow = "\033[33m"; gray = "\033[90m"; reset = "\033[0m"
 if not sys.stdout.isatty():
     red = green = yellow = gray = reset = ""
@@ -89,16 +86,15 @@ def generator():
 
 
 def from_conf(key):
-    """Reads a key out of aegis-init.conf without sourcing it."""
-    try:
-        with open(CONF, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith(key + "="):
-                    return line.split("=", 1)[1].strip().strip('"').strip("'")
-    except FileNotFoundError:
-        pass
-    return None
+    """Reads a key out of the instance's aegis.conf without sourcing it.
+
+    Through lib/aegis/paths.read_conf — the ONE reader. Until
+    2026-08-27 this function opened a path of its own that named the
+    v2 file (aegis-init.conf); on the first clean instance it found
+    nothing, took EDGE for cloudflare, and told an EDGE=local operator
+    that "the Cloudflare token is missing" — the exact lie the comment
+    below it warns against."""
+    return paths.read_conf().get(key)
 
 
 def credentials():

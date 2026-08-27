@@ -197,6 +197,19 @@ def main():
     steps = outcomes.Steps(json_mode=a.json_mode)
     narrate = not a.json_mode
 
+    # EDGE=local: GitHub cannot deliver to an address of this host that
+    # no tunnel publishes, so there is no hook to register and none to
+    # miss — phase 60 already declared these gates without a subject.
+    # Saying "no webhook" in red here would send the operator to fix
+    # what by design does not exist (first clean instance, 2026-08-27).
+    if (paths.read_conf().get("EDGE") or "cloudflare") == "local":
+        if narrate:
+            print(f"  {yellow}!{reset} webhooks NOT EVALUATED — EDGE=local: GitHub cannot "
+                  f"deliver to this edge; a push reaches Jenkins through its periodic scan")
+            print(f"    {gray}This is NOT approval: it is a check with no subject on this edge.{reset}")
+        steps.not_evaluable("webhooks", reason="EDGE=local:no_hook_can_be_delivered")
+        steps.finish()
+
     try:
         repos = repos_with_job()
         url = f"https://jenkins.{root_domain()}/github-webhook/"

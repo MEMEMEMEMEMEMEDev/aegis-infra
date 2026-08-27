@@ -38,8 +38,15 @@ make_enc_secret registry-htpasswd registry-system \
 for pair in \
     "regcred-internal:jenkins-system:$B/platform/jenkins-secrets/secret-regcred-internal.enc.yaml" \
     "regcred-kyverno:kyverno:$B/kyverno/secret-regcred-kyverno.enc.yaml" \
-    "regcred-internal:org-canary:$PLATFORM_DIR/k8s/organizations/org-canary/secret-regcred-internal.enc.yaml"
+    "regcred-internal:org-canary:$PLATFORM_DIR/k8s/organizations/org-canary/secret-regcred-internal.enc.yaml" \
+    "regcred-internal:garage-system:$B/garage-system/secret-regcred-internal.enc.yaml"
 do
+    # garage-system: its secret-generator lists this file and, until
+    # 2026-08-27, no phase wrote it — on the house machine it existed
+    # from a hand-run `aegis secret`, on the first clean instance the
+    # whole garage App failed to render (ksops: no such file) and no
+    # tenant would ever have had a bucket. Check 145 derives this list
+    # from the generators so the next namespace cannot be forgotten.
     IFS=: read -r name ns dest <<< "$pair"
     # --type MANDATORY (run #9, THE blocker of phase 60): without it,
     # make_enc_secret generates type OPAQUE and the kubelet IGNORES it
@@ -58,6 +65,17 @@ done
 # .enc.yaml (the cosign pattern / temporal rule — run #4: a static
 # entry for a file belonging to THIS phase broke the App's build in
 # phase 35, and with it ALL of the App's secrets):
+# ── the shared Garage's own credentials (rpc_secret + admin_token) ──
+# garage-system's generator lists secret-garage-credentials.enc.yaml
+# and, until 2026-08-27, NO phase wrote it: on the house machine it came
+# from a hand-run `aegis secret create`; on the first clean instance
+# the garage App never rendered (ksops: no such file), ArgoCD said
+# Healthy about nothing, and no tenant would ever have had a bucket.
+# `aegis secret create` creates IF MISSING and never regenerates —
+# rotating these with the cluster up leaves the node unable to talk to
+# itself, so a re-run of this phase must not touch them.
+run_cmd aegis_exec secret create "$B/garage-system/secret-garage-credentials.enc.yaml"
+gate "garage-credentials-cifradas" test -s "$B/garage-system/secret-garage-credentials.enc.yaml"
 GEN_ARGO="$B/platform/argocd-secrets/secret-generator.yaml"
 # H4 run #13: the grep -q by name matched the generator's COMMENT ("→
 # phase 40 adds it") → the sed never ran → the secret was never born
@@ -79,12 +97,18 @@ GEN_ARGO="$B/platform/argocd-secrets/secret-generator.yaml"
 # failure with staged content = it dies HERE, not as a "broken
 # kustomize" 2 gates later):
 git_commit_if_changes "$PLATFORM_DIR" \
-    "feat(registry): htpasswd + 4 atomically derived regcreds"
+    "feat(registry): htpasswd + 5 atomically derived regcreds + garage credentials"
 git_push_verified "$PLATFORM_DIR"
 
 # ── 40.1 PKI + registry over GitOps (strict order) ─────────────────
 argo_sync aegis-ca-issuer          # already synced in phase 35; idempotent
 argo_sync registry 600
+# Garage was synced by root in phase 35 with NOTHING to render (its
+# secrets did not exist yet); now they do, and Garage is what every
+# tenant's storage and every data backup stands on — it is synced and
+# MEASURED here, not assumed healthy by silence.
+argo_sync garage 600
+gate "garage-sano" wait_rollout garage-system statefulset/garage 600
 gate "registry-tls-secret" bash -c \
   "kubectl -n registry-system get secret registry-tls >/dev/null"
 gate "registry-htpasswd-vivo" bash -c \
