@@ -33,6 +33,16 @@ echo "$F80_NC" | grep -q 'kyverno-policies/kustomization.yaml' \
     || D39="$D39 phase 80 does not add the policy to the kustomization (it would be left orphaned);"
 [[ -f "$P/k8s/base/kyverno-policies/clusterpolicy-require-aegis-signature.yaml" ]] \
     || D39="$D39 the policy file does not exist;"
+# The other half of the order (2026-08-27, second init over a host that
+# had carried an instance): a platform/ from a previous cluster already
+# lists the policy, and root would sync it in phase 35 with a Kyverno
+# that cannot reach the registry yet. Phase 35 turns it OFF; 80 turns it
+# on again:
+F35_NC="$(nc "$PHASES/35-gitops.sh")"
+echo "$F35_NC" | grep -q 'kyverno-policies/kustomization.yaml' \
+    && echo "$F35_NC" | grep -q '"resources: \[\]"' \
+    && echo "$F35_NC" | grep -q 'politica-apagada-hasta-80' \
+    || D39="$D39 phase 35 does not turn the policy OFF on a re-init (a platform/ from a previous cluster would enforce before Kyverno can verify);"
 if [[ -n "$D39" ]]; then fail "70/80 order broken:$D39"
 else pass "the signature policy does NOT exist until phase 80 adds it (runtime-entry)"; fi
 }

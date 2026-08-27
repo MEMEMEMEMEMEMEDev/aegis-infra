@@ -18,3 +18,14 @@ red_9() {
     printf '\nthis: is: not: valid: yaml:\n' \
         >> "$AEGIS_ROOT/seed/platform/k8s/base/kyverno-policies/kustomization.yaml"
 }
+
+# 2026-08-27: the re-init half disappears — a previous cluster's platform/ enforces from phase 35
+red_2() {
+    python3 - "$AEGIS_ROOT/init/phases/35-gitops.sh" <<'PY'
+import re, sys
+p = sys.argv[1]; t = open(p).read()
+n = re.subn(r'gate "politica-apagada-hasta-80" bash -c \\\n[^\n]*\n', "", t, count=1)
+assert n[1] == 1
+open(p, "w").write(n[0])
+PY
+}

@@ -26,6 +26,33 @@ CONF="$AEGIS_HOME/aegis.conf"; source "$CONF"
 #                              contracts that declare a repo
 # Without the second one, the organizations' Applications start up and
 # ArgoCD leaves them at "project not found" (#19).
+# ── D5, the other half: on a RE-INIT the signature policy goes OFF ──
+# The seed lists no ClusterPolicy (resources: []) and phase 80 is the
+# last thing that turns it on — with the CA and the regcred already in
+# Kyverno. A platform/ that came from a PREVIOUS cluster (destroy +
+# init on the same host) already lists it: root would sync it in this
+# phase, Enforce would be live on a Kyverno that cannot reach the
+# registry yet, and phase 70's canary would be blocked on every image
+# (second init of the rehearsal, 2026-08-27). So what phase 80 turns
+# on, this phase turns OFF first; 80 turns it on again, in order.
+KPK35="$PLATFORM_DIR/k8s/base/kyverno-policies/kustomization.yaml"
+if yaml_lists_file "$KPK35" clusterpolicy-require-aegis-signature.yaml; then
+    log_warn "kyverno-policies already lists the signature policy — a platform/ from a previous cluster; Enforce goes OFF until phase 80 re-arms it"
+    run_cmd python3 - "$KPK35" <<'EOF'
+import sys
+p = sys.argv[1]
+t = open(p).read().replace(
+    "resources:\n  - clusterpolicy-require-aegis-signature.yaml",
+    "resources: []")
+open(p, "w").write(t)
+EOF
+    git_commit_if_changes "$PLATFORM_DIR" \
+        "chore(kyverno): Enforce off until phase 80 re-arms it (re-init over a previous instance)"
+    git_push_verified "$PLATFORM_DIR"
+fi
+gate "politica-apagada-hasta-80" bash -c \
+  "python3 -c \"import yaml,sys; r=(yaml.safe_load(open('$KPK35')) or {}).get('resources') or []; sys.exit(1 if any('clusterpolicy' in x for x in r) else 0)\""
+
 run_cmd kubectl apply -f "$PLATFORM_DIR/k8s/bootstrap/appprojects.yaml"
 # The derived one may be EMPTY and that is correct: a freshly started
 # instance has no contracts yet. `kubectl apply` over a file with no
