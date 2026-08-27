@@ -99,7 +99,7 @@ fi
 # that would swallow a legitimate commit failure (hook, identity,
 # index.lock):
 git_commit_if_changes "$PLATFORM_DIR" \
-    "feat(bootstrap): initial v2 platform (aegis-init seed)"
+    "feat(bootstrap): initial platform (seeded by aegis init)"
 # DELIBERATE push --force (run #4): on a run from a snapshot the local
 # .git is new and the remote carries the previous run's history →
 # "fetch first" with a misleading network message. The remote is OURS

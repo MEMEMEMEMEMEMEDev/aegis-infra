@@ -45,7 +45,10 @@ tool_version() {
     case "$tool" in
         kubectl) kubectl version --client 2>/dev/null ;;
         *)       "$tool" --version 2>/dev/null || "$tool" version 2>/dev/null ;;
-    esac | grep -om1 '[0-9]\+\.[0-9]\+\(\.[0-9]\+\)\?' || echo unknown
+    esac | grep -om1 '[0-9]\+\.[0-9]\+\(\.[0-9]\+\)\?' | head -n1 || echo unknown
+    # head -n1: -m1 stops at the first matching LINE, but -o prints every
+    # match IN it — helm's BuildInfo carries "v3.17.0" and "go1.23.4" on
+    # one line, and the version came back as two (2026-08-27, VPS).
 }
 
 install_tool() {

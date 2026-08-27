@@ -570,4 +570,4 @@ gate "base-images-build-verde" jenkins_build_retry base-images 2700 2
 platform_repo_sync
 
 log_ok "SUPPLY-CHAIN COMPLETE: blocking scan + signature + bounded \
-fail-closed Enforce. The init is done: the v2 platform end to end."
+fail-closed Enforce. The init is done: the platform end to end."
