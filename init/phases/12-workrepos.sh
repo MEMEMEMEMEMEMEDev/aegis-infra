@@ -59,7 +59,7 @@ ensure_repo() {
             # Unattended does not decide about what is not marked as
             # ours:
             ni_mode && die "repo $GH_OWNER/$repo exists WITHOUT the marker $MARK_TOPIC and there is no operator to decide — pick another name in the conf, or mark the repo by hand if it really is disposable"
-            gate_red "use $GH_OWNER/$repo as a DISPOSABLE v2 repo — if it is a real repo (v1), ABORT and pick another name with --configure"
+            gate_red "use $GH_OWNER/$repo as a repo OWNED by aegis init (it gets force-pushed) — if you use it for anything else, ABORT and pick another name with --configure"
             run_cmd gh api -X PUT "repos/$GH_OWNER/$repo/topics" \
                 -f "names[]=$MARK_TOPIC"
         fi
@@ -80,8 +80,8 @@ ensure_repo() {
     gate "b4-false-$repo" bash -c \
       "gh api repos/$GH_OWNER/$repo --jq .delete_branch_on_merge | grep -qx false"
 }
-ensure_repo "$PLATFORM_REPO" "aegis v2 — platform (DISPOSABLE test repo)"
-ensure_repo "$APP_REPO"      "aegis v2 — canary (DISPOSABLE test repo)"
+ensure_repo "$PLATFORM_REPO" "aegis — platform (GitOps source, owned by aegis init)"
+ensure_repo "$APP_REPO"      "aegis — canary app (built and deployed by the platform)"
 
 # ── 12.2 seed PLATFORM_REPO with the artifact's platform/ ──────────
 # platform/ IS the working tree (already rendered by phase 10):
@@ -138,6 +138,17 @@ gate "platform-repo-sembrado" retry_net 3 bash -c \
     run_cmd bash -c "sed \"s/CHANGEME-app/hello-aegis/\" \
       '$PLATFORM_DIR/docs/protocols/templates/Jenkinsfile.app' \
       > '$SEED_TMP/Jenkinsfile'"
+    # ci/write-digest.mjs is what that Jenkinsfile's deploy stage RUNS
+    # (`node ci/write-digest.mjs`). It travels with the Jenkinsfile, from
+    # the same canonical folder — seed/canary/ carries no copy of it, for
+    # the same reason it carries no Jenkinsfile. Until 2026-08-27 nothing
+    # placed it: the first canary build on a clean instance built,
+    # scanned, pushed and signed, and died in `desplegar` with
+    # MODULE_NOT_FOUND. Tenant apps got it from their template; the
+    # canary got it from nowhere.
+    run_cmd mkdir -p "$SEED_TMP/ci"
+    run_cmd cp "$PLATFORM_DIR/docs/protocols/templates/write-digest.mjs" \
+      "$SEED_TMP/ci/write-digest.mjs"
     # CR-5 run #14: the seed does NOT go through
     # render_platform_placeholders (that is platform/'s business) — the
     # domain of the canary's IngressRoute is rendered HERE, at seeding
@@ -150,7 +161,7 @@ gate "platform-repo-sembrado" retry_net 3 bash -c \
     run_cmd git -C "$SEED_TMP" init -b main
     run_cmd git -C "$SEED_TMP" add -A
     run_cmd git -C "$SEED_TMP" commit -m \
-        "feat: canary hello-aegis v2 (aegis-init seed)" --no-verify
+        "feat: canary hello-aegis (seeded by aegis init)" --no-verify
     run_cmd git -C "$SEED_TMP" remote add origin \
         "https://github.com/$GH_OWNER/$APP_REPO.git"
     # --force: the orphan history overwrites the previous run's (H6).
