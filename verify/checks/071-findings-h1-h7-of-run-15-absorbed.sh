@@ -51,6 +51,12 @@ sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba}' "$PHASES/12-workrepos.sh" \
 # H6 defence: phase 70 validates the Deployment's EFFECTIVE tag:
 nc "$PHASES/70-deploy-auto.sh" | grep -q 'tag-efectivo-en-registry' \
     || D71="$D71 H6: phase 70 does not validate the effective tag against the registry;"
+# …and in the shape the image really has: the pipeline pins BY DIGEST
+# (name@sha256:…, no tag), so the gate has to ask the registry for the
+# manifest — the tag-only version read the registry's PORT as the tag
+# and failed a Running canary (2026-08-27, first clean instance):
+nc "$PHASES/70-deploy-auto.sh" | grep -q '/v2/hello-aegis/manifests/\$EFF_REF' \
+    || D71="$D71 H6: phase 70's effective-image gate does not check a digest-pinned image against the registry's manifests (it only knows tags);"
 # H4: coredns must EXIST before the rollout status, in the playbook
 # (awk over NON-comment lines: the raw grep -n anchored on the COMMENT
 # that documents the fix — mention≠use, inside the check itself, for the

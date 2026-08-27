@@ -9,3 +9,14 @@ red_1() {
 
 # control: a LEGITIMATE change cannot turn it red
 control_1() { printf '# legitimate comment\n' >> "$AEGIS_ROOT/init/phases/12-workrepos.sh"; }
+
+# 2026-08-27: the digest branch of the effective-image gate disappears
+red_2() {
+    python3 - "$AEGIS_ROOT/init/phases/70-deploy-auto.sh" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = '"https://$REGISTRY_CLUSTER_IP:5000/v2/hello-aegis/manifests/$EFF_REF")'
+assert t.count(old) == 1
+open(p, "w").write(t.replace(old, '"https://$REGISTRY_CLUSTER_IP:5000/v2/hello-aegis/tags/list")', 1))
+PY
+}

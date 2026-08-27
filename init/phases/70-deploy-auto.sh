@@ -77,15 +77,36 @@ gate "deploy-canary-existe" poll 180 5 bash -c \
   "kubectl -n org-canary get deploy hello-aegis >/dev/null 2>&1"
 EFF_IMG="$(kubectl -n org-canary get deploy hello-aegis \
     -o jsonpath='{.spec.template.spec.containers[0].image}')"
-EFF_BASE="${EFF_IMG%%@*}"          # without @digest (re-run post-Enforce)
-EFF_TAG="${EFF_BASE##*:}"
 printf '%s' "$TAGS_JSON" > "$SECRETS_TMP/tags.json"
+# What ArgoCD resolved is checked against the registry ITSELF, in the
+# shape it has. The DIGEST shape is the normal one here: the pipeline's
+# write-digest.mjs pins the overlay by digest and nothing else, so the
+# image reads name@sha256:… with no tag at all. Until 2026-08-27 this
+# gate stripped the "@digest", took whatever followed the last ':' as
+# the tag — on a digest-only image that is "5000/hello-aegis", the
+# registry's PORT — looked it up in the catalogue, and failed a canary
+# that was Running (first clean instance, VPS). A digest is checked by
+# asking the registry for its manifest (HEAD); a tag, in the catalogue.
+if [[ "$EFF_IMG" == *@sha256:* ]]; then
+    EFF_REF="${EFF_IMG##*@}"
+    EFF_HOW="manifest $EFF_REF answered by the registry"
+    EFF_PROBE=(retry_net 3 curl -fsS -o /dev/null --max-time 30 -I \
+        --netrc-file "$SECRETS_TMP/registry.netrc" \
+        --cacert "$SECRETS_TMP/aegis-ca.crt" \
+        -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+        "https://$REGISTRY_CLUSTER_IP:5000/v2/hello-aegis/manifests/$EFF_REF")
+else
+    EFF_REF="${EFF_IMG##*:}"
+    EFF_HOW="tag $EFF_REF listed in the catalogue"
+    EFF_PROBE=(bash -c "jq -e --arg t '$EFF_REF' '.tags[]? | select(. == \$t)' \
+       '$SECRETS_TMP/tags.json' >/dev/null")
+fi
+log_info "effective image: $EFF_IMG → checking: $EFF_HOW"
 gate_diag "tag-efectivo-en-registry" \
-  'log_warn "the EFFECTIVE tag of the Deployment is NOT in the registry — a leftover override (.argocd-source-*) trampling the newTag? (H6 #15; the seeding in phase 12 should have purged it)";
+  'log_warn "the EFFECTIVE image of the Deployment is NOT in the registry — a leftover override (.argocd-source-*) trampling the pin? (H6 #15; the seeding in phase 12 should have purged it)";
    kubectl -n org-canary get deploy hello-aegis -o jsonpath="{.spec.template.spec.containers[0].image}"; echo;
    jq -r ".tags[]?" "$SECRETS_TMP/tags.json"' \
-  bash -c "jq -e --arg t '$EFF_TAG' '.tags[]? | select(. == \$t)' \
-     '$SECRETS_TMP/tags.json' >/dev/null"
+  "${EFF_PROBE[@]}"
 # THIS is the defining gate of the registry→kubelet path (TLS+auth
 # +mirror+/etc/hosts): a REAL pod pulled a REAL image. H7 #13: on
 # failure the cause lives in events/describe — show it:
