@@ -1276,6 +1276,10 @@ finish() {   # <failed>
 # ═══════════════════════════════════════════════════════════════════
 #  ENTRY
 # ═══════════════════════════════════════════════════════════════════
+# --help BEFORE touching anything: until 2026-08-27 asking for help on a
+# machine with no store died with "the store does not exist" (same class
+# as `preflight --help`, fixed the day before).
+for a in "$@"; do case "$a" in -h|--help) sed -n '1,56p' "$0"; exit 0 ;; esac; done
 [[ -d "$STATE_SECRETS" ]] || die "the store $STATE_SECRETS does not exist (did you run the init?)"
 
 YES=0; NAMES=(); CONTINUE=0; CHECK=0
