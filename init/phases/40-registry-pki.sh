@@ -103,12 +103,11 @@ git_push_verified "$PLATFORM_DIR"
 # ── 40.1 PKI + registry over GitOps (strict order) ─────────────────
 argo_sync aegis-ca-issuer          # already synced in phase 35; idempotent
 argo_sync registry 600
-# Garage was synced by root in phase 35 with NOTHING to render (its
-# secrets did not exist yet); now they do, and Garage is what every
-# tenant's storage and every data backup stands on — it is synced and
-# MEASURED here, not assumed healthy by silence.
-argo_sync garage 600
-gate "garage-sano" wait_rollout garage-system statefulset/garage 600
+# Garage itself is NOT synced here: its image comes from the mirror,
+# which phase 80 fills — on a fresh registry a sync now would sit in
+# ImagePullBackOff until the mirror ran (measured on the second init of
+# the rehearsal, 2026-08-27). Phase 80 syncs and MEASURES it once the
+# image exists. What this phase guarantees is that its secrets do.
 gate "registry-tls-secret" bash -c \
   "kubectl -n registry-system get secret registry-tls >/dev/null"
 gate "registry-htpasswd-vivo" bash -c \

@@ -583,6 +583,19 @@ gate_diag "mirror-images-build-verde" \
 # fails its scan does not exist, and an init that went on would leave
 # the provisioner on a reference nobody built.
 gate "base-images-build-verde" jenkins_build_retry base-images 2700 2
+
+# ── Garage, now that its image is mirrored ──────────────────────────
+# Its secrets exist since phase 40; its image since 80.6; the bucket
+# provisioner's base since 80.7. Synced WITHOUT hooks: the provisioning
+# Jobs are hooks that pull the base by the digest the contracts were
+# rendered with — on a host that already carried tenants that digest
+# may belong to a registry that no longer exists (destroy + init), and
+# a hook-running sync would wait on them for the whole timeout. They
+# run on the next ordinary auto-sync, after `aegis org apply` re-renders
+# them. What is measured here is Garage itself: every tenant's storage
+# and every data backup stands on it.
+argo_sync garage 600 nohooks
+gate "garage-sano" wait_rollout garage-system statefulset/garage 600
 # The propagate stage just pushed to the platform repo: pull it in
 # before anything below commits on top of a stale clone.
 platform_repo_sync

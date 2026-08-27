@@ -467,7 +467,14 @@ poll() {
 # has-not-converged-yet); (4) only then does it demand Healthy.
 # Returns 1 on failure (with a log) — set -e makes it fatal in the
 # caller, and `argo_sync X || retry` allows deliberate retries.
-argo_sync() {   # <app> [timeout_s]
+argo_sync() {   # <app> [timeout_s] [nohooks]
+    # nohooks: sync with ArgoCD's `apply` strategy, which runs NO hooks.
+    # For an App whose hooks depend on something a LATER phase produces
+    # (Garage's bucket-provisioning Jobs pull an image only phase 80
+    # builds), a hook-running sync waits on those hooks for the whole
+    # timeout — measured on the first init over a host that already
+    # carried tenants (2026-08-27). The hooks still run on the next
+    # ordinary auto-sync, once their image exists.
     local app="$1" timeout="${2:-300}"
     log_info "sync $app"
     if ! poll 180 5 bash -c \
@@ -515,13 +522,18 @@ argo_sync() {   # <app> [timeout_s]
     # retry" and the auto-sync STOPS retrying that revision — the
     # manual failure poisons the automatic recovery.
     # Fix: the manual sync carries the spec's options EXPLICITLY.
-    local sync_patch='{"operation":{"sync":{}}}' spec_opts
+    local sync_body="" spec_opts
     spec_opts="$(kubectl -n argocd get application "$app" \
         -o jsonpath='{.spec.syncPolicy.syncOptions}' 2>/dev/null || true)"
     if [[ "$spec_opts" == \[*\] ]]; then
-        sync_patch="{\"operation\":{\"sync\":{\"syncOptions\":$spec_opts}}}"
+        sync_body="\"syncOptions\":$spec_opts"
         log_info "sync $app: the spec's options propagated to the operation ($spec_opts)"
     fi
+    if [[ "${3:-}" == "nohooks" ]]; then
+        sync_body="${sync_body:+$sync_body,}\"syncStrategy\":{\"apply\":{}}"
+        log_info "sync $app: apply strategy — hooks are NOT run in this sync"
+    fi
+    local sync_patch="{\"operation\":{\"sync\":{$sync_body}}}"
     local patch_out="" patch_rc=0 sync_noop=false
     patch_out="$(kubectl -n argocd patch application "$app" --type merge \
         -p "$sync_patch" 2>&1)" || patch_rc=$?
