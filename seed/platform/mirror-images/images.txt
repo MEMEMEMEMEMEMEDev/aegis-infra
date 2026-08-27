@@ -120,7 +120,7 @@ public.ecr.aws/docker/library/golang:1.26.6-alpine@sha256:3889b425f035be855a72fb
 # The source digest is the SAME on public.ecr.aws as on Docker Hub;
 # measured with both APIs on 2026-08-17 before choosing, as was done
 # with nginx-unprivileged.
-public.ecr.aws/docker/library/python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a	python:3.12-slim
+public.ecr.aws/docker/library/python:3.12-slim@sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17	python:3.12-slim
 # nodejs22 distroless — runtime of the portfolio BFF.
 #
 # WHY DISTROLESS AND NOT node:22-alpine. The official one was tried on
@@ -167,7 +167,7 @@ public.ecr.aws/docker/library/python:3.12-slim@sha256:2c941e860699f878900b0edc24
 # signs; org-portafolio sits in Kyverno's enforce zone and demands a
 # signature. Two different images for two different jobs: one builds,
 # the other runs.
-gcr.io/distroless/nodejs22-debian13:nonroot@sha256:a2723a2817c5b01b8e7b98d567bc8b5a6b0e713e25bfb0a82b6ade4b9db06f50	nodejs-distroless:22
+gcr.io/distroless/nodejs22-debian13:nonroot@sha256:22d2f0480e59548ad14cf10d8921b24ef809780e7a61b162838f3d15a4a92e3d	nodejs-distroless:22
 
 # alpine 3.21 — runtime of the hello-aegis canary.
 #
