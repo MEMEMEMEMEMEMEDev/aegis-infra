@@ -23,8 +23,8 @@ re-bootstrap (NOT implemented — known limit, see §Known limits).
 10 age-ceremony   generates the root of trust; 3 backups
                   VALIDATED by roundtrip; .envrc/direnv;
                   .sops.yaml
-12 workrepos      CREATES and SEEDS the DISPOSABLE work repos
-                  (ops-stack-v2 / hello-aegis-v2 by default) via
+12 workrepos      CREATES and SEEDS the work repos it owns
+                  (aegis-platform / aegis-canary by default) via
                   gh, idempotent through a topic marker; B4
                   settings through gh api; known_hosts from the
                   T1 pins
@@ -140,9 +140,8 @@ rule: every *-secrets App BEFORE its consumer.
 
 ## Known limits (v1 of the init)
 
-0. The work repos (ops-stack-v2 / hello-aegis-v2) are FOR TESTING
-   and DISPOSABLE: the init and the platform write to them
-   freely. Promoting the result to "production" is a later
+0. The work repos (aegis-platform / aegis-canary by default) belong
+   to the init and the platform: they write to them freely. Promoting the result to "production" is a later
    decision of the operator's (rename/clean up/re-bootstrap),
    outside the scope of this init.
 1. Total loss of GitHub: no path (it starts with a clone). H4.

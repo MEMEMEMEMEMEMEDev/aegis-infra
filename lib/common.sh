@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # aegis-init lib/common.sh — logging, gates, human pauses, state.
-# Loaded by aegis-init.sh; the phases receive it already sourced.
+# Loaded by `aegis init`; the phases receive it already sourced.
 # Baked-in rules: revert steps NEVER with && (every step with a
 # visible exit code); GREEN/YELLOW/RED levels as gate functions.
 

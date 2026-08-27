@@ -3,7 +3,7 @@
 # (it asks field by field, with defaults and validation) and
 # writes aegis-init.conf by itself. Use this example only to
 # pre-arm a non-interactive re-run.
-# Regenerate interactively: ./aegis-init.sh --configure
+# Regenerate interactively: aegis init --configure
 #
 # All T1: domains, names, public IDs. ZERO secrets.
 # How the platform is reached from outside. It decides which of the
@@ -17,14 +17,14 @@ EDGE="cloudflare"
 # tunnel; a LAN address exposes it to the network:
 EDGE_BIND_IP=""
 GH_OWNER="mi-org"
-# ISOLATION: DISPOSABLE v2 work repos — init CREATES them and
-# writes to them (commits, tags, settings, webhooks). NEVER
-# point at the real v1 repos (ops-stack / hello-aegis):
-PLATFORM_REPO="ops-stack-v2"
-APP_REPO="hello-aegis-v2"
+# Work repos the init CREATES under GH_OWNER and then OWNS
+# (commits, tags, settings, webhooks): new names, never repos
+# already used for something else:
+PLATFORM_REPO="aegis-platform"
+APP_REPO="aegis-canary"
 ROOT_DOMAIN="example.com"                # cloudflare: an active zone
                                          # local: <ip-with-dashes>.sslip.io
-ACME_EMAIL="operador@example.com"        # Let's Encrypt registration
+ACME_EMAIL="operador@example.com"        # contact email (CF account email under cloudflare)
 KUBE_CONTEXT_EXPECTED="default"          # k3s default context
 REGISTRY_CLUSTER_IP="10.43.179.123"      # in 10.43.0.0/16; paired
                                          # with the cert's SAN

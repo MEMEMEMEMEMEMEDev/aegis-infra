@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # PHASE 12 — work repos: the init CREATES and SEEDS them (D10).
-# ISOLATION: the v2 repos are DISPOSABLE and our own (ops-stack-v2 /
-# hello-aegis-v2 by default) — the init writes commits, tags, settings
-# and webhooks to them; they must NEVER be the real v1 repos. The
+# The work repos are the init's OWN (aegis-platform / aegis-canary by
+# default) — it writes commits, tags, settings and webhooks to them;
+# they must never be repos already used for something else. The
 # operator does not create repos by hand (the mission: the init asks
 # and does).
 #
