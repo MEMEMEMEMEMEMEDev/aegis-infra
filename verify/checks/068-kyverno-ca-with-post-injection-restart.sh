@@ -9,6 +9,14 @@ echo "$NC80B" | grep -q 'CA_INJECTED_THIS_RUN' \
     || D68="$D68 phase 80 does not distinguish whether the CA was injected on THIS run;"
 echo "$NC80B" | grep -q 'rollout restart' \
     || D68="$D68 no rollout restart after the injection (subPath freezes the old CA in memory);"
+# 2026-08-27, second init over a host that carried an instance: the
+# placeholder was gone, the file held the previous cluster's CA, and
+# Kyverno fell back to plain HTTP against the registry. Presence is not
+# identity — phase 80 compares the injected CA with the live one:
+echo "$NC80B" | grep -q 'pem_stale "$KYV"' \
+    || D68="$D68 phase 80 does not compare the injected CA with the live one (a previous cluster's CA stays forever);"
+echo "$NC80B" | grep -q 'ca-en-kyverno-es-la-viva' \
+    || D68="$D68 phase 80 has no gate that the CA in kyverno's values IS the live one;"
 # W-04 / R1 / PLAT-03 — DENY-BY-DEFAULT: imageReferences is '*' (every
 # pod signed), NOT an allowlist by name. Enumerating shapes was paid for
 # (P1.2); the invariant is that the allowlist by name does NOT exist:

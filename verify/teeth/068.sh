@@ -9,3 +9,15 @@ red_1() {
 
 # control: a LEGITIMATE change cannot turn it red
 control_1() { printf '# legitimate comment\n' >> "$AEGIS_ROOT/init/phases/80-supply-chain.sh"; }
+
+# 2026-08-27: the identity comparison disappears — a previous cluster's CA stays forever
+red_3() {
+    python3 - "$AEGIS_ROOT/init/phases/80-supply-chain.sh" <<'PY'
+import re, sys
+p = sys.argv[1]; t = open(p).read()
+n = re.subn(r'elif pem_stale "\$KYV" "\$SECRETS_TMP/aegis-ca.pem"; then\n(?:.*\n)*?    CA_INJECTED_THIS_RUN=true\nfi\n', "fi\n", t, count=1)
+assert n[1] == 1
+t = n[0].replace('gate "ca-en-kyverno-es-la-viva" bash -c "! pem_stale \'$KYV\' \'$SECRETS_TMP/aegis-ca.pem\'"\n', "", 1)
+open(p, "w").write(t)
+PY
+}

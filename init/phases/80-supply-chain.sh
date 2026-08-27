@@ -154,13 +154,20 @@ gate "kustomize-build-policies" bash -c \
 # indent of the block's REAL line:
 KYV="$PLATFORM_DIR/k8s/base/platform/kyverno/values.yaml"
 CA_INJECTED_THIS_RUN=false
+kubectl -n cert-manager get secret aegis-internal-ca \
+    -o jsonpath='{.data.ca\.crt}' | base64 -d \
+    > "$SECRETS_TMP/aegis-ca.pem"
 if placeholder_pending "$KYV" __AEGIS_CA_PEM__; then
-    kubectl -n cert-manager get secret aegis-internal-ca \
-        -o jsonpath='{.data.ca\.crt}' | base64 -d \
-        > "$SECRETS_TMP/aegis-ca.pem"
     run_cmd inject_placeholder "$KYV" __AEGIS_CA_PEM__ "$SECRETS_TMP/aegis-ca.pem"
     CA_INJECTED_THIS_RUN=true
+elif pem_stale "$KYV" "$SECRETS_TMP/aegis-ca.pem"; then
+    # presence is not identity: the CA in git belongs to a cluster
+    # that no longer exists (re-init over a previous instance)
+    log_warn "kyverno's values carry a CA that is NOT the live one — re-injecting (a previous cluster's CA would send Kyverno to plain HTTP against the registry)"
+    run_cmd reinject_pem "$KYV" "$SECRETS_TMP/aegis-ca.pem"
+    CA_INJECTED_THIS_RUN=true
 fi
+gate "ca-en-kyverno-es-la-viva" bash -c "! pem_stale '$KYV' '$SECRETS_TMP/aegis-ca.pem'"
 gate "ca-inyectado-en-kyverno" bash -c \
     "grep -q 'BEGIN CERTIFICATE' '$KYV' && ! grep -q '__AEGIS_CA_PEM__' '$KYV'"
 

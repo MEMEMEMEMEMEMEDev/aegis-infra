@@ -344,6 +344,18 @@ _obs_ca_pem() {   # -> $SECRETS_TMP/obs-aegis-ca.pem, or non-zero
         > "$SECRETS_TMP/obs-aegis-ca.pem"
     [[ -s "$SECRETS_TMP/obs-aegis-ca.pem" ]]
 }
+OBS_CA_REINJECTED=false
+# (if the live CA cannot be read, the placeholder branch below dies
+#  with the reason; here it only means there is nothing to compare)
+if _obs_ca_pem && ! placeholder_pending "$CAY" __OBS_CA_PEM__ \
+   && pem_stale "$CAY" "$SECRETS_TMP/obs-aegis-ca.pem"; then
+    # presence is not identity (re-init over a previous instance): the
+    # ConfigMap carries a dead cluster's CA; blackbox would trust the
+    # wrong chain and every registry probe would fail in red
+    log_warn "blackbox's CA ConfigMap carries a CA that is NOT the live one — re-injecting and restarting blackbox"
+    run_cmd reinject_pem "$CAY" "$SECRETS_TMP/obs-aegis-ca.pem"
+    OBS_CA_REINJECTED=true
+fi
 if placeholder_pending "$CAY" __OBS_CA_PEM__; then
     _obs_ca_pem || die "the live CA could not be read from cert-manager/aegis-internal-ca — blackbox validates the registry's chain AGAINST it (phase 35 is the one that issues it)"
     run_cmd inject_placeholder "$CAY" __OBS_CA_PEM__ "$SECRETS_TMP/obs-aegis-ca.pem"
@@ -631,6 +643,13 @@ argo_sync root 300
 # nowhere, with no Secret grafana does not start), then the stores,
 # then the collectors, then vmalert, grafana last:
 argo_sync observability-base 600
+# a re-injected CA (re-init over a previous instance) lives in a
+# ConfigMap blackbox already mounted: it needs a restart to trust the
+# live chain (same subPath lesson as Kyverno's, phase 80)
+if [[ "${OBS_CA_REINJECTED:-false}" == "true" ]]; then
+    run_cmd kubectl -n observability rollout restart deploy/blackbox
+    gate "obs-blackbox-con-ca-viva" wait_rollout observability deploy/blackbox 300
+fi
 # F-B #15: Synced counts ONLY for the JUST-pushed revision (the HEAD
 # is the one from 85.7's push — nothing commits in between):
 argo_secrets_gate observability-base 300 \

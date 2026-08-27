@@ -288,6 +288,53 @@ EOF
 placeholder_pending() {   # <yaml> <placeholder>
     grep -vE '^\s*#' "$1" | grep -qF "$2"
 }
+# ── a PEM that is already injected may be the WRONG one ─────────────
+# On a host that carried a previous instance (destroy + init), the
+# placeholder is long gone and the file holds the CA of a cluster that
+# no longer exists; cert-manager issued a NEW one. Presence is not
+# identity: Kyverno trusted a dead CA, fell back to plain HTTP against
+# an HTTPS registry, and every image verification failed (second init
+# of the rehearsal, 2026-08-27). pem_stale compares the first PEM block
+# of the file with the live one (rc 0 = differs, 1 = same, 2 = no PEM);
+# reinject_pem replaces that block, keeping the indent, and validates
+# the resulting YAML before writing — the same bargain inject_placeholder
+# keeps.
+pem_stale() {   # <yaml> <live_pem_file>
+    python3 - "$1" "$2" <<'EOF'
+import sys
+def blocks(t):
+    out, cur = [], None
+    for l in t.splitlines():
+        s = l.strip()
+        if s.startswith("-----BEGIN CERTIFICATE-----"): cur = []
+        if cur is not None: cur.append(s)
+        if s.startswith("-----END CERTIFICATE-----") and cur is not None: out.append("\n".join(cur)); cur = None
+    return out
+have = blocks(open(sys.argv[1]).read()); live = blocks(open(sys.argv[2]).read())
+if not have: sys.exit(2)
+sys.exit(0 if have[0] != (live[0] if live else None) else 1)
+EOF
+}
+reinject_pem() {   # <target_yaml> <live_pem_file>
+    python3 - "$1" "$2" <<'EOF'
+import sys, yaml
+target, pem = sys.argv[1], sys.argv[2]
+text = open(target).read(); lines = text.splitlines()
+start = next((i for i, l in enumerate(lines) if l.strip().startswith("-----BEGIN CERTIFICATE-----") and not l.lstrip().startswith("#")), None)
+if start is None: sys.exit(f"reinject_pem: no PEM block in {target}")
+end = next((i for i in range(start, len(lines)) if lines[i].strip().startswith("-----END CERTIFICATE-----")), None)
+if end is None: sys.exit(f"reinject_pem: PEM block in {target} has no END")
+indent = lines[start][: len(lines[start]) - len(lines[start].lstrip())]
+new = [indent + l for l in open(pem).read().strip().splitlines()]
+out_lines = lines[:start] + new + lines[end + 1:]
+out = "\n".join(out_lines) + ("\n" if text.endswith("\n") else "")
+try:
+    list(yaml.safe_load_all(out))
+except Exception as e:
+    sys.exit(f"reinject_pem: the YAML resulting from {target} does NOT parse ({e}) — the file is left INTACT")
+open(target, "w").write(out)
+EOF
+}
 
 # ── gate with diagnosis on failure (H7 run #13) ─────────────────────
 # Every MUTE timeout of run #13 had the exact error hidden away in a
