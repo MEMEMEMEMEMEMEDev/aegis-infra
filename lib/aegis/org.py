@@ -96,6 +96,7 @@ MAIN_TF = os.path.join(PLATFORM_ROOT, "tofu", "envs", "cloudflare-tunnel", "main
 JENKINS_VALUES = os.path.join(PLATFORM_ROOT, "k8s", "base", "platform", "jenkins", "values.yaml")
 VMAGENT_VALUES = os.path.join(PLATFORM_ROOT, "k8s", "base", "observability", "vmagent", "values.yaml")
 JENKINSFILE_TPL = os.path.join(PLATFORM_ROOT, "docs", "protocols", "templates", "Jenkinsfile.app")
+BASE_CONSUMERS = os.path.join(PLATFORM_ROOT, "base-images", "consumers.txt")
 STAGING_DIR = os.path.join(PLATFORM_ROOT, ".aegis-app")
 
 CONTRACT_VERSION = 1
@@ -2687,6 +2688,105 @@ def apply_jenkins(write):
     return 0
 
 
+# ── the consumers of each base image, derived ─────────────────────────
+#
+# On 2026-08-26 a CVE in the shared nginx base left four static fronts
+# frozen for a day: the fix was one FROM line, and it had to be bumped
+# BY HAND in four repos, one pull request each, by whoever remembered
+# which repos stood on that base. The base-images job now does that
+# edit itself — after building, scanning and signing a base it clones
+# every consumer and rewrites its FROM — and the one thing it needs is
+# the list of consumers. That list is not knowledge anybody should
+# keep: the contracts already say it.
+#
+# The discriminator is the service TYPE, not a field of its own. A
+# `estatico` service is by definition served by the platform's nginx
+# base on STATIC_PORT (the rule in _type_coherence forbids it a port
+# precisely because the base decides it), and aegis-base-nginx is
+# exactly that base. So "the repos of the static services" IS "the
+# consumers of aegis-base-nginx", with nothing to declare twice. The
+# day a second base exists, its type joins this map.
+#
+# The repo string is written EXACTLY as the contract carries it
+# (git@… or https://…): the pipeline normalises both forms, and
+# rewriting it here would be a second normaliser to keep in step with
+# the first.
+
+CONSUMERS_BLOCK_START = markers.CONSUMERS_BLOCK_START
+CONSUMERS_BLOCK_END = markers.CONSUMERS_BLOCK_END
+CONSUMERS_BLOCK_PATTERN = markers.CONSUMERS_BLOCK_PATTERN
+# Which service types stand on a base aegis owns. Today one base, one
+# type; the map is here so that the second one is one line, not a
+# second function.
+BASE_CONSUMER_TYPES = {"estatico"}
+
+
+def base_consumers():
+    """The repos every base consumer comes out of, sorted and unique.
+
+    A service's repo is resolved the way repos_of does it — the service's
+    own `repo`, or the organization's when the service has none — so
+    the list can never name a repo the AppProject would not let in.
+    Sorted, unique: one repo with two static fronts is one clone, and
+    the file's diff does not depend on the filesystem (I1).
+    """
+    repos = set()
+    for name in sorted(os.listdir(ORGS_DIR)):
+        if not name.endswith((".yaml", ".yml")):
+            continue
+        c = yaml.safe_load(open(os.path.join(ORGS_DIR, name), encoding="utf-8")) or {}
+        for s in c.get("servicios") or []:
+            if s.get("tipo") not in BASE_CONSUMER_TYPES:
+                continue
+            repo = s.get("repo") or c.get("repo")
+            if repo:
+                repos.add(repo)
+    return sorted(repos)
+
+
+def render_consumers_block():
+    """The block, and NOTHING but URLs inside it.
+
+    Unlike the jobs and probes blocks this one carries no explanatory
+    comment and no "(none)" line: the pipeline reads the file with
+    grep and every non-comment line is a repository it will clone.
+    With zero consumers the two sentinels sit adjacent.
+    """
+    return "\n".join([CONSUMERS_BLOCK_START, *base_consumers(), CONSUMERS_BLOCK_END])
+
+
+def apply_base_consumers(write):
+    if not os.path.isfile(BASE_CONSUMERS):
+        raise Invalid(
+            f"{BASE_CONSUMERS} does not exist.\n"
+            f"  The seed ships it (base-images/consumers.txt) and the base-images\n"
+            f"  job reads it to know which repos to rewrite after a base is rebuilt.\n"
+            f"  Without it the bump is back to being a hand edit in every consumer.")
+    text = open(BASE_CONSUMERS, encoding="utf-8").read()
+    if not CONSUMERS_BLOCK_PATTERN.search(text):
+        raise Invalid(
+            f"I could not find the derived block's markers in {BASE_CONSUMERS}.\n"
+            f"  These two lines have to exist (at column 0, this file is not YAML):\n"
+            f"{CONSUMERS_BLOCK_START}\n"
+            f"{CONSUMERS_BLOCK_END}\n"
+            f"  Without them there is no way of knowing what is derived and what is a\n"
+            f"  person's, and overwriting blind is worse than not generating.")
+    repos = base_consumers()
+    new = CONSUMERS_BLOCK_PATTERN.sub(lambda _: render_consumers_block(), text, count=1)
+    print(f"\nbase-consumers  {grey}(base-images/consumers.txt){off}")
+    if new == text:
+        print(f"  {grey}={off} base consumers  {grey}{len(repos)} repo(s){off}")
+        return 0
+    print(f"  {yellow}~{off} base consumers -> {', '.join(repos) or '(none)'}")
+    if write:
+        open(BASE_CONSUMERS, "w", encoding="utf-8").write(new)
+        # The same warning as jenkins': the job reads the file from the
+        # platform repo's main, not from this working tree.
+        print(f"  {grey}the base-images job reads the list from git, not from here:\n"
+              f"  it takes effect once this change is committed + pushed{off}")
+    return 0
+
+
 # ── each service's Jenkinsfile, instantiated ──────────────────────────
 #
 # The canonical template (docs/protocols/templates/Jenkinsfile.app) has
@@ -2953,6 +3053,7 @@ def main():
                               ("buckets", apply_provisioning),
                               ("garage", apply_garage),
                               ("jenkins", apply_jenkins),
+                              ("base-consumers", apply_base_consumers),
                               ("probes", apply_probes),
                               ("jenkinsfiles", apply_jenkinsfiles)):
                 try:
@@ -2996,6 +3097,7 @@ def main():
                           ("buckets", apply_provisioning),
                           ("garage", apply_garage),
                           ("jenkins", apply_jenkins),
+                          ("base-consumers", apply_base_consumers),
                           ("probes", apply_probes),
                           ("jenkinsfiles", apply_jenkinsfiles)):
             try:

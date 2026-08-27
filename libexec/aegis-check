@@ -1313,6 +1313,64 @@ except Exception:
       [[ "$n_ok" -gt 0 ]] \
           && ok "$n_ok deployed image(s) with their last build scanned"
   fi
+
+  #     ...and did anybody scan it AGAIN? The round above answers for
+  #     the BUILD: the image went through Trivy the day it was pushed.
+  #     It says nothing about the CVEs published since. image-watch
+  #     (Jenkins, once a day) re-scans every mirrored image against
+  #     today's DB and leaves a heartbeat; a run that dies leaves none.
+  #     The same four outcomes, and the seams matter:
+  #       · heartbeat in the last 2d and no fixable CVE → green
+  #       · heartbeat in the last 2d and fixable CVEs   → failure
+  #       · no heartbeat in 2d but one in 30d           → failure: the
+  #         watch STOPPED (that is ImageWatchSilent, seen from here)
+  #       · no heartbeat in 30d either                  → COULD NOT
+  #         EVALUATE: never ran, or the cron is older than the window
+  #     The [2d] is 2 × the job's period (check 092 §8's floor): with
+  #     [1d] one late run reads as silence. The second query, at [30d],
+  #     exists so that «stopped» and «never» do not print the same line:
+  #     the alert cannot tell them apart, this round can.
+  hb=$(_vm_num 'last_over_time(aegis_image_watch_timestamp_seconds[2d])')
+  if [[ -z "$hb" ]]; then
+      hb30=$(_vm_num 'last_over_time(aegis_image_watch_timestamp_seconds[30d])')
+      if [[ -n "$hb30" ]]; then
+          bad "image-watch STOPPED: its last heartbeat is $(( ($(date +%s) - hb30) / 86400 )) day(s) old — what is running has not been re-scanned since"
+          note "the cron is gone from job-dsl, the job is broken, or vmsingle rejected the push: read the image-watch console"
+      else
+          notice "COULD NOT EVALUATE: image-watch has never run (or its heartbeat is older than 2 days) — nothing on this instance has re-scanned what it serves"
+      fi
+  else
+      age_h=$(( ($(date +%s) - hb) / 3600 ))
+      if [[ "$age_h" -gt 48 ]]; then
+          bad "image-watch's heartbeat is ${age_h}h old: the daily run is missing"
+      else
+          fixable=$(_vm 'sum by (image) (last_over_time(aegis_image_fixable_vulns[2d])) > 0' \
+              | python3 -c 'import sys,json
+try:
+    for r in json.load(sys.stdin)["data"]["result"]:
+        print(r["metric"].get("image","?") + "=" + str(int(float(r["value"][1]))))
+except Exception:
+    pass' 2>/dev/null | sort | tr '\n' ' ')
+          could_not=$(_vm 'last_over_time(aegis_image_watch_failed[2d]) == 1' \
+              | python3 -c 'import sys,json
+try:
+    for r in json.load(sys.stdin)["data"]["result"]:
+        print(r["metric"].get("image","?"))
+except Exception:
+    pass' 2>/dev/null | sort | tr '\n' ' ')
+          if [[ -n "$fixable" ]]; then
+              bad "image-watch ran ${age_h}h ago and found fixable CVE(s) against today's DB: ${fixable% }"
+              note "for an aegis-base-* the loop already tried a rebuild; for a third party read UpstreamFixAvailable (crane digest on the upstream tag)"
+          else
+              ok "image-watch ran ${age_h}h ago: nothing running has a fixable CVE against today's DB"
+          fi
+          # A zero the watch could not measure is not a zero. It is
+          # reported as its own line so that the ✓ above never covers
+          # it: «COULD NOT EVALUATE ≠ clean».
+          [[ -n "$could_not" ]] \
+              && notice "COULD NOT EVALUATE: image-watch could not scan ${could_not% } — their fixable count is not a measurement"
+      fi
+  fi
 fi
 
 # ── verdict ───────────────────────────────────────────────────────

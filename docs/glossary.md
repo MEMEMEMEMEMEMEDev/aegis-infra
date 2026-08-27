@@ -184,6 +184,16 @@ words. Under the old substring match, retiring `usa` flagged `usage`,
 retiring `organizacion` flagged `aegis-organizaciones`, and the first
 group below could not even begin.
 
+One thing this inventory does NOT contain, on purpose: the image chain
+born on 2026-08-27 — the `base-images` and `image-watch` jobs, the six
+alerts of `images.yaml` (`ImageWithFixableVulns` … `ImageWatchSilent`),
+the `aegis_image_*` and `aegis_base_*` metrics, the `jenkins-watch` and
+`jenkins-base` event sources. All of it is English from birth
+(`seed/platform/docs/protocols/images.md`), so it adds no row here and
+no new Spanish anywhere. The one Spanish key that chain touches, the
+`origen` of the mirror event, is already a §5B row and stays exactly
+where it is.
+
 ### 5A. Renames of code — through the ratchet
 
 #### 1. The contract's vocabulary — the most expensive

@@ -4,7 +4,7 @@
 # aegis-subcommands: plan apply validate edge routes plan-delete delete migrate
 """aegis org — the command line on top of lib/aegis/org.py.
 
-The body (the contract's validation and the eleven derivations) lives in
+The body (the contract's validation and the twelve derivations) lives in
 the PACKAGE, not here. In v2 it lived in this file and the consumers
 —aegis-app, aegis-secret, aegis dev test-org, aegis dev test-types—
 loaded it with SourceFileLoader, that is, they imported an EXECUTABLE by

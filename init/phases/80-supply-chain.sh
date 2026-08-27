@@ -538,5 +538,20 @@ else
     done
 fi
 
+# ── 80.6 the third parties come in through the same door ──────────
+# mirror-images needs everything this phase just proved: the trivy
+# server (80.1) and the cosign key (80.2). Until 2026-08-27 nobody
+# fired it: the job did not even exist in the seed's job-dsl, so a
+# fresh instance whose first tenant declared a postgres was born with
+# services.yaml pointing at an internal image that nobody had ever
+# pushed — ImagePullBackOff, and `aegis data restore` with nowhere to
+# restore to (R-21 in the record). It is a GATE and not a courtesy: a
+# third-party image that does not pass the scan does not get in, and
+# an init that ends green over an empty registry would be the silence
+# this tree exists to make impossible. The job keeps going past a
+# broken image and lists them all at the end, so one red here names
+# every image that needs a newer tag — not just the first.
+gate "mirror-images-build-verde" jenkins_build_retry mirror-images 2700 2
+
 log_ok "SUPPLY-CHAIN COMPLETE: blocking scan + signature + bounded \
 fail-closed Enforce. The init is done: the v2 platform end to end."

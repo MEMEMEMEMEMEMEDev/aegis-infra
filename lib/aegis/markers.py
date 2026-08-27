@@ -80,6 +80,23 @@ JOBS_BLOCK_PATTERN = re.compile(
 PROBES_BLOCK_PATTERN = re.compile(
     re.escape(PROBES_BLOCK_START) + r"\n(?:.*\n)*?" + re.escape(PROBES_BLOCK_END))
 
+# ── the base-images consumers, a derived block in a plain-text list ──
+# NO indentation, on purpose: base-images/consumers.txt is not YAML. It
+# is read by the base-images Jenkins pipeline with `grep`, one
+# repository URL per line, and it skips lines that start with `#`. So
+# the sentinels are comments at column 0 and the body between them is
+# nothing but URLs — no header comment, no blank line, no "(none)"
+# placeholder — because anything else would reach the pipeline as a
+# repository to clone. The list exists because of 2026-08-26: a CVE in
+# a shared base left four static fronts frozen, each waiting for a
+# person to bump the same FROM by hand in four repos; the derived list
+# is what lets the base-images job do that edit itself.
+CONSUMERS_BLOCK_START = "# --- DERIVED by aegis-org (base consumers): do not edit by hand ---"
+CONSUMERS_BLOCK_END = "# --- END DERIVED ---"
+
+CONSUMERS_BLOCK_PATTERN = re.compile(
+    re.escape(CONSUMERS_BLOCK_START) + r"\n(?:.*\n)*?" + re.escape(CONSUMERS_BLOCK_END))
+
 # ── the orchestrator's sentinel ──────────────────────────────────────
 # aegis-init prints it when a phase fails, and check 73 looks for it.
 # The shape matters: it has to be pasteable from any directory.

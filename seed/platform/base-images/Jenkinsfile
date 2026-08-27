@@ -1,0 +1,657 @@
+// base-images — builds the base images aegis OWNS, asserts their
+// contract, scans them, pushes and signs them, and then writes the new
+// digest into the FROM of every consumer.
+//
+// THE PROBLEM IT SOLVES
+// A base pulled from a third party is patched when the third party
+// feels like it. On 2026-08-26, CVE-2026-14456 (OpenSSL, libcrypto3
+// 3.5.7-r0 → 3.5.8-r0) blocked every deploy of every static front for
+// days: the scan is blocking —rightly—, upstream nginx had not rebuilt
+// its image (two tags, both vulnerable), and Alpine had shipped the fix
+// on 2026-08-25. The fix was one `apk upgrade` away and there was no
+// image of ours to run it in. base-images/<member>/Containerfile is
+// that image, and this job is what rebuilds it —by hand, or from
+// image-watch the morning it finds a fixable CVE— and carries the
+// result to the consumers, so that "the base is patched" and "the
+// fronts run on the patched base" are the same event, not two.
+//
+// ONE RUN, THREE THINGS, IN THIS ORDER
+//   build     kaniko → tar; the CONTRACT (UID 101, port 8080) is
+//             asserted on the tar; trivy scans it; only then crane
+//             pushes it and cosign signs it. An image that fails any
+//             of those never exists in the registry.
+//   propagate for each member that was built, the consumers listed in
+//             base-images/consumers.txt get ONE line rewritten in
+//             their Containerfile(s) and a commit on their default
+//             branch. That commit is what makes them rebuild.
+//   report    one summary event.
+//
+// Job defined in JCasC job-dsl (D9), next to mirror-images. It declares
+// the MEMBERS parameter; so does this file, so that a manual "Build
+// with Parameters" shows the same thing the DSL says.
+pipeline {
+  agent {
+    kubernetes {
+      // jenkins-system's strict RQ: EVERY container declares limits
+      // (jnlp included — never `yaml ''`, that overrides the default).
+      //
+      // The pod is Jenkinsfile.app's minus `node` (nothing here runs
+      // JavaScript; the git write is done from jnlp, whose
+      // inbound-agent image ships git). Limits add up to 5000m /
+      // 4.25Gi, which is UNDER the app pod's 5250m / 4.5Gi — and the
+      // quota was sized for jenkins-0 plus TWO app builds overlapping.
+      // A base build next to an app build fits; raising any limit here
+      // has to be measured against that sum, not against this file.
+      yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  imagePullSecrets:
+  - name: regcred-internal
+  containers:
+  - name: jnlp
+    image: jenkins/inbound-agent:3355.v388858a_47b_33-23
+    resources:
+      requests: { cpu: 500m, memory: 512Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+  # kaniko: UNPRIVILEGED build (W-05), the same one Jenkinsfile.app
+  # uses: --no-push into a tar so that the contract check and the scan
+  # run BEFORE anything reaches the registry. -debug ships a shell.
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:v1.23.2-debug
+    command: ['sleep', 'infinity']
+    volumeMounts:
+    - name: regcred
+      mountPath: /kaniko/.docker/config.json
+      subPath: .dockerconfigjson
+      readOnly: true
+    - name: ca-trust
+      mountPath: /kaniko/ca.crt
+      subPath: ca.crt
+      readOnly: true
+    resources:
+      requests: { cpu: 500m, memory: 512Mi }
+      limits:   { cpu: 1500m, memory: 2Gi }
+  # crane: reads the tar (the contract check uses its busybox tar),
+  # pushes it once scanned, and resolves digests. Custom aegis-ci-crane
+  # image (distroless crane on alpine with a shell; tag = the FROM of
+  # ci-images/crane/Containerfile). Auth via DOCKER_CONFIG; CA via
+  # SSL_CERT_FILE.
+  - name: crane
+    image: registry.registry-system.svc.cluster.local:5000/aegis-ci-crane:v0.20.3
+    command: ['sleep', 'infinity']
+    env:
+    - name: DOCKER_CONFIG
+      value: /crane/docker
+    - name: SSL_CERT_FILE
+      value: /crane/ca/ca.crt
+    volumeMounts:
+    - name: regcred
+      mountPath: /crane/docker/config.json
+      subPath: .dockerconfigjson
+      readOnly: true
+    - name: ca-trust
+      mountPath: /crane/ca/ca.crt
+      subPath: ca.crt
+      readOnly: true
+    resources:
+      requests: { cpu: 250m, memory: 256Mi }
+      limits:   { cpu: 1000m, memory: 512Mi }
+  # trivy: THIN client — the server (trivy-system) holds the DB.
+  - name: trivy
+    image: ghcr.io/aquasecurity/trivy:0.72.0
+    command: ['sleep', 'infinity']
+    resources:
+      requests: { cpu: 250m, memory: 256Mi }
+      limits:   { cpu: 1000m, memory: 512Mi }
+  # cosign: custom aegis-ci-cosign image (the official binary is
+  # distroless and container(){sh} needs a shell). Password through
+  # secretKeyRef, NEVER argv. No optional here: like mirror-images,
+  # this job never runs during bootstrap, so a missing key is a real
+  # error and must break the build rather than be skipped — an
+  # unsigned base cannot even be pulled by a consumer's build.
+  # DECLARED COUPLING: the tag MUST match the FROM of
+  # ci-images/cosign/Containerfile (source of the pin).
+  - name: cosign
+    image: registry.registry-system.svc.cluster.local:5000/aegis-ci-cosign:v2.6.3
+    command: ['sleep', 'infinity']
+    env:
+    - name: COSIGN_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: cosign-signing-key
+          key: cosign.password
+    - name: DOCKER_CONFIG
+      value: /cosign/docker
+    volumeMounts:
+    - name: cosign-key
+      mountPath: /cosign/keys/cosign.key
+      subPath: cosign.key
+      readOnly: true
+    - name: regcred
+      mountPath: /cosign/docker/config.json
+      subPath: .dockerconfigjson
+      readOnly: true
+    - name: ca-trust
+      mountPath: /cosign/ca/ca.crt
+      subPath: ca.crt
+      readOnly: true
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits:   { cpu: 500m, memory: 256Mi }
+  volumes:
+  - name: regcred
+    secret:
+      secretName: regcred-internal
+      items: [{ key: .dockerconfigjson, path: .dockerconfigjson }]
+  - name: ca-trust
+    secret:
+      secretName: aegis-ca-trust
+      items: [{ key: ca.crt, path: ca.crt }]
+  - name: cosign-key
+    secret:
+      secretName: cosign-signing-key
+      items: [{ key: cosign.key, path: cosign.key }]
+'''
+      defaultContainer 'jnlp'
+    }
+  }
+  options {
+    // Two runs propagating at once would race on the SAME consumer
+    // repositories (two rebases, two pushes, and the older digest can
+    // win). One at a time; image-watch queues behind a manual run.
+    disableConcurrentBuilds()
+    timeout(time: 45, unit: 'MINUTES')
+  }
+  environment {
+    REGISTRY     = 'registry.registry-system.svc.cluster.local:5000'
+    TRIVY_SERVER = 'http://trivy.trivy-system.svc.cluster.local:4954'
+  }
+  parameters {
+    string(name: 'MEMBERS', defaultValue: '',
+      description: 'space-separated member directories under base-images/ (e.g. "nginx"); empty = all of them. image-watch passes only the members with a fixable CVE.')
+  }
+  stages {
+    stage('preflight') {
+      // Fails EARLY and with a message that says what to do (the
+      // mirror-images lesson: a missing key that only shows up in the
+      // last stage, after building and scanning everything).
+      steps {
+        container('cosign') {
+          sh '''
+            test -f /cosign/keys/cosign.key || {
+              echo "ERROR: the cosign-signing-key Secret is missing in jenkins-system."
+              echo "       Without a key nothing can be signed, and an unsigned"
+              echo "       base cannot be pulled by any consumer. See phase 80-supply-chain."
+              exit 1
+            }
+          '''
+        }
+        container('trivy') {
+          sh '''
+            wget -q -T 10 -O /dev/null "${TRIVY_SERVER}/healthz" || {
+              echo "ERROR: trivy-server is not answering at ${TRIVY_SERVER}."
+              echo "       A base that nobody scanned would be signed with the aegis"
+              echo "       key and inherited by every front. Not an option."
+              exit 1
+            }
+          '''
+        }
+      }
+    }
+
+    stage('members') {
+      // A member is a directory under base-images/ with a Containerfile
+      // in it. MEMBERS narrows the run to some of them (image-watch
+      // names only the ones with a fixable CVE); a name without a
+      // Containerfile is an error, not a silent skip — a typo in a
+      // parameter that rebuilds nothing and ends green is the kind of
+      // failure this tree hunts.
+      steps {
+        script {
+          def found = sh(returnStdout: true,
+            script: 'ls -d base-images/*/Containerfile 2>/dev/null || true'
+          ).trim()
+          def all = found ? found.split('\n').collect { it.tokenize('/')[1] } : []
+          all.each { m ->
+            if (!(m ==~ /[a-z0-9][a-z0-9-]*/)) {
+              // The name lands in image names, metric labels and a
+              // sed expression: it has to be plain.
+              error "base-images/${m}: a member name is [a-z0-9-] only"
+            }
+          }
+          def members = all
+          def asked = (params.MEMBERS ?: '').trim()
+          if (asked) {
+            members = asked.split(/\s+/) as List
+            members.each { m ->
+              if (!all.contains(m)) {
+                error "MEMBERS names '${m}', and base-images/${m}/Containerfile does not exist (known: ${all.join(' ')})"
+              }
+            }
+          }
+          if (members.isEmpty()) { error 'base-images/ has no member with a Containerfile' }
+          echo "${members.size()} member(s) to build: ${members.join(' ')}"
+          MEMBERS_TO_BUILD = members
+        }
+      }
+    }
+
+    stage('build') {
+      steps {
+        script {
+          def built = []     // [name, tag, digest] per member that got through
+          def failed = []
+          MEMBERS_TO_BUILD.each { m ->
+            // Through env, not Groovy interpolation: whatever reaches
+            // the shell's argv comes from the process environment.
+            env.M = m
+            echo "================ aegis-base-${m} ================"
+            try {
+              // TAG = <alpine minor>-<build number, zero-padded to 6>
+              // (lexicographic order == numeric order). The minor is
+              // DERIVED from the member's FROM: one place to edit the
+              // pin, the ci-images lesson. No floating tag, ever: a
+              // mutable pointer in the registry is exactly what this
+              // tree avoids, and the consumers pin by digest anyway.
+              def minor = sh(returnStdout: true, script: '''
+                sed -n -E 's|^FROM .*/alpine:([0-9]+\\.[0-9]+).*|\\1|p' \
+                  "base-images/${M}/Containerfile" | head -1
+              ''').trim()
+              if (!(minor ==~ /[0-9]+\.[0-9]+/)) {
+                error "base-images/${m}/Containerfile: the FROM must name the internal alpine:<major>.<minor> (got '${minor}')"
+              }
+              env.MINOR = minor
+              env.TAG   = "${minor}-${env.BUILD_NUMBER.padLeft(6, '0')}"
+              echo "TAG=${env.TAG}"
+
+              container('kaniko') {
+                // W-05: kaniko builds into a TAR (--no-push) so that
+                // the contract check and the scan run BEFORE the push.
+                // --destination gives the tar its ref; our own CA via
+                // --registry-certificate.
+                sh '''
+                  /kaniko/executor \
+                    --context=dir://${WORKSPACE}/base-images/${M} \
+                    --dockerfile=Containerfile \
+                    --destination=${REGISTRY}/aegis-base-${M}:${TAG} \
+                    --no-push \
+                    --tarPath=${WORKSPACE}/base-${M}.tar \
+                    --registry-certificate ${REGISTRY}=/kaniko/ca.crt
+                '''
+              }
+              container('crane') {
+                // THE CONTRACT, asserted on the artifact and not on the
+                // Containerfile's text. A consumer's pod depends on two
+                // facts about this image that nothing else checks:
+                //   - User is 101, numeric: tenant namespaces are PSS
+                //     restricted (root is rejected at admission; a
+                //     non-numeric USER fails runAsNonRoot);
+                //   - it exposes 8080: the tenant NetworkPolicy admits
+                //     only edge → 8080, and an image on 80 starts fine
+                //     and never receives a request.
+                // The tar is a docker-archive: manifest.json names the
+                // config blob, and the config carries both facts. It
+                // runs before the push on purpose — an image that
+                // breaks the contract never exists in the registry.
+                sh '''
+                  set -e
+                  cd "${WORKSPACE}"
+                  CFG=$(tar -xOf "base-${M}.tar" manifest.json \
+                        | sed -n 's/.*"Config":"\\([^"]*\\)".*/\\1/p' | head -1)
+                  test -n "$CFG" || { echo "ERROR: base-${M}.tar has no Config in manifest.json"; exit 1; }
+                  tar -xOf "base-${M}.tar" "$CFG" > "cfg-${M}.json"
+                  ok=1
+                  if grep -q -E '"User":[[:space:]]*"101"' "cfg-${M}.json"; then
+                    echo "contract: User=101 (numeric)          OK"
+                  else
+                    echo "contract: User is NOT 101              BROKEN"; ok=0
+                  fi
+                  if grep -q '"8080/tcp"' "cfg-${M}.json"; then
+                    echo "contract: ExposedPorts has 8080/tcp    OK"
+                  else
+                    echo "contract: 8080/tcp is NOT exposed      BROKEN"; ok=0
+                  fi
+                  if [ "$ok" != 1 ]; then
+                    echo "ERROR: aegis-base-${M} breaks the base contract."
+                    echo "       Every consumer's pod assumes UID 101 (PSS restricted:"
+                    echo "       root is rejected at admission) and port 8080 (the tenant"
+                    echo "       NetworkPolicy admits only edge -> 8080). The image is NOT"
+                    echo "       pushed. Fix base-images/${M}/Containerfile."
+                    exit 1
+                  fi
+                '''
+              }
+              container('trivy') {
+                // Blocking, exactly as for our own code — and this IS
+                // our own code. NO --ignorefile: a base aegis owns has
+                // no exceptions, because the whole reason it exists is
+                // that its fix is one rebuild away. An exception here
+                // would be the mirror's disease with a new name.
+                sh '''
+                  trivy image --server "$TRIVY_SERVER" \
+                    --input "${WORKSPACE}/base-${M}.tar" \
+                    --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed \
+                    --scanners vuln --no-progress
+                '''
+              }
+              container('crane') {
+                // crane pushes the ALREADY checked and scanned tar; the
+                // digest comes from crane digest, for the signature and
+                // for the consumers. base_digest: what the FROM's tag
+                // resolved to in THIS instance's registry — the seed
+                // pins by tag because it cannot know an instance's
+                // internal digest; the event records the answer.
+                sh '''
+                  set -e
+                  cd "${WORKSPACE}"
+                  crane push "base-${M}.tar" "${REGISTRY}/aegis-base-${M}:${TAG}"
+                  crane digest "${REGISTRY}/aegis-base-${M}:${TAG}" > "base-${M}.digest"
+                  crane digest "${REGISTRY}/alpine:${MINOR}" > "base-${M}.base-digest"
+                  echo "pushed:  ${REGISTRY}/aegis-base-${M}:${TAG}@$(cat base-${M}.digest)"
+                  echo "built on ${REGISTRY}/alpine:${MINOR}@$(cat base-${M}.base-digest)"
+                '''
+              }
+              container('cosign') {
+                // Signed BY DIGEST (immutable) against the internal
+                // registry. --tlog-upload=false: nothing from the
+                // private registry leaves for the public Rekor.
+                sh '''
+                  DIGEST="$(cat ${WORKSPACE}/base-${M}.digest)"
+                  cosign sign --yes \
+                    --key /cosign/keys/cosign.key \
+                    --tlog-upload=false \
+                    --registry-cacert /cosign/ca/ca.crt \
+                    "${REGISTRY}/aegis-base-${M}@${DIGEST}"
+                '''
+              }
+              // Observability HOOK: one JSON line per base, natural key
+              // = digest, same transport as Jenkinsfile.app and
+              // mirror-images — a direct POST, because the output of an
+              // `sh` step travels the remoting channel and Vector, which
+              // reads /var/log/pods, never sees it. `source` is the
+              // PRODUCER (jenkins-base), the _stream_field.
+              //
+              // Scan and signature are blocking here, so reaching this
+              // line proves both ran; the explicit zeros are pushed all
+              // the same, because an absent series does not say "it was
+              // scanned" — it says nothing.
+              sh '''
+                DIGEST="$(cat ${WORKSPACE}/base-${M}.digest)"
+                BASE_DIGEST="$(cat ${WORKSPACE}/base-${M}.base-digest)"
+                EVENTO=$(printf \
+                  '{"source":"jenkins-base","event":"base-build","image":"aegis-base-%s","tag":"%s","digest":"%s","base_digest":"%s","scan_skipped":false,"sign_skipped":false,"build":"%s","ts":"%s"}' \
+                  "${M}" "${TAG}" "${DIGEST}" "${BASE_DIGEST}" "${BUILD_NUMBER}" \
+                  "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+                printf 'AEGIS_EVENT %s\\n' "$EVENTO"
+                printf '%s\\n' "$EVENTO" \
+                  | curl -fsS --max-time 15 \
+                      -H 'Content-Type: application/stream+json' --data-binary @- \
+                      'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \
+                  || echo 'NOTICE: the event could not be recorded in vlogs-events (the build does NOT fail for this)'
+                {
+                  printf 'aegis_build_scan_skipped{image="aegis-base-%s"} 0\\n' "$M"
+                  printf 'aegis_build_sign_skipped{image="aegis-base-%s"} 0\\n' "$M"
+                  printf 'aegis_build_timestamp_seconds{image="aegis-base-%s"} %s\\n' "$M" "$(date -u +%s)"
+                } | curl -fsS --max-time 15 --data-binary @- \
+                      'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' \
+                  || echo 'NOTICE: the build metrics did not reach vmsingle (the build does NOT fail for this)'
+              '''
+              def digest = readFile("base-${m}.digest").trim()
+              built << [name: m, tag: env.TAG, digest: digest]
+            } catch (err) {
+              // A broken member must not stop the rest from being
+              // built: it is noted down and the loop goes on. The run
+              // fails at the end all the same (see report) — with the
+              // whole picture, and AFTER the members that did build
+              // have reached their consumers.
+              echo "FAILED aegis-base-${m}: ${err.getMessage()}"
+              failed << m
+            } finally {
+              sh 'rm -f "base-${M}.tar" "cfg-${M}.json" || true'
+            }
+          }
+          BUILT  = built
+          FAILED = failed
+          echo "built: ${built.collect { it.name }.join(' ') ?: '(none)'}   failed: ${failed.join(' ') ?: '(none)'}"
+        }
+      }
+    }
+
+    stage('propagate') {
+      // WRITES THE NEW DIGEST INTO THE CONSUMERS' FROM, by direct
+      // commit to their default branch.
+      //
+      // WHY A DIRECT COMMIT AND NOT A PULL REQUEST. It is the same trust
+      // level and the same credential (`github-token`) the app's own
+      // pipeline already uses to commit its digest into k8s/ on every
+      // build (Jenkinsfile.app, `desplegar`). A base that passed the
+      // contract, the scan and the signature is no less trusted than
+      // the app image that stands on it; a PR nobody merges is a
+      // patched base nobody runs — the state this job exists to end.
+      //
+      // WHY THIS DOES NOT LOOP. The consumer's `detect-change` skips a
+      // build only when the commit touches k8s/ alone. This commit
+      // touches a Containerfile, so the consumer BUILDS — which is the
+      // point. Its own digest commit then touches only k8s/ and is
+      // skipped, as always. Nothing new is needed in the anti-loop.
+      //
+      // THE GUARD. `github-token` can push to every repository of the
+      // owner, so this stage must be UNABLE to write anything but that
+      // one line: the diff is checked to list Containerfiles only, one
+      // line out and one line in per file, or nothing is pushed and the
+      // run goes UNSTABLE naming the repo. A consumer that does not
+      // match at all (a Containerfile that pins some other way) is the
+      // same UNSTABLE, not a failure: the base is built and signed, and
+      // the metric says who did not get it.
+      //
+      // FAN-OUT. One base → N consumer builds, each an app pod. They
+      // QUEUE behind the jenkins-system ResourceQuota (two at a time),
+      // they do not fail: the quota was sized for exactly that, and a
+      // queued build is a visible build.
+      steps {
+        script {
+          if (!BUILT) {
+            echo 'propagate: no member was built — nothing to propagate'
+            return
+          }
+          def consumers = []
+          readFile('base-images/consumers.txt').split('\n').each { line ->
+            def l = line.trim()
+            if (!l || l.startsWith('#')) { return }
+            // Both spellings GitHub answers to, normalised to https so
+            // the token's credential helper (below) sees every clone.
+            def slug = l
+            if (slug.startsWith('git@github.com:')) {
+              slug = slug.substring('git@github.com:'.length())
+            } else if (slug.startsWith('https://github.com/')) {
+              slug = slug.substring('https://github.com/'.length())
+            } else {
+              error "consumers.txt: not a GitHub repository URL: ${l}"
+            }
+            if (slug.endsWith('.git')) { slug = slug[0..-5] }
+            if (!(slug ==~ /[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/)) {
+              error "consumers.txt: cannot read <owner>/<repo> out of: ${l}"
+            }
+            consumers << slug
+          }
+          if (consumers.isEmpty()) {
+            echo 'propagate: consumers.txt lists no repository — nothing to propagate (aegis org apply fills the block from the contracts)'
+            return
+          }
+          echo "${consumers.size()} consumer(s): ${consumers.join(' ')}"
+
+          BUILT.each { b ->
+            env.M      = b.name
+            env.TAG    = b.tag
+            env.DIGEST = b.digest
+            consumers.each { slug ->
+              env.REPO_SLUG = slug
+              env.REPO_URL  = "https://github.com/${slug}.git"
+              echo "---- aegis-base-${b.name} -> ${slug} ----"
+              def rc = 99
+              withCredentials([usernamePassword(
+                credentialsId: 'github-token',
+                usernameVariable: 'GH_USER',
+                passwordVariable: 'GH_TOKEN')]) {
+                // SINGLE quotes: the shell expands $GH_TOKEN, not
+                // Groovy. With double ones the token would end up
+                // embedded in the job's config.
+                //
+                // Exit codes are the stage's vocabulary:
+                //   0  pushed        10 already at this digest
+                //   20 no Containerfile names this base
+                //   21 the guard refused the diff
+                //   22 push failed 3 times     23 clone failed
+                rc = sh(returnStatus: true, script: '''
+                  set -e
+                  cd "${WORKSPACE}"
+                  SCRATCH="${WORKSPACE}/.propagate/$(echo "${REPO_SLUG}" | tr '/' '_')"
+                  rm -rf "${SCRATCH}"
+                  mkdir -p "${SCRATCH}"
+
+                  # The config goes to the workspace and not to $HOME,
+                  # so the change dies with the pod instead of leaking
+                  # into another build. safe.directory first (#55): git
+                  # refuses to operate on a tree it thinks somebody else
+                  # owns, and it refuses on the FIRST command.
+                  export GIT_CONFIG_GLOBAL="${WORKSPACE}/.gitconfig-base"
+                  rm -f "${GIT_CONFIG_GLOBAL}"
+                  git config --global --add safe.directory '*'
+                  git config --global user.email "ci@aegis"
+                  git config --global user.name "aegis CI"
+                  # The token NEVER touches argv or disk: what is stored
+                  # is the variable's NAME, and git expands it when it
+                  # invokes the helper.
+                  git config --global credential.helper \
+                    '!f() { echo username=x-access-token; echo password=$GH_TOKEN; }; f'
+
+                  git clone --quiet --depth 1 "${REPO_URL}" "${SCRATCH}" || exit 23
+                  cd "${SCRATCH}"
+                  BRANCH="$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's#^origin/##')"
+                  test -n "${BRANCH}" || exit 23
+                  echo "default branch: ${BRANCH}"
+
+                  # Consumers do NOT share a Containerfile path (the
+                  # front may live at the root, under front/, anywhere):
+                  # the file is FOUND by what it says, never assumed.
+                  FILES="$(grep -rl --include=Containerfile -E "aegis-base-${M}(:[^@ ]+)?@sha256:" . || true)"
+                  if [ -z "${FILES}" ]; then
+                    echo "no Containerfile in ${REPO_SLUG} names aegis-base-${M}@sha256:..."
+                    exit 20
+                  fi
+                  echo "${FILES}" | sed 's/^/  matches: /'
+                  echo "${FILES}" | xargs sed -i -E \
+                    "s#(aegis-base-${M})(:[^@ ]+)?@sha256:[0-9a-f]{64}#\\1:${TAG}@${DIGEST}#g"
+
+                  if git diff --quiet; then
+                    echo "${REPO_SLUG} is already at ${TAG}@${DIGEST}"
+                    exit 10
+                  fi
+
+                  # THE GUARD: only Containerfiles, one line out and one
+                  # line in each. Anything else means the sed did more
+                  # than it was told, and nothing leaves this pod.
+                  git diff --numstat | tee numstat.txt
+                  if ! awk -F'\\t' '
+                        $1 != "1" || $2 != "1" || $3 !~ /(^|\\/)Containerfile$/ { bad = 1 }
+                        END { exit bad }' numstat.txt; then
+                    echo "GUARD: the diff is not one line per Containerfile — refusing to push"
+                    git diff | head -80
+                    exit 21
+                  fi
+                  git diff
+
+                  # -u stages only tracked, modified files: the guard has
+                  # just proved those are Containerfiles and nothing else.
+                  git add -u
+                  git commit --quiet -m "chore(base): aegis-base-${M} -> ${TAG}@${DIGEST}"
+
+                  # Retry: the consumer's own pipeline may have pushed
+                  # its digest in the meantime.
+                  for i in 1 2 3; do
+                    if git pull --quiet --rebase origin "${BRANCH}" && git push --quiet origin "HEAD:${BRANCH}"; then
+                      echo "pushed to ${REPO_SLUG}@${BRANCH}: $(git rev-parse --short HEAD)"
+                      exit 0
+                    fi
+                    sleep 5
+                  done
+                  echo "could not push to ${REPO_SLUG} after 3 attempts" >&2
+                  exit 22
+                ''')
+              }
+              sh 'rm -rf "${WORKSPACE}/.propagate" "${WORKSPACE}/.gitconfig-base" || true'
+
+              def reasons = [
+                0: 'pushed', 10: 'already at this digest',
+                20: 'no Containerfile names this base', 21: 'the guard refused the diff',
+                22: 'push failed after 3 attempts', 23: 'clone failed',
+              ]
+              def ok = (rc == 0 || rc == 10)
+              env.PROP_OK     = ok ? 'true' : 'false'
+              env.PROP_FAILED = ok ? '0' : '1'
+              env.PROP_REASON = reasons.containsKey(rc) ? reasons[rc] : "exit ${rc}"
+              if (!ok) {
+                unstable("aegis-base-${b.name} did not reach ${slug}: ${env.PROP_REASON}")
+              }
+              // Per (image, repo): the failure flag, the last time the
+              // consumer was seen at the current digest (pushed now or
+              // already there — both mean "the consumer has it"), and
+              // the event with the reason. Best-effort, like the rest.
+              sh '''
+                EVENTO=$(printf \
+                  '{"source":"jenkins-base","event":"base-propagated","image":"aegis-base-%s","repo":"%s","digest":"%s","ok":%s,"reason":"%s","build":"%s","ts":"%s"}' \
+                  "${M}" "${REPO_SLUG}" "${DIGEST}" "${PROP_OK}" "${PROP_REASON}" "${BUILD_NUMBER}" \
+                  "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+                printf 'AEGIS_EVENT %s\\n' "$EVENTO"
+                printf '%s\\n' "$EVENTO" \
+                  | curl -fsS --max-time 15 \
+                      -H 'Content-Type: application/stream+json' --data-binary @- \
+                      'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \
+                  || echo 'NOTICE: the event could not be recorded in vlogs-events (the build does NOT fail for this)'
+                {
+                  printf 'aegis_base_propagation_failed{image="aegis-base-%s",repo="%s"} %s\\n' "$M" "$REPO_SLUG" "$PROP_FAILED"
+                  if [ "${PROP_OK}" = true ]; then
+                    printf 'aegis_base_propagated_timestamp_seconds{image="aegis-base-%s",repo="%s"} %s\\n' "$M" "$REPO_SLUG" "$(date -u +%s)"
+                  fi
+                } | curl -fsS --max-time 15 --data-binary @- \
+                      'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' \
+                  || echo 'NOTICE: the propagation metrics did not reach vmsingle (the build does NOT fail for this)'
+              '''
+            }
+          }
+        }
+      }
+    }
+
+    stage('report') {
+      // ONE summary event for the run (its _msg is the event name — a
+      // run has no single image), and THEN the verdict: a member
+      // that failed fails the run — after the ones that built have
+      // reached their consumers and after the summary is written, so
+      // that a red run still tells the whole story.
+      steps {
+        script {
+          env.BUILT_JSON  = BUILT.collect { '"aegis-base-' + it.name + '"' }.join(',')
+          env.FAILED_JSON = FAILED.collect { '"aegis-base-' + it + '"' }.join(',')
+          sh '''
+            EVENTO=$(printf \
+              '{"source":"jenkins-base","event":"base-run","built":[%s],"failed":[%s],"build":"%s","ts":"%s"}' \
+              "${BUILT_JSON}" "${FAILED_JSON}" "${BUILD_NUMBER}" \
+              "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+            printf 'AEGIS_EVENT %s\\n' "$EVENTO"
+            printf '%s\\n' "$EVENTO" \
+              | curl -fsS --max-time 15 \
+                  -H 'Content-Type: application/stream+json' --data-binary @- \
+                  'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=event&_stream_fields=source' \
+              || echo 'NOTICE: the event could not be recorded in vlogs-events (the build does NOT fail for this)'
+          '''
+          if (FAILED) {
+            error "members that failed (${FAILED.size()}): ${FAILED.join(', ')}"
+          }
+          echo 'all members built, signed and propagated.'
+        }
+      }
+    }
+  }
+}

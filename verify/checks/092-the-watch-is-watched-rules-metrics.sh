@@ -122,7 +122,31 @@ for m in sorted(used - modules):
 #  · build — there is no period: a repo can go weeks without one. The
 #    floor is a POLICY (one week), not the mirror of a value living
 #    somewhere else: that is why it is written here and not derived.
+# Three kinds of file push: a CronJob under k8/ (its schedule is the
+# cron), a tenant template (a build), and — since 2026-08-27 — every
+# seed/platform/*/Jenkinsfile the platform runs itself. A platform
+# Jenkinsfile's cadence is NOT in the Jenkinsfile: it is the `cron(…)`
+# of the job-dsl item whose scriptPath names it (check 139 says why it
+# lives there). One with a cron is a cron producer; one without is a
+# build. So deleting image-watch's cron line turns its daily metrics
+# into build-class ones, and every [2d] that reads them falls short of
+# the week — which is exactly the shape of the hole: the watch stopped
+# being daily and the rules went on reading it as if it were.
 BUILD_FLOOR = 7 * 86400
+def cron_period(sched):
+    """Seconds between two runs of a 5-field cron, or None if the shape
+    is not one of the four this check knows. Jenkins' `H` (a hash-
+    spread value) counts as a fixed number: `H 6 * * *` is daily."""
+    c = sched.split()
+    if len(c) != 5 or c[2] != "*" or c[3] != "*" or c[4] != "*":
+        return None
+    m, h = c[0], c[1]
+    fixed = lambda x: x == "H" or re.fullmatch(r"\d+", x) is not None
+    if h == "*" and fixed(m):                                 return 3600
+    if h.startswith("*/") and h[2:].isdigit() and fixed(m):   return int(h[2:]) * 3600
+    if m.startswith("*/") and m[2:].isdigit() and h == "*":   return int(m[2:]) * 60
+    if fixed(h) and fixed(m):                                 return 86400
+    return None
 producers = {}   # metric -> (file, class, minimum_secs)
 for y in sorted((P / "k8s").rglob("*.yaml")):
     txt = y.read_text()
@@ -132,13 +156,7 @@ for y in sorted((P / "k8s").rglob("*.yaml")):
         if d.get("kind") != "CronJob":
             continue
         sched = d["spec"]["schedule"]
-        c, per = sched.split(), None
-        if len(c) == 5:
-            m, h = c[0], c[1]
-            if h == "*" and re.fullmatch(r"\d+", m):                  per = 3600
-            elif h.startswith("*/") and re.fullmatch(r"\d+", m):      per = int(h[2:]) * 3600
-            elif m.startswith("*/") and h == "*":                     per = int(m[2:]) * 60
-            elif re.fullmatch(r"\d+", h) and re.fullmatch(r"\d+", m): per = 86400
+        per = cron_period(sched)
         if per is None:
             bad.append(f"{y.name}: could not derive the period of the cron {sched!r} — with "
                        "no period there is no minimum window to demand of whoever reads it")
@@ -146,12 +164,39 @@ for y in sorted((P / "k8s").rglob("*.yaml")):
         for met in set(re.findall(r"\b(aegis_[a-z0-9_]+)\b", txt)):
             producers.setdefault(met, (str(y.relative_to(P)),
                                        f"cron every {per}s", 2 * per))
-for jf in sorted((P / "docs/protocols/templates").glob("Jenkinsfile*")):
+# The cron of each platform pipeline, from the job-dsl: scriptPath → cron.
+job_cron = {}
+try:
+    jv = yaml.safe_load((P / "k8s/base/platform/jenkins/values.yaml").read_text())
+    for it in yaml.safe_load(jv["controller"]["JCasC"]["configScripts"]["aegis-jobs"])["jobs"]:
+        s = it.get("script", "") if isinstance(it, dict) else ""
+        sp = re.search(r"scriptPath\(\s*'([^']+)'", s)
+        tr = re.search(r"triggers\s*\{(.*?)\}", s, re.S)
+        cr = re.search(r"cron\(\s*'([^']+)'", tr.group(1)) if tr else None
+        if sp:
+            job_cron[sp.group(1)] = cr.group(1) if cr else None
+except Exception as e:
+    bad.append(f"jenkins/values.yaml: the job-dsl could not be read ({e!r}): no platform pipeline has a known cadence")
+# A metric emitted from a Jenkinsfile: `aegis_x{labels} value` or a bare
+# `aegis_x value` (image-watch pushes its heartbeat without labels). A
+# name followed by a word is prose in a comment, not a push.
+JF_METRIC = re.compile(r"\b(aegis_[a-z0-9_]+)(?=\{|\s+[-+0-9$%\"'(])")
+def jenkinsfile_producer(jf, rel, cadence, minimum):
     txt = jf.read_text()
     if "/api/v1/import/prometheus" not in txt:
-        continue
-    for met in set(re.findall(r"\b(aegis_[a-z0-9_]+)\{", txt)):
-        producers.setdefault(met, (str(jf.relative_to(P)), "every build", BUILD_FLOOR))
+        return
+    for met in set(JF_METRIC.findall(txt)):
+        producers.setdefault(met, (rel, cadence, minimum))
+for jf in sorted((P / "docs/protocols/templates").glob("Jenkinsfile*")):
+    jenkinsfile_producer(jf, str(jf.relative_to(P)), "every build", BUILD_FLOOR)
+for jf in sorted(P.glob("*/Jenkinsfile")):
+    rel = str(jf.relative_to(P))
+    sched = job_cron.get(rel)
+    per = cron_period(sched) if sched else None
+    if per is None:
+        jenkinsfile_producer(jf, rel, "every build", BUILD_FLOOR)
+    else:
+        jenkinsfile_producer(jf, rel, f"cron every {per}s ({sched!r} in the job-dsl)", 2 * per)
 
 # ── 3. the rules ────────────────────────────────────────────────────
 cm = yaml.safe_load((OBS / "rules/vmalert-rules.yaml").read_text())
@@ -212,6 +257,14 @@ NO_GUARD = {
         "«deployed and unmeasured» case is reported by aegis check, "
         "which knows how to cross it against what is running",
     "ImagenSinFirma": "same reason as ImagenSinEscaneo",
+    "TrivyIgnoreExpiring":
+        "zero exceptions is healthy: the metric legitimately vanishes. One series per "
+        "trivyignore entry, and a file with no entries pushes none — an absent() here "
+        "would page for the cleanest possible state",
+    "BasePropagationFailed":
+        "build-cadence, absent until the first base rebuild. Same family as "
+        "ImagenSinEscaneo: the series is born with the first propagation, and a newborn "
+        "platform has had none",
 }
 METRIC = re.compile(r"\b([a-z][a-z0-9_]+)\s*(?:\{|\[|\)|\s|$)")
 WORDS = {"time", "sum", "max", "min", "avg", "count", "rate", "increase", "absent",

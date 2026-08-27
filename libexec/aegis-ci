@@ -1,0 +1,321 @@
+#!/usr/bin/env bash
+# aegis-summary: The platform's image chain: fire the builds, read the digests
+# aegis-group:   infra
+# aegis-subcommands: build digests
+# aegis-help:
+# Usage: aegis ci build [--members "<m> ..."] [<job>...]
+#        aegis ci digests
+#
+# build    fires the platform's image jobs in Jenkins through the API
+#          and WAITS for each one. With no job named, the ORDER IS THE
+#          CONTRACT and follows the supply chain:
+#            mirror-images -> ci-images -> base-images -> image-watch
+#          With jobs named: exactly those, in the order given.
+#          --members "<m> ..." is passed to base-images as MEMBERS
+#          (space-separated member directories; empty = all of them).
+# digests  prints image@digest for what the internal registry holds:
+#          every aegis-base-* tag of the shape <major>.<minor>-<yymmdd>
+#          (newest last) and every tag of every other repository, each
+#          with the digest the registry itself reports. This is what a
+#          human reads BEFORE bumping a consumer's FROM by hand.
+
+# aegis-ci — the platform's image chain, driven from the host.
+#
+# ── why it exists ─────────────────────────────────────────────────
+# The chain has four jobs and a fixed order, and until now the order
+# lived in people's heads: mirror-images pulls the third parties the
+# rest are built FROM; ci-images builds the tooling (the cosign runner)
+# out of those mirrors; base-images builds the bases aegis OWNS on top
+# of the mirrors and with that tooling; image-watch looks at what the
+# other three produced. Firing them out of order does not fail loudly
+# — it builds on top of yesterday's mirror and says SUCCESS.
+#
+# The second half (M-47 of the record): the protocol says a consumer
+# pins its FROM by digest, the reference showed a tag, and the digests
+# of the internal registry were not consultable without a cluster
+# session. `digests` reads them the way the init's own gates do: with
+# the regcred the cluster holds, through the internal CA, from the
+# registry's manifest (Docker-Content-Digest), never from a build log.
+#
+# ── what it does NOT do ───────────────────────────────────────────
+# It does not edit any FROM, it does not commit and it does not sync.
+# It fires and it reads; the bump stays a decision a person takes with
+# the digest in front of them.
+set -euo pipefail
+
+# ── canonical preamble (V-102) ───────────────────────────────────────
+# The PRODUCT is resolved from this file itself, following symlinks
+# (phase 05 installs /usr/local/bin/aegis as a symlink: without
+# readlink -f, AEGIS_ROOT would be /usr/local). If bin/aegis already
+# exported it, that is respected. The INSTANCE is decided by
+# lib/paths.sh, never here.
+if [[ -z "${AEGIS_ROOT:-}" ]]; then
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} ci: readlink is missing — I cannot tell where the product lives" >&2; exit 2; }
+    AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+fi
+export AEGIS_ROOT
+# shellcheck source=../lib/paths.sh
+source "$AEGIS_ROOT/lib/paths.sh"
+
+usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
+bad_usage() { printf '%s ci: %s\n' "${AEGIS_CMD:-aegis}" "$*" >&2; printf 'try: %s ci --help\n' "${AEGIS_CMD:-aegis}" >&2; exit 3; }
+
+# ── the chain: order, timeouts ───────────────────────────────────────
+# The order IS the contract (see the header). The timeouts are per job:
+# mirroring pulls from the internet and scans every image, so it is the
+# longest; the watch only reads.
+CHAIN=(mirror-images ci-images base-images image-watch)
+timeout_of() {
+    case "$1" in
+        mirror-images) echo 2700 ;;
+        ci-images)     echo 1800 ;;
+        base-images)   echo 1800 ;;
+        image-watch)   echo 1200 ;;
+    esac
+}
+is_job() { local j; for j in "${CHAIN[@]}"; do [[ "$j" == "$1" ]] && return 0; done; return 1; }
+
+# ── arguments, BEFORE anything runs ─────────────────────────────────
+# `--help` is answered here, with nothing sourced beyond paths.sh and
+# nothing executed: until 2026-08-26 `aegis preflight --help` installed
+# packages instead of describing itself. Usage errors leave with 3.
+VERB="${1:-}"; [[ $# -gt 0 ]] && shift
+case "$VERB" in
+    -h|--help|"") usage; exit 0 ;;
+    build|digests) ;;
+    *) bad_usage "«$VERB» is not a subcommand (build | digests)" ;;
+esac
+JOBS=(); MEMBERS=""; MEMBERS_GIVEN=0
+if [[ "$VERB" == build ]]; then
+    while (($#)); do
+        case "$1" in
+            -h|--help)  usage; exit 0 ;;
+            --members)  [[ $# -ge 2 ]] || bad_usage "--members needs a value (space-separated member directories under base-images/)"
+                        MEMBERS="$2"; MEMBERS_GIVEN=1; shift 2 ;;
+            --members=*) MEMBERS="${1#--members=}"; MEMBERS_GIVEN=1; shift ;;
+            -*)         bad_usage "unknown flag «$1»" ;;
+            *)          is_job "$1" || bad_usage "«$1» is not a job of the chain: ${CHAIN[*]}"
+                        JOBS+=("$1"); shift ;;
+        esac
+    done
+    (( ${#JOBS[@]} > 0 )) || JOBS=("${CHAIN[@]}")
+    if (( MEMBERS_GIVEN )); then
+        has_base=0; for j in "${JOBS[@]}"; do [[ "$j" == base-images ]] && has_base=1; done
+        (( has_base )) || bad_usage "--members only means something for base-images, and base-images is not among the jobs to fire (${JOBS[*]})"
+    fi
+else
+    (($# == 0)) || { [[ "$1" == -h || "$1" == --help ]] && { usage; exit 0; }; bad_usage "digests takes no arguments (got «$1»)"; }
+fi
+
+# ── the libs (only now: nothing above has needed them) ──────────────
+# common.sh: log_* to stderr, die, retry_net, REGISTRY_HOST_INTERNAL.
+# secrets.sh: secrets_workdir (tmpfs + shred on exit) and registry_creds
+# (the regcred and the CA out of the cluster into that tmpfs, never
+# printed). jenkins.sh: the API from inside the pod, netrc through
+# stdin, next-build-number BEFORE the trigger, wait by number.
+# shellcheck source=../lib/common.sh
+source "$AEGIS_ROOT/lib/common.sh"
+# shellcheck source=../lib/secrets.sh
+source "$AEGIS_ROOT/lib/secrets.sh"
+# shellcheck source=../lib/jenkins.sh
+source "$AEGIS_ROOT/lib/jenkins.sh"
+
+# rc 2 is «the instrument never reached the subject» — not «wrong» and
+# never «empty». die() is rc 1 (something measured and wrong); this is
+# the other verdict, and it carries the reason.
+could_not() { log_error "COULD NOT EVALUATE: $*"; exit 2; }
+
+# The instance's conf is T1 (no secrets) and optional here: it carries
+# REGISTRY_CLUSTER_IP (paired with the cert's SAN). If it is not there,
+# the cluster is asked.
+[[ -f "$AEGIS_CONF" ]] && source "$AEGIS_CONF"
+: "${REGISTRY_CLUSTER_IP:=}"
+
+# ═══════════════════════════════════════════════════════════════════
+#  build
+# ═══════════════════════════════════════════════════════════════════
+
+# jenkins_build_retry_params <job> <timeout_s> <tries> <query> — the
+# lib's jenkins_build_retry posts to /job/<job>/build and cannot carry
+# parameters; this is the same loop against buildWithParameters?<query>.
+# It lives HERE and not in lib/jenkins.sh on purpose: one caller, and
+# the lib's contract (network signature -> re-fire; real failure ->
+# stop, console already printed by jenkins_wait_build) is copied, not
+# changed. If a second caller appears, it moves to the lib.
+jenkins_build_retry_params() {
+    local job="$1" timeout="${2:-1800}" tries="${3:-3}" query="$4" i next
+    for ((i = 1; i <= tries; i++)); do
+        next="$(jenkins_next_build "$job")"
+        jenkins_post "/job/$job/buildWithParameters?$query" >/dev/null
+        if jenkins_wait_build "$job" "$timeout" "$next"; then
+            return 0
+        fi
+        if jenkins_get "/job/$job/$next/consoleText" 2>/dev/null \
+             | grep -qiE "$AEGIS_NET_SIGS"; then
+            log_warn "build $job#$next: FAILURE with a transient NETWORK signature (attempt $i/$tries) — re-firing"
+            continue
+        fi
+        log_error "build $job#$next: FAILURE with NO network signature — a real failure, it is not retried (console above)"
+        return 1
+    done
+    log_error "build $job: $tries attempts with network failures — the network cannot carry the build; retry once it settles"
+    return 1
+}
+
+# ci_settled_build <job> <first> <tries> — after a successful retry
+# loop, WHICH build succeeded: the first fired one, or a re-fire. The
+# numbers are contiguous from <first> (nextBuildNumber captured before
+# each POST), so the SUCCESS is one of <first>..<first+tries-1>. Prints
+# the number; empty if none of them reads SUCCESS (the log above still
+# holds the lib's own verdict).
+ci_settled_build() {
+    local job="$1" first="$2" tries="$3" n res
+    for ((n = first; n < first + tries; n++)); do
+        res="$(jenkins_get "/job/$job/$n/api/json" 2>/dev/null | jq -r '.result // empty' 2>/dev/null || true)"
+        [[ "$res" == SUCCESS ]] && { printf '%s' "$n"; return 0; }
+    done
+    return 0
+}
+
+do_build() {
+    local tries=3
+    # The subject has to be reachable BEFORE anything is fired: the
+    # jenkins.sh functions exec into the pod and read the admin
+    # credential out of the cluster; an absent cluster is «could not»,
+    # not «the build failed».
+    kubectl -n jenkins-system get sts jenkins -o name >/dev/null 2>&1 \
+        || could_not "jenkins-system/sts/jenkins is not reachable (kubeconfig? is the cluster up?)"
+    kubectl -n jenkins-system get secret jenkins-admin -o name >/dev/null 2>&1 \
+        || could_not "the Secret jenkins-system/jenkins-admin is not readable — without it the API cannot be spoken to"
+    secrets_workdir
+    # The build URLs printed below come from Jenkins' own root URL
+    # (what `.url` carries), so they are the ones a browser opens. If
+    # the API does not answer at all, that is «could not», before
+    # anything is fired.
+    local root
+    root="$(retry_net 3 jenkins_get /api/json 2>/dev/null | jq -r '.url // empty' 2>/dev/null)" \
+        || could_not "the Jenkins API did not answer from inside the pod (exec/creds/pod down)"
+    [[ -n "$root" ]] || root="https://jenkins.${ROOT_DOMAIN:-localhost}"
+    root="${root%/}"
+
+    local job q missing=()
+    for job in "${JOBS[@]}"; do
+        jenkins_get_code "/job/$job/api/json" 2>/dev/null | grep -q '^200$' || missing+=("$job")
+    done
+    (( ${#missing[@]} == 0 )) \
+        || could_not "Jenkins does not have the job(s): ${missing[*]} — did the jenkins App sync the Job DSL?"
+
+    log_info "chain to fire, in this order: ${JOBS[*]}"
+    local timeout first settled
+    for job in "${JOBS[@]}"; do
+        timeout="$(timeout_of "$job")"
+        first="$(jenkins_next_build "$job")" \
+            || could_not "no nextBuildNumber for $job — the Jenkins API stopped answering"
+        if [[ "$job" == base-images && $MEMBERS_GIVEN == 1 ]]; then
+            q="MEMBERS=$(jq -rn --arg m "$MEMBERS" '$m|@uri')"
+            log_info "firing $job with MEMBERS='${MEMBERS:-<all>}' (timeout ${timeout}s) → build #$first  $root/job/$job/$first/"
+            jenkins_build_retry_params "$job" "$timeout" "$tries" "$q" \
+                || { printf '%-14s build #%s  FAILED  %s/job/%s/%s/\n' "$job" "$first" "$root" "$job" "$first"
+                     die "the chain stops at $job: what comes after would build on top of a failed step"; }
+        else
+            log_info "firing $job (timeout ${timeout}s) → build #$first  $root/job/$job/$first/"
+            jenkins_build_retry "$job" "$timeout" "$tries" \
+                || { printf '%-14s build #%s  FAILED  %s/job/%s/%s/\n' "$job" "$first" "$root" "$job" "$first"
+                     die "the chain stops at $job: what comes after would build on top of a failed step"; }
+        fi
+        settled="$(ci_settled_build "$job" "$first" "$tries")"
+        [[ -n "$settled" ]] || settled="$first"
+        printf '%-14s build #%s  SUCCESS  %s/job/%s/%s/\n' "$job" "$settled" "$root" "$job" "$settled"
+    done
+    log_ok "the chain is done: ${JOBS[*]}"
+    return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════
+#  digests
+# ═══════════════════════════════════════════════════════════════════
+ACCEPT='Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json'
+BASE_TAG_RE='^[0-9]+\.[0-9]+-[0-9]{6}$'
+
+# reg_get <path> — a GET against the registry's v2 API with the creds
+# and the CA registry_creds left in tmpfs. Same shape as phases 70/80:
+# by ClusterIP (the cert's SAN carries it), netrc by file, CA by file.
+reg_get()  { retry_net 3 curl -fsS  --max-time 30 --netrc-file "$SECRETS_TMP/registry.netrc" --cacert "$SECRETS_TMP/aegis-ca.crt" "https://$REGISTRY_CLUSTER_IP:5000/v2/$1"; }
+# reg_digest <repo> <tag> — HEAD of the manifest; the digest is what the
+# registry says in Docker-Content-Digest, never a build log (check 069).
+reg_digest() {
+    retry_net 3 curl -fsSI --max-time 30 --netrc-file "$SECRETS_TMP/registry.netrc" --cacert "$SECRETS_TMP/aegis-ca.crt" \
+        -H "$ACCEPT" "https://$REGISTRY_CLUSTER_IP:5000/v2/$1/manifests/$2" \
+      | tr -d '\r' | awk 'tolower($1)=="docker-content-digest:"{print $2}'
+}
+
+do_digests() {
+    # What the read needs, checked as «could not» before anything is
+    # materialised: the regcred (registry_creds reads it), the CA, and
+    # the ClusterIP (the conf's, or the live Service's).
+    kubectl -n jenkins-system get secret regcred-internal -o name >/dev/null 2>&1 \
+        || could_not "the Secret jenkins-system/regcred-internal is not readable (kubeconfig? is the cluster up?)"
+    kubectl -n cert-manager get secret aegis-internal-ca -o name >/dev/null 2>&1 \
+        || could_not "the Secret cert-manager/aegis-internal-ca is not readable — without the CA the registry's TLS cannot be trusted"
+    if [[ -z "$REGISTRY_CLUSTER_IP" ]]; then
+        REGISTRY_CLUSTER_IP="$(kubectl -n registry-system get svc registry -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
+        [[ -n "$REGISTRY_CLUSTER_IP" ]] \
+            || could_not "no REGISTRY_CLUSTER_IP in $AEGIS_CONF and registry-system/svc/registry has no ClusterIP"
+    fi
+    secrets_workdir
+    registry_creds "$REGISTRY_HOST_INTERNAL" "$REGISTRY_CLUSTER_IP"
+    [[ -s "$SECRETS_TMP/registry.netrc" && -s "$SECRETS_TMP/aegis-ca.crt" ]] \
+        || could_not "the registry credential or the CA came out empty from the cluster"
+
+    # «curl failed» ≠ «no repositories» (P1.15): the read is demanded.
+    local catalog
+    catalog="$(reg_get '_catalog?n=1000')" \
+        || could_not "the registry at $REGISTRY_CLUSTER_IP:5000 did not answer the catalogue (network/registry-system down) — this is NOT an empty registry"
+    local repos
+    repos="$(jq -r '.repositories[]?' <<< "$catalog" | sort)"
+    if [[ -z "$repos" ]]; then
+        log_error "the registry answered and holds NO repository — nothing to pin a FROM to yet (has the chain been fired? ${AEGIS_CMD:-aegis} ci build)"
+        return 1
+    fi
+
+    local repo tags_json tags tag digest unread=0 n=0
+    while IFS= read -r repo; do
+        [[ -n "$repo" ]] || continue
+        if ! tags_json="$(reg_get "$repo/tags/list")"; then
+            log_warn "$repo: could not read its tags (the line is left out — this is not «no tags»)"
+            unread=$((unread + 1)); continue
+        fi
+        if [[ "$repo" == aegis-base-* ]]; then
+            # the bases aegis owns: only the shape the protocol pins
+            # (<major>.<minor>-<yymmdd>), newest last, so the last line
+            # is the candidate.
+            tags="$(jq -r '.tags[]?' <<< "$tags_json" | grep -E "$BASE_TAG_RE" | sort -t- -k1,1V -k2,2n || true)"
+        else
+            # cosign stores signatures as <digest>.sig tags in the same
+            # repo: they are attestations of an image, not an image a
+            # FROM can name, so they are left out of the listing.
+            tags="$(jq -r '.tags[]?' <<< "$tags_json" | grep -v '\.sig$' | sort -V || true)"
+        fi
+        [[ -n "$tags" ]] || { log_info "$repo: no tag of the expected shape"; continue; }
+        while IFS= read -r tag; do
+            [[ -n "$tag" ]] || continue
+            if ! digest="$(reg_digest "$repo" "$tag")" || [[ -z "$digest" ]]; then
+                log_warn "$repo:$tag: could not read its manifest (the line is left out — this is not a missing tag)"
+                unread=$((unread + 1)); continue
+            fi
+            printf '%s/%s:%s@%s\n' "$REGISTRY_HOST_INTERNAL" "$repo" "$tag" "$digest"
+            n=$((n + 1))
+        done <<< "$tags"
+    done <<< "$repos"
+
+    if (( unread > 0 )); then
+        could_not "$unread repository/tag read(s) failed — the $n lines above are real, but the picture is incomplete"
+    fi
+    log_ok "$n image@digest lines, straight from the registry's manifests"
+    return 0
+}
+
+case "$VERB" in
+    build)   do_build ;;
+    digests) do_digests ;;
+esac

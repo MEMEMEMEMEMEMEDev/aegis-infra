@@ -276,3 +276,97 @@ data:
             annotations:
               summary: "{{ $labels.image }} was published unsigned"
               description: "The last build did not find cosign's key. Unlike the scan, this is NOT silent: Kyverno rejects the admission and the deploy fails. The alert exists to name the cause before somebody debugs the rejection from scratch."
+  # Images (2026-08-27). Everything above measures the BUILD: did the
+  # last build scan, did it sign, how long ago. None of it measures
+  # the image AFTER the build. A CVE published the week after the push
+  # lands in the trivy DB and the deployed image goes on serving,
+  # scanned-green in every panel, vulnerable in fact. Two Jenkins jobs
+  # close that gap and push here:
+  #  · image-watch (cron, once a day, one POST at the end of the run):
+  #    re-scans every mirrored image against TODAY's DB, fixable only,
+  #    and asks the upstream whether re-mirroring would help. A run
+  #    that dies leaves no heartbeat — that IS the signal.
+  #  · base-images (build cadence, like Jenkinsfile.app): rebuilds an
+  #    aegis-base-* and bumps the FROM of its consumers.
+  #
+  # Windows: [2d] for everything image-watch pushes (2 × its daily
+  # period, check 092 §8: with [1d] one late run and every series is
+  # «absent»); [30d] for base-images, which is a build and can go
+  # weeks without one (same policy as suministro.yaml).
+  #
+  # Alertmanager has ONE route, so the `info` below pages like the
+  # rest. That is acceptable ON PURPOSE: each firing of it is a
+  # decision the operator has to take (re-mirror or not), not noise
+  # to be filed — if a day comes when it is noise, the fix is a route,
+  # not deleting the alert.
+  images.yaml: |
+    groups:
+      - name: images
+        rules:
+          # `for: 24h` is the rebuild window: when the watch finds a
+          # fixable CVE in an aegis-base-* it triggers the rebuild the
+          # same morning. A day later, still there, means one of two
+          # things a loop cannot fix: the distro has not shipped the
+          # fix yet, or the image is a third party's and a human has
+          # to decide.
+          - alert: ImageWithFixableVulns
+            expr: sum by (image) (last_over_time(aegis_image_fixable_vulns[2d])) > 0
+            for: 24h
+            labels: {severity: warning}
+            annotations:
+              summary: "{{ $labels.image }} has {{ $value }} fixable CVE(s) against today's DB, a day after the watch saw them"
+              description: "Fixable, not theoretical: --ignore-unfixed. For an aegis-base-* the loop already tried (base-images rebuilt it the morning it appeared): either the distro has no fix yet or the rebuild failed — check the base-images console. For a third party run `crane digest` on the upstream tag and read UpstreamFixAvailable: if it fires, re-mirroring helps; if not, the fix is not published upstream yet."
+          # All three legs on the same `image`: vulnerable today, the
+          # upstream tag moved, AND the candidate scans clean. Only
+          # then does re-mirroring help; without the third leg it is a
+          # bump for nothing.
+          - alert: UpstreamFixAvailable
+            expr: sum by (image) (last_over_time(aegis_image_fixable_vulns[2d])) > 0 and on (image) last_over_time(aegis_upstream_candidate_fixable_vulns[2d]) == 0 and on (image) last_over_time(aegis_upstream_moved[2d]) == 1
+            for: 1h
+            labels: {severity: info}
+            annotations:
+              summary: "{{ $labels.image }}: the upstream moved and the candidate scans clean"
+              description: "Re-mirroring WILL help: the upstream tag points at a new digest and that digest has no fixable CVE. Edit images.txt (tag+digest), run mirror-images, bump the consumer. Until then ImageWithFixableVulns keeps firing for this image."
+          # Not «clean»: the watch could not run trivy on this image
+          # (transport, registry, scan error). A 0 in fixable_vulns
+          # next to a 1 here is a zero that measured nothing.
+          - alert: ImageWatchCouldNotEvaluate
+            expr: last_over_time(aegis_image_watch_failed[2d]) == 1
+            for: 1h
+            labels: {severity: warning}
+            annotations:
+              summary: "image-watch COULD NOT EVALUATE {{ $labels.image }}"
+              description: "COULD NOT EVALUATE ≠ clean: the watch's last run could not scan this image (pull, transport or trivy error), so its fixable count is not a measurement. Read the image-watch console for the error; the rest of the images ARE measured."
+          # Build cadence, so 30d and no `for`: the series says «the
+          # last rebuild of this base, seen from this consumer», and
+          # until there is another rebuild that is the truth.
+          - alert: BasePropagationFailed
+            expr: last_over_time(aegis_base_propagation_failed[30d]) == 1
+            labels: {severity: warning}
+            annotations:
+              summary: "{{ $labels.repo }} is still on the old {{ $labels.image }}"
+              description: "The base was rebuilt and signed, but the FROM bump in this consumer repo FAILED or found nothing to bump: what it deploys is still built on the vulnerable base, and nothing in its own pipeline will say so. Check the base-images console for {{ $labels.repo }}; the fix is the bump (by hand if need be) and a build."
+          # One series per exception id; when there are no exceptions
+          # there is no series, and that is health. Negative = already
+          # expired — it stays under the threshold until somebody
+          # removes the entry.
+          - alert: TrivyIgnoreExpiring
+            expr: last_over_time(aegis_trivyignore_expires_in_seconds[2d]) < 30 * 86400
+            labels: {severity: warning}
+            annotations:
+              summary: "trivyignore exception {{ $labels.id }} expires in under 30d"
+              description: "Re-measure the exception (its statement in trivyignore.yaml says how it was justified and what would close it) or let it expire. When it does, the next mirror run and the next watch both go red ON PURPOSE: an exception nobody re-read is a CVE nobody looks at."
+          # The guard of the four above (check 092 §5): each `or
+          # absent()` is over a series the watch pushes on EVERY run,
+          # so the disappearance of any of them means the run did not
+          # finish — and with the series gone the comparing alerts do
+          # not go false, they go empty. Phase 85 fires the job once
+          # at birth, so on this instance «silent» means «stopped»,
+          # never «not yet».
+          - alert: ImageWatchSilent
+            expr: absent(last_over_time(aegis_image_watch_timestamp_seconds[2d])) or absent(last_over_time(aegis_image_fixable_vulns[2d])) or absent(last_over_time(aegis_image_watch_failed[2d]))
+            for: 1h
+            labels: {severity: critical}
+            annotations:
+              summary: "image-watch did not leave its daily heartbeat"
+              description: "The daily job did not push in the last two days: the cron is gone from job-dsl, the job is broken, or vmsingle rejected the POST. Without it ImageWithFixableVulns, UpstreamFixAvailable and ImageWatchCouldNotEvaluate are mute, not green — and what is running has not been re-scanned since the last heartbeat. Phase 85 fires it once at birth: silent means stopped, not «not yet»."

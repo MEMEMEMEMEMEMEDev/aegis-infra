@@ -53,13 +53,20 @@
 #
 # ── HOW IT IS UPDATED ─────────────────────────────────────────────
 #
-#   1. a new line in mirror-images/images.txt (origin, by digest)
+#   1. a line in mirror-images/images.txt, two fields:
+#        <source>:<tag>@sha256:<digest>   <destination>:<tag>
+#      (the origin by DIGEST, with its tag IN the reference so that
+#      image-watch can ask every morning whether it moved upstream;
+#      `crane digest <source>:<tag>` gives the number)
 #   2. run the mirror-images job  -> it mirrors, SCANS and SIGNS
 #   3. read the internal registry's digest again (recipe above)
 #   4. edit it here + `aegis org apply orgs/*.yaml`
 #
 # Step 4 is separate on purpose: mirroring does not deploy. Pulling an
 # image and putting it into production are two different decisions.
+# The whole chain — the three jobs, the bases aegis owns, what the
+# daily watch alerts on and what it never does by itself — is
+# docs/protocols/images.md.
 
 version: 1
 

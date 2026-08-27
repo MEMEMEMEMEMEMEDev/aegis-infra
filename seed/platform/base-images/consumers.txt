@@ -1,0 +1,24 @@
+# base-images/consumers.txt — the repositories that stand on a base
+# aegis OWNS. One repository URL per line, in either of the two forms
+# GitHub answers to (the job normalises both to https):
+#
+#   git@github.com:<owner>/<repo>.git
+#   https://github.com/<owner>/<repo>(.git)
+#
+# Every repository listed here has at least one `Containerfile` whose
+# FROM names `aegis-base-<member>@sha256:…` (with or without a tag
+# before the `@`). After a successful build of that member, the
+# base-images job clones the repository, rewrites THAT line to the new
+# `<tag>@<digest>`, and commits it to the default branch — which is what
+# makes the consumer's own pipeline rebuild on the patched base. A repo
+# whose Containerfile does not match leaves the run UNSTABLE, with a
+# metric and an event naming it; nothing else in it is ever written.
+#
+# The block below is DERIVED from orgs/*.yaml — the `repo` of every
+# service of type `estatico` — by `aegis org apply`, and it is
+# re-derived WHOLE on every run: whatever is edited between the markers
+# does not survive the next one. Static fronts are the only consumers
+# so far because aegis-base-nginx is the only base so far; a second
+# base brings its own type here.
+# --- DERIVED by aegis-org (base consumers): do not edit by hand ---
+# --- END DERIVED ---

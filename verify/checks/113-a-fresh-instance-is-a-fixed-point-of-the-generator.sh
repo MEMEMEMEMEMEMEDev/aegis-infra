@@ -22,7 +22,7 @@ check() {
 #
 #   1. `apply_jenkins` RAISED against the seed. The derived block's
 #      markers were in no file, so it demanded them and stopped. Since
-#      the eleven stages run one after another, the first real
+#      the twelve stages run one after another, the first real
 #      `aegis org apply` of any instance died there — and the stages
 #      after it never ran nor said why.
 #   2. `main.tf` shipped THREE public hostnames while edge.yaml declared

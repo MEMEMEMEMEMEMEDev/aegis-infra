@@ -66,10 +66,27 @@ spec:
           # SINGLE SOURCE of the pin: the FROM of each Containerfile →
           # the tag of the resulting image is DERIVED from it (no second
           # place to edit — the lesson of the duplicated pin).
-          build_push() {   # <subdir> <name> <FROM-pattern>
-            local dir="ci-images/$1" name="$2" pat="$3" tag
-            tag="$(sed -n "s/^FROM .*${pat}:\\(v[0-9][0-9.]*\\).*/\\1/p" \
-                   "$dir/Containerfile" | head -1)"
+          #
+          # The capture is "everything up to the first space" and NOT
+          # "a v followed by digits": node is versioned 22.23.1-alpine,
+          # no v and with a suffix. With the old pattern the tag came
+          # out EMPTY and the `test -n` below killed the build — which
+          # at least failed loudly, but was of no use. The seed carried
+          # that old pattern, and only built two of its four images,
+          # until 2026-08-27: check 137 now demands that every
+          # ci-images/*/Containerfile has its build_push here.
+          build_push() {   # <subdir> <name> <FROM-pattern> [<tag-sed>]
+            local dir="ci-images/$1" name="$2" pat="$3" expr="${4:-}" tag
+            # The 4th argument exists for aegis-ci-tofu, whose version is
+            # NOT in a FROM: the official OpenTofu image fails on purpose
+            # when used as a base (opentofu#1931), so the binary is
+            # downloaded verified and the version lives in an ARG.
+            if [ -n "$expr" ]; then
+              tag="$(sed -n "$expr" "$dir/Containerfile" | head -1)"
+            else
+              tag="$(sed -n "s|^FROM .*${pat}:\\([^ ]*\\).*|\\1|p" \
+                     "$dir/Containerfile" | head -1)"
+            fi
             test -n "$tag"
             echo "== ${name}:${tag} (kaniko, unprivileged) =="
             /kaniko/executor \
@@ -80,6 +97,9 @@ spec:
           }
           build_push cosign aegis-ci-cosign cosign
           build_push crane  aegis-ci-crane  crane
+          build_push node   aegis-ci-node   node
+          build_push tofu   aegis-ci-tofu   tofu \
+            's|^ARG TOFU_VERSION=\\(.*\\)|\\1|p'
         '''
       }
     }

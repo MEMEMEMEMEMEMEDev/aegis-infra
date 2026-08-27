@@ -11,20 +11,28 @@
 # tenant went through the same control, ours or third-party alike.
 #
 # FORMAT
-#   <source>@<digest>   <destination>:<tag>
+#   <source>:<tag>@<digest>   <destination>:<tag>
 #
 # The source is pinned BY DIGEST, not by tag. A tag is a mutable
 # pointer: whoever controls the source registry can repoint it at other
-# content without us noticing. The digest is the content. The tag stays
-# in the comment so a human knows what they are reading.
+# content without us noticing. The digest is the content. The tag
+# travels IN the reference (`name:tag@digest` is a digest reference for
+# every registry client: the tag is kept as text and the digest is what
+# gets pulled) so that image-watch can ask, every morning, whether the
+# tag moved upstream — and whether what it moved to is any cleaner.
+# Before 2026-08-27 the tag lived only in a comment, and the question
+# could not be asked by a machine. Two fields, still: a third column
+# would have broken the parser of every instance alive.
 #
 # HOW TO UPDATE AN IMAGE
 #   1. crane digest <source>:<new-tag>
-#   2. edit the line here (digest AND destination tag)
+#   2. edit the line here (tag AND digest in the source, tag in the destination)
 #   3. commit + push  →  run the mirror-images job
 #   4. bump the reference in the manifest that consumes it
 # Step 4 is separate on purpose: mirroring does not deploy. Pulling a
 # new image and putting it in production are two distinct decisions.
+# image-watch tells you when step 1 would be worth doing — it never
+# does steps 2-4 for a third party. See docs/protocols/images.md.
 #
 # Empty lines and lines starting with # are ignored.
 
@@ -52,15 +60,15 @@
 #     For customer data that has to be solved first.
 #   - Permissions per key-and-bucket instead of IAM. Less power, and
 #     less to get wrong with.
-docker.io/dxflrs/garage@sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690	garage:v2.3.0
+docker.io/dxflrs/garage:v2.3.0@sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690	garage:v2.3.0
 
 # --- data -----------------------------------------------------------
 # redis:8.6.4-alpine
-public.ecr.aws/docker/library/redis@sha256:2cc044fc5a07c9b701f8f1255a309ae9ad7856e694ac03513bf3648c01e40763	redis:8.6.4-alpine
+public.ecr.aws/docker/library/redis:8.6.4-alpine@sha256:2cc044fc5a07c9b701f8f1255a309ae9ad7856e694ac03513bf3648c01e40763	redis:8.6.4-alpine
 
 # postgres:17.10-alpine — major 17 on purpose (more field time than 18;
 # upstream support until November 2029).
-public.ecr.aws/docker/library/postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193	postgres:17.10-alpine
+public.ecr.aws/docker/library/postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193	postgres:17.10-alpine
 
 # --- CI toolchains --------------------------------------------------
 # golang:1.26.6-alpine — compiles the ai-gateway in the pipeline.
@@ -90,7 +98,7 @@ public.ecr.aws/docker/library/postgres@sha256:742f40ea20b9ff2ff31db5458d12745298
 # encoding/xml, net/url, crypto/tls — all fixed in 1.26.6). Trivy reads
 # the buildinfo of the ELF, so the patch belongs to the COMPILER: no
 # line of gateway code can fix this.
-public.ecr.aws/docker/library/golang@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83	golang:1.26.6-alpine
+public.ecr.aws/docker/library/golang:1.26.6-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83	golang:1.26.6-alpine
 
 # --- application runtimes -------------------------------------------
 # python:3.12-slim — base of the engine-cpu (#26), build AND runtime.
@@ -112,7 +120,7 @@ public.ecr.aws/docker/library/golang@sha256:3889b425f035be855a72fb4755265311293b
 # The source digest is the SAME on public.ecr.aws as on Docker Hub;
 # measured with both APIs on 2026-08-17 before choosing, as was done
 # with nginx-unprivileged.
-public.ecr.aws/docker/library/python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a	python:3.12-slim
+public.ecr.aws/docker/library/python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a	python:3.12-slim
 # nodejs22 distroless — runtime of the portfolio BFF.
 #
 # WHY DISTROLESS AND NOT node:22-alpine. The official one was tried on
@@ -159,43 +167,7 @@ public.ecr.aws/docker/library/python@sha256:2c941e860699f878900b0edc2403613c234d
 # signs; org-portafolio sits in Kyverno's enforce zone and demands a
 # signature. Two different images for two different jobs: one builds,
 # the other runs.
-gcr.io/distroless/nodejs22-debian13@sha256:a2723a2817c5b01b8e7b98d567bc8b5a6b0e713e25bfb0a82b6ade4b9db06f50	nodejs-distroless:22
-
-# nginx-unprivileged 1.31.3-alpine — base of the THREE static fronts:
-# portafolio, blog and ejemplo.
-#
-# WHY THE unprivileged VARIANT AND NOT PLAIN nginx. Two reasons, and
-# both are mandatory on this platform:
-#
-#   1. It listens on 8080. A tenant's NetworkPolicy only allows ingress
-#      from the edge to 8080; with regular nginx (port 80) the pod
-#      starts up fine and NEVER receives traffic. That is the worst
-#      class of failure: the silent one.
-#   2. It runs as UID 101, not root. Tenant namespaces sit under the
-#      `restricted` Pod Security Standards: a container that asks for
-#      root is REJECTED at admission and the pod never comes to exist.
-#
-# WHY IT IS ONLY BEING MIRRORED NOW, which is the part really worth
-# telling.
-#
-# It was not here. The three fronts pulled it from Docker Hub ON EVERY
-# BUILD. It surfaced on 2026-08-09, when build 38 of the portfolio died
-# like this:
-#
-#   Retrieving image nginxinc/nginx-unprivileged from index.docker.io
-#   error building image: Get "https://index.docker.io/v2/": ...
-#
-# And the failed build is the lesser consequence. The greater one is
-# that we were signing the RESULTING artifact with cosign while nobody
-# had verified the base it was built on — and by TAG, no less. The
-# signature policy was doing exactly what it promises —verifying what we
-# sign— and even so there was unverified ground underneath. That is
-# precisely the hole this file exists to close.
-#
-# The source digest is the SAME on public.ecr.aws as on Docker Hub; it
-# was measured with `crane digest` against both before choosing. So
-# using ECR costs nothing and dodges the Hub's rate limits.
-public.ecr.aws/nginx/nginx-unprivileged@sha256:334d92979f15aaecd5dd50af5105e1230e2bb70765d45b1e2f964e7c5eda81c3	nginx-unprivileged:1.31.3-alpine
+gcr.io/distroless/nodejs22-debian13:nonroot@sha256:a2723a2817c5b01b8e7b98d567bc8b5a6b0e713e25bfb0a82b6ade4b9db06f50	nodejs-distroless:22
 
 # alpine 3.21 — runtime of the hello-aegis canary.
 #
@@ -212,4 +184,22 @@ public.ecr.aws/nginx/nginx-unprivileged@sha256:334d92979f15aaecd5dd50af5105e1230
 # That the canary was the LAST thing to stop reaching the internet has
 # its irony: it exists to exercise the path everything else walks, so it
 # was also the last place where the hole could hide.
-public.ecr.aws/docker/library/alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d	alpine:3.21
+public.ecr.aws/docker/library/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d	alpine:3.21
+
+# alpine 3.22 — the ground under the bases aegis OWNS (base-images/).
+#
+# aegis-base-nginx is `alpine:3.22 + apk upgrade + apk add nginx`, and
+# THAT is the whole point of owning a base: the day OpenSSL published
+# CVE-2026-14456 the nginx image everybody consumes stayed unbuilt
+# upstream for days (two tags, both carrying the vulnerable
+# libcrypto3), while Alpine had the patched package out within the day.
+# A base built from the distribution's packages picks the fix up at
+# the next build — one `apk upgrade` — instead of waiting for a third
+# party's release cycle. Which is why image-watch, when it finds a
+# fixable CVE in a base we own, simply rebuilds it.
+#
+# The digest here freezes the FILESYSTEM the build starts from; the
+# packages on top come from the apk index of the day. So this pin
+# ages slowly and matters little — the scan of the resulting base is
+# what says whether it is clean, and it runs on every build.
+public.ecr.aws/docker/library/alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce	alpine:3.22

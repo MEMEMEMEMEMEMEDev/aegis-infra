@@ -326,3 +326,126 @@ if bad:
 print(f"  \033[1;32m✓\033[0m {compared} generated files from real contracts: "
       "same objects, same fields, same values")
 PY
+RC=$?
+
+# ── the base-consumers derivation, on scratch contracts ──────────────
+#
+# `apply_base_consumers` fills base-images/consumers.txt with the repo
+# of every `estatico` service — the list the base-images job reads to
+# bump a rebuilt base's digest in each consumer itself (2026-08-26: a
+# CVE in the shared nginx base, four fronts frozen, the same FROM edited
+# by hand in four repos). Check 113 proves the block is a fixed point
+# with ZERO organizations; the reference instance above predates the
+# file, so the WITH-contracts path has nowhere else to be measured.
+#
+# Two contracts, the smallest the validator accepts, each on its own
+# copy of the v3-flavoured instance with the orgs/ emptied and the
+# SEED's consumers.txt dropped in — the seed's, and not sentinels typed
+# here: if the seed's markers ever drift from markers.py the derivation
+# refuses, and this harness has to be the one that turns red.
+#
+#   static  one `estatico` front and an organization `repo`
+#           → exactly that repo, exactly as written, one line
+#   http    only an `http` service, with a repo of its own
+#           → an empty block: the two sentinels adjacent
+#
+# and after each apply, a `plan` has to report `=`: writing twice is
+# what the pipeline would see as a diff on every run.
+CONSUMERS_SEED="$AEGIS_ROOT/seed/platform/base-images/consumers.txt"
+ROOT_DOMAIN="$(sed -n 's/^root_domain: *//p' "$TMP/v3/edge.yaml" | head -1)"
+ROOT_DOMAIN="${ROOT_DOMAIN:-example.test}"
+
+# The block's body, read with the SAME pattern the producer uses.
+consumers_body() {
+    AEGIS_ROOT="$AEGIS_ROOT" python3 - "$1" <<'PY'
+import os, sys
+sys.path.insert(0, os.path.join(os.environ["AEGIS_ROOT"], "lib"))
+from aegis import markers
+m = markers.CONSUMERS_BLOCK_PATTERN.search(open(sys.argv[1], encoding="utf-8").read())
+if m is None:
+    sys.exit("no derived block")
+print("\n".join(m.group(0).splitlines()[1:-1]))
+PY
+}
+
+scratch_org() {   # <dir> <flavour: static|http>
+    local d="$1" flavour="$2"
+    rm -rf "$d"; cp -a "$TMP/v3-base" "$d"
+    rm -f "$d"/orgs/*.yaml "$d"/orgs/*.yml
+    mkdir -p "$d/base-images"
+    cp "$CONSUMERS_SEED" "$d/base-images/consumers.txt"
+    if [[ "$flavour" == static ]]; then
+        cat > "$d/orgs/scratch.yaml" <<EOF
+version: 1
+organizacion: scratch
+dominio: scratch.$ROOT_DOMAIN
+cuota: pequena
+repo: git@github.com:scratch-owner/scratch-front.git
+servicios:
+  - nombre: front
+    tipo: estatico
+    publico: /
+EOF
+    else
+        cat > "$d/orgs/scratch.yaml" <<EOF
+version: 1
+organizacion: scratch
+dominio: scratch.$ROOT_DOMAIN
+cuota: pequena
+servicios:
+  - nombre: api
+    tipo: http
+    puerto: 8080
+    publico: /
+    repo: https://github.com/scratch-owner/scratch-api
+EOF
+    fi
+}
+
+scratch_org_run() {   # <dir> <subcommand> <contract>
+    PLATFORM_DIR="$1" AEGIS_CONF="$CONF" AEGIS_ROOT="$AEGIS_ROOT" \
+        "$AEGIS_ROOT/libexec/aegis-org" "$2" "$1/orgs/$3"
+}
+
+# One stage's report in a `plan`: the lines under its header. `plan`
+# exits non-zero on the reference copy (apply_jenkins refuses, see
+# note_side above), so the answer is read from the report, never from
+# the exit code.
+stage_report() {   # <dir> <stage header>
+    scratch_org_run "$1" plan scratch.yaml 2>/dev/null \
+        | sed -n "/^$2 /,/^$/p" | sed 's/\x1b\[[0-9;]*m//g'
+}
+
+CB=0
+for flavour in static http; do
+    d="$TMP/scratch-$flavour"
+    scratch_org "$d" "$flavour"
+    note_side "v3 scratch/$flavour" scratch_org_run "$d" apply scratch.yaml
+    if ! got="$(consumers_body "$d/base-images/consumers.txt" 2>&1)"; then
+        CB=1
+        printf '  \033[1;31m✗\033[0m base-consumers (%s): %s\n' "$flavour" "$got"
+        continue
+    fi
+    case "$flavour" in
+        static) want="git@github.com:scratch-owner/scratch-front.git" ;;
+        http)   want="" ;;
+    esac
+    if [[ "$got" != "$want" ]]; then
+        CB=1
+        printf '  \033[1;31m✗\033[0m base-consumers (%s): expected %q, the block carries %q\n' \
+            "$flavour" "$want" "$got"
+        continue
+    fi
+    # applied once; the second look must find nothing to do
+    if ! stage_report "$d" base-consumers | grep -q '^  = base consumers'; then
+        CB=1
+        printf '  \033[1;31m✗\033[0m base-consumers (%s): a second `plan` still reports a change:\n' "$flavour"
+        stage_report "$d" base-consumers | sed 's/^/      /'
+        continue
+    fi
+done
+if [[ "$CB" == 0 ]]; then
+    printf '  \033[1;32m✓\033[0m base-consumers: a static front renders its repo verbatim, an http-only contract renders an empty block, and both are byte-stable on the second run\n'
+fi
+
+exit $(( RC | CB ))

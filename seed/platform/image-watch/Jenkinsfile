@@ -1,0 +1,776 @@
+// image-watch — every morning, re-looks at what the platform ALREADY
+// serves, against TODAY's vulnerability database.
+//
+// THE GAP IT CLOSES (measured 2026-08-26)
+// Nobody re-looked at what was already mirrored. The only CVE detector
+// on the platform was the blocking scan, and it only acts when somebody
+// REBUILDS — so CVE-2026-14456 (OpenSSL QUIC DoS in libcrypto3) was
+// discovered by a portfolio build failing, weeks after the base had
+// been pinned, and nothing on the platform could say whether pulling
+// upstream again would help. It would not have: two upstream tags were
+// tried, both still carried the vulnerable libcrypto3. A new digest is
+// not a new image. That morning a human answered three questions by
+// hand — is what we serve still clean? did upstream move? is what it
+// moved to any cleaner? — and this job exists so that a machine asks
+// them every day, with the same rigour and none of the memory.
+//
+// WHAT IT NEVER DOES
+//   · it never BLOCKS: there is nothing to block — the images are
+//     already in the registry and already running. An image with a
+//     finding becomes a metric and an event, never a red build;
+//   · it never ERRORS over an image: a pull that fails, a scan that
+//     fails, a manifest that is not there — all of that is a value in a
+//     series (`aegis_image_watch_failed`, `aegis_image_not_mirrored`),
+//     because "this one could not be measured" is itself something the
+//     alerts must be able to see. The build only fails when the WATCH
+//     cannot work at all: no trivy-server, or an images.txt it cannot
+//     parse;
+//   · it never re-mirrors a third party. It tells the operator whether
+//     re-mirroring would help; the decision stays a human one (the
+//     `loop` stage below says why). The one thing it does act on is
+//     the bases aegis OWNS, which exist precisely so that a fix can be
+//     picked up by a rebuild instead of by waiting for a third party.
+//
+// THE ONE GAP IT LEAVES OPEN (S11 of docs/protocols/images.md)
+// It watches what is MIRRORED and the BASES — not the application images
+// that actually run in the tenants. An app image built last month from a
+// then-clean base carries whatever that base carried, and this job does
+// not open it. v1 accepts that on purpose: the app images are rebuilt by
+// their own pipelines when the base's digest is propagated into their
+// FROM, and that propagation is what the base rebuild triggers. The
+// protocol names the gap so nobody mistakes "the watch is green" for
+// "the tenants are clean".
+//
+// THE SCHEDULE IS NOT HERE ON PURPOSE. A declarative `triggers { cron }`
+// only registers after the job's first run; the job-dsl in
+// k8s/base/platform/jenkins/values.yaml declares `H 6 * * *`, effective
+// the moment JCasC seeds the job. Do not add a triggers block.
+//
+// Same mechanics as mirror-images/Jenkinsfile: crane pulls the tar,
+// trivy looks at it (thin client, the server holds the DB), values reach
+// the shell through env — never Groovy interpolation — and every POST is
+// best-effort with a NOTICE. No cosign and no kaniko: nothing is signed
+// and nothing is built here.
+
+// ─── helpers (steps run in whatever container() is active) ───────────
+
+// The wall clock, read where it is measured. Two shapes: seconds for
+// the metrics, ISO for the events (`_time_field=ts`).
+def nowEpoch() { return sh(returnStdout: true, script: 'date -u +%s').trim() }
+def nowIso()   { return sh(returnStdout: true, script: 'date -u +%Y-%m-%dT%H:%M:%SZ').trim() }
+
+// Posts a batch of events as JSON lines — one curl per batch, not one
+// per event. Runs in jnlp (curl lives there), so call it OUTSIDE any
+// container() block. The AEGIS_EVENT echo stays: the output of an `sh`
+// step never reaches the container stdout (durable-task streams it over
+// the remoting channel, Vector reads /var/log/pods and never sees it),
+// so the POST is the record and the echo is what a human reads.
+//
+// The Content-Type is NOT decorative: without it curl declares
+// x-www-form-urlencoded and VictoriaLogs discards the whole body,
+// returning HTTP 200 and zero rows — no drop, no log, no complaint. It
+// cost an afternoon to find out (phase 85).
+def postEvents(List events) {
+  if (!events) { return }
+  def body = ''
+  for (ev in events) { body += groovy.json.JsonOutput.toJson(ev) + '\n' }
+  writeFile file: 'watch-events.jsonl', text: body
+  sh '''
+    set -e
+    while IFS= read -r line; do printf 'AEGIS_EVENT %s\\n' "$line"; done < watch-events.jsonl
+    curl -fsS --max-time 15 \
+      -H 'Content-Type: application/stream+json' --data-binary @watch-events.jsonl \
+      'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \
+      || echo 'NOTICE: the events could not be recorded in vlogs-events (the watch does NOT fail over this)'
+    rm -f watch-events.jsonl
+  '''
+}
+
+// Pulls `ref` to watch.tar and scans it. Returns
+//   [ok: true,  crit: n, high: n, findings: [[cve, severity, pkg, installed, fixed], ...]]
+//   [ok: false]  when the pull or the scan did not run to completion.
+//
+// THE WRAP IS THE POINT. trivy is run with --exit-code 0 (findings are
+// not failures here) and a template that prints one line per CVE. A
+// transport error or a bad tar ALSO leaves an empty output — and an
+// empty output must never read as "clean". So the exit status of trivy
+// itself is what decides: non-zero → nothing is counted, the image is
+// marked failed, and the absent series says "not measured" instead of
+// a zero saying "nothing found". Silence-as-success is the cardinal
+// sin of this tree; this function is where it would be committed.
+//
+// --ignore-unfixed: every line that comes out has a fix available.
+// That is what "fixable" means in the metric names, and it is what
+// makes the count actionable: a CVE with no fix is a fact, a CVE with a
+// fix is a task.
+//
+// trivy has no jq, and neither does anything else in this pod: the
+// template output is plain whitespace-separated fields, counted in
+// Groovy. FixedVersion may carry a comma-separated list with spaces
+// ("3.0.19-r0, 3.1.2-r0"), so it is everything after the fourth field.
+def pullAndScan(String ref, boolean withIgnorefile) {
+  def out = [ok: false, crit: 0, high: 0, findings: []]
+  env.PULL_REF = ref
+  env.WATCH_IGNOREFILE = withIgnorefile ? "${env.WORKSPACE}/mirror-images/trivyignore.yaml" : ''
+  try {
+    def prc = -1
+    container('crane') {
+      // The SAME retry loop as mirror-images, for the same reason: the
+      // pull is the only step that depends on a third-party service
+      // (public.ecr.aws answered TOOMANYREQUESTS on build 3 there), and
+      // "the network failed" is retried while "the image is no good"
+      // never is. Hence no retry on the scan.
+      prc = sh(returnStatus: true, script: '''
+        set -e
+        rm -f watch.tar
+        echo "-- pull $PULL_REF"
+        n=0
+        until crane pull "$PULL_REF" watch.tar; do
+          n=$((n+1))
+          if [ "$n" -ge 3 ]; then
+            echo "   pull failed 3 times — giving up on this image"
+            exit 1
+          fi
+          echo "   transient failure; retry $n/3 in $((n*20))s"
+          sleep $((n*20))
+        done
+      ''')
+    }
+    if (prc != 0) {
+      echo "NOTICE: ${ref} could not be pulled (exit ${prc}) — NOT measured"
+      return out
+    }
+    def src = -1
+    container('trivy') {
+      src = sh(returnStatus: true, script: '''
+        set -e
+        rm -f watch-scan.txt
+        echo "-- scan $PULL_REF"
+        if [ -n "$WATCH_IGNOREFILE" ]; then
+          set -- --ignorefile "$WATCH_IGNOREFILE"
+        else
+          set --
+        fi
+        trivy image --server "$TRIVY_SERVER" --input watch.tar \
+          --exit-code 0 --severity CRITICAL,HIGH --ignore-unfixed \
+          --scanners vuln --no-progress "$@" \
+          --format template \
+          --template '{{range .}}{{range .Vulnerabilities}}{{.VulnerabilityID}} {{.Severity}} {{.PkgName}} {{.InstalledVersion}} {{.FixedVersion}}{{"\\n"}}{{end}}{{end}}' \
+          > watch-scan.txt
+      ''')
+    }
+    if (src != 0) {
+      echo "NOTICE: the scan of ${ref} did not complete (trivy exit ${src}) — NOT measured; an empty report after an error is not a clean report"
+      return out
+    }
+    for (line in readFile('watch-scan.txt').split('\n')) {
+      def l = line.trim()
+      if (!l) { continue }
+      def f = l.split(/\s+/)
+      if (f.size() < 4) {
+        echo "NOTICE: unreadable finding line ignored: ${l}"
+        continue
+      }
+      def fixed = ''
+      for (int i = 4; i < f.size(); i++) { fixed += (fixed ? ' ' : '') + f[i] }
+      if (f[1] == 'CRITICAL') { out.crit += 1 }
+      if (f[1] == 'HIGH')     { out.high += 1 }
+      out.findings << [f[0], f[1], f[2], f[3], fixed]
+      echo "   ${f[1]} ${f[0]} ${f[2]} ${f[3]} -> ${fixed}"
+    }
+    out.ok = true
+    echo "   CRITICAL ${out.crit} · HIGH ${out.high}"
+    return out
+  } finally {
+    sh 'rm -f watch.tar watch-scan.txt || true'
+  }
+}
+
+pipeline {
+  agent {
+    kubernetes {
+      // jenkins-system's strict RQ: EVERY container declares limits
+      // (jnlp included — never `yaml ''`, that overrides the default).
+      yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  imagePullSecrets:
+  - name: regcred-internal
+  containers:
+  - name: jnlp
+    image: jenkins/inbound-agent:3355.v388858a_47b_33-23
+    resources:
+      requests: { cpu: 500m, memory: 512Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+  # crane: talks to the PUBLIC registries (upstream digests, candidate
+  # pulls) and to the internal one (what we serve). SSL_CERT_FILE points
+  # at the aegis CA and that does NOT break public TLS: Go loads that
+  # file IN ADDITION TO the system certificate directories, not instead
+  # of them — verified against this very binary when mirror-images was
+  # written. One container for both sides.
+  - name: crane
+    image: registry.registry-system.svc.cluster.local:5000/aegis-ci-crane:v0.20.3
+    command: ['sleep', 'infinity']
+    env:
+    - name: DOCKER_CONFIG
+      value: /crane/docker
+    - name: SSL_CERT_FILE
+      value: /crane/ca/ca.crt
+    volumeMounts:
+    - name: regcred
+      mountPath: /crane/docker/config.json
+      subPath: .dockerconfigjson
+      readOnly: true
+    - name: ca-trust
+      mountPath: /crane/ca/ca.crt
+      subPath: ca.crt
+      readOnly: true
+    resources:
+      requests: { cpu: 250m, memory: 256Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+  # trivy: THIN client — the server (trivy-system) holds the DB, and
+  # "today's DB" is the whole reason this job runs daily instead of
+  # once per build.
+  - name: trivy
+    image: ghcr.io/aquasecurity/trivy:0.72.0
+    command: ['sleep', 'infinity']
+    resources:
+      requests: { cpu: 250m, memory: 256Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+  volumes:
+  - name: regcred
+    secret:
+      secretName: regcred-internal
+      items: [{ key: .dockerconfigjson, path: .dockerconfigjson }]
+  - name: ca-trust
+    secret:
+      secretName: aegis-ca-trust
+      items: [{ key: ca.crt, path: ca.crt }]
+'''
+      defaultContainer 'jnlp'
+    }
+  }
+  options {
+    // Two watches at once would push two contradictory sets of values
+    // for the same series within the same minute; one morning's answer
+    // is one run.
+    disableConcurrentBuilds()
+    timeout(time: 60, unit: 'MINUTES')
+  }
+  environment {
+    REGISTRY     = 'registry.registry-system.svc.cluster.local:5000'
+    TRIVY_SERVER = 'http://trivy.trivy-system.svc.cluster.local:4954'
+  }
+  stages {
+    stage('preflight') {
+      // The ONE thing that makes the watch impossible rather than
+      // partial. Without a trivy-server there is nothing to ask, and a
+      // run that pushed "0 findings" because it could not scan would be
+      // the exact lie this job exists to prevent.
+      steps {
+        container('trivy') {
+          sh '''
+            set -e
+            wget -q -T 10 -O /dev/null "${TRIVY_SERVER}/healthz" || {
+              echo "ERROR: trivy-server is not answering at ${TRIVY_SERVER}."
+              echo "       The watch cannot look at anything without it, and it will"
+              echo "       not push a heartbeat it did not earn: ImageWatchSilent is"
+              echo "       the correct alarm for this morning."
+              exit 1
+            }
+          '''
+        }
+      }
+    }
+
+    stage('inventory') {
+      // Same parser as mirror-images, plus the split of the source into
+      // repo / tag / pinned digest that the upstream question needs.
+      // Every name that will become a label value or reach a shell is
+      // validated here: images.txt is trusted content, but a validated
+      // name is a name that cannot surprise the exposition format.
+      steps {
+        script {
+          def targets = []
+          for (line in readFile('mirror-images/images.txt').split('\n')) {
+            def l = line.trim()
+            if (!l || l.startsWith('#')) { continue }
+            def parts = l.split(/\s+/)
+            if (parts.size() != 2) {
+              error "images.txt: malformed line (2 fields expected): ${l}"
+            }
+            def at = parts[0].indexOf('@')
+            if (at < 0) {
+              error "images.txt: the source must be pinned by digest: ${parts[0]}"
+            }
+            def pinned  = parts[0].substring(at + 1)
+            def nameTag = parts[0].substring(0, at)
+            if (!(pinned ==~ /sha256:[0-9a-f]{64}/)) {
+              error "images.txt: not a sha256 digest: ${pinned}"
+            }
+            // The tag is whatever follows the last ':' AFTER the last
+            // '/', so that a registry port (host:5000/name) is not
+            // mistaken for one.
+            def slash = nameTag.lastIndexOf('/')
+            def colon = nameTag.lastIndexOf(':')
+            def srcRepo = nameTag
+            def srcTag  = ''
+            if (colon > slash) {
+              srcRepo = nameTag.substring(0, colon)
+              srcTag  = nameTag.substring(colon + 1)
+            }
+            def dslash = parts[1].lastIndexOf('/')
+            def dcolon = parts[1].lastIndexOf(':')
+            def dstName = dcolon > dslash ? parts[1].substring(0, dcolon) : parts[1]
+            if (!(dstName ==~ /[A-Za-z0-9][A-Za-z0-9._\/-]*/) || !(parts[1] ==~ /[A-Za-z0-9][A-Za-z0-9._\/:-]*/)) {
+              error "images.txt: destination name I cannot turn into a label: ${parts[1]}"
+            }
+            if (!(srcRepo ==~ /[A-Za-z0-9][A-Za-z0-9._\/:-]*/) || !(srcTag ==~ /[A-Za-z0-9._-]*/)) {
+              error "images.txt: source I cannot hand to a shell: ${parts[0]}"
+            }
+            targets << [kind: 'mirror', image: dstName, dst: parts[1],
+                        srcRepo: srcRepo, srcTag: srcTag, pinned: pinned]
+          }
+          if (targets.isEmpty()) { error 'images.txt has no entries at all' }
+
+          // The bases aegis OWNS: one member per base-images/<m>/
+          // Containerfile, served as aegis-base-<m>. Which tag is
+          // "current" is resolved in the next stage from the registry
+          // itself. An instance may own none: that is a NOTICE, not an
+          // error.
+          def ls = sh(returnStdout: true,
+                      script: 'ls -d base-images/*/Containerfile 2>/dev/null || true').trim()
+          if (ls) {
+            for (p in ls.split('\n')) {
+              def m = p.trim().split('/')[1]
+              if (!(m ==~ /[a-z0-9][a-z0-9-]*/)) {
+                error "base-images: member name I cannot turn into a label: ${m}"
+              }
+              targets << [kind: 'base', image: "aegis-base-${m}".toString(), member: m, dst: '']
+            }
+          } else {
+            echo 'NOTICE: no base-images/*/Containerfile — this instance owns no bases; only the mirror list is watched'
+          }
+
+          echo "${targets.size()} image(s) to watch:"
+          for (t in targets) {
+            if (t.kind == 'mirror') {
+              def q = t.srcTag ? "upstream ${t.srcRepo}:${t.srcTag}" : 'upstream tag UNKNOWN (old name@digest form: the moved question will NOT be measured)'
+              echo "  ${t.dst}  (${q}, pinned ${t.pinned})"
+            } else {
+              echo "  aegis-base-${t.member}  (base we own; current tag from the registry)"
+            }
+          }
+          TARGETS = targets
+          // image → [failed, not_mirrored, crit, high, moved, candidate,
+          // digest]. Emitted ONCE, at the end: a later stage may
+          // override an earlier answer (a failed upstream lookup marks
+          // an image failed even if its serving scan was fine), and
+          // one line per series per run is what the heartbeat promises.
+          STATE = [:]
+          for (t in targets) {
+            STATE[t.image] = [failed: 0, not_mirrored: 0, crit: null, high: null,
+                              moved: null, candidate: null, digest: '', kind: t.kind]
+          }
+          IGNORE_METRICS = []
+          TRIGGERED = ''
+        }
+      }
+    }
+
+    stage('serving') {
+      // Question 1: is what we SERVE still clean, against today's DB?
+      // The pull comes from the internal registry: it is the very bytes
+      // a tenant would receive, not what upstream serves under that tag.
+      steps {
+        script {
+          for (t in TARGETS) {
+            def st = STATE[t.image]
+            echo "================ ${t.image} ================"
+            def dst = t.dst
+            if (t.kind == 'base') {
+              // Which tag is "current" for a base: the highest of the
+              // shape <alpine-minor>-<build padded 6>. The regex is not
+              // decoration: a stray tag of another shape (a manual
+              // push, a test) must NOT become "what we serve". Plain
+              // sort is enough while the minor has two digits — the
+              // padded build keeps the same-minor case ordered.
+              env.BASE_REPO = "${env.REGISTRY}/${t.image}"
+              def lrc = -1
+              container('crane') {
+                lrc = sh(returnStatus: true, script: '''
+                  set -e
+                  rm -f watch-tags watch-ls.err
+                  crane ls "$BASE_REPO" > watch-tags 2> watch-ls.err
+                ''')
+              }
+              if (lrc != 0) {
+                def err = readFile('watch-ls.err').trim()
+                if (err.contains('NAME_UNKNOWN') || err.contains('MANIFEST_UNKNOWN') || err.contains('not found') || err.contains('404')) {
+                  echo "NOTICE: ${t.image} has never been pushed (base-images has not run yet on this instance) — not mirrored"
+                  st.not_mirrored = 1
+                } else {
+                  echo "NOTICE: could not list ${t.image}: ${err} — NOT measured"
+                  st.failed = 1
+                }
+                continue
+              }
+              def cur = sh(returnStdout: true,
+                           script: "set -e; grep -E '^[0-9]+[.][0-9]+-[0-9]{6}\$' watch-tags | sort | tail -1 || true").trim()
+              if (!cur) {
+                echo "NOTICE: ${t.image} exists but carries no tag of the shape <minor>-<build> — nothing we would serve; not mirrored"
+                st.not_mirrored = 1
+                continue
+              }
+              dst = "${t.image}:${cur}".toString()
+              echo "   current tag: ${cur}"
+            }
+            env.DST = dst
+            def mrc = -1
+            container('crane') {
+              mrc = sh(returnStatus: true, script: '''
+                set -e
+                rm -f watch-manifest.err watch-digest
+                crane manifest "${REGISTRY}/${DST}" > /dev/null 2>> watch-manifest.err
+                crane digest "${REGISTRY}/${DST}" > watch-digest 2>> watch-manifest.err
+              ''')
+            }
+            if (mrc != 0) {
+              def err = readFile('watch-manifest.err').trim()
+              if (err.contains('MANIFEST_UNKNOWN') || err.contains('NAME_UNKNOWN') || err.contains('not found') || err.contains('404')) {
+                // A NOTICE, not a failure: on a fresh instance the
+                // mirror may not have run yet, and the list may carry
+                // an entry that was added but not mirrored. Either way
+                // the answer is "we do not serve this", and it is
+                // measured as such.
+                echo "NOTICE: ${env.REGISTRY}/${dst} is not in the registry — not mirrored"
+                st.not_mirrored = 1
+              } else {
+                echo "NOTICE: could not read ${env.REGISTRY}/${dst}: ${err} — NOT measured"
+                st.failed = 1
+              }
+              continue
+            }
+            st.digest = readFile('watch-digest').trim()
+            echo "   serving ${st.digest}"
+            // --ignorefile ONLY for the mirror list: those are the
+            // measured exceptions of mirror-images/trivyignore.yaml, and
+            // the watch must see the image the way the mirror saw it.
+            // The bases we own have no exceptions, by construction.
+            def r = pullAndScan("${env.REGISTRY}/${dst}".toString(), t.kind == 'mirror')
+            if (!r.ok) {
+              st.failed = 1
+              continue
+            }
+            st.crit = r.crit
+            st.high = r.high
+            def events = []
+            def ts = nowIso()
+            for (f in r.findings) {
+              events << [source: 'jenkins-watch', event: 'image-vuln', image: t.image,
+                         digest: st.digest, cve: f[0], severity: f[1], pkg: f[2],
+                         installed: f[3], fixed: f[4], build: env.BUILD_NUMBER, ts: ts]
+            }
+            postEvents(events)
+          }
+          sh 'rm -f watch-tags watch-ls.err watch-manifest.err watch-digest || true'
+        }
+      }
+    }
+
+    stage('upstream') {
+      // Questions 2 and 3, for the mirror list only: did the tag move
+      // upstream, and is what it moved to any cleaner? `crane digest`
+      // against the public registry is a HEAD, not a pull; only a moved
+      // tag costs a pull, and that pull is the candidate — scanned
+      // exactly like what we serve, ignorefile included, so that the
+      // two totals are comparable.
+      //
+      // The bases are not asked: their "upstream" is the apk index, and
+      // the answer to "would a rebuild help" is the rebuild itself
+      // (the loop stage).
+      steps {
+        script {
+          for (t in TARGETS) {
+            if (t.kind != 'mirror') { continue }
+            def st = STATE[t.image]
+            echo "================ ${t.image} (upstream) ================"
+            if (!t.srcTag) {
+              // Old `name@digest` form: the mirror still works, the
+              // question cannot be asked. Nothing is pushed for moved
+              // or candidate — an absent series is the honest answer
+              // — and the serving answer from the previous stage stays.
+              echo "NOTICE: ${t.dst} carries no upstream tag in images.txt — whether upstream moved is NOT measured (write it as name:tag@digest)"
+              continue
+            }
+            env.UP_REF = "${t.srcRepo}:${t.srcTag}"
+            def drc = -1
+            container('crane') {
+              drc = sh(returnStatus: true, script: '''
+                set -e
+                rm -f watch-upstream
+                echo "-- digest $UP_REF"
+                n=0
+                until crane digest "$UP_REF" > watch-upstream; do
+                  n=$((n+1))
+                  if [ "$n" -ge 3 ]; then
+                    echo "   digest lookup failed 3 times — giving up on this image"
+                    exit 1
+                  fi
+                  echo "   transient failure; retry $n/3 in $((n*20))s"
+                  sleep $((n*20))
+                done
+              ''')
+            }
+            if (drc != 0) {
+              // Overrides the serving answer: an image whose upstream
+              // could not be read this morning is an image the watch
+              // did not finish looking at.
+              echo "NOTICE: upstream ${t.srcRepo}:${t.srcTag} could not be read — the image is marked failed for this run"
+              st.failed = 1
+              continue
+            }
+            def upstream = readFile('watch-upstream').trim()
+            if (upstream == t.pinned) {
+              st.moved = 0
+              // Not moved: the candidate IS what we serve, so the
+              // candidate total is the serving total. Pushing it keeps
+              // the series DENSE — one value per image every morning,
+              // moved or not — which is what lets UpstreamFixAvailable
+              // compare candidate against current without first asking
+              // whether upstream moved. An absent series would read as
+              // "unknown", not as "same as today". When the serving
+              // scan did not produce a total there is nothing honest to
+              // copy, and the series stays absent for this image.
+              st.candidate = (st.crit != null) ? st.crit + st.high : null
+              echo "   upstream still at the pinned digest"
+              continue
+            }
+            st.moved = 1
+            echo "   upstream MOVED: ${t.pinned} -> ${upstream}"
+            // The candidate by digest, so that what is scanned is what
+            // was seen — the tag could move again between the HEAD and
+            // the pull.
+            def r = pullAndScan("${t.srcRepo}:${t.srcTag}@${upstream}".toString(), true)
+            if (!r.ok) {
+              st.failed = 1
+            } else {
+              st.candidate = r.crit + r.high
+            }
+            postEvents([[source: 'jenkins-watch', event: 'upstream-moved', image: t.image,
+                         upstream: "${t.srcRepo}:${t.srcTag}".toString(),
+                         digest: st.digest, pinned: t.pinned, new_digest: upstream,
+                         candidate_fixable: st.candidate,
+                         current_fixable: (st.crit != null) ? st.crit + st.high : null,
+                         build: env.BUILD_NUMBER, ts: nowIso()]])
+          }
+          sh 'rm -f watch-upstream || true'
+        }
+      }
+    }
+
+    stage('ignores') {
+      // Every exception in trivyignore.yaml has an expiry, and an expiry
+      // nobody watches is a permanent exception with extra steps. This
+      // derives what trivy never publishes: how long each one has left.
+      //
+      // Parsed with awk, not a YAML parser: there is no yaml tool and no
+      // jq anywhere in this pod, and the file's shape is fixed by hand
+      // (`- id:` then, somewhere below it, `expired_at:`). The rule is
+      // literal: each entry's date is the FIRST `expired_at:` after its
+      // `id:`, inside the `vulnerabilities:` section. jnlp's date is GNU
+      // (Debian image), which is why the epoch is computed here and not
+      // in the alpine containers.
+      steps {
+        script {
+          def raw = sh(returnStdout: true, script: '''
+            set -e
+            f=mirror-images/trivyignore.yaml
+            test -f "$f" || { echo "NOFILE"; exit 0; }
+            awk '
+              /^[a-z_]+:/ { section = $1; sub(/:.*/, "", section) }
+              section == "vulnerabilities" && /^[[:space:]]*-[[:space:]]*id:/ {
+                if (id != "") print id, "-"
+                id = $0; sub(/.*id:[[:space:]]*/, "", id); sub(/[[:space:]].*/, "", id); gsub(/"/, "", id)
+              }
+              section == "vulnerabilities" && id != "" && /^[[:space:]]*expired_at:/ {
+                d = $0; sub(/.*expired_at:[[:space:]]*/, "", d); sub(/[[:space:]].*/, "", d); gsub(/"/, "", d)
+                print id, d; id = ""
+              }
+              END { if (id != "") print id, "-" }
+            ' "$f" | while read -r id day; do
+              if [ "$day" = "-" ]; then
+                printf '%s inf\\n' "$id"
+              else
+                ep=$(date -u -d "$day 00:00:00 UTC" +%s) || {
+                  echo "ERROR: trivyignore.yaml: cannot read expired_at '$day' of $id as a date" >&2
+                  exit 1
+                }
+                printf '%s %s %s\\n' "$id" "$ep" "$day"
+              fi
+            done
+          ''').trim()
+          if (raw == 'NOFILE') {
+            echo 'NOTICE: no mirror-images/trivyignore.yaml — this instance carries no exceptions'
+          } else if (!raw) {
+            echo 'NOTICE: trivyignore.yaml has no entries under vulnerabilities:'
+          } else {
+            def now = nowEpoch().toLong()
+            def events = []
+            def ts = nowIso()
+            for (line in raw.split('\n')) {
+              def f = line.trim().split(/\s+/)
+              if (!(f[0] ==~ /[A-Za-z0-9-]+/)) {
+                error "trivyignore.yaml: id I cannot turn into a label: ${f[0]}"
+              }
+              if (f[1] == 'inf') {
+                // An entry without expired_at never expires. Pushed as
+                // +Inf rather than skipped: an exception that lasts
+                // forever is a fact worth a series, and skipping it
+                // would make it the one nobody can see.
+                echo "NOTICE: ${f[0]} has no expired_at — a permanent exception; pushed as +Inf"
+                IGNORE_METRICS << "aegis_trivyignore_expires_in_seconds{id=\"${f[0]}\"} +Inf".toString()
+                continue
+              }
+              def left = f[1].toLong() - now
+              def days = left.intdiv(86400L)
+              echo "   ${f[0]} expires ${f[2]} (${days} day(s) left)"
+              IGNORE_METRICS << "aegis_trivyignore_expires_in_seconds{id=\"${f[0]}\"} ${left}".toString()
+              if (left < 30L * 86400L) {
+                events << [source: 'jenkins-watch', event: 'ignore-expiring',
+                           image: 'mirror-images/trivyignore.yaml', id: f[0],
+                           expired_at: f[2], seconds_left: left,
+                           build: env.BUILD_NUMBER, ts: ts]
+              }
+            }
+            postEvents(events)
+          }
+        }
+      }
+    }
+
+    stage('loop') {
+      // The one action the watch takes on its own, and only on what
+      // aegis OWNS. A base with a fixable CRITICAL or HIGH is a base
+      // whose fix is an `apk upgrade` away — that is the whole reason
+      // for owning bases (see the alpine 3.22 entry of images.txt) —
+      // so the rebuild is fired, with ONLY the members that need it.
+      // base-images scans blocking and propagates the digest into every
+      // consumer's FROM; if the fix is not in the apk index yet, that
+      // build fails loudly and the watch will ask again tomorrow.
+      //
+      // NEVER for a third party. Re-mirroring is not a rebuild: it
+      // changes which upstream bytes the platform signs with its own
+      // key, and the day of CVE-2026-14456 the answer to "would a new
+      // digest help" was NO, twice. That call — pick a newer tag, wait
+      // for upstream, or write a measured exception — is a human one.
+      // The watch's job is to make it an informed one:
+      // aegis_upstream_moved and the candidate total say exactly
+      // whether step 1 of "HOW TO UPDATE AN IMAGE" would be worth doing.
+      steps {
+        script {
+          def due = []
+          for (t in TARGETS) {
+            if (t.kind != 'base') { continue }
+            def st = STATE[t.image]
+            if (st.crit == null) { continue }         // not measured: nothing to act on
+            if (st.crit + st.high > 0) { due << t.member }
+          }
+          if (due.isEmpty()) {
+            echo 'no base we own carries a fixable CRITICAL or HIGH this morning — nothing to rebuild'
+          } else {
+            def members = due.join(' ')
+            echo "triggering base-images for: ${members}"
+            for (m in due) {
+              def st = STATE["aegis-base-${m}".toString()]
+              echo "   ${m}: CRITICAL ${st.crit} · HIGH ${st.high} fixable in what we serve"
+            }
+            try {
+              build job: 'base-images',
+                    parameters: [string(name: 'MEMBERS', value: members)],
+                    wait: false, propagate: false
+              TRIGGERED = members
+            } catch (err) {
+              // The watch's own work is done and its metrics are true;
+              // what did not happen is the reaction. Not swallowed: the
+              // build goes UNSTABLE, the summary event carries it, and
+              // the console says so.
+              echo "NOTICE: could not trigger base-images (${err.getMessage()}) — the findings stand, the rebuild did not start"
+              TRIGGERED = "FAILED to trigger base-images for: ${members}".toString()
+              currentBuild.result = 'UNSTABLE'
+            }
+            def images = []
+            for (m in due) { images << "aegis-base-${m}".toString() }
+            postEvents([[source: 'jenkins-watch', event: 'base-rebuild-triggered',
+                         image: images.join(' '), members: members, triggered: TRIGGERED,
+                         build: env.BUILD_NUMBER, ts: nowIso()]])
+          }
+        }
+      }
+    }
+
+    stage('report') {
+      // ONE file, ONE POST, the heartbeat LAST. Every series of the run
+      // was collected in Groovy and is written here, with
+      // `aegis_image_watch_timestamp_seconds` as the final line of the
+      // same body. So the heartbeat only exists if every stage before
+      // it finished AND the body reached vmsingle: a run that died
+      // halfway — or whose POST failed — leaves no heartbeat, and that
+      // absence is exactly what ImageWatchSilent reads. A per-stage
+      // push would have let a half-run look like a run. Same road as
+      // trivy-db-age and every other producer: /api/v1/import/prometheus,
+      // best-effort, with a NOTICE — the watch does not fail over
+      // observability, but it does not keep quiet either.
+      //
+      // The explicit zeros are pushed for the same reason mirror-images
+      // pushes them: an absent series does not say "clean", it says
+      // nothing. Every image gets not_mirrored and failed; the counts,
+      // moved and candidate only when they were actually measured.
+      steps {
+        script {
+          def lines = []
+          def evaluated = 0, notMirrored = 0, failed = 0, moved = 0
+          for (img in STATE.keySet()) {
+            def st = STATE[img]
+            evaluated += 1
+            if (st.not_mirrored == 1) { notMirrored += 1 }
+            if (st.failed == 1)       { failed += 1 }
+            if (st.moved == 1)        { moved += 1 }
+            lines << "aegis_image_not_mirrored{image=\"${img}\"} ${st.not_mirrored}".toString()
+            lines << "aegis_image_watch_failed{image=\"${img}\"} ${st.failed}".toString()
+            if (st.crit != null) {
+              lines << "aegis_image_fixable_vulns{image=\"${img}\",severity=\"CRITICAL\"} ${st.crit}".toString()
+              lines << "aegis_image_fixable_vulns{image=\"${img}\",severity=\"HIGH\"} ${st.high}".toString()
+            }
+            if (st.moved != null) {
+              lines << "aegis_upstream_moved{image=\"${img}\"} ${st.moved}".toString()
+            }
+            if (st.candidate != null) {
+              lines << "aegis_upstream_candidate_fixable_vulns{image=\"${img}\"} ${st.candidate}".toString()
+            }
+          }
+          lines.addAll(IGNORE_METRICS)
+          lines << "aegis_image_watch_timestamp_seconds ${nowEpoch()}".toString()
+          writeFile file: 'watch-metrics.prom', text: lines.join('\n') + '\n'
+          echo "watched ${evaluated} image(s): ${notMirrored} not mirrored, ${failed} not measured, ${moved} moved upstream; triggered: ${TRIGGERED ?: 'nothing'}"
+          sh '''
+            set -e
+            echo "-- metrics of the run:"
+            sed 's/^/   /' watch-metrics.prom
+            curl -fsS --max-time 15 --data-binary @watch-metrics.prom \
+              'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' \
+              || echo 'NOTICE: the watch metrics did not reach vmsingle — no heartbeat this morning; ImageWatchSilent is the correct alarm (the watch does NOT fail over this)'
+            rm -f watch-metrics.prom
+          '''
+          // `image` here is the watch itself: the row needs a _msg (the
+          // events panel shows it), and a summary has no image of its own.
+          postEvents([[source: 'jenkins-watch', event: 'watch-run', image: 'image-watch',
+                       evaluated: evaluated, not_mirrored: notMirrored, failed: failed,
+                       moved: moved, triggered: TRIGGERED,
+                       build: env.BUILD_NUMBER, ts: nowIso()]])
+        }
+      }
+    }
+  }
+}

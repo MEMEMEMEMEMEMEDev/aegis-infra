@@ -60,10 +60,13 @@ the generator:
     ...one job per service with a repo, from every contract...
     # --- END DERIVED ---
 
-Outside the block, what was written by hand survives (the platform jobs
-such as mirror-images). Migration debt noted: the 5 current jobs are by
-hand and `org-canary` has no contract — they move into the block when
-their org has a contract, not before.
+Outside the block, what was written by hand survives, and stays by hand
+by design: the five platform jobs — the canary's multibranch,
+`ci-images`, `mirror-images`, `base-images` and `image-watch` (the
+image chain of `seed/platform/docs/protocols/images.md`). None of them
+belongs to an org, so none of them ever moves into the block. Migration
+debt noted: `org-canary` has no contract — its job moves into the block
+when it has one, not before.
 
 **2b. The instantiated Jenkinsfile.** The template has 1 CHANGEME in 452
 lines: it is instantiated from the contract (`IMAGE = '<org>-<svc>'`)
@@ -160,10 +163,13 @@ delete` [TODAY].
 
 For redis, a queue, or whatever the future asks for. Half of it already
 exists [TODAY]: mirror-images fetches+scans+signs third parties ("redis,
-postgres, whatever", says its own Jenkinsfile). The complete checklist:
+postgres, whatever", says its own Jenkinsfile), and the image chain
+around it — mirrors, owned bases, the daily watch — is a protocol of
+its own: `seed/platform/docs/protocols/images.md`. The complete
+checklist:
 
-1. a line in `mirror-images/images.txt` (origin BY DIGEST) + run the job
-   → mirrored and signed
+1. a line in `mirror-images/images.txt` (`<source>:<tag>@<digest>
+   <dst>:<tag>`, images.md §2) + run the job → mirrored and signed
 2. an entry in `services.yaml`: the internal registry's image by digest,
    resources, the shape of the credential. The decision is taken ONCE,
    for every org
@@ -183,16 +189,30 @@ postgres.
 ## 7. Protocol: app dependencies (the red pipeline with an exit)
 
 [TODAY] the scan blocks CRITICAL/HIGH — that is the gate doing its job,
-not a failure. What is missing is the dev's way out:
+not a failure. The way out depends on WHERE the CVE is, and since
+2026-08-27 the platform's half of it is written down and running
+(`seed/platform/docs/protocols/images.md`):
 
-1. first: bump the dependency's version (the normal fix)
-2. with no fix available: a DECLARED exception — a `trivyignore` in the
-   app's repo (the mirror-images/trivyignore.yaml pattern [TODAY]) with
-   the CVE, a justification and a mandatory **expiry date**
-3. an expired exception = a red build again. Without an expiry it is
-   invisible debt; with one it is scheduled debt
-4. the scan stage reads the repo's trivyignore and lists in the log
-   EVERY active exception and its remaining days (visible, not buried)
+1. in the app's own dependency: bump its version (the normal fix). The
+   app's layer has no exceptions and will not get any
+2. in the BASE under the app: nothing to do in the app. A base aegis
+   owns is rebuilt by the loop the morning the distro ships the fix and
+   its digest is committed into the app's `FROM` (images.md §3-4); a
+   third-party base with no upstream rebuild has no exception path —
+   the answer is to own it (images.md §6). This was CVE-2026-14456, the
+   red pipeline this section was written about
+3. in a mirrored third party we cannot rebuild: a DECLARED exception in
+   `mirror-images/trivyignore.yaml`, with the measurement that proves
+   the CVE is not in the binary and an `expired_at`. Expiry is watched
+   (alert `TrivyIgnoreExpiring`, 30 days' notice); expired = red again,
+   on purpose. Without an expiry it is invisible debt; with one it is
+   scheduled debt
+
+Still a sketch, not built: a per-repo trivyignore for an app's own
+dependencies, read by the scan stage, with EVERY active exception and
+its remaining days listed in the log (visible, not buried). The
+discipline it would copy — measurement, expiry, red on expiry — is the
+one the platform already applies to its mirrors.
 
 ## 8. Out of scope for this version (decided, not forgotten)
 

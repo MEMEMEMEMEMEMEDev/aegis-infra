@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>aegis nginx base</title>
+</head>
+<body>
+  <h1>aegis nginx base</h1>
+  <p>This is the aegis-base-nginx image with nothing on top of it.
+     A consumer replaces this page with its own site
+     (<code>COPY --chown=101:101 dist/ /usr/share/nginx/html/</code>)
+     and its own <code>server{}</code> in
+     <code>/etc/nginx/conf.d/default.conf</code>, listening on 8080.</p>
+</body>
+</html>

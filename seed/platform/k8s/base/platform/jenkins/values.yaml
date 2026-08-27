@@ -135,6 +135,81 @@ controller:
                   }
                 }
               }
+          # MIND THE SHAPE: every job goes in ITS OWN `- script: >`.
+          # The `>` FOLDS the block onto a single line, so two
+          # pipelineJob in the same item become `...} pipelineJob(...)`,
+          # which Groovy reads as a CHAINED call on the previous job and
+          # blows up the whole seed with MissingMethodException — no new
+          # job is born and the error only shows in the JCasC reload
+          # log. Check 139 counts the items.
+          - script: >
+              pipelineJob('mirror-images') {
+                displayName('mirror-images (third parties: pull + scan + sign)')
+                description('Pulls third-party images into the internal registry, scans them and signs them with the aegis key. Without this no public image can run in a tenant namespace. The list lives in mirror-images/images.txt, pinned by digest. Mirroring does NOT deploy. Fired once by phase 80; after that, by hand when images.txt changes.')
+                definition {
+                  cpsScm {
+                    scm {
+                      git {
+                        remote {
+                          url('git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git')
+                          credentials('ops-stack-repo-ro')
+                        }
+                        branch('main')
+                      }
+                    }
+                    scriptPath('mirror-images/Jenkinsfile')
+                  }
+                }
+              }
+          - script: >
+              pipelineJob('base-images') {
+                displayName('base-images (bases aegis owns: build + contract + scan + sign + propagate)')
+                description('Builds the base images aegis OWNS (base-images/<member>/Containerfile) with kaniko, asserts their contract (UID 101, port 8080), scans them (blocking, no exceptions), pushes and signs them, then commits the new digest into the FROM of every consumer listed in base-images/consumers.txt. MEMBERS empty = every member; image-watch passes only the members with a fixable CVE.')
+                parameters {
+                  stringParam('MEMBERS', '', 'space-separated member directories under base-images/ (e.g. "nginx"); empty = all of them')
+                }
+                definition {
+                  cpsScm {
+                    scm {
+                      git {
+                        remote {
+                          url('git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git')
+                          credentials('ops-stack-repo-ro')
+                        }
+                        branch('main')
+                      }
+                    }
+                    scriptPath('base-images/Jenkinsfile')
+                  }
+                }
+              }
+          # The cron lives HERE and not in the Jenkinsfile: a declarative
+          # `triggers { cron }` inside a Jenkinsfile is only registered
+          # after the job's FIRST run, so until somebody ran it by hand
+          # the schedule did not exist — a silent hole. Declared in the
+          # job-dsl it is effective the moment JCasC seeds the job.
+          - script: >
+              pipelineJob('image-watch') {
+                displayName('image-watch (daily: what we serve, against today\'s vulnerability DB)')
+                description('Every morning it re-scans every mirrored image and every base aegis owns against the CURRENT trivy DB, asks whether each upstream moved and whether the candidate is clean, and checks how long each trivyignore exception has left. It never blocks anything: it pushes metrics and events, and for the bases aegis OWNS it fires base-images with the members that have a fixable CVE. Third parties are never re-mirrored on their own.')
+                triggers {
+                  cron('H 6 * * *')
+                }
+                definition {
+                  cpsScm {
+                    scm {
+                      git {
+                        remote {
+                          url('git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git')
+                          credentials('ops-stack-repo-ro')
+                        }
+                        branch('main')
+                      }
+                    }
+                    scriptPath('image-watch/Jenkinsfile')
+                  }
+                }
+              }
           # --- DERIVED by aegis-org (tenant jobs): do not edit by hand ---
           # One multibranch job per repo declared in a contract in
           # orgs/. The job's name is its Application's: one repo, one

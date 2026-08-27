@@ -887,6 +887,18 @@ gate_diag "obs-deadman-firing" \
     'curl -fsS --max-time 15 "http://$VMALERT_IP:8880/api/v1/alerts" 2>/dev/null | jq . 2>/dev/null | head -n 40' \
     poll 600 15 _deadman_firing
 
+# ── 85.13 the morning question, asked once at birth ───────────────
+# image-watch runs on a cron (job-dsl, `H 6 * * *`) and pushes its
+# own heartbeat; ImageWatchSilent goes off when that heartbeat is
+# absent. On a fresh instance the first cron is up to a day away, so
+# without this the alert would be a chronic red for the first 24
+# hours — a red that trains the operator to ignore it, which is the
+# one thing the rules file forbids. Firing it once here is what makes
+# "silent" mean "it stopped", and not "it has not started yet". It is
+# a gate because the job never fails over an image (those become
+# metrics): if it fails, the watch itself is broken.
+gate "obs-image-watch-primera-corrida" jenkins_build_retry image-watch 1200 2
+
 # ── the phone's credential, shown ONCE (§3) ────────────────────────
 # Only HERE and not when it is minted: ntfy is already alive and the
 # operator can subscribe the app right away. W-01: the value does NOT

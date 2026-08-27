@@ -14,7 +14,9 @@
 // in production; that is an explicit bump in the manifest that consumes
 // it. Two distinct decisions, taken separately.
 //
-// The list lives in mirror-images/images.txt, pinned BY DIGEST.
+// The list lives in mirror-images/images.txt, pinned BY DIGEST
+// (`name:tag@digest`: the tag is kept as text for image-watch, the
+// digest is what gets pulled).
 //
 // NO kaniko: nothing is built here. crane pulls the tar, trivy looks at
 // it, crane pushes it, cosign signs it. The order matters: the scan runs
@@ -171,6 +173,15 @@ spec:
               // pointer, and mirroring one signs with OUR key whatever
               // the source happens to be serving today.
               error "images.txt: the source must be pinned by digest: ${parts[0]}"
+            }
+            if (!(parts[0] =~ /:[^@\/]+@sha256:/)) {
+              // Not an error: instances written before 2026-08-27 carry
+              // `<source>@<digest>` with the tag in a comment, and they
+              // still mirror fine. What they lose is the morning
+              // question — image-watch cannot ask whether a tag moved
+              // upstream when it does not know the tag. In the seed,
+              // check 135 makes this shape impossible.
+              echo "NOTICE: ${parts[0]} carries no upstream tag — image-watch cannot ask whether upstream moved (write it as name:tag@digest)"
             }
             entries << [src: parts[0], dst: parts[1]]
           }

@@ -313,6 +313,430 @@ data:
             "overrides": []
           },
           "description": "How much what the two panels next to it say is worth. The last build measured them: if that was a month ago, they describe that image and not what is being deployed today. A deployed image that does not show up here is not green: it is unmeasured, and that is what aegis check reports."
+        },
+        {
+          "id": 8,
+          "title": "Fixable CVEs per image, against today's DB",
+          "type": "table",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 32,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (image,severity) (last_over_time(aegis_image_fixable_vulns[2d]))",
+              "instant": true,
+              "format": "table",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              }
+            }
+          ],
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "Value": "fixable"
+                }
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "fixable"
+                },
+                "properties": [
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-text"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "description": "What is RUNNING, re-scanned every morning by image-watch against today's trivy DB, fixable only (--ignore-unfixed). A build-time green says nothing about the CVEs published after the push; this does. Alert ImageWithFixableVulns (after the 24h rebuild window). A 0 next to 'could not evaluate' in the watch console is a zero that measured nothing."
+        },
+        {
+          "id": 9,
+          "title": "Upstream moved / candidate clean",
+          "type": "table",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 32,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "last_over_time(aegis_upstream_moved[2d])",
+              "instant": true,
+              "format": "table",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              }
+            },
+            {
+              "refId": "B",
+              "expr": "last_over_time(aegis_upstream_candidate_fixable_vulns[2d])",
+              "instant": true,
+              "format": "table",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              }
+            }
+          ],
+          "transformations": [
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "Value #A": "upstream moved",
+                  "Value #B": "candidate fixable"
+                }
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "upstream moved"
+                },
+                "properties": [
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {
+                        "type": "value",
+                        "options": {
+                          "0": {
+                            "text": "same digest",
+                            "color": "text",
+                            "index": 0
+                          },
+                          "1": {
+                            "text": "MOVED",
+                            "color": "blue",
+                            "index": 1
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-text"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "candidate fixable"
+                },
+                "properties": [
+                  {
+                    "id": "thresholds",
+                    "value": {
+                      "mode": "absolute",
+                      "steps": [
+                        {
+                          "color": "green",
+                          "value": null
+                        },
+                        {
+                          "color": "red",
+                          "value": 1
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-text"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "description": "Would re-mirroring help? MOVED = the upstream tag points at a new digest; 'candidate fixable' = fixable CVEs in that new digest (equal to the current total when it has not moved). MOVED with 0 is the only case where editing images.txt fixes anything — that is UpstreamFixAvailable. Only for images.txt entries whose tag is known."
+        },
+        {
+          "id": 10,
+          "title": "Days since image-watch ran",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 40,
+            "w": 6,
+            "h": 6
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "(time() - last_over_time(aegis_image_watch_timestamp_seconds[2d])) / 86400",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              }
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "d",
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1.5
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "description": "How much the two tables above are worth: they describe the morning of the last run. Empty is NOT green — it is ImageWatchSilent: the daily job left no heartbeat in two days, and nothing on this instance has re-scanned what it serves since."
+        },
+        {
+          "id": 11,
+          "title": "trivyignore: days left",
+          "type": "table",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 40,
+            "w": 18,
+            "h": 6
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "last_over_time(aegis_trivyignore_expires_in_seconds[2d]) / 86400",
+              "instant": true,
+              "format": "table",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              }
+            }
+          ],
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "renameByName": {
+                  "Value": "days left"
+                }
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "d",
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0
+                  },
+                  {
+                    "color": "green",
+                    "value": 30
+                  }
+                ]
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "days left"
+                },
+                "properties": [
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "color-text"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "description": "One row per exception in trivyignore.yaml, by id. Negative = already expired: the next mirror run and the next watch go red on purpose until somebody re-measures it or removes it. Alert TrivyIgnoreExpiring under 30d. No rows with no exceptions — that is health, not a gap."
+        },
+        {
+          "id": 12,
+          "title": "Listed but not mirrored",
+          "type": "table",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 46,
+            "w": 8,
+            "h": 6
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "last_over_time(aegis_image_not_mirrored[2d]) == 1",
+              "instant": true,
+              "format": "table",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              }
+            }
+          ],
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "Value": true
+                }
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "description": "images.txt entries the watch found absent from the registry. Normal on a fresh instance (mirror-images has not run yet) and a NOTICE, not an alert: nothing runs on an image that is not there. An entry that stays here after a mirror run is a mirror that failed for that image."
+        },
+        {
+          "id": 13,
+          "title": "Days since the base was propagated",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "x": 8,
+            "y": 46,
+            "w": 16,
+            "h": 6
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "(time() - last_over_time(aegis_base_propagated_timestamp_seconds[30d])) / 86400",
+              "legendFormat": "{{image}} → {{repo}}",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "vmsingle"
+              }
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value_and_name"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "d",
+              "decimals": 1
+            },
+            "overrides": []
+          },
+          "description": "When each consumer's FROM was last bumped to a rebuilt aegis-base-*. Read next to 'How long since anyone built it': a base propagated a week ago into a repo nobody built since is a bump that has not reached what runs. A failed bump is BasePropagationFailed, not a gap here."
         }
       ],
       "templating": {
