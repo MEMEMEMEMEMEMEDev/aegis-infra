@@ -97,6 +97,125 @@ decides a merge on its own. Check 52.
 
 ---
 
+## Disease E — silence as success (the instrument never looked)
+
+Named in the code long before it was written down here: `aegis check`
+calls it "the check passes without having looked at its subject".
+The first init on a machine that was not the house one (2026-08-27)
+produced the fullest collection of it in a single day:
+
+- the wizard printed "config written" over a `mv` that had FAILED (the
+  instance's directory did not exist yet) and the init went on with
+  the answers in memory — because `config_wizard || die` suspends
+  `set -e` inside the function, and the `mv` had no `|| die` of its
+  own;
+- the preflight's leftovers check looked at a path that exists on no
+  customer's machine and reported "clean";
+- `jenkins_build_retry` waited the whole 2700 s for a build that never
+  existed: the POST had been refused (a parameterized job needs
+  `buildWithParameters`) and every 404 was read as "not started yet";
+- the phase-80 gate that "pins the canary to a digest" accepted ANY
+  `@sha256:` — the unsigned image already had that shape;
+- the round said "could not count the tenant probes" about a
+  measured zero (no tenant declares a domain).
+
+Typical signature: a green line, or an infinite wait, with the cause
+one step BEFORE it — a write that did not happen, a request that was
+refused, a comparison against the wrong thing.
+
+Class fix (in force):
+- every write that matters carries its own `|| die` (checks 142,
+  060); a trigger is followed by "does the build EXIST" before "did
+  it finish" (`_jenkins_build_appears`, check 060);
+- a gate compares against THE value, not against a shape
+  (`grep -qF "@$DIGEST"`, check 071);
+- a measured zero is said as a zero, and "could not evaluate" is
+  reserved for the instrument not reaching its subject.
+
+## Disease F — product == instance (the house machine hides it)
+
+Until the day the artifact ran on a machine that was not the one it
+was written on, the product's repo and the instance's directory were
+the same folder, with leftovers of every earlier run in it. Whatever
+the init did not do, the folder already had. The first clean instance
+found, in one day, everything that folder had been hiding:
+
+- the instance's `platform/` was seeded in phase 10, and phases 00 and
+  05 had been reading it all along (check 141);
+- three encrypted secrets that ksops generators listed and NO phase
+  wrote — they came from a hand-run `aegis secret create` years of
+  runs ago; without them the garage App never rendered (check 145);
+- `ci/write-digest.mjs`, which every Jenkinsfile runs, was in the
+  canary's repo from earlier builds and in no seed (check 005c);
+- `/usr/local/bin/aegis`: two comments said phase 05 installed it;
+  nothing did (check 143);
+- the preflight assumed the VirtualBox VM it was born on (NIC names,
+  the NAT's DNS) and the wizard's defaults named the operator's own
+  repositories;
+- the build agents' CPU RESERVATIONS were sized for the house
+  machine: on a 4-CPU node the platform at rest reserved 2.5 and a
+  build asked for 1.6 more — no build could ever schedule, and the
+  Pending pods held the CI quota so nothing else could either;
+- the canary's Application was declared in two files, and the two
+  drifted the first time one was edited (check 146).
+
+Class fix (in force): `lib/paths.sh` is the ONE place that decides
+where the product and the instance are; the checks above derive their
+lists from the code (generators, Jenkinsfiles, entry points) instead
+of enumerating; and the rehearsal on a foreign machine is a recurring
+practice, not a one-off (`docs/journeys/foreign-instance.md`).
+
+## Disease G — presence is not identity (re-init over a previous instance)
+
+`aegis destroy --k3s` removes the cluster and the host bridge; it
+leaves the instance's `platform/` (the customer's repo, with their
+contracts), the store and the conf — on purpose. The init that runs
+next reuses them and converges in minutes... and inherits, inside
+`platform/`, everything an EARLIER cluster wrote there:
+
+- the CA of a cluster that no longer exists, injected into Kyverno's
+  values and blackbox's ConfigMap. Every injection guard asked "is
+  the placeholder still there?" — it was not, so the dead CA stayed;
+  Kyverno, not trusting the new registry's certificate, fell back to
+  plain HTTP against an HTTPS server and refused every image;
+- the signature policy already listed in the kustomization — phase
+  80 is "the LAST one to turn it on", and the seed is born with it
+  off; a repo from a previous cluster is born with it ON, before
+  Kyverno has a CA or a credential;
+- image digests of a registry that no longer exists: in the bucket
+  provisioner's Jobs, in the tenants' overlays, in `services.yaml`.
+
+Typical signature: a green gate over a stale thing; `x509` or
+"Client sent an HTTP request to an HTTPS server" in Kyverno's log;
+ImagePullBackOff on a digest git swears by; a sync that waits on
+hooks forever.
+
+Class fix (in force):
+- injected PEMs are COMPARED with the live CA and re-injected when
+  they differ, with the consumer restarted (`pem_stale`,
+  `reinject_pem`, phases 80/85, check 068);
+- phase 35 turns the signature policy OFF when it finds it on, and 80
+  turns it on again in order (check 039);
+- Garage is synced after the mirror, without hooks; the hooks run on
+  the next ordinary sync (phase 80);
+- what the init does NOT repair, and the operator does after a
+  re-init on a host with tenants: `aegis org apply orgs/*.yaml` (the
+  provisioner's Jobs get this registry's digest) and `aegis sync
+  garage`; the tenants' own builds re-run through the pipeline.
+
+## Disease H — mention is not use (the text claims what the code does not do)
+
+A comment, a help text or a docstring describing behaviour that no
+code implements. Found on the same day: `aegis destroy --help` said
+it deleted the GitHub repos (it never had); two entry points explained
+their `readlink -f` with "phase 05 installs the symlink" (nothing
+did); `aegis secret create`'s docstring said contracts and files were
+"told apart by the extension" (the code sent both to the contract
+branch); the injection guards' comments promised idempotence they had
+for the placeholder only. The checks that exist for the class
+(`mention != use` is written into several of them) read the CODE, and
+treat a claim in prose as the thing to verify, not as evidence.
+
 ## Network / environment transients (E-1)
 
 The dev environment is intermittent BY DESIGN (the operator's mobile

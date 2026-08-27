@@ -96,6 +96,14 @@ aegis vps entregar aegis-vps   # already through Access, with a session open
 connection is already established). The corresponding line is in the
 operator's `rotation-checklist.md`.
 
+## What the first full run taught
+
+The first complete rehearsal on this shape (a clean host, a fresh
+account, `EDGE=local`) is written up in
+`docs/journeys/foreign-instance.md` — the sequence, the numbers and
+what stays open — and its failure classes are Diseases E–H in
+`docs/failure-modes.md`. Repeat it whenever a phase changes shape.
+
 ## Known drift
 
 The current machine (2026-08) has EVERYTHING the cloud-init declares

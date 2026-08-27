@@ -278,7 +278,11 @@ the mould:
 5. `platform/docs/conventions/secrets.md` — the hard rules.
 6. `platform/docs/failure-modes.md` — the failure classes and their
    signatures.
-7. The code: `libexec/aegis-init` → `lib/common.sh` → the phase you
+7. `journeys/foreign-instance.md` — the rehearsal on a machine that
+   is not the house one: what travels, what is answered, what it
+   found. Read it before touching a phase: most of what the static
+   checks cannot see lives there.
+8. The code: `libexec/aegis-init` → `lib/common.sh` → the phase you
    are going to touch → the checks that cover it in
    `verify/checks/` (search for the phase number or the gate name).
 

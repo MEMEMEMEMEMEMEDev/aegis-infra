@@ -149,6 +149,13 @@ A cheat sheet of the ones that come up most while operating:
 | cloudflared restarts often | reconnection over an intermittent network — NORMAL in dev | nothing, it is expected |
 | Pod rejected citing `require-aegis-signature` | unsigned image — the platform WORKING | pipeline: build+scan+sign |
 | Pod rejected WITHOUT citing the policy | PSS or quota, NOT Kyverno | the deny message says which |
+| Kyverno deny with `x509` or "Client sent an HTTP request to an HTTPS server" | the CA injected in git is a PREVIOUS cluster's (re-init) | `pem_stale` — re-run phase 80, which re-injects and restarts |
+| Kyverno refuses EVERY image right after a re-init | the signature policy was inherited ON, before phase 80 armed it | phase 35 turns it off; `aegis init --from 35-gitops` |
+| App Synced, but the live image is an OLD digest | `ignoreDifferences` on the image (the v2 answer to mutateDigest) | remove it — git carries the digest (check 144) |
+| Builds Pending, "Insufficient cpu", and the CI quota shows as used | reservations larger than the node; Pending pods hold quota | the agents' `requests`, then abort the stuck builds |
+| App in ComparisonError: ksops "no such file" | an encrypted secret a generator lists and nobody wrote | the phase that owns that secret (check 145) |
+| A sync that waits on hooks forever | the hooks' image is not in THIS registry yet | sync without hooks; `aegis org apply` + sync once it is |
+| `jenkins_build_retry` waits the whole timeout; the job has no build | POST to `/build` on a parameterized job (refused, logged only by Jenkins) | `jenkins_fire` picks the endpoint; the job's `property` says which |
 
 ## 6. The recovery tools
 
