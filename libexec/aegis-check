@@ -172,10 +172,19 @@ NS_OUTSIDE="jenkins-system"
 # that was happening was a missing limits.cpu. With resources declared,
 # the only thing that can reject it is the signature enforce.
 LIMITS='{"requests":{"cpu":"10m","memory":"32Mi"},"limits":{"cpu":"50m","memory":"64Mi"}}'
+# And the same for Pod Security: the namespaces this probe enters
+# enforce `restricted`, and a pod that runs as root with privilege
+# escalation is rejected by PodSecurity BEFORE Kyverno ever sees it —
+# on the first clean instance the round said "rejected in garage-system
+# but NOT by require-aegis-signature" about a probe PSS had turned
+# away. The probe carries the full restricted profile, so that once
+# more the only thing left to reject it is the signature.
+SECCTX_POD='{"runAsNonRoot":true,"runAsUser":65532,"seccompProfile":{"type":"RuntimeDefault"}}'
+SECCTX_CTR='{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}'
 probe() { # probe <ns> <name>
     kubectl run "$2" -n "$1" --image="$IMG_UNSIGNED" --restart=Never \
       --dry-run=server -o name \
-      --overrides="{\"apiVersion\":\"v1\",\"spec\":{\"containers\":[{\"name\":\"$2\",\"image\":\"$IMG_UNSIGNED\",\"command\":[\"true\"],\"resources\":$LIMITS}]}}" 2>&1
+      --overrides="{\"apiVersion\":\"v1\",\"spec\":{\"securityContext\":$SECCTX_POD,\"containers\":[{\"name\":\"$2\",\"image\":\"$IMG_UNSIGNED\",\"command\":[\"true\"],\"resources\":$LIMITS,\"securityContext\":$SECCTX_CTR}]}}" 2>&1
 }
 
 red=$'\033[31m'; green=$'\033[32m'; yellow=$'\033[33m'; gray=$'\033[90m'; reset=$'\033[0m'
@@ -1224,6 +1233,9 @@ except Exception:
   probes=$(_vm_num 'count(count by (job) (probe_success{job=~"sitio-.*"})) or vector(0)')
   if [[ -z "$probes" ]]; then
       notice "COULD NOT EVALUATE: I could not count the tenant probes"
+  elif [[ "$with_domain" -eq 0 ]]; then
+      # zero contracts with a domain is a MEASURED zero, not a blind one
+      notice "no organization declares a domain yet: nothing to probe (0 contracts with dominio: in orgs/)"
   elif [[ "$with_domain" -gt 0 && "$probes" -lt "$with_domain" ]]; then
       bad "$with_domain organization(s) with a domain and only $probes probe(s): one of them was born unwatched"
       note "they are derived by ${AEGIS_CMD:-aegis} org apply → k8s/base/observability/vmagent/values.yaml"

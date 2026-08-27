@@ -156,7 +156,16 @@ spec:
     # every sync SyncFailed (first clean instance, 2026-08-27; at home
     # the CRDs had been CREATED once and never patched).
     syncOptions: [ServerSideApply=true]
-    syncOptions: [ServerSideApply=true]
+  # The API server writes `conversion: {strategy: None}` into every CRD
+  # that declares no conversion; the chart's policies.kyverno.io CRDs
+  # declare none, and ArgoCD's server-side diff reports that default
+  # as drift forever (eight CRDs OutOfSync after a Succeeded sync, on
+  # the first clean instance). Ignored on CRDs only, and only that
+  # field: a real change to a CRD's schema still shows.
+  ignoreDifferences:
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jsonPointers: [/spec/conversion]
 ---
 # THE LAST one enabled (D5): Enforce only with a signature in place.
 apiVersion: argoproj.io/v1alpha1

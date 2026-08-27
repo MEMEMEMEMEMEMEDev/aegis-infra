@@ -21,18 +21,26 @@ global:
     - name: SSL_CERT_FILE
       value: /etc/ssl/certs/ca-certificates.crt
 
-# NATIVE scope of ALL the webhooks => blast radius of the Fail =
-# org-canary. Consistent mutating+validating (the per-policy
-# matchConditions are NOT — they break verifyImages). CONSCIOUS
-# inherited debt: every future policy is born scoped to org-canary;
-# widen it here.
+# NATIVE scope of ALL the webhooks => blast radius of the Fail = every
+# namespace labelled aegis.dev/part-of=aegis-tenants (the tenants,
+# the canary, garage-system). Consistent mutating+validating (the
+# per-policy matchConditions are NOT — they break verifyImages). By
+# LABEL and not by name: the policies match by that label, and a scope
+# by name (`org-canary`, the shape the seed carried until 2026-08-27)
+# let a namespace WITH the label — garage-system, and every tenant an
+# `aegis org apply` would create — admit unsigned images while the
+# policy said Enforce. The house instance had already widened it; the
+# seed had not. What must never carry the label: the namespaces the
+# recovery needs (argocd, kyverno, registry-system, jenkins-system,
+# cert-manager, infra-edge) — with failurePolicy Fail, a Kyverno that
+# is down would lock the bootstrap out.
 config:
   webhooks:
     namespaceSelector:
       matchExpressions:
-        - key: kubernetes.io/metadata.name
+        - key: aegis.dev/part-of
           operator: In
-          values: [org-canary]
+          values: [aegis-tenants]
 
 admissionController: {replicas: 1}    # dev single-node; hetzner: 2-3
 backgroundController: {replicas: 1}
