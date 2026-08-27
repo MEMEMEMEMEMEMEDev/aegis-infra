@@ -1,0 +1,135 @@
+# aegis-base-node — the SECOND base image aegis OWNS: alpine + the
+# distribution's nodejs package, with node as the entrypoint, running
+# as UID 65532. It is what the platform's node backends (the blog and
+# portfolio BFFs, the ejemplo API, the shop API — every service that
+# runs a JavaScript server behind the edge) put in their FROM.
+#
+# WHAT THIS FILE REPLACES, AND WHY
+# ────────────────────────────────
+# Until 2026-08-27 the backends stood on nodejs-distroless:22, a
+# THIRD-PARTY image (Debian 13 underneath) mirrored into the internal
+# registry: the same arrangement the static fronts had with
+# nginx-unprivileged, and it broke the same way, one day later.
+#
+# On 2026-08-26 CVE-2026-14456 (OpenSSL) had blocked every static
+# front until they moved to aegis-base-nginx (nginx/Containerfile
+# tells that story in full). On 2026-08-27 the same CVE showed up in
+# the backends' base: libssl3t64 3.5.6-1~deb13u2 inside
+# nodejs-distroless:22, fixed in Debian as 3.5.7-1~deb13u2. Upstream's
+# `nonroot` tag had a NEW digest by then, so it was pulled and
+# measured: the same vulnerable package. A new digest is not a new
+# image — the third time in two days that lesson was paid for. The
+# distribution had the fix, the image did not, and there was, again,
+# no place of ours to run the upgrade.
+#
+# This file is that place, and it is the move the fronts had just been
+# proven clean with: `alpine + apk upgrade + apk add nodejs`, the
+# distribution's package with the distribution's patch cadence,
+# rebuilt by the base-images job the morning image-watch finds a
+# fixable CVE, and propagated by digest to every consumer.
+#
+# WHY ALPINE'S NODE IS THE NODE THE BACKENDS ALREADY BUILD WITH
+# Alpine 3.22 main ships nodejs 22.23.2-r0 (built 2026-07-29): the
+# same 22.23 line as aegis-ci-node:22.23.1-alpine, the image in which
+# every consumer's build stage runs `npm ci`. Both are musl builds, so
+# the node_modules a consumer COPYs out of its build stage are what
+# this runtime expects. Measured on the four backends: none has a
+# native `.node` module (nothing to recompile against a different
+# libc), and all four declare `engines: node >=22`.
+#
+# WHAT A CONSUMER MAY ASSUME (the contract, asserted by the job before
+# the image is pushed):
+#   - it runs as UID/GID 65532 — distroless's `nonroot`, the number
+#     every consumer's `COPY --chown=65532:65532` and
+#     `USER 65532:65532` already carry. Tenant namespaces are PSS
+#     `restricted`: a root container is rejected at admission, and a
+#     non-numeric USER fails runAsNonRoot because the kubelet cannot
+#     prove it;
+#   - /app exists, is owned by 65532, and is the WORKDIR;
+#   - it exposes 8080 (a tenant's NetworkPolicy admits only
+#     edge → 8080; a server on any other port starts fine and NEVER
+#     receives traffic — the silent failure);
+#   - the ENTRYPOINT is node: a consumer's `CMD ["/app/src/server.js"]`
+#     is the script, nothing more. distroless kept node at
+#     /nodejs/bin/node; the package puts it at /usr/bin/node. No
+#     consumer names the path, so the move is invisible to them.
+# That is nodejs-distroless's contract, kept on purpose: the consumers
+# change one FROM line and nothing else.
+#
+# WHAT IS NOT HERE, ON PURPOSE
+#   - npm. Production runs node; the consumers install in their build
+#     stage and copy node_modules across. An npm in the runtime is a
+#     supply-chain tool inside a tenant pod with nothing to do there.
+#   - distroless's absence of a shell. Alpine keeps /bin/sh and
+#     busybox; distroless had none. That is a real trade, stated
+#     plainly: a smaller surface that stayed vulnerable for days,
+#     against a slightly larger one that is one `apk upgrade` away
+#     from clean. Nothing at runtime needs the shell (node is the
+#     entrypoint and the tenant pod's root filesystem is read-only).
+#     What says whether this image is clean is not the size of its
+#     surface but the scan of the RESULT, with no exceptions — the
+#     same scan that refused the old base.
+
+# The FROM is the SAME public digest nginx/Containerfile pins, for the
+# reasons told there in full: pulled from the PUBLIC registry, by
+# DIGEST, and not from the internal mirror (whose blocking scan would
+# refuse the stale alpine underneath, so this base could never be
+# built from it). The alpine's own packages never run anywhere: `apk
+# upgrade` replaces them on the next line, and what runs is the
+# RESULT, which is scanned (with no exceptions) and signed by the job,
+# and whose event records this digest as `base_digest`. The minor here
+# is the single source of the image's tag: the job derives
+# `<minor>-<build>` from this line, the way ci-images does.
+FROM public.ecr.aws/docker/library/alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+
+# ORDER MATTERS, and every step below has a reason:
+#
+# 1. uid/gid 65532 are created first, by number, under the name
+#    distroless gave them: `nonroot`. The nodejs package, unlike
+#    nginx's, has no user of its own to create, so there is no race
+#    with the package here — but the assertion stays, because it is
+#    what breaks the BUILD, with this line in the log, if that
+#    assumption is ever wrong (a future package that does create a
+#    user, or an adduser that hands out a different number) — instead
+#    of four tenant pods failing at once with EACCES on a file under
+#    /app that every `--chown=65532:65532` had promised them.
+#    No home directory (-H, /nonexistent): nothing in a tenant pod
+#    writes to $HOME, and the root filesystem is read-only anyway.
+# 2. `apk upgrade` BEFORE `apk add`. The alpine above is frozen by
+#    digest: its packages are whatever they were the day it was built
+#    upstream. The upgrade is where today's patched packages come in —
+#    the libssl this base's node links against comes from this line,
+#    and it is the line image-watch rebuilds this image to run.
+# 3. `apk add nodejs`: the runtime only. npm is a separate package and
+#    is not installed (see above).
+# 4. /app, owned by 65532: the directory every consumer COPYs into and
+#    works from.
+RUN addgroup -g 65532 -S nonroot \
+ && adduser -u 65532 -D -S -H -h /nonexistent -s /sbin/nologin -G nonroot -g nonroot nonroot \
+ && apk upgrade --no-cache \
+ && apk add --no-cache nodejs \
+ && [ "$(id -u nonroot)" = 65532 ] && [ "$(id -g nonroot)" = 65532 ] \
+ && mkdir -p /app && chown 65532:65532 /app
+
+# The build-time contract, the sibling of nginx's `nginx -t`: the
+# runtime the package installed actually starts, and the core modules
+# a backend needs first (http to listen, crypto for TLS and hashes, fs
+# to read its own files) load. If the package ever ships a node that
+# is missing one of them, or one that cannot link the libssl the
+# upgrade brought, the build fails HERE, with this line in the log —
+# not in a consumer's pod at startup.
+RUN node --version && node -e 'require("http"); require("crypto"); require("fs"); process.exit(0)'
+
+# No consumer sets NODE_ENV (measured: none of the four Containerfiles
+# nor their k8s/ manifests do). The base sets the value every
+# framework reads to choose its production behaviour; a consumer that
+# needs otherwise overrides it in its pod spec. It changes nothing
+# about what is installed: node_modules arrive already built from CI.
+ENV NODE_ENV=production
+WORKDIR /app
+EXPOSE 8080
+# Numeric uid:gid on purpose (see the contract above). The job reads
+# this line to know which uid to assert on the built image.
+USER 65532:65532
+# The consumer supplies only the script, as CMD.
+ENTRYPOINT ["/usr/bin/node"]

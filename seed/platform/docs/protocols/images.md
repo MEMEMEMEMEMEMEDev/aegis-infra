@@ -55,8 +55,8 @@ asks every morning whether what we serve is still clean.
    crane pull                     kaniko build                  kaniko build
         │                              │                            │
    trivy (BLOCKING,               contract assertion            push
-   trivyignore.yaml               UID 101 · port 8080           (no scan, no sign:
-   scoped exceptions)             nginx -t                       nothing runs in
+   trivyignore.yaml               UID of its USER · 8080        (no scan, no sign:
+   scoped exceptions)             nginx -t · node -e             nothing runs in
         │                              │                            a tenant)
    crane push                     trivy (BLOCKING,
         │                         NO exceptions)
@@ -160,13 +160,23 @@ picks it up, on our cadence, not a third party's.
 
 ```
 base-images/
-  consumers.txt          ← the repos standing on a base (derived block, §3.4)
-  nginx/                 ← one directory per member
+  consumers.txt          ← every repo that builds an image (derived block, §3.4)
+  nginx/                 ← one directory per member: the static fronts' base
     Containerfile        ← FROM public alpine:3.22@sha256:… + apk upgrade + apk add nginx
     nginx.conf
     default.conf
     index.html
+  node/                  ← the node backends' base
+    Containerfile        ← same FROM + apk upgrade + apk add nodejs; nothing else to ship
 ```
+
+Two members, same day, same cause. `nginx/` is what §0 tells. `node/`
+came hours later: the same CVE-2026-14456 was found in the `libssl3t64`
+of `nodejs-distroless:22` (Debian 13), the mirrored runtime the four
+node backends stood on, and the upstream candidate digest was measured
+the same morning: **not patched either** — a new digest is not a new
+image, the second time in a day. Alpine 3.22 already shipped the fixed
+openssl, so the answer was the one §6 prescribes: own it.
 
 To add a member: a directory under `base-images/`, a `Containerfile`
 in it that honours the contract below, and a comment at its top that
@@ -192,7 +202,16 @@ the apk index of the day, which is the point.
 ### 3.2 The contract — what a consumer may assume
 
 Asserted by the job BEFORE the image is pushed: a base that breaks
-one of these lines fails its own build, not four tenant pods.
+one of these lines fails its own build, not four tenant pods. The job
+reads the uid it expects from the member's own last `USER` line — it
+must be numeric and non-root, and it is what the pushed image's config
+must carry — and the port from the contract (8080, every member). Each
+member also RUNS its server once at build time, so the class of error
+that only a running binary can find surfaces in the base's build and
+not in a consumer's pod: `nginx -t` for nginx, `node --version &&
+node -e '…'` for node. Check 138 demands both, per package installed.
+
+#### aegis-base-nginx
 
 | a consumer may assume | why it is there |
 |---|---|
@@ -205,8 +224,25 @@ one of these lines fails its own build, not four tenant pods.
 | `STOPSIGNAL SIGQUIT` | nginx's graceful stop: in-flight requests finish |
 
 It is nginx-unprivileged's contract, kept on purpose: every consumer
-changed one `FROM` line and nothing else. A second member (another
-server, another runtime) brings its own table here.
+changed one `FROM` line and nothing else. The second member did the
+same with the contract IT replaced.
+
+#### aegis-base-node
+
+| a consumer may assume | why it is there |
+|---|---|
+| it runs as UID/GID **65532** (`nonroot`) | distroless's uid, kept so the four backends change only their `FROM`; numeric, so PSS `restricted` can prove `runAsNonRoot` |
+| `ENTRYPOINT ["/usr/bin/node"]` — the consumer's `CMD` is the script path, `CMD ["/app/src/server.js"]` | distroless's contract: the backends already write it this way, and a `CMD` that is a path cannot be a shell |
+| `WORKDIR /app` | `COPY --chown=65532:65532 . /app/` works unchanged; relative paths in the code resolve from there |
+| it listens on **8080** | the same NetworkPolicy as the fronts: `edge → 8080` only |
+| `NODE_ENV=production` | libraries drop their development paths; a consumer that needs otherwise sets its own |
+| there is no `npm`, and nothing to install with | consumers copy a `node_modules` built in CI on `aegis-ci-node` — the same **22.23** line, **musl** (`node:22.23.1-alpine`) — so a native module built there loads here. Installing in the runtime image is the base you cannot rebuild, again |
+
+The build-time check is `RUN node --version && node -e '…'`: the
+runtime loads and the core modules are in the package, proven on the
+base's build and not on the first request to a backend. It is the
+sibling of `nginx -t`, and it is the line check 138 refuses to let a
+member that installs `nodejs` leave out.
 
 ### 3.3 The tag scheme
 
@@ -230,19 +266,34 @@ edit in one file.
 
 The block between the markers in `base-images/consumers.txt` is
 DERIVED from the organization contracts by `aegis org apply`: the
-`repo` of every service of type `estatico`, re-derived whole on every
-run. A static front declared in a contract is a consumer of
-`aegis-base-nginx` without anybody listing it; a service that leaves
-the contract leaves the list.
+`repo` of **every service that builds an image** — every image-bearing
+type, not only `estatico` — re-derived whole on every run. A service
+declared in a contract is on the list without anybody listing it; a
+service that leaves the contract leaves the list. Until 2026-08-27 it
+was the static fronts alone, because nginx was the only base. With two
+bases the contract cannot say which one a repo stands on — only its
+Containerfile can — so this is ONE list for every base, and the job
+sorts it out per member.
 
-After a successful build of a member, the job clones each consumer,
-rewrites the `FROM` that names `aegis-base-<member>` to the new
-`<tag>@<digest>`, and commits it to the default branch. That commit
-is what makes the consumer's own pipeline rebuild on the patched
-base. A repo whose Containerfile does not match leaves the run
-UNSTABLE, with a metric and an event naming it
-(alert `BasePropagationFailed`, §4); nothing else in the repo is
-ever written.
+After a successful build of a member, the job clones each listed repo
+and greps it for a `Containerfile` whose `FROM` names
+`aegis-base-<member>@sha256:` (with or without a tag before the `@`).
+Found: that line is rewritten to the new `<tag>@<digest>` and committed
+to the default branch — the commit that makes the consumer's own
+pipeline rebuild on the patched base. Not found: the repo is **skipped
+with a notice** in the console. A listed repo that names no member is
+a fact — an API on a mirrored runtime, a front not yet moved — and
+not a failure. What IS a failure is a repo that names the member and
+could not be bumped (clone, sed, push): that leaves the run UNSTABLE,
+with a metric and an event naming it
+(alert `BasePropagationFailed`, §4); nothing else in the repo is ever
+written.
+
+Over-listing costs one clone and one grep. The hole the list closes
+is the other direction: a consumer that is **not** listed is the
+`FROM` nobody bumps — the base's alert `ImageWithFixableVulns` clears,
+the propagation reports success, and what runs still stands on the
+old base. That is why the block is derived and never written by hand.
 
 ---
 
@@ -378,6 +429,19 @@ failure is visible in Jenkins and in the `jenkins-build` events only. Closing
 it means the watch enumerating what runs (the tenants' Deployments)
 instead of what is listed — a different job, deliberately not this
 one.
+
+**The platform's own node consumer still stands on the mirrored
+runtime.** The bucket provisioner Job (`bucket.aprovisionador` in
+`services.yaml`) runs on `nodejs-distroless` — the image whose
+`libssl3t64` carried CVE-2026-14456 on 2026-08-27, with no patched
+candidate upstream (§3.1). It is not a repo, so `consumers.txt` cannot
+list it and the loop cannot bump it: it is a `digest:` in
+`services.yaml` that a human moves (§2, step 4). It is a candidate to
+move to `aegis-base-node` — same uid, same `ENTRYPOINT`, the script
+path as `CMD`, one line — and from that day it is a base the loop
+rebuilds. Until then the watch reports the mirror every morning, and
+the exposure is what §0 measured for the fronts: a Job speaking plain
+HTTP to Garage inside the cluster, no TLS, no QUIC.
 
 **Fan-out.** One base rebuild → N consumer commits → N app builds,
 5000m each. Under the `jenkins-system` quota the pods QUEUE; they do

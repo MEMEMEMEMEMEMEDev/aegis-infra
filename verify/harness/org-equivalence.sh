@@ -331,23 +331,34 @@ RC=$?
 # ── the base-consumers derivation, on scratch contracts ──────────────
 #
 # `apply_base_consumers` fills base-images/consumers.txt with the repo
-# of every `estatico` service — the list the base-images job reads to
-# bump a rebuilt base's digest in each consumer itself (2026-08-26: a
-# CVE in the shared nginx base, four fronts frozen, the same FROM edited
-# by hand in four repos). Check 113 proves the block is a fixed point
-# with ZERO organizations; the reference instance above predates the
-# file, so the WITH-contracts path has nowhere else to be measured.
+# of every service that BUILDS AN IMAGE — the list the base-images job
+# reads to bump a rebuilt base's digest in each consumer itself
+# (2026-08-26: a CVE in the shared nginx base, four fronts frozen, the
+# same FROM edited by hand in four repos). Check 113 proves the block
+# is a fixed point with ZERO organizations; the reference instance
+# above predates the file, so the WITH-contracts path has nowhere else
+# to be measured.
 #
-# Two contracts, the smallest the validator accepts, each on its own
+# Three contracts, the smallest the validator accepts, each on its own
 # copy of the v3-flavoured instance with the orgs/ emptied and the
 # SEED's consumers.txt dropped in — the seed's, and not sentinels typed
 # here: if the seed's markers ever drift from markers.py the derivation
 # refuses, and this harness has to be the one that turns red.
 #
-#   static  one `estatico` front and an organization `repo`
-#           → exactly that repo, exactly as written, one line
-#   http    only an `http` service, with a repo of its own
-#           → an empty block: the two sentinels adjacent
+#   static    one `estatico` front and an organization `repo`
+#             → exactly that repo, exactly as written, one line
+#   http      only an `http` service, with a repo of its own
+#             → that repo, one line. Until 2026-08-27 this case
+#             expected an EMPTY block: nginx was the only owned base
+#             and only static fronts stood on it. aegis-base-node
+#             joined for the node backends, and since an `http`
+#             service is node or Go with no contract field to tell
+#             them apart, EVERY image-bearing repo is listed and the
+#             job's grep of the Containerfile decides per base (a
+#             repo naming no base is a notice, not a failure).
+#   postgres  only a `postgres` service — no repo, no Containerfile,
+#             provided by the platform
+#             → an empty block: the two sentinels adjacent
 #
 # and after each apply, a `plan` has to report `=`: writing twice is
 # what the pipeline would see as a diff on every run.
@@ -368,13 +379,14 @@ print("\n".join(m.group(0).splitlines()[1:-1]))
 PY
 }
 
-scratch_org() {   # <dir> <flavour: static|http>
+scratch_org() {   # <dir> <flavour: static|http|postgres>
     local d="$1" flavour="$2"
     rm -rf "$d"; cp -a "$TMP/v3-base" "$d"
     rm -f "$d"/orgs/*.yaml "$d"/orgs/*.yml
     mkdir -p "$d/base-images"
     cp "$CONSUMERS_SEED" "$d/base-images/consumers.txt"
-    if [[ "$flavour" == static ]]; then
+    case "$flavour" in
+    static)
         cat > "$d/orgs/scratch.yaml" <<EOF
 version: 1
 organizacion: scratch
@@ -386,7 +398,8 @@ servicios:
     tipo: estatico
     publico: /
 EOF
-    else
+        ;;
+    http)
         cat > "$d/orgs/scratch.yaml" <<EOF
 version: 1
 organizacion: scratch
@@ -399,7 +412,20 @@ servicios:
     publico: /
     repo: https://github.com/scratch-owner/scratch-api
 EOF
-    fi
+        ;;
+    postgres)
+        # No `dominio` and no `repo`: nothing is public and nothing is
+        # built, and the validator rejects both fields when unused.
+        cat > "$d/orgs/scratch.yaml" <<EOF
+version: 1
+organizacion: scratch
+cuota: pequena
+servicios:
+  - nombre: db
+    tipo: postgres
+EOF
+        ;;
+    esac
 }
 
 scratch_org_run() {   # <dir> <subcommand> <contract>
@@ -417,7 +443,7 @@ stage_report() {   # <dir> <stage header>
 }
 
 CB=0
-for flavour in static http; do
+for flavour in static http postgres; do
     d="$TMP/scratch-$flavour"
     scratch_org "$d" "$flavour"
     note_side "v3 scratch/$flavour" scratch_org_run "$d" apply scratch.yaml
@@ -427,8 +453,9 @@ for flavour in static http; do
         continue
     fi
     case "$flavour" in
-        static) want="git@github.com:scratch-owner/scratch-front.git" ;;
-        http)   want="" ;;
+        static)   want="git@github.com:scratch-owner/scratch-front.git" ;;
+        http)     want="https://github.com/scratch-owner/scratch-api" ;;
+        postgres) want="" ;;
     esac
     if [[ "$got" != "$want" ]]; then
         CB=1
@@ -445,7 +472,7 @@ for flavour in static http; do
     fi
 done
 if [[ "$CB" == 0 ]]; then
-    printf '  \033[1;32m✓\033[0m base-consumers: a static front renders its repo verbatim, an http-only contract renders an empty block, and both are byte-stable on the second run\n'
+    printf '  \033[1;32m✓\033[0m base-consumers: a static front and an http service each render their repo verbatim, a postgres-only contract renders an empty block, and all three are byte-stable on the second run\n'
 fi
 
 exit $(( RC | CB ))

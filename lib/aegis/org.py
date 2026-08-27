@@ -2699,13 +2699,24 @@ def apply_jenkins(write):
 # the list of consumers. That list is not knowledge anybody should
 # keep: the contracts already say it.
 #
-# The discriminator is the service TYPE, not a field of its own. A
-# `estatico` service is by definition served by the platform's nginx
-# base on STATIC_PORT (the rule in _type_coherence forbids it a port
-# precisely because the base decides it), and aegis-base-nginx is
-# exactly that base. So "the repos of the static services" IS "the
-# consumers of aegis-base-nginx", with nothing to declare twice. The
-# day a second base exists, its type joins this map.
+# Which repos are in it is decided by the service TYPE, but only up
+# to a point. While aegis-base-nginx was the only base, the type was
+# the whole answer: a `estatico` service is by definition served by
+# that base on STATIC_PORT (the rule in _type_coherence forbids it a
+# port precisely because the base decides it), so "the repos of the
+# static services" WAS "the consumers of aegis-base-nginx". On
+# 2026-08-27 aegis-base-node joined for the node backends, and the
+# type stopped being enough: a backend is `http` whether it is node or
+# not (the seed's own template app is Go), and the contract has no
+# field that says which base — nor should it: the ONLY place that
+# knows is the repo's Containerfile, in its FROM line. So the list
+# names every repo that BUILDS AN IMAGE, one list for every base, and
+# the job decides per member by grepping each repo for
+# `aegis-base-<member>@sha256:` — a listed repo whose Containerfile
+# names no such base is skipped with a notice, never failed. That
+# asymmetry is deliberate: a repo listed for nothing costs one clone
+# and one line of log; a consumer NOT listed is exactly the hole this
+# file exists to close (the FROM nobody bumped).
 #
 # The repo string is written EXACTLY as the contract carries it
 # (git@… or https://…): the pipeline normalises both forms, and
@@ -2715,19 +2726,32 @@ def apply_jenkins(write):
 CONSUMERS_BLOCK_START = markers.CONSUMERS_BLOCK_START
 CONSUMERS_BLOCK_END = markers.CONSUMERS_BLOCK_END
 CONSUMERS_BLOCK_PATTERN = markers.CONSUMERS_BLOCK_PATTERN
-# Which service types stand on a base aegis owns. Today one base, one
-# type; the map is here so that the second one is one line, not a
-# second function.
-BASE_CONSUMER_TYPES = {"estatico"}
+# There used to be a BASE_CONSUMER_TYPES = {"estatico"} here, "so that
+# the second base is one line". The second base killed the distinction
+# instead: with two bases and no contract field naming either, the only
+# type-level fact that survives is "this service comes out of an image
+# somebody builds" — and that set already has a name.
+BASE_CONSUMER_TYPES = TYPES_WITH_IMAGE
 
 
 def base_consumers():
-    """The repos every base consumer comes out of, sorted and unique.
+    """The repos of every service that builds an image, sorted and unique.
+
+    Every image-bearing type (TYPES_WITH_IMAGE), not only `estatico`:
+    since 2026-08-27 there are two owned bases (nginx for the static
+    fronts, node for the node backends) and the contract cannot say
+    which one a repo stands on — only its Containerfile can. So this is
+    ONE list for every base, and the base-images job sorts it out per
+    member by grepping each repo for `aegis-base-<member>@sha256:`; a
+    listed repo that names no base is skipped with a notice. Over-
+    listing is cheap; a consumer left OUT is the FROM nobody bumps,
+    which is the failure this file was created to end. `postgres` stays
+    out because it has no repo and no Containerfile to bump.
 
     A service's repo is resolved the way repos_of does it — the service's
     own `repo`, or the organization's when the service has none — so
     the list can never name a repo the AppProject would not let in.
-    Sorted, unique: one repo with two static fronts is one clone, and
+    Sorted, unique: one repo with a front and its API is one clone, and
     the file's diff does not depend on the filesystem (I1).
     """
     repos = set()

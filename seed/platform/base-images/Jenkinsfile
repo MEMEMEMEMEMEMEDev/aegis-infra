@@ -13,17 +13,26 @@
 // that image, and this job is what rebuilds it —by hand, or from
 // image-watch the morning it finds a fixable CVE— and carries the
 // result to the consumers, so that "the base is patched" and "the
-// fronts run on the patched base" are the same event, not two.
+// consumers run on the patched base" are the same event, not two.
+// On 2026-08-27 the same CVE turned up in the node backends' base
+// (nodejs-distroless:22 — Debian's libssl3t64 3.5.6-1~deb13u2, and a
+// NEW upstream digest carrying the SAME package): base-images/node/
+// is the second member. This job did not change shape for it; only
+// the contract check learned to read the uid each member declares.
 //
 // ONE RUN, THREE THINGS, IN THIS ORDER
-//   build     kaniko → tar; the CONTRACT (UID 101, port 8080) is
-//             asserted on the tar; trivy scans it; only then crane
+//   build     kaniko → tar; the CONTRACT is asserted on the tar: the
+//             numeric, non-root uid the member's last USER line
+//             declares (the uid its consumers chown to) and port
+//             8080; trivy scans it; only then crane
 //             pushes it and cosign signs it. An image that fails any
 //             of those never exists in the registry.
-//   propagate for each member that was built, the consumers listed in
-//             base-images/consumers.txt get ONE line rewritten in
-//             their Containerfile(s) and a commit on their default
-//             branch. That commit is what makes them rebuild.
+//   propagate for each member that was built, every repository in
+//             base-images/consumers.txt whose Containerfile names that
+//             member gets ONE line rewritten and a commit on its
+//             default branch. That commit is what makes it rebuild. A
+//             repository that names no such line is not a consumer of
+//             that base: a notice, not a failure.
 //   report    one summary event.
 //
 // Job defined in JCasC job-dsl (D9), next to mirror-images. It declares
@@ -169,7 +178,7 @@ spec:
   }
   parameters {
     string(name: 'MEMBERS', defaultValue: '',
-      description: 'space-separated member directories under base-images/ (e.g. "nginx"); empty = all of them. image-watch passes only the members with a fixable CVE.')
+      description: 'space-separated member directories under base-images/ (e.g. "nginx node"); empty = all of them. image-watch passes only the members with a fixable CVE.')
   }
   stages {
     stage('preflight') {
@@ -192,7 +201,7 @@ spec:
             wget -q -T 10 -O /dev/null "${TRIVY_SERVER}/healthz" || {
               echo "ERROR: trivy-server is not answering at ${TRIVY_SERVER}."
               echo "       A base that nobody scanned would be signed with the aegis"
-              echo "       key and inherited by every front. Not an option."
+              echo "       key and inherited by every consumer. Not an option."
               exit 1
             }
           '''
@@ -265,6 +274,26 @@ spec:
               env.TAG   = "${minor}-${env.BUILD_NUMBER.padLeft(6, '0')}"
               echo "TAG=${env.TAG}"
 
+              // The uid the contract will assert is READ from the
+              // member, not hardcoded: nginx declares 101, node 65532
+              // (distroless's nonroot) — each is the number that
+              // member's consumers `--chown` to. The LAST `USER` line
+              // wins, as it does for the image itself; it must be
+              // numeric (`USER <uid>` or `USER <uid>:<gid>`) and not
+              // 0, or the member is refused before a layer is built.
+              def lastUser = sh(returnStdout: true, script: '''
+                grep -E '^USER[[:space:]]' "base-images/${M}/Containerfile" | tail -1 || true
+              ''').trim()
+              if (!(lastUser ==~ /USER\s+[0-9]+(:[0-9]+)?/)) {
+                error "base-images/${m}/Containerfile: the last USER line must be numeric, `USER <uid>` or `USER <uid>:<gid>` (got '${lastUser ?: '(no USER line)'}')"
+              }
+              def expectedUid = lastUser.replaceFirst(/^USER\s+([0-9]+).*$/, '$1')
+              if (expectedUid == '0') {
+                error "base-images/${m}/Containerfile: USER is root (0); tenant namespaces are PSS restricted and reject it at admission"
+              }
+              env.EXPECTED_UID = expectedUid
+              echo "contract uid, from the member's USER line: ${expectedUid}"
+
               container('kaniko') {
                 // W-05: kaniko builds into a TAR (--no-push) so that
                 // the contract check and the scan run BEFORE the push.
@@ -284,16 +313,22 @@ spec:
                 // THE CONTRACT, asserted on the artifact and not on the
                 // Containerfile's text. A consumer's pod depends on two
                 // facts about this image that nothing else checks:
-                //   - User is 101, numeric: tenant namespaces are PSS
+                //   - User is the numeric uid the member declares
+                //     (EXPECTED_UID, read above from its last USER
+                //     line: 101 for nginx, 65532 for node), and not 0.
+                //     It is the uid that member's consumers chown their
+                //     files to, and tenant namespaces are PSS
                 //     restricted (root is rejected at admission; a
                 //     non-numeric USER fails runAsNonRoot);
                 //   - it exposes 8080: the tenant NetworkPolicy admits
                 //     only edge → 8080, and an image on 80 starts fine
                 //     and never receives a request.
                 // The tar is a docker-archive: manifest.json names the
-                // config blob, and the config carries both facts. It
-                // runs before the push on purpose — an image that
-                // breaks the contract never exists in the registry.
+                // config blob, and the config carries both facts (User
+                // as "<uid>" or "<uid>:<gid>" — both spellings are the
+                // same uid to the kubelet). It runs before the push on
+                // purpose — an image that breaks the contract never
+                // exists in the registry.
                 sh '''
                   set -e
                   cd "${WORKSPACE}"
@@ -301,11 +336,13 @@ spec:
                         | sed -n 's/.*"Config":"\\([^"]*\\)".*/\\1/p' | head -1)
                   test -n "$CFG" || { echo "ERROR: base-${M}.tar has no Config in manifest.json"; exit 1; }
                   tar -xOf "base-${M}.tar" "$CFG" > "cfg-${M}.json"
+                  USER_CFG=$(sed -n 's/.*"User":[[:space:]]*"\\([^"]*\\)".*/\\1/p' "cfg-${M}.json" | head -1)
                   ok=1
-                  if grep -q -E '"User":[[:space:]]*"101"' "cfg-${M}.json"; then
-                    echo "contract: User=101 (numeric)          OK"
+                  if [ "${EXPECTED_UID}" != 0 ] \
+                     && grep -q -E "\\"User\\":[[:space:]]*\\"${EXPECTED_UID}(:[0-9]+)?\\"" "cfg-${M}.json"; then
+                    echo "contract: User=${USER_CFG} (numeric, non-root)  OK"
                   else
-                    echo "contract: User is NOT 101              BROKEN"; ok=0
+                    echo "contract: User='${USER_CFG}', expected ${EXPECTED_UID}  BROKEN"; ok=0
                   fi
                   if grep -q '"8080/tcp"' "cfg-${M}.json"; then
                     echo "contract: ExposedPorts has 8080/tcp    OK"
@@ -314,10 +351,11 @@ spec:
                   fi
                   if [ "$ok" != 1 ]; then
                     echo "ERROR: aegis-base-${M} breaks the base contract."
-                    echo "       Every consumer's pod assumes UID 101 (PSS restricted:"
-                    echo "       root is rejected at admission) and port 8080 (the tenant"
-                    echo "       NetworkPolicy admits only edge -> 8080). The image is NOT"
-                    echo "       pushed. Fix base-images/${M}/Containerfile."
+                    echo "       Every consumer's pod assumes the uid the member declares"
+                    echo "       (${EXPECTED_UID}, its last USER line: the uid its consumers"
+                    echo "       chown to; PSS restricted rejects root at admission) and"
+                    echo "       port 8080 (the tenant NetworkPolicy admits only edge -> 8080)."
+                    echo "       The image is NOT pushed. Fix base-images/${M}/Containerfile."
                     exit 1
                   fi
                 '''
@@ -442,10 +480,21 @@ spec:
       // owner, so this stage must be UNABLE to write anything but that
       // one line: the diff is checked to list Containerfiles only, one
       // line out and one line in per file, or nothing is pushed and the
-      // run goes UNSTABLE naming the repo. A consumer that does not
-      // match at all (a Containerfile that pins some other way) is the
-      // same UNSTABLE, not a failure: the base is built and signed, and
-      // the metric says who did not get it.
+      // run goes UNSTABLE naming the repo — the base is built and
+      // signed, and the metric says who did not get it.
+      //
+      // NOT A CONSUMER IS A FACT, NOT A FAILURE. consumers.txt lists
+      // every repository that builds an image, and with more than one
+      // member each repository stands on ONE of them: a node backend
+      // names no aegis-base-nginx line, and that is correct. A
+      // repository in which no Containerfile names the member is
+      // skipped with a NOTICE and an event (ok:true, reason "not a
+      // consumer of this base"), and NO propagation series is written
+      // for that (image, repo) pair: an absent series reads "not a
+      // consumer", while a 0 would read "propagated" — a bump that
+      // never happened. (A Containerfile that names the member with
+      // no digest is the same silence to this grep; pinning by digest
+      // is the consumer's own rule, enforced in its own tree.)
       //
       // FAN-OUT. One base → N consumer builds, each an app pod. They
       // QUEUE behind the jenkins-system ResourceQuota (two at a time),
@@ -502,9 +551,11 @@ spec:
                 //
                 // Exit codes are the stage's vocabulary:
                 //   0  pushed        10 already at this digest
-                //   20 no Containerfile names this base
-                //   21 the guard refused the diff
-                //   22 push failed 3 times     23 clone failed
+                //   20 no Containerfile names this base — not a
+                //      consumer: a notice, an ok event, no metric
+                //   21 the guard refused the diff      } UNSTABLE,
+                //   22 push failed 3 times             } metric 1,
+                //   23 clone failed                    } event ok:false
                 rc = sh(returnStatus: true, script: '''
                   set -e
                   cd "${WORKSPACE}"
@@ -539,7 +590,7 @@ spec:
                   # the file is FOUND by what it says, never assumed.
                   FILES="$(grep -rl --include=Containerfile -E "aegis-base-${M}(:[^@ ]+)?@sha256:" . || true)"
                   if [ -z "${FILES}" ]; then
-                    echo "no Containerfile in ${REPO_SLUG} names aegis-base-${M}@sha256:..."
+                    echo "NOTICE: no Containerfile in ${REPO_SLUG} names aegis-base-${M}@sha256:... — not a consumer of this base"
                     exit 20
                   fi
                   echo "${FILES}" | sed 's/^/  matches: /'
@@ -586,24 +637,37 @@ spec:
 
               def reasons = [
                 0: 'pushed', 10: 'already at this digest',
-                20: 'no Containerfile names this base', 21: 'the guard refused the diff',
+                20: 'not a consumer of this base', 21: 'the guard refused the diff',
                 22: 'push failed after 3 attempts', 23: 'clone failed',
               ]
-              def ok = (rc == 0 || rc == 10)
-              env.PROP_OK     = ok ? 'true' : 'false'
-              env.PROP_FAILED = ok ? '0' : '1'
-              env.PROP_REASON = reasons.containsKey(rc) ? reasons[rc] : "exit ${rc}"
+              // 0 and 10 mean "the consumer has it"; 20 means "this
+              // repository is not a consumer of this member" — true,
+              // and nothing to fix. Everything else (21, 22, 23, or a
+              // code this table does not know) is a consumer that did
+              // NOT get the base, and the run says so.
+              def consumer = (rc != 20)
+              def ok       = (rc == 0 || rc == 10 || rc == 20)
+              env.PROP_CONSUMER = consumer ? 'true' : 'false'
+              env.PROP_OK       = ok ? 'true' : 'false'
+              env.PROP_FAILED   = ok ? '0' : '1'
+              env.PROP_REASON   = reasons.containsKey(rc) ? reasons[rc] : "exit ${rc}"
               if (!ok) {
                 unstable("aegis-base-${b.name} did not reach ${slug}: ${env.PROP_REASON}")
+              } else if (!consumer) {
+                echo "NOTICE: ${slug} is not a consumer of aegis-base-${b.name} — skipped (event recorded, no propagation metric)"
               }
-              // Per (image, repo): the failure flag, the last time the
-              // consumer was seen at the current digest (pushed now or
-              // already there — both mean "the consumer has it"), and
-              // the event with the reason. Best-effort, like the rest.
+              // Per (image, repo): the event with the reason, ALWAYS;
+              // the failure flag and the last time the consumer was
+              // seen at the current digest (pushed now or already there
+              // — both mean "the consumer has it") ONLY for a consumer.
+              // For a non-consumer no series is written at all: an
+              // absent series reads "not a consumer of this base",
+              // while a 0 would read "propagated", which never
+              // happened. Best-effort, like the rest.
               sh '''
                 EVENTO=$(printf \
-                  '{"source":"jenkins-base","event":"base-propagated","image":"aegis-base-%s","repo":"%s","digest":"%s","ok":%s,"reason":"%s","build":"%s","ts":"%s"}' \
-                  "${M}" "${REPO_SLUG}" "${DIGEST}" "${PROP_OK}" "${PROP_REASON}" "${BUILD_NUMBER}" \
+                  '{"source":"jenkins-base","event":"base-propagated","image":"aegis-base-%s","repo":"%s","digest":"%s","ok":%s,"consumer":%s,"reason":"%s","build":"%s","ts":"%s"}' \
+                  "${M}" "${REPO_SLUG}" "${DIGEST}" "${PROP_OK}" "${PROP_CONSUMER}" "${PROP_REASON}" "${BUILD_NUMBER}" \
                   "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
                 printf 'AEGIS_EVENT %s\\n' "$EVENTO"
                 printf '%s\\n' "$EVENTO" \
@@ -611,14 +675,18 @@ spec:
                       -H 'Content-Type: application/stream+json' --data-binary @- \
                       'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \
                   || echo 'NOTICE: the event could not be recorded in vlogs-events (the build does NOT fail for this)'
-                {
-                  printf 'aegis_base_propagation_failed{image="aegis-base-%s",repo="%s"} %s\\n' "$M" "$REPO_SLUG" "$PROP_FAILED"
-                  if [ "${PROP_OK}" = true ]; then
-                    printf 'aegis_base_propagated_timestamp_seconds{image="aegis-base-%s",repo="%s"} %s\\n' "$M" "$REPO_SLUG" "$(date -u +%s)"
-                  fi
-                } | curl -fsS --max-time 15 --data-binary @- \
-                      'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' \
-                  || echo 'NOTICE: the propagation metrics did not reach vmsingle (the build does NOT fail for this)'
+                if [ "${PROP_CONSUMER}" = true ]; then
+                  {
+                    printf 'aegis_base_propagation_failed{image="aegis-base-%s",repo="%s"} %s\\n' "$M" "$REPO_SLUG" "$PROP_FAILED"
+                    if [ "${PROP_OK}" = true ]; then
+                      printf 'aegis_base_propagated_timestamp_seconds{image="aegis-base-%s",repo="%s"} %s\\n' "$M" "$REPO_SLUG" "$(date -u +%s)"
+                    fi
+                  } | curl -fsS --max-time 15 --data-binary @- \
+                        'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' \
+                    || echo 'NOTICE: the propagation metrics did not reach vmsingle (the build does NOT fail for this)'
+                else
+                  echo "no propagation metric for aegis-base-${M} x ${REPO_SLUG}: not a consumer of this base (no series = not a consumer)"
+                fi
               '''
             }
           }

@@ -1,4 +1,4 @@
-# title: every base aegis owns keeps its contract: pinned FROM, port 8080, numeric USER, config checked
+# title: every base aegis owns keeps its contract: pinned FROM, port 8080, numeric USER, server checked at build
 # origin: new in v3 — 2026-08-27, the day aegis-base-nginx replaced a third-party base nobody could patch
 check() {
 # base-images/<member>/Containerfile is a base image aegis OWNS: alpine
@@ -21,23 +21,44 @@ check() {
 #     image on 80 starts fine and never receives a request.
 #   · the LAST `USER` is numeric. Tenant namespaces are PSS restricted:
 #     runAsNonRoot cannot be proven for `USER nginx` (the kubelet does
-#     not read /etc/passwd) and the pod is rejected at admission.
-#   · if the image installs nginx, it runs `nginx -t` at build time:
-#     the include of conf.d in the wrong context fails HERE, not in
-#     the consumer's pod. Generalised the simplest honest way: the
-#     config check is demanded of the server the base installs, and
-#     nginx is the only server the seed knows how to demand it of.
+#     not read /etc/passwd) and the pod is rejected at admission. Which
+#     number is the member's business (nginx runs as 101, node as
+#     65532, the uid distroless taught its consumers): the job reads
+#     the expected uid from this same line, so the clause here is
+#     "numeric", not "101".
+#   · if the image installs a server, it RUNS it once at build time.
+#     For nginx that is `nginx -t`: the include of conf.d in the wrong
+#     context fails HERE, not in the consumer's pod. For nodejs it is
+#     `node --version` or `node -e …`: the runtime loads and the core
+#     modules are in the package, proven before four backends stand on
+#     it. The table below is the whole rule — package installed → RUN
+#     line demanded → why — and a third base is one more row.
+# The second member arrived the same day as the first: the CVE that
+# blocked the static fronts (CVE-2026-14456) surfaced again in the
+# libssl3t64 of nodejs-distroless:22, and the upstream candidate digest
+# was measured and is not patched either. aegis-base-node is alpine +
+# apk upgrade + apk add nodejs, keeping distroless's contract (uid
+# 65532, ENTRYPOINT node, port 8080) so the node backends change only
+# their FROM.
 # Besides the members, the job and the propagation list have to be
 # there: base-images/Jenkinsfile is what asserts the contract before
 # pushing, and consumers.txt carries the derived block aegis-org
 # rewrites — without its two sentinels the generator has nowhere to
 # write and the consumers never get the new digest.
-# Zero members is red: the seed ships nginx, and a base-images/ with
-# nothing in it is a job that builds nothing and reports success.
+# Zero members is red: the seed ships nginx and node, and a base-images/
+# with nothing in it is a job that builds nothing and reports success.
 B="$P/base-images"
-[[ -d "$B" ]] || { fail "$B does not exist: the platform owns no base image (the seed ships aegis-base-nginx)"; return; }
+[[ -d "$B" ]] || { fail "$B does not exist: the platform owns no base image (the seed ships aegis-base-nginx and aegis-base-node)"; return; }
 D138=""
 REG='registry.registry-system.svc.cluster.local:5000/'
+# package → the RUN line demanded → its name for the verdict → why.
+# One row per server the seed knows how to demand a build-time check
+# of; a new base with a new server is one more row, nothing else.
+T=$'\t'
+SERVERS=(
+    "nginx${T}nginx[[:space:]]+-t([[:space:]]|\$)${T}nginx -t${T}a conf.d included in the wrong context fails in the consumer's pod instead of here"
+    "nodejs${T}node[[:space:]]+(--version|-e)([[:space:]]|\$)${T}node --version / node -e${T}a runtime that does not load, or a core module the package left out, fails in the consumer's pod instead of here"
+)
 members=0
 for cf in "$B"/*/Containerfile; do
     [[ -f "$cf" ]] || continue
@@ -57,12 +78,13 @@ for cf in "$B"/*/Containerfile; do
     elif ! [[ "$last_user" =~ ^[0-9]+(:[0-9]+)?$ ]]; then
         D138="$D138 $m: the last USER is '$last_user', not numeric: runAsNonRoot cannot be proven for a name and the pod is rejected at admission;"
     fi
-    if grep -qE 'apk[[:space:]]+add[^&|;]*[[:space:]]nginx([[:space:]]|$)' <<< "$code"; then
-        grep -qE '^[[:space:]]*RUN[[:space:]].*nginx[[:space:]]+-t([[:space:]]|$)' <<< "$code" \
-            || D138="$D138 $m: installs nginx and never runs \`nginx -t\`: a conf.d included in the wrong context fails in the consumer's pod instead of here;"
-    fi
+    while IFS=$'\t' read -r pkg pat human why; do
+        grep -qE "apk[[:space:]]+add[^&|;]*[[:space:]]${pkg}([[:space:]]|$)" <<< "$code" || continue
+        grep -qE "^[[:space:]]*RUN[[:space:]].*${pat}" <<< "$code" \
+            || D138="$D138 $m: installs $pkg and never runs \`$human\` at build time: $why;"
+    done < <(printf '%s\n' "${SERVERS[@]}")
 done
-(( members > 0 )) || D138="$D138 base-images/ has no <member>/Containerfile: a job that builds nothing and reports success (the seed ships nginx);"
+(( members > 0 )) || D138="$D138 base-images/ has no <member>/Containerfile: a job that builds nothing and reports success (the seed ships nginx and node);"
 [[ -f "$B/Jenkinsfile" ]] || D138="$D138 base-images/Jenkinsfile does not exist: nothing asserts the contract before the push, nothing propagates the digest;"
 C="$B/consumers.txt"
 if [[ -f "$C" ]]; then
@@ -74,5 +96,5 @@ else
     D138="$D138 base-images/consumers.txt does not exist: the rebuilt base is propagated to nobody;"
 fi
 if [[ -n "$D138" ]]; then fail "base-images:$D138"
-else pass "$members owned base(s): pinned FROM, EXPOSE 8080, numeric USER, config checked where a server is installed; the job and the consumers list with both sentinels are there"; fi
+else pass "$members owned base(s): pinned FROM, EXPOSE 8080, numeric USER, the server run once at build time where one is installed (nginx -t · node -e); the job and the consumers list with both sentinels are there"; fi
 }
