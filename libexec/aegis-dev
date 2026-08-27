@@ -13,6 +13,7 @@
 # product. That is why they are hidden from the main menu — but they
 # exist, they are verified, and they run inside `aegis verify` (H6: in
 # v2 these two acceptance tests were orphans, nobody ever ran them).
+
 set -euo pipefail
 
 # ── canonical preamble (V-102) ───────────────────────────────────────

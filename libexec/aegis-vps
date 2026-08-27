@@ -30,6 +30,7 @@
 #
 # Three outcomes like every command of the house: 0 done, 1 missing/wrong,
 # 2 could not evaluate.
+
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

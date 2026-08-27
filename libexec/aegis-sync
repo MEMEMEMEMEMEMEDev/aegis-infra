@@ -32,6 +32,7 @@
 # This script does not pass syncOptions. Full stop. The app's own are
 # the ones that count, which is what one wants 100% of the times one
 # syncs by hand.
+
 set -euo pipefail
 
 red=$'\033[31m'; green=$'\033[32m'; gray=$'\033[90m'; reset=$'\033[0m'

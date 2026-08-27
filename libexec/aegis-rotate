@@ -53,6 +53,7 @@
 # It does NOT commit and does NOT push. It leaves the files written and
 # coherent and prints the steps. That the commit be given by a person is
 # the same decision aegis-registry already took.
+
 set -euo pipefail
 
 # ── canonical preamble (V-102) ───────────────────────────────────────

@@ -22,6 +22,7 @@
 # 27,840 tokens measured, -22%) and with that it halves the real
 # concurrency. Zero complexity inside the cluster for a problem that lives
 # outside it.
+
 set -euo pipefail
 
 NS=ai-system

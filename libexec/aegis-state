@@ -16,6 +16,7 @@
 # is expensive. `aegis state` is the MACHINE (what it takes to rebuild
 # the installation); `aegis data` is the TENANTS' data (what it takes to
 # rebuild the shop). A backup of one is no use for restoring the other.
+
 set -euo pipefail
 
 # ── canonical preamble (V-102) ───────────────────────────────────────

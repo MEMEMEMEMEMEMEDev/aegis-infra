@@ -26,6 +26,7 @@
 # $AEGIS_HOME/.init-state/runs/, which is this machine's state by
 # definition: there is nothing to exclude because it is not in the
 # product's tree.
+
 set -euo pipefail
 
 # ── canonical preamble (V-102) ───────────────────────────────────────

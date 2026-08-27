@@ -41,6 +41,7 @@
 # It does not edit any FROM, it does not commit and it does not sync.
 # It fires and it reads; the bump stays a decision a person takes with
 # the digest in front of them.
+
 set -euo pipefail
 
 # ── canonical preamble (V-102) ───────────────────────────────────────

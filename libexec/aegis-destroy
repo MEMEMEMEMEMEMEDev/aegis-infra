@@ -37,6 +37,7 @@
 #   aegis destroy                 # DRY-RUN: shows the destruction plan
 #   aegis destroy --yes           # destroys CF + purges the local tfstate
 #   aegis destroy --yes --purge-secrets --k3s   # total teardown
+
 set -euo pipefail
 
 # ── canonical preamble (V-102) ───────────────────────────────────────
