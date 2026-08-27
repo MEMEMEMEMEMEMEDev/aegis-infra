@@ -112,6 +112,19 @@ for t in jq git openssl direnv gh age sops tofu kubectl helm cosign; do
 done
 gate "userland-completo" check_binaries
 
+# ── the product on the PATH (03 §7) ─────────────────────────────────
+# `aegis` as a command: a symlink to THIS product, so every "Resume:"
+# line the init prints and every protocol that says `aegis <x>` works
+# from any directory. A symlink and not a copy: the product is a repo,
+# and a copy would be a second version nobody updates; every entry
+# point resolves it with readlink -f. Until 2026-08-27 two comments
+# (libexec/aegis-init, libexec/aegis-destroy) said this phase did it
+# and nothing did — the first "Resume:" line the VPS printed was
+# followed by `aegis: command not found`.
+run_cmd sudo ln -sfn "$AEGIS_ROOT/bin/aegis" /usr/local/bin/aegis
+gate "aegis-en-path" bash -c \
+    "[[ \"\$(readlink -f \"\$(command -v aegis)\")\" == '$AEGIS_ROOT/bin/aegis' ]]"
+
 # ── defensive direnv hook (A3) ──────────────────────────────────────
 if ! grep -q 'direnv hook bash' ~/.bashrc 2>/dev/null; then
     run_cmd bash -c \

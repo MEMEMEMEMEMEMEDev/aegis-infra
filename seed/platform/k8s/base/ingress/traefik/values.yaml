@@ -28,8 +28,13 @@ ports:
     # The certificate is NOT configured per-route: the default TLSStore
     # of k8s/base/ingress/edge-tls carries the wildcard, so a route that
     # lists `websecure` is served without naming a secret.
-    tls:
-      enabled: true
+    # Chart 40.x keys this under `http.tls` (a `tls:` straight under
+    # the port fails the chart's schema — the first VPS run hit it);
+    # `enabled: true` is also the chart's default, written out so the
+    # intent survives a chart bump that changes the default.
+    http:
+      tls:
+        enabled: true
     forwardedHeaders:
       trustedIPs: ["10.42.0.0/16"]
 deployment:
