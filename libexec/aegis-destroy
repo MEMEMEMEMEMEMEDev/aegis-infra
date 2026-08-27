@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# aegis-summary: Undoes what the init created outside (cloud and repos)
+# aegis-summary: Undoes the init's footprint on the cloud edge and this host
 # aegis-group:   setup
 # aegis-help:
 # Usage: aegis destroy [--yes] [--purge-secrets] [--k3s]
 #
-# Undoes the EXTERNAL footprint the init created: Cloudflare (tunnel,
-# DNS, Access) and the GitHub repos. Without --yes it is a DRY-RUN
-# that only says what it would remove.
+# Undoes the footprint the init left on the EDGE and on THIS HOST:
+# the Cloudflare tunnel, DNS and Access (through tofu, when there is a
+# state), the EDGE=local host bridge, and — with --k3s — the cluster.
+# It does NOT delete the GitHub repos: they carry the init's marker
+# topic, a re-run reuses them, and deleting a repo is a decision taken
+# by hand. (Until 2026-08-27 this text claimed the repos too; the code
+# never did it.) Without --yes it is a DRY-RUN that only says what it
+# would remove.
 #
 #   --yes             act (default: dry-run)
 #   --purge-secrets   also wipe the instance's secret store
