@@ -87,25 +87,13 @@ fi
 #     `git checkout -- platform/` trampled the files of the RUNNING
 #     instance.
 #
-# Now the seed lives in seed/platform/ (unrendered) and is COPIED
-# here. The render below still operates on platform/, that is, on the
-# copy, and the seed is never left with one instance's values inside.
-#
-# THE GUARD IS THE IMPORTANT PART: if platform/ already has .git, this
-# is NOT a virgin start — it is an instance with a history of its own,
-# and its working tree is the truth. Copying the seed on top would
-# destroy it.
-PLATFORM_SEED="$AEGIS_ROOT/seed/platform"
-[[ -d "$PLATFORM_SEED" ]] || die "seed/platform/ is missing — the artifact is incomplete"
-if [[ -d "$PLATFORM_DIR/.git" ]]; then
-    log_info "platform/ is already an instance (it has .git): NOT seeding from the seed"
-else
-    run_cmd mkdir -p "$PLATFORM_DIR"
-    # -a preserves modes (bin/ has executables); the `.` also copies
-    # the hidden files, which include .sops.yaml.tpl and .gitignore.
-    run_cmd cp -a "$PLATFORM_SEED/." "$PLATFORM_DIR/"
-    log_ok "platform/ seeded from seed/platform/ ($(find "$PLATFORM_SEED" -type f | wc -l) files)"
-fi
+# Now the seed lives in seed/platform/ (unrendered) and is COPIED by
+# seed_platform_dir (lib/common.sh) — phase 00 already did it, because
+# phases 00 and 05 read platform/ before this one; here it is a no-op
+# that keeps this phase whole under --only. The render below operates
+# on platform/, that is, on the copy, and the seed is never left with
+# one instance's values inside.
+seed_platform_dir
 
 # ── the platform repo's .sops.yaml: recipient = the public key ─────
 # (in greenfield the v2 repo is initialized with THIS public key; the

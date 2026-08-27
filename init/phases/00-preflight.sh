@@ -26,6 +26,12 @@ EOF
 #    principle as the secrets: generate+guide).
 ensure_config    # defines and validates every var (lib/config.sh)
 
+# 1a. The instance's platform/ exists from HERE on: this phase's
+#     host-key gate and phase 05's pins read it, and on a clean
+#     machine (product != instance) nothing had created it yet.
+#     Idempotent; never touches an instance that already has .git.
+seed_platform_dir
+
 # 1b. host/network DOCTOR (P0.4/P0.5 audit 2026-07-18): EVERYTHING
 #     that killed phases 30-40 minutes into real runs is verified
 #     HERE, with the remediation in the message. The doctor diagnoses

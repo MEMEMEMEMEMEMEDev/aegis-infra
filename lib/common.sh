@@ -123,6 +123,35 @@ _gate_record() {   # <gate> <pass|fail> <duration_s>
         >> "$AEGIS_STATE_DIR/gates.jsonl"; } 2>/dev/null || true
 }
 
+# ── the instance's platform/ is born from the seed, BEFORE anyone reads it ──
+# Product != instance: seed/platform/ ships in the artifact, unrendered;
+# $PLATFORM_DIR is this machine's copy of it. Until 2026-08-27 the copy
+# happened in phase 10 — but phase 00 (the GitHub host-key pins) and
+# phase 05 (the userland pins) already READ $PLATFORM_DIR. On the house
+# machine, where product and instance are the same folder, nobody
+# noticed; the first run on a VPS died in phase 00 with a python
+# traceback on a path that did not exist yet. So the seeding is one
+# function, called by phase 00 right after the config (nothing it
+# needs comes later) and again by phase 10, where it is a no-op.
+#
+# THE GUARD IS THE IMPORTANT PART: if platform/ already has .git, this
+# is NOT a virgin start — it is an instance with a history of its own,
+# and its working tree is the truth. Copying the seed on top would
+# destroy it.
+seed_platform_dir() {
+    local seed="$AEGIS_ROOT/seed/platform"
+    [[ -d "$seed" ]] || die "seed/platform/ is missing — the artifact is incomplete"
+    if [[ -d "$PLATFORM_DIR/.git" ]]; then
+        log_info "platform/ is already an instance (it has .git): NOT seeding from the seed"
+        return 0
+    fi
+    run_cmd mkdir -p "$PLATFORM_DIR"
+    # -a preserves modes (bin/ has executables); the `.` also copies
+    # the hidden files, which include .sops.yaml.tpl and .gitignore.
+    run_cmd cp -a "$seed/." "$PLATFORM_DIR/"
+    log_ok "platform/ seeded from seed/platform/ ($(find "$seed" -type f | wc -l) files)"
+}
+
 # ── gates ───────────────────────────────────────────────────────────
 # gate_no_subject: the gate has NOTHING TO LOOK AT under this edge.
 #
