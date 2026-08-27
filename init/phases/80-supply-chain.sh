@@ -558,7 +558,16 @@ fi
 # this tree exists to make impossible. The job keeps going past a
 # broken image and lists them all at the end, so one red here names
 # every image that needs a newer tag — not just the first.
-gate "mirror-images-build-verde" jenkins_build_retry mirror-images 2700 2
+# When it is red, say what the operator does next — the job's last line
+# names the images, not the way out. On the first clean instance
+# (2026-08-27) five of seven failed on ONE CVE upstream had not fixed,
+# and the protocol already had the two answers; the gate did not point
+# at them.
+gate_diag "mirror-images-build-verde" \
+  'log_warn "a third-party image that fails the scan of TODAY does not get in — and the seed pins age between release and install.";
+   log_warn "For each image the job lists: (a) upstream rebuilt it → measure the new digest and bump mirror-images/images.txt (docs/protocols/images.md §2);";
+   log_warn "(b) upstream did not → a DATED exception with explicit paths in mirror-images/trivyignore.yaml, or wait (§6). Then: aegis init --from 80-supply-chain"' \
+  jenkins_build_retry mirror-images 2700 2
 
 # ── 80.7 the bases aegis owns, built here so nothing stands on a sample ──
 # base-images builds every member (nginx for the static fronts, node for
