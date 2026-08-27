@@ -196,8 +196,9 @@ jenkins_wait_build() {
     done
 }
 
-# jenkins_build_retry <job> [timeout_s] [tries] — triggers the build
-# through the API and waits; F-D run #15: with the operator's mobile
+# jenkins_build_retry <job> [timeout_s] [tries] [query] — triggers the
+# build through the API (jenkins_fire: the endpoint the job accepts,
+# the query when it carries parameters) and waits; F-D run #15: with the operator's mobile
 # network the build can die from a transient (the "server misbehaving"
 # of the upstream DNS took down the ArgoCD sync IN THE SAME MINUTE as
 # build #1). If the FAILURE carries a NETWORK signature in the console
@@ -205,11 +206,56 @@ jenkins_wait_build() {
 # whole run of the phase. A FAILURE with no network signature = a REAL
 # failure → cut short NOW (the console was already printed by
 # jenkins_wait_build). Captures next BEFORE the POST (race #9):
+# jenkins_job_parameterized <job> — 0 if the job declares parameters.
+# Jenkins has TWO trigger endpoints and each refuses the other's job:
+# /build on a parameterized job expects a form and throws ("Error while
+# serving .../build" in the controller's log, nothing in the caller's);
+# /buildWithParameters on a plain job throws "not parameterized". The
+# job knows which one it is; ask it.
+jenkins_job_parameterized() {
+    jenkins_get "/job/$1/api/json?tree=property%5BparameterDefinitions%5Bname%5D%5D" 2>/dev/null       | jq -e '[.property[]? | select(.parameterDefinitions? and (.parameterDefinitions | length > 0))] | length > 0'       >/dev/null
+}
+
+# jenkins_fire <job> [query] — the trigger POST, on the endpoint the job
+# accepts, with the query (url-encoded k=v&k=v) when it carries
+# parameters. First clean instance, 2026-08-27: phase 80.7 fired
+# base-images (it has MEMBERS) through /build, Jenkins refused it in
+# its own log only, and the wait sat 45 minutes on a build that never
+# existed. A failed POST is an error HERE, said out loud.
+jenkins_fire() {
+    local job="$1" query="${2:-}" path
+    if jenkins_job_parameterized "$job"; then
+        path="/job/$job/buildWithParameters${query:+?$query}"
+    else
+        [[ -z "$query" ]] || { log_error "jenkins_fire $job: parameters given ('$query') to a job that declares none"; return 1; }
+        path="/job/$job/build"
+    fi
+    jenkins_post "$path" >/dev/null         || { log_error "jenkins_fire $job: the trigger POST to $path failed — nothing was queued (Jenkins' own log has the reason: kubectl -n jenkins-system logs jenkins-0 -c jenkins | grep 'Error while serving')"; return 1; }
+}
+
+# _jenkins_build_appears <job> <n> [secs] — after the trigger, build <n>
+# must come into existence (or the job must at least be queued) within
+# <secs>; otherwise the trigger did not take, and waiting the build's
+# whole timeout for it is the silence of 2026-08-27. Returns 0 when it
+# appeared, 1 when it did not.
+_jenkins_build_appears() {
+    local job="$1" n="$2" secs="${3:-120}" waited=0 code
+    while (( waited < secs )); do
+        code="$(jenkins_get_code "/job/$job/$n/api/json" 2>/dev/null || echo 000)"
+        [[ "$code" == "200" ]] && return 0
+        jenkins_get "/job/$job/api/json?tree=inQueue" 2>/dev/null | jq -e '.inQueue == true' >/dev/null && return 0
+        sleep 10; waited=$(( waited + 10 ))
+    done
+    log_error "build $job#$n never appeared in ${secs}s and the job is not queued — the trigger did not take (a build that does not exist is not a slow build)"
+    return 1
+}
+
 jenkins_build_retry() {
-    local job="$1" timeout="${2:-1800}" tries="${3:-3}" i next
+    local job="$1" timeout="${2:-1800}" tries="${3:-3}" query="${4:-}" i next
     for ((i = 1; i <= tries; i++)); do
         next="$(jenkins_next_build "$job")"
-        jenkins_post "/job/$job/build" >/dev/null
+        jenkins_fire "$job" "$query" || return 1
+        _jenkins_build_appears "$job" "$next" 120 || return 1
         if jenkins_wait_build "$job" "$timeout" "$next"; then
             return 0
         fi

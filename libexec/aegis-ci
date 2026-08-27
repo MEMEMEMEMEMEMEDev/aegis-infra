@@ -135,32 +135,10 @@ could_not() { log_error "COULD NOT EVALUATE: $*"; exit 2; }
 #  build
 # ═══════════════════════════════════════════════════════════════════
 
-# jenkins_build_retry_params <job> <timeout_s> <tries> <query> — the
-# lib's jenkins_build_retry posts to /job/<job>/build and cannot carry
-# parameters; this is the same loop against buildWithParameters?<query>.
-# It lives HERE and not in lib/jenkins.sh on purpose: one caller, and
-# the lib's contract (network signature -> re-fire; real failure ->
-# stop, console already printed by jenkins_wait_build) is copied, not
-# changed. If a second caller appears, it moves to the lib.
-jenkins_build_retry_params() {
-    local job="$1" timeout="${2:-1800}" tries="${3:-3}" query="$4" i next
-    for ((i = 1; i <= tries; i++)); do
-        next="$(jenkins_next_build "$job")"
-        jenkins_post "/job/$job/buildWithParameters?$query" >/dev/null
-        if jenkins_wait_build "$job" "$timeout" "$next"; then
-            return 0
-        fi
-        if jenkins_get "/job/$job/$next/consoleText" 2>/dev/null \
-             | grep -qiE "$AEGIS_NET_SIGS"; then
-            log_warn "build $job#$next: FAILURE with a transient NETWORK signature (attempt $i/$tries) — re-firing"
-            continue
-        fi
-        log_error "build $job#$next: FAILURE with NO network signature — a real failure, it is not retried (console above)"
-        return 1
-    done
-    log_error "build $job: $tries attempts with network failures — the network cannot carry the build; retry once it settles"
-    return 1
-}
+# The trigger and its wait live in lib/jenkins.sh (jenkins_build_retry
+# takes the query as its 4th argument since 2026-08-27, when phase 80.7
+# became the second caller that fires a parameterized job — the copy
+# this file used to carry is gone).
 
 # ci_settled_build <job> <first> <tries> — after a successful retry
 # loop, WHICH build succeeded: the first fired one, or a re-fire. The
@@ -211,18 +189,16 @@ do_build() {
         timeout="$(timeout_of "$job")"
         first="$(jenkins_next_build "$job")" \
             || could_not "no nextBuildNumber for $job — the Jenkins API stopped answering"
+        q=""
         if [[ "$job" == base-images && $MEMBERS_GIVEN == 1 ]]; then
             q="MEMBERS=$(jq -rn --arg m "$MEMBERS" '$m|@uri')"
             log_info "firing $job with MEMBERS='${MEMBERS:-<all>}' (timeout ${timeout}s) → build #$first  $root/job/$job/$first/"
-            jenkins_build_retry_params "$job" "$timeout" "$tries" "$q" \
-                || { printf '%-14s build #%s  FAILED  %s/job/%s/%s/\n' "$job" "$first" "$root" "$job" "$first"
-                     die "the chain stops at $job: what comes after would build on top of a failed step"; }
         else
             log_info "firing $job (timeout ${timeout}s) → build #$first  $root/job/$job/$first/"
-            jenkins_build_retry "$job" "$timeout" "$tries" \
-                || { printf '%-14s build #%s  FAILED  %s/job/%s/%s/\n' "$job" "$first" "$root" "$job" "$first"
-                     die "the chain stops at $job: what comes after would build on top of a failed step"; }
         fi
+        jenkins_build_retry "$job" "$timeout" "$tries" "$q" \
+            || { printf '%-14s build #%s  FAILED  %s/job/%s/%s/\n' "$job" "$first" "$root" "$job" "$first"
+                 die "the chain stops at $job: what comes after would build on top of a failed step"; }
         settled="$(ci_settled_build "$job" "$first" "$tries")"
         [[ -n "$settled" ]] || settled="$first"
         printf '%-14s build #%s  SUCCESS  %s/job/%s/%s/\n' "$job" "$settled" "$root" "$job" "$settled"
