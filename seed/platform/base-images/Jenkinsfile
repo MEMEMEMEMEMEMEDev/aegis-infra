@@ -259,7 +259,7 @@ spec:
                   "base-images/${M}/Containerfile" | head -1
               ''').trim()
               if (!(minor ==~ /[0-9]+\.[0-9]+/)) {
-                error "base-images/${m}/Containerfile: the FROM must name the internal alpine:<major>.<minor> (got '${minor}')"
+                error "base-images/${m}/Containerfile: the FROM must name alpine:<major>.<minor> (got '${minor}')"
               }
               env.MINOR = minor
               env.TAG   = "${minor}-${env.BUILD_NUMBER.padLeft(6, '0')}"
@@ -338,18 +338,20 @@ spec:
               container('crane') {
                 // crane pushes the ALREADY checked and scanned tar; the
                 // digest comes from crane digest, for the signature and
-                // for the consumers. base_digest: what the FROM's tag
-                // resolved to in THIS instance's registry — the seed
-                // pins by tag because it cannot know an instance's
-                // internal digest; the event records the answer.
+                // for the consumers. base_digest: the digest the FROM
+                // line pins (public, universal — see the Containerfile
+                // for why it is not the mirror), so the event says which
+                // bytes this base was built on.
                 sh '''
                   set -e
                   cd "${WORKSPACE}"
                   crane push "base-${M}.tar" "${REGISTRY}/aegis-base-${M}:${TAG}"
                   crane digest "${REGISTRY}/aegis-base-${M}:${TAG}" > "base-${M}.digest"
-                  crane digest "${REGISTRY}/alpine:${MINOR}" > "base-${M}.base-digest"
+                  sed -n -E 's|^FROM .*@(sha256:[0-9a-f]{64}).*|\\1|p' \\
+                    "base-images/${M}/Containerfile" | head -1 > "base-${M}.base-digest"
+                  test -s "base-${M}.base-digest"
                   echo "pushed:  ${REGISTRY}/aegis-base-${M}:${TAG}@$(cat base-${M}.digest)"
-                  echo "built on ${REGISTRY}/alpine:${MINOR}@$(cat base-${M}.base-digest)"
+                  echo "built on alpine:${MINOR}@$(cat base-${M}.base-digest)"
                 '''
               }
               container('cosign') {

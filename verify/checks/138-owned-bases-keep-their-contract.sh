@@ -1,4 +1,4 @@
-# title: every base aegis owns keeps its contract: internal FROM, port 8080, numeric USER, config checked
+# title: every base aegis owns keeps its contract: pinned FROM, port 8080, numeric USER, config checked
 # origin: new in v3 — 2026-08-27, the day aegis-base-nginx replaced a third-party base nobody could patch
 check() {
 # base-images/<member>/Containerfile is a base image aegis OWNS: alpine
@@ -7,10 +7,16 @@ check() {
 # digest to every consumer. The consumers changed one FROM line and
 # nothing else, so what they may assume of the base is a CONTRACT, and
 # each clause has a failure that is silent in the pod:
-#   · FROM the INTERNAL registry. A base built on an image pulled from
-#     the internet stands on a digest nobody mirrored, scanned or
-#     signed — the hole the mirror closed on 2026-08-09 reopened one
-#     level down.
+#   · FROM pinned by DIGEST — the internal registry, or a public
+#     reference with `@sha256:`. A bare tag from the internet is a
+#     mutable pointer: the hole the mirror closed on 2026-08-09,
+#     reopened one level down. The first version demanded the mirror
+#     itself, and the same day's measurement showed why that cannot
+#     be the rule: the public alpine:3.22 carried the very libcrypto3
+#     the mirror's scan refuses, so a base that only exists to run
+#     `apk upgrade` on top of it could never be built from a mirror it
+#     cannot enter. The alpine underneath never runs; the result is
+#     what gets scanned and signed. So: pinned, from anywhere.
 #   · EXPOSE 8080. A tenant's NetworkPolicy admits edge → 8080 only; an
 #     image on 80 starts fine and never receives a request.
 #   · the LAST `USER` is numeric. Tenant namespaces are PSS restricted:
@@ -40,8 +46,9 @@ for cf in "$B"/*/Containerfile; do
     code="$(joincont "$cf" | grep -vE '^[[:space:]]*#')"
     from="$(grep -E '^[[:space:]]*FROM[[:space:]]' <<< "$code" | head -1)"
     [[ -z "$from" ]] && D138="$D138 $m: no FROM;"
-    [[ -n "$from" && "$from" != *"FROM $REG"* && "$from" != *"FROM --platform="*" $REG"* ]] \
-        && D138="$D138 $m: FROM does not name the internal registry ($REG…): a base built on the internet stands on a digest nobody mirrored, scanned or signed;"
+    if [[ -n "$from" ]] && ! grep -qE "FROM ([^ ]+ )*($(printf '%s' "$REG" | sed 's/\./\\./g')[^ ]+|[^ ]+@sha256:[0-9a-f]{64})([[:space:]]|$)" <<< "$from"; then
+        D138="$D138 $m: FROM is neither the internal registry ($REG…) nor a reference pinned by @sha256: — a bare tag from the internet is a mutable pointer, and a base built on it stands on bytes nobody chose;"
+    fi
     grep -qE '^[[:space:]]*EXPOSE[[:space:]]+8080([[:space:]]|$)' <<< "$code" \
         || D138="$D138 $m: no EXPOSE 8080 (a tenant's NetworkPolicy admits only 8080: on any other port the pod starts and never receives a request);"
     last_user="$(grep -E '^[[:space:]]*USER[[:space:]]' <<< "$code" | tail -1 | awk '{print $2}')"
@@ -67,5 +74,5 @@ else
     D138="$D138 base-images/consumers.txt does not exist: the rebuilt base is propagated to nobody;"
 fi
 if [[ -n "$D138" ]]; then fail "base-images:$D138"
-else pass "$members owned base(s): internal FROM, EXPOSE 8080, numeric USER, config checked where a server is installed; the job and the consumers list with both sentinels are there"; fi
+else pass "$members owned base(s): pinned FROM, EXPOSE 8080, numeric USER, config checked where a server is installed; the job and the consumers list with both sentinels are there"; fi
 }

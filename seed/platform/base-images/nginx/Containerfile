@@ -45,13 +45,23 @@
 # That is nginx-unprivileged's contract, kept on purpose: the consumers
 # changed one FROM line and nothing else.
 
-# The FROM is pinned by TAG against the INTERNAL registry (the seed
-# cannot know an instance's internal digest; the instance's
-# mirror-images job pins the source by digest, and the build event
-# records what this tag resolved to as `base_digest`). The minor here
-# is the single source of the image's tag: the job derives
+# The FROM comes from the PUBLIC registry, pinned by DIGEST — and not
+# from the internal mirror, which is what the first version did and
+# what the mirror's own rule would suggest. Measured on 2026-08-27: the
+# alpine:3.22 image upstream was built on 2026-06-22 and still carries
+# libcrypto3 3.5.7-r0, so the mirror's blocking scan would refuse it —
+# and this base could never be built from a mirror it cannot enter.
+# The mirror's guarantee («everything that runs in a tenant was scanned
+# and signed») is not weakened by this: the alpine underneath never
+# runs anywhere. Its packages are REPLACED by `apk upgrade` on the very
+# next line, and what runs is the result, which IS scanned (with no
+# exceptions) and signed by the job. A public digest is also universal:
+# the seed can pin it, every instance builds from the same bytes, and
+# the build event records it as `base_digest`. What must never happen
+# is a bare tag from the internet: check 138 bites on that. The minor
+# here is the single source of the image's tag: the job derives
 # `<minor>-<build>` from this line, the way ci-images does.
-FROM registry.registry-system.svc.cluster.local:5000/alpine:3.22
+FROM public.ecr.aws/docker/library/alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
 
 # ORDER MATTERS, and every step below has a reason:
 #
@@ -66,9 +76,9 @@ FROM registry.registry-system.svc.cluster.local:5000/alpine:3.22
 #    creates the user differently), the BUILD breaks here, with this
 #    line in the log — instead of four tenant pods failing at once with
 #    a permission error on a file the browser never sees.
-# 3. `apk upgrade` BEFORE `apk add`. The mirrored alpine is frozen by
-#    digest: its packages are whatever they were the day it was
-#    mirrored. The upgrade is where today's patched packages come in —
+# 3. `apk upgrade` BEFORE `apk add`. The alpine above is frozen by
+#    digest: its packages are whatever they were the day it was built
+#    upstream. The upgrade is where today's patched packages come in —
 #    it is the line that would have carried openssl 3.5.8-r0 on
 #    2026-08-25, and it is the line image-watch rebuilds this image to
 #    run.

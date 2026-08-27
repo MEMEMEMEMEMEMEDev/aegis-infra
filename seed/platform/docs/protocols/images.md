@@ -162,7 +162,7 @@ picks it up, on our cadence, not a third party's.
 base-images/
   consumers.txt          ← the repos standing on a base (derived block, §3.4)
   nginx/                 ← one directory per member
-    Containerfile        ← FROM <REGISTRY>/alpine:3.22 + apk upgrade + apk add nginx
+    Containerfile        ← FROM public alpine:3.22@sha256:… + apk upgrade + apk add nginx
     nginx.conf
     default.conf
     index.html
@@ -175,13 +175,19 @@ builds every directory it finds (or the `MEMBERS` it is handed), and
 `image-watch` scans every base that the registry holds. A new member
 is in the loop the morning after its first build.
 
-The base's own `FROM` is `<REGISTRY>/alpine:3.22` — by TAG, against
-the internal registry, on purpose. The seed cannot know the digest an
-instance's `mirror-images` will give `alpine:3.22` there; the source
-IS pinned by digest, in `images.txt`, and the build event records
-what the tag resolved to as `base_digest`. The digest freezes the
-filesystem the build starts from; the packages on top come from the
-apk index of the day, which is the point.
+The base's own `FROM` is the **public** `alpine:3.22`, pinned by
+**digest** — not the mirror, on purpose. Measured on 2026-08-27: the
+public image was built on 2026-06-22 and still carried the libcrypto3
+the mirror's blocking scan refuses, so a base that exists to run
+`apk upgrade` on top of it could never be built from a mirror it
+cannot enter. Nothing is lost: the alpine underneath never runs
+anywhere — its packages are replaced on the next line, and what runs
+is the result, scanned with no exceptions and signed. A public digest
+is universal, so the seed can pin it and every instance builds from
+the same bytes; the build event records it as `base_digest`. A bare
+tag from the internet is what check 138 refuses. The digest freezes
+the filesystem the build starts from; the packages on top come from
+the apk index of the day, which is the point.
 
 ### 3.2 The contract — what a consumer may assume
 

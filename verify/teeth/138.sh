@@ -25,12 +25,12 @@ assert n[1] == 1
 open(p, "w").write(n[0])
 PY
 }
-# FROM the internet: a base standing on a digest nobody mirrored or signed
+# FROM a BARE TAG on the internet: a mutable pointer, bytes nobody chose
 red_3() {
     python3 - "$AEGIS_ROOT/$CF" <<'PY'
 import re, sys
 p = sys.argv[1]; t = open(p).read()
-n = re.subn(r"^FROM \S+/alpine:3\.22\s*$", "FROM alpine:3.22", t, count=1, flags=re.M)
+n = re.subn(r"^FROM \S+/alpine:3\.22\S*\s*$", "FROM alpine:3.22", t, count=1, flags=re.M)
 assert n[1] == 1
 open(p, "w").write(n[0])
 PY
@@ -47,3 +47,15 @@ PY
 }
 # control: a LABEL is metadata, not contract
 control_1() { printf 'LABEL org.opencontainers.image.vendor="aegis"\n' >> "$AEGIS_ROOT/$CF"; }
+
+# control: the internal registry by tag is the OTHER legal shape (the
+# mirror pins the source by digest; the tag is that instance's pointer)
+control_2() {
+    python3 - "$AEGIS_ROOT/$CF" <<'PY'
+import re, sys
+p = sys.argv[1]; t = open(p).read()
+n = re.subn(r"^FROM \S+/alpine:3\.22\S*\s*$", "FROM registry.registry-system.svc.cluster.local:5000/alpine:3.22", t, count=1, flags=re.M)
+assert n[1] == 1
+open(p, "w").write(n[0])
+PY
+}

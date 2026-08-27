@@ -185,21 +185,3 @@ gcr.io/distroless/nodejs22-debian13:nonroot@sha256:a2723a2817c5b01b8e7b98d567bc8
 # its irony: it exists to exercise the path everything else walks, so it
 # was also the last place where the hole could hide.
 public.ecr.aws/docker/library/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d	alpine:3.21
-
-# alpine 3.22 — the ground under the bases aegis OWNS (base-images/).
-#
-# aegis-base-nginx is `alpine:3.22 + apk upgrade + apk add nginx`, and
-# THAT is the whole point of owning a base: the day OpenSSL published
-# CVE-2026-14456 the nginx image everybody consumes stayed unbuilt
-# upstream for days (two tags, both carrying the vulnerable
-# libcrypto3), while Alpine had the patched package out within the day.
-# A base built from the distribution's packages picks the fix up at
-# the next build — one `apk upgrade` — instead of waiting for a third
-# party's release cycle. Which is why image-watch, when it finds a
-# fixable CVE in a base we own, simply rebuilds it.
-#
-# The digest here freezes the FILESYSTEM the build starts from; the
-# packages on top come from the apk index of the day. So this pin
-# ages slowly and matters little — the scan of the resulting base is
-# what says whether it is clean, and it runs on every build.
-public.ecr.aws/docker/library/alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce	alpine:3.22
