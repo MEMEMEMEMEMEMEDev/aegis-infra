@@ -10,13 +10,25 @@
 # (with sudo) and reports OK / FAIL / WARN. Idempotent: re-running
 # must end all OK.
 
-# aegis-preflight — leaves a VM in the state aegis-init needs before running
-# (environment fixes discovered in the real runs). Idempotent: re-running
-# must give all OK. Auto-repairs what it can (clock, DNS, packages, git
-# identity via prompt). Nothing here is tied to a particular user, domain or
-# account: the customization lives in init/aegis-init.conf.
+# aegis-preflight — leaves a MACHINE in the state aegis-init needs before
+# running (environment fixes discovered in the real runs). Idempotent:
+# re-running must give all OK. Auto-repairs what it can (clock, DNS,
+# packages, gh, git identity via prompt). Nothing here is tied to a
+# particular user, domain or account: the customization lives in
+# aegis.conf.
+#
+# It was born on a VirtualBox VM and, until 2026-08-27, it ASSUMED that
+# shape everywhere: it pinned the NAT NIC's DNS to VirtualBox's resolver
+# and installed a boot service to re-apply it — on a VPS whose only NIC
+# is eth0 that service failed on every boot, and the leftovers check
+# looked at a v2 path that exists on no customer's machine (and so was
+# green). The first run on a real VPS found both. Now the VirtualBox
+# shape is MEASURED (the NIC exists and sits on VirtualBox's NAT subnet)
+# and everything else is generic.
 set -u
 AEGIS_ROOT="${AEGIS_ROOT:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)}"
+# shellcheck source=../lib/paths.sh
+source "$AEGIS_ROOT/lib/paths.sh"      # AEGIS_STATE_DIR: where a previous init would have left its gates
 usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
 # Parsed BEFORE anything else: this command installs things with sudo,
 # and until 2026-08-26 `aegis preflight --help` ran the whole
@@ -25,10 +37,9 @@ for a in "$@"; do case "$a" in
     -h|--help) usage; exit 0 ;;
     *) echo "${AEGIS_CMD:-aegis} preflight takes no arguments (got '$a'); try --help" >&2; exit 3 ;;
 esac; done
-NAT_IF="${NAT_IF:-enp0s3}"                               # VirtualBox NAT NIC
-HOST_IF="${HOST_IF:-enp0s8}"                             # host-only/bridge NIC
+NAT_IF="${NAT_IF:-enp0s3}"                               # VirtualBox NAT NIC (only acted on if measured, see 3/9)
+HOST_IF="${HOST_IF:-enp0s8}"                             # VirtualBox host-only/bridge NIC
 NAT_DNS="${NAT_DNS:-10.0.2.3}"                           # DNS of VirtualBox's NAT
-WORKSPACE="${AEGIS_WORKSPACE:-$HOME/workspace/aegis-v2}" # where the artifact lives
 MAX_DRIFT="${MAX_DRIFT:-120}"                            # seconds of drift tolerated
 PASS=0; FAIL=0; WARNS=0
 ok(){   echo "  [OK]   $1"; PASS=$((PASS+1)); }
@@ -55,18 +66,25 @@ sudo -K
 if sudo -n true 2>/dev/null; then ok "NOPASSWD active for $USER"; else bad "NOPASSWD did not stay active"; fi
 
 echo "== 2/9 IPv6 persistently disabled (the RA advertises a v6 route with no way out) =="
+# all + default cover every NIC, present and future; naming NICs here
+# baked the VirtualBox ones into every machine.
 sudo tee /etc/sysctl.d/99-disable-ipv6.conf >/dev/null <<EOF
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
-net.ipv6.conf.$NAT_IF.disable_ipv6 = 1
-net.ipv6.conf.$HOST_IF.disable_ipv6 = 1
 EOF
 sudo sysctl --system >/dev/null 2>&1
 [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)" = "1" ] \
   && ok "IPv6 off (runtime + /etc/sysctl.d/99-disable-ipv6.conf)" \
   || bad "IPv6 is still enabled - buildah tries v6 and the pulls die"
 
-echo "== 3/9 per-interface DNS (the bridge NIC usually brings an unreachable DNS) =="
+echo "== 3/9 DNS (on the VirtualBox shape the bridge NIC brings an unreachable DNS) =="
+# The VirtualBox shape is MEASURED, not assumed: the NAT NIC exists and
+# carries an address on VirtualBox's NAT subnet. Anywhere else the host's
+# DNS is left exactly as it was configured — a VPS, a LAN box, a cloud
+# VM each have their own, and none of them is 10.0.2.3.
+is_vbox_nat=0
+if ip -4 -o addr show "$NAT_IF" 2>/dev/null | grep -q ' inet 10\.0\.2\.'; then is_vbox_nat=1; fi
+if [ "$is_vbox_nat" = 1 ]; then
 sudo resolvectl dns "$NAT_IF" "$NAT_DNS" 2>/dev/null || warn "I could not set DNS on $NAT_IF"
 ip link show "$HOST_IF" >/dev/null 2>&1 && sudo resolvectl dns "$HOST_IF" "" 2>/dev/null
 # persistence: resolvectl is runtime-only -> a oneshot that re-applies on every boot
@@ -85,6 +103,17 @@ EOF
 sudo systemctl daemon-reload && sudo systemctl enable aegis-dns-fix.service >/dev/null 2>&1 \
   && ok "aegis-dns-fix.service enabled (survives a reboot)" \
   || bad "I could not enable aegis-dns-fix.service"
+else
+  ok "not the VirtualBox shape ($NAT_IF is not on 10.0.2.0/24): the host's DNS is left as configured"
+  # a service from an earlier, VirtualBox-only version of this command
+  # would fail on every boot here; it is repaired, not just reported
+  if [ -e /etc/systemd/system/aegis-dns-fix.service ]; then
+    sudo systemctl disable --now aegis-dns-fix.service >/dev/null 2>&1
+    sudo rm -f /etc/systemd/system/aegis-dns-fix.service && sudo systemctl daemon-reload \
+      && ok "removed a stale aegis-dns-fix.service (it named NICs this machine does not have)" \
+      || bad "I could not remove the stale aegis-dns-fix.service"
+  fi
+fi
 R=0; for i in 1 2 3; do resolvectl query github.com >/dev/null 2>&1 && R=$((R+1)); done
 [ "$R" -eq 3 ] && ok "github.com resolves 3/3" || bad "unstable DNS ($R/3) - check resolvectl status"
 
@@ -156,12 +185,16 @@ g_mail="$(git config --global user.email 2>/dev/null || true)"
 [ -n "$g_name" ] && [ -n "$g_mail" ] \
   && ok "git with identity: $g_name <$g_mail>" \
   || bad "git without identity -> git config --global user.name/user.email (any valid one)"
+# gh is THE GitHub credential of the whole init (phase 00, D10): the
+# install is ours to do, the login is the operator's — it is the one
+# step of this command that needs a human and a browser.
+command -v gh >/dev/null || sudo apt-get install -y -qq gh >/dev/null 2>&1
 if command -v gh >/dev/null; then
   gh auth status >/dev/null 2>&1 \
     && ok "gh authenticated as $(gh api user --jq .login 2>/dev/null || echo '?')" \
-    || bad "gh WITHOUT auth -> gh auth login (needs the repo + delete_repo scopes)"
+    || bad "gh WITHOUT auth -> run 'gh auth login' (scopes: repo, delete_repo) and re-run this command"
 else
-  warn "gh not installed (the init assumes it at phase 00)"
+  bad "gh not installed and apt could not install it (the init assumes it at phase 00)"
 fi
 
 echo "== 7/9 real connectivity to the endpoints the phases use =="
@@ -180,21 +213,18 @@ mem_g=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
 [ -d /dev/shm ] && touch /dev/shm/.aegis-probe 2>/dev/null && rm -f /dev/shm/.aegis-probe \
   && ok "/dev/shm writable (age/cosign ceremonies)" || bad "/dev/shm not writable"
 
-echo "== 9/9 leftovers from previous runs (they must NOT exist in the snap) =="
-for p in "$WORKSPACE/.init-state" /etc/rancher/k3s /var/lib/rancher/k3s; do
-  [ -e "$p" ] && warn "$p exists - this snap is not a clean 'pre-aegis'" || ok "clean: $p"
+echo "== 9/9 leftovers of a previous instance on this host (the init expects none) =="
+for p in "$AEGIS_STATE_DIR" /etc/rancher/k3s /var/lib/rancher/k3s; do
+  [ -e "$p" ] && warn "$p exists - this host already carried an instance (aegis init would converge on it)" || ok "clean: $p"
 done
-
-# stable copy (in case /tmp gets cleaned by the reboot of the snapshot cycle)
-cp -f "$0" "$HOME/aegis-preflight.sh" 2>/dev/null && chmod +x "$HOME/aegis-preflight.sh"
 
 echo
 echo "================== SUMMARY =================="
 echo "  OK: $PASS   WARN: $WARNS   FAIL: $FAIL"
 if [ "$FAIL" -eq 0 ]; then
-  echo "  VM ready. Now: reboot, re-run (~/aegis-preflight.sh was saved;"
-  echo "  everything must stay OK without asking anything) and ONLY THEN take the snapshot."
+  echo "  Machine ready. Re-running this command must stay all OK; then: aegis init"
 else
-  echo "  Fix the FAILs before snapshotting."
+  echo "  Fix the FAILs, re-run this command, and only then: aegis init"
 fi
-exit "$FAIL"
+# one of the four outcomes, not a count: rc 1 = something is missing or wrong
+[ "$FAIL" -eq 0 ] && exit 0 || exit 1

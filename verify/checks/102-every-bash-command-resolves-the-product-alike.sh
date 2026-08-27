@@ -35,9 +35,10 @@ for f in "$LIBEXEC"/aegis-* "$LIBEXEC"/state/* "$LIBEXEC"/dev/*; do
     # platform/ hanging off the product.
     # $HOME/aegis EXACTLY: $HOME/aegis-respaldos is another thing (the
     # backup deliberately goes OUTSIDE the tree) and
-    # $HOME/aegis-preflight.sh is the copy for a clean VM. A pattern
-    # that does not tell them apart bites healthy things, and a check
-    # that shouts about healthy things stops being read.
+    # $HOME/aegis-preflight.sh was, until 2026-08-27, the preflight's
+    # copy of itself for a clean VM. A pattern that does not tell them
+    # apart bites healthy things, and a check that shouts about healthy
+    # things stops being read.
     nc "$f" | grep -qE '\$HOME/aegis($|[/"'"'"'[:space:]])' \
         && D102="$D102 $b decides where the instance is on its own (that belongs to lib/paths.sh);"
     nc "$f" | grep -q '\$AEGIS_ROOT/platform' \

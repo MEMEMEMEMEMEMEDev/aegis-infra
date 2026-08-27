@@ -282,7 +282,7 @@ if it does NOT drag them along.
 | D5 | `/etc/sudoers.d/010-aegis-init-nopasswd` | `aegis-preflight.sh:31-32`, `lib/common.sh:737,739,755`, `phases/00-preflight.sh:60` | 5 places |
 | D6 | the GitHub topic `aegis-app` | `aegis-app:106` | the repos already created carry it |
 | D7 | `initiatedBy.username: "aegis-sync"` | `aegis-sync:56` | **it stays engraved in ArgoCD's history**; to be decided separately |
-| D8 | `aegis-preflight.sh` copies itself into `$HOME` under a hardcoded name | `:169` and `:175` | |
+| D8 | `aegis-preflight.sh` copies itself into `$HOME` under a hardcoded name | `:169` and `:175` | **closed 2026-08-27**: the product lives in a repo, the copy is gone |
 | D9 | The rule `("bin/aegis-org-prueba", ...)` in `bin/aegis-semilla:129` | `:252-256` `morir()` if it does not match | **Kills all three subcommands of `aegis-semilla`.** The rename's only loud failure — and it is a false positive |
 
 - [ ] pending

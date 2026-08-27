@@ -65,10 +65,12 @@ commit.**
   the local profile (`platform/docs/protocols/vps-lab.md`, and the
   `aegis vps` command); the house instance comes second.
 
-A wrinkle worth knowing before you run anything: `aegis preflight`
-still defaults its NICs to the VirtualBox shape v2 ran on
-(`NAT_IF=enp0s3`, `HOST_IF=enp0s8`). On any other machine, override
-them.
+A wrinkle that used to be here: `aegis preflight` was born on the
+VirtualBox VM v2 ran on and assumed that shape everywhere (it pinned
+the NAT NIC's DNS to VirtualBox's resolver, with a boot service to
+re-apply it). Since 2026-08-27 it MEASURES that shape — the NAT NIC
+exists and sits on 10.0.2.0/24 — and touches no DNS anywhere else; the
+first run on a VPS is what found it.
 
 The plan (the wave roadmap, the run packages, the decisions and the
 dissents) lives in `plan/` inside this repo, together with
