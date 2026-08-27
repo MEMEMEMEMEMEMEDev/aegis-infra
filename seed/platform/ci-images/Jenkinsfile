@@ -22,7 +22,7 @@ spec:
   - name: jnlp
     image: jenkins/inbound-agent:3355.v388858a_47b_33-23
     resources:
-      requests: { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 250m, memory: 512Mi }
       limits:   { cpu: 1000m, memory: 1Gi }
   # kaniko, unprivileged (W-05). Auth: regcred in kaniko's docker
   # config; the registry's own CA through --registry-certificate. -debug
@@ -41,7 +41,7 @@ spec:
       subPath: ca.crt
       readOnly: true
     resources:
-      requests: { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 250m, memory: 512Mi }
       limits:   { cpu: 1500m, memory: 2Gi }
   volumes:
   - name: regcred

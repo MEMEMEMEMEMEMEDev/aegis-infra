@@ -72,7 +72,7 @@ spec:
   - name: jnlp
     image: jenkins/inbound-agent:3355.v388858a_47b_33-23
     resources:
-      requests: { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 250m, memory: 512Mi }
       limits:   { cpu: 1000m, memory: 1Gi }
   # kaniko: UNPRIVILEGED build (W-05), the same one Jenkinsfile.app
   # uses: --no-push into a tar so that the contract check and the scan
@@ -90,7 +90,7 @@ spec:
       subPath: ca.crt
       readOnly: true
     resources:
-      requests: { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 250m, memory: 512Mi }
       limits:   { cpu: 1500m, memory: 2Gi }
   # crane: reads the tar (the contract check uses its busybox tar),
   # pushes it once scanned, and resolves digests. Custom aegis-ci-crane
@@ -115,14 +115,14 @@ spec:
       subPath: ca.crt
       readOnly: true
     resources:
-      requests: { cpu: 250m, memory: 256Mi }
+      requests: { cpu: 100m, memory: 256Mi }
       limits:   { cpu: 1000m, memory: 512Mi }
   # trivy: THIN client — the server (trivy-system) holds the DB.
   - name: trivy
     image: ghcr.io/aquasecurity/trivy:0.72.0
     command: ['sleep', 'infinity']
     resources:
-      requests: { cpu: 250m, memory: 256Mi }
+      requests: { cpu: 100m, memory: 256Mi }
       limits:   { cpu: 1000m, memory: 512Mi }
   # cosign: custom aegis-ci-cosign image (the official binary is
   # distroless and container(){sh} needs a shell). Password through
@@ -157,7 +157,7 @@ spec:
       subPath: ca.crt
       readOnly: true
     resources:
-      requests: { cpu: 100m, memory: 128Mi }
+      requests: { cpu: 50m, memory: 128Mi }
       limits:   { cpu: 500m, memory: 256Mi }
   volumes:
   - name: regcred

@@ -214,7 +214,7 @@ spec:
   - name: jnlp
     image: jenkins/inbound-agent:3355.v388858a_47b_33-23
     resources:
-      requests: { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 250m, memory: 512Mi }
       limits:   { cpu: 1000m, memory: 1Gi }
   # crane: talks to the PUBLIC registries (upstream digests, candidate
   # pulls) and to the internal one (what we serve). SSL_CERT_FILE points
@@ -240,7 +240,7 @@ spec:
       subPath: ca.crt
       readOnly: true
     resources:
-      requests: { cpu: 250m, memory: 256Mi }
+      requests: { cpu: 100m, memory: 256Mi }
       limits:   { cpu: 1000m, memory: 1Gi }
   # trivy: THIN client — the server (trivy-system) holds the DB, and
   # "today's DB" is the whole reason this job runs daily instead of
@@ -249,7 +249,7 @@ spec:
     image: ghcr.io/aquasecurity/trivy:0.72.0
     command: ['sleep', 'infinity']
     resources:
-      requests: { cpu: 250m, memory: 256Mi }
+      requests: { cpu: 100m, memory: 256Mi }
       limits:   { cpu: 1000m, memory: 1Gi }
   volumes:
   - name: regcred

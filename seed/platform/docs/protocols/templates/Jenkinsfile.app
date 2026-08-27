@@ -28,7 +28,7 @@ spec:
   - name: jnlp
     image: jenkins/inbound-agent:3355.v388858a_47b_33-23
     resources:
-      requests: { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 250m, memory: 512Mi }
       limits:   { cpu: 1000m, memory: 1Gi }
   # node: ONLY for the `desplegar` stage, which writes the digest into
   # the overlay. It does not compile the app —kaniko does that from the
@@ -47,7 +47,7 @@ spec:
     # At 500m this pod went over the ceiling and verify-static caught
     # it on the spot — check 36, the run #11 cascade.
     resources:
-      requests: { cpu: 100m, memory: 128Mi }
+      requests: { cpu: 50m, memory: 128Mi }
       limits:   { cpu: 250m, memory: 256Mi }
   # kaniko: UNPRIVILEGED build (W-05). No /dev/fuse, no vfs, no
   # privileged — it extracts layers straight onto the FS (it works where
@@ -68,7 +68,7 @@ spec:
       subPath: ca.crt
       readOnly: true
     resources:
-      requests: { cpu: 500m, memory: 512Mi }
+      requests: { cpu: 250m, memory: 512Mi }
       limits:   { cpu: 1500m, memory: 2Gi }
   # crane: pushes the tar that was ALREADY scanned (scan-before-push).
   # Custom image aegis-ci-crane (distroless crane on alpine with a shell;
@@ -92,14 +92,14 @@ spec:
       subPath: ca.crt
       readOnly: true
     resources:
-      requests: { cpu: 250m, memory: 256Mi }
+      requests: { cpu: 100m, memory: 256Mi }
       limits:   { cpu: 1000m, memory: 512Mi }
   # trivy: THIN client — the server (trivy-system) holds the DB.
   - name: trivy
     image: ghcr.io/aquasecurity/trivy:0.72.0
     command: ['sleep', 'infinity']
     resources:
-      requests: { cpu: 250m, memory: 256Mi }
+      requests: { cpu: 100m, memory: 256Mi }
       limits:   { cpu: 1000m, memory: 512Mi }
   # cosign: custom image aegis-ci-cosign (the official binary on
   # alpine with a shell — the official one is distroless and
@@ -140,7 +140,7 @@ spec:
       subPath: ca.crt
       readOnly: true
     resources:
-      requests: { cpu: 100m, memory: 128Mi }
+      requests: { cpu: 50m, memory: 128Mi }
       limits:   { cpu: 500m, memory: 256Mi }
   volumes:
   - name: regcred
