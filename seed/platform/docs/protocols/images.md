@@ -437,7 +437,13 @@ one.
   as an implicit consumer and rewrites the `tag:` and `digest:` lines of
   that block after every successful build of the member. The Job is an
   ArgoCD sync hook recreated on every sync, so the next sync runs it on
-  the rebuilt base. The seed carries a SAMPLE tag+digest (a digest born
+  the rebuilt base — and the bump ALONE does not cause that sync:
+  hooks sit outside the desired-state comparison, so an app whose only
+  change is a hook's image stays `Synced` and auto-sync never fires
+  (measured 2026-08-27 on the reference instance). After a rebuild of
+  `aegis-base-node`, run `aegis sync garage` (or wait for the next real
+  change under `garage-system/`); the Application's `operationState`
+  records the hook's phase, which is the proof. The seed carries a SAMPLE tag+digest (a digest born
   in a registry cannot be known before phase 80 builds it there); check
   138 holds the shape, phase 80 and the job hold the value.
 
