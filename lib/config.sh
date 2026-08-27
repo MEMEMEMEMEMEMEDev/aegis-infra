@@ -208,12 +208,25 @@ config_wizard() {
         # quoting — it expands when sourced):
         printf 'AEGIS_WORKSPACE="%s"\n' "$AEGIS_WORKSPACE"
     } > "$tmp"
-    mv "$tmp" "$CONF_FILE"
+    # The instance's directory may not exist yet: on a clean machine
+    # (product != instance) this is the FIRST thing ever written there.
+    # And the write is checked: config_wizard runs inside `|| die`, where
+    # `set -e` is suspended, so a failed mv used to be followed by
+    # "config written" and an init that went on with the answers in
+    # memory only — the first VPS run did exactly that (2026-08-27).
+    mkdir -p "$(dirname "$CONF_FILE")" \
+        || { rm -f "$tmp"; die "could not create $(dirname "$CONF_FILE") for the config"; }
+    mv "$tmp" "$CONF_FILE" \
+        || { rm -f "$tmp"; die "could not write $CONF_FILE (the answers were NOT saved)"; }
     log_ok "config written to $CONF_FILE"
 }
 
 # ── validation of an existing conf (for re-runs) ────────────────────
 config_validate() {
+    # a conf that is not there is not "invalid": it is absent, and the
+    # caller re-runs the wizard — said out loud, never as a bash error
+    # from `source` that the run walks past
+    [[ -f "$CONF_FILE" ]] || { log_warn "no config at $CONF_FILE"; return 1; }
     # shellcheck source=/dev/null
     source "$CONF_FILE"
     local missing=() v
