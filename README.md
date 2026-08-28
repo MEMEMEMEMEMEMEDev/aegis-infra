@@ -23,6 +23,22 @@ firma se rechaza en la admisión, no se descubre después.
 
 ---
 
+## En cinco pasos
+
+```bash
+git clone https://github.com/MEMEMEMEMEMEMEDev/aegis-infra && cd aegis-infra
+./bin/aegis preflight      # deja la máquina lista, o dice qué falta
+gh auth login              # tu cuenta de GitHub: el init crea los repos por ti
+tmux new -s aegis          # la corrida es larga; que un ssh caído no la mate
+./bin/aegis init           # el asistente pregunta lo que no puede inferir, y luego quince fases
+```
+
+> Antes de sentarte: ten decidido **dónde vas a guardar la clave age**
+> (la fase 10 la muestra una sola vez) y, si vas con Cloudflare, **una
+> zona y una credencial para acuñar tokens**. Todo eso está en
+> [Antes de empezar](#antes-de-empezar-lo-que-conviene-tener-listo); el
+> detalle de cada paso, en [Empezar](#empezar).
+
 ## En dos minutos
 
 | | |
