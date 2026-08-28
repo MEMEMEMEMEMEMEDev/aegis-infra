@@ -8,21 +8,21 @@
   <!-- left pane: the phase list -->
   <g fill="#c9d1d9">
     <text x="40" y="76"><tspan fill="#7ee787">$</tspan> aegis init --list</text>
-    <text x="40" y="104">[ ] 00-preflight</text>
-    <text x="40" y="126">[ ] 05-host</text>
-    <text x="40" y="148">[ ] 10-age-ceremony</text>
-    <text x="40" y="170">[ ] 12-workrepos</text>
-    <text x="40" y="192">[ ] 15-third-parties</text>
-    <text x="40" y="214">[ ] 20-k3s</text>
-    <text x="40" y="236">[ ] 25-edge-tofu</text>
-    <text x="40" y="258">[ ] 30-argocd</text>
-    <text x="40" y="280">[ ] 35-gitops</text>
-    <text x="40" y="302">[ ] 40-registry-pki</text>
-    <text x="40" y="324">[ ] 50-jenkins</text>
-    <text x="40" y="346">[ ] 60-webhook</text>
-    <text x="40" y="368">[ ] 70-deploy-auto</text>
-    <text x="40" y="390">[ ] 80-supply-chain</text>
-    <text x="40" y="412">[ ] 85-observability</text>
+    <text x="40" y="104">[<tspan fill="#7ee787">✔</tspan>] 00-preflight</text>
+    <text x="40" y="126">[<tspan fill="#7ee787">✔</tspan>] 05-host</text>
+    <text x="40" y="148">[<tspan fill="#7ee787">✔</tspan>] 10-age-ceremony</text>
+    <text x="40" y="170">[<tspan fill="#7ee787">✔</tspan>] 12-workrepos</text>
+    <text x="40" y="192">[<tspan fill="#7ee787">✔</tspan>] 15-third-parties</text>
+    <text x="40" y="214">[<tspan fill="#7ee787">✔</tspan>] 20-k3s</text>
+    <text x="40" y="236">[<tspan fill="#7ee787">✔</tspan>] 25-edge-tofu</text>
+    <text x="40" y="258">[<tspan fill="#7ee787">✔</tspan>] 30-argocd</text>
+    <text x="40" y="280">[<tspan fill="#7ee787">✔</tspan>] 35-gitops</text>
+    <text x="40" y="302">[<tspan fill="#7ee787">✔</tspan>] 40-registry-pki</text>
+    <text x="40" y="324">[<tspan fill="#7ee787">✔</tspan>] 50-jenkins</text>
+    <text x="40" y="346">[<tspan fill="#7ee787">✔</tspan>] 60-webhook</text>
+    <text x="40" y="368">[<tspan fill="#7ee787">✔</tspan>] 70-deploy-auto</text>
+    <text x="40" y="390">[<tspan fill="#7ee787">✔</tspan>] 80-supply-chain</text>
+    <text x="40" y="412">[<tspan fill="#7ee787">✔</tspan>] 85-observability</text>
   </g>
   <line x1="420" y1="60" x2="420" y2="420" stroke="#30363d"/>
   <!-- right pane: the verifier -->

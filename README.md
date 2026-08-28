@@ -17,8 +17,8 @@ firma se rechaza en la admisión, no se descubre después.
 > la instalación completa corrió de extremo a extremo en una máquina
 > ajena (ver [dónde se probó](#dónde-se-probó)) y cada afirmación de
 > este documento sale de una puerta o de un check que se puede volver a
-> ejecutar. Una capa más amigable —para quien no quiere leer un
-> Jenkinsfile y para desarrolladores junior— es lo próximo que se
+> ejecutar. Una capa más amigable, para quien no quiere leer un
+> Jenkinsfile y para desarrolladores junior, es lo próximo que se
 > construye encima de esta. Todavía no está.
 
 ---
@@ -34,8 +34,8 @@ firma se rechaza en la admisión, no se descubre después.
 
 ## Dónde se probó
 
-**El entorno:** un VPS alquilado —4 CPU / 16 GB, Ubuntu, nada más que
-ssh—, una **cuenta de GitHub nueva** y **sin dominio** (`EDGE=local`).
+**El entorno:** un VPS alquilado (4 CPU / 16 GB, Ubuntu, nada más que
+ssh), una **cuenta de GitHub nueva** y **sin dominio** (`EDGE=local`).
 Es decir, sin nada de lo que el autor tiene a mano en su propia
 máquina. Todo lo de abajo ocurrió ahí el 2026-08-27, y la tabla
 completa, con cada puerta, está en `docs/journeys/foreign-instance.md`.
@@ -65,6 +65,195 @@ y sus clases tienen nombre en `seed/platform/docs/failure-modes.md`.
 **Lo que todavía no se ha medido:** el perfil de borde `cloudflare` en
 una máquina ajena. Bajo `EDGE=local` sus puertas quedan registradas como
 no evaluables.
+
+## Antes de empezar: lo que conviene tener listo
+
+Para probarlo **completo** hacen falta GitHub **y** Cloudflare. Sin
+Cloudflare, `EDGE=local` te da la plataforma entera (build, scan,
+firma, admisión, GitOps, observabilidad) sobre nombres que resuelven
+al host, y las puertas del borde público (unas veinte) quedan como *no
+evaluables*. Es una buena primera corrida; no es la corrida completa.
+
+- **GitHub.** Una cuenta con `gh auth login` hecho; el preflight dice
+  qué permisos pide (`repo`, `delete_repo`). El init **crea y posee**
+  dos repos con nombres nuevos, y después uno por aplicación; los
+  *deploy keys* y los webhooks los crea él, no tú. Una cuenta u
+  organización dedicada es lo más cómodo.
+- **Cloudflare, para el perfil `cloudflare`.** Una zona en tu cuenta
+  (un dominio con sus nameservers en Cloudflare), el ID de cuenta y el
+  ID de zona (el asistente los pide), y **una credencial maestra
+  efímera** con la que el init acuña sus dos tokens acotados: tu
+  *Global API Key* o un token de cuenta con el permiso «Account API
+  Tokens: Edit». Vive solo en memoria durante la fase `15`; si la
+  pasas por archivo (`CF_MASTER_FILE`), destrúyelo al terminar; el
+  init te lo recuerda. Conviene saber crear tokens en el panel de
+  Cloudflare antes de sentarse.
+- **Un lugar seguro para la clave age, decidido de antemano.** Es la
+  raíz de confianza: descifra todo, y perderla es perder todo lo
+  cifrado, incluidos los respaldos de estado (van cifrados con ella).
+  La fase `10` la genera, la deja leer **una sola vez y fuera del
+  pane** (en tmpfs, desde otra terminal), y exige un respaldo validado
+  cifrando y descifrando de verdad; sugiere un USB offline más una
+  carpeta fuera de la máquina. Ten listo dónde va a ir (gestor de
+  contraseñas, USB, papel) y que no sea el mismo host. Y **nunca
+  grabes la sesión** (`script`, `tmux pipe-pane`, asciinema) durante
+  esa fase.
+- **Sin operador** (`--non-interactive`): `AEGIS_AGE_BACKUP_FILE`
+  (idealmente en `/dev/shm`) para el respaldo de la clave y
+  `CF_MASTER_FILE` para la credencial de Cloudflare; el init se niega a
+  correr sin ellos.
+- **Un correo de contacto** para los certificados (el asistente lo
+  infiere de `git config`) y una sesión ssh que no se caiga: tmux.
+
+Lo que **no** hace falta preparar: claves de cosign, certificados,
+registros DNS, el túnel, las credenciales del registro interno. Todo
+eso lo genera el init y lo puede rotar `aegis rotate`.
+
+## Requisitos
+
+| | |
+|---|---|
+| **Host** | Linux con `sudo`. Ubuntu es lo que se ha corrido; el playbook que prepara el host exige Ubuntu 24.04 o superior con systemd. El preflight configura `sudo` sin contraseña, instala con `apt` tmux, python3-yaml y jq (y `gh` si falta), y exige curl, git y python3 ya presentes. |
+| **Recursos** | 4 CPU y 8 GB de RAM alcanzan (el preflight avisa por debajo de 7 GB). 25 GB libres en `/`; `/dev/shm` escribible. |
+| **Red** | Salida a internet por IPv4: el preflight sondea github.com, api.github.com, api.cloudflare.com, get.k3s.io, dl.k8s.io y Docker Hub. Reloj en hora (≤ 120 s frente a GitHub) e IPv6 apagado; el preflight hace ambas cosas. |
+| **GitHub** | `gh` autenticado con `gh auth login` (el preflight dice qué permisos pide). El init **crea y posee** dos repos, plataforma y canario, con nombres nuevos. Identidad git global (`user.name`, `user.email`). |
+| **Opcional: Cloudflare** | Una cuenta con una zona, para `EDGE=cloudflare` (hostnames públicos, túnel, TLS de un emisor ACME). Sin ella, `EDGE=local` da la misma plataforma sobre nombres que resuelven al host (vía sslip.io), con TLS de la CA propia de la instancia. |
+
+Un host con restos de otra instancia también funciona (está medido); el
+init avisa si los encuentra.
+
+## Empezar
+
+```bash
+git clone <la URL de este repositorio> aegis-infra
+cd aegis-infra
+./bin/aegis preflight      # deja la máquina como la necesita el init, o dice por qué no
+gh auth login              # si el preflight lo pidió; después, preflight otra vez
+tmux new -s aegis          # el init es largo; una sesión ssh caída lo mataría
+./bin/aegis init           # el asistente de configuración y, después, quince fases
+```
+
+En adelante este documento escribe `aegis` a secas; es `./bin/aegis`
+desde el checkout del producto, y `aegis --help` es el mapa.
+
+**Cuenta con horas, no con minutos.** Cuánto, depende de la máquina y
+de la conexión; la fase larga es la 80, la que espeja y construye las
+imágenes de la plataforma. Por eso el tmux.
+
+**Dónde queda todo.** Este checkout es el producto y no se escribe
+durante una corrida. La instancia, lo que es de esta máquina, vive en
+`~/aegis` (o donde apunte `AEGIS_HOME`): `aegis.conf`, el checkout del
+repo de plataforma en `platform/`, los marcadores y las puertas en
+`.init-state/` y el almacén cifrado en `.state-secrets/`.
+
+**El asistente** pregunta lo que no puede inferir: el perfil de borde
+(`cloudflare` o `local`), los nombres de los dos repos que el init crea,
+el dominio raíz (bajo `local` propone uno de sslip.io), el contexto de
+kubectl, el ClusterIP del registro interno y el espacio de trabajo para
+direnv; bajo `cloudflare`, además, el ID de cuenta y de zona; bajo
+`local`, dónde escucha el puente. El dueño de GitHub lo saca de la
+sesión de `gh` y el correo de contacto para certificados, de
+`git config`. Muestra un resumen, pide confirmación y escribe
+`aegis.conf` de forma atómica.
+
+### Cuando termina
+
+La fase `10-age-ceremony` te habrá mostrado un secreto, el único de
+toda la corrida: la clave age, la raíz de confianza de la instancia, en
+`~/.config/sops/age/aegis.key`. Guárdala donde el init te indica; sin
+ella no se lee nada de lo que sigue.
+
+Las puertas de la plataforma cuelgan del dominio raíz: `argocd.`,
+`jenkins.`, `grafana.` y `ntfy.<dominio>`; `aegis.<dominio>` es el
+canario, la primera aplicación que la propia plataforma construyó,
+firmó y desplegó. Bajo `cloudflare` las consolas quedan detrás de
+Access; bajo `local` los nombres resuelven al host vía sslip.io y el
+certificado lo firma la CA de la instancia, así que el navegador
+avisará hasta que la importes.
+
+Las contraseñas de administración no se imprimen: nacen cifradas en el
+almacén (`~/aegis/.state-secrets/`), como `jenkins_admin_pass.enc`,
+`grafana_admin_pass.enc` y `argocd_admin_pass.enc`. Se leen con la
+clave age:
+
+```bash
+export SOPS_AGE_KEY_FILE=~/.config/sops/age/aegis.key
+sops -d --input-type binary --output-type binary ~/aegis/.state-secrets/jenkins_admin_pass.enc
+```
+
+Y en adelante, la rutina:
+
+```bash
+aegis check               # mide el clúster vivo contra lo declarado, sin escribir nada
+aegis init --list         # qué fases hay y cuáles pasaron
+```
+
+<details>
+<summary><b>Si se cae</b></summary>
+
+Cuando una fase falla, el init se detiene en ella y deja su puerta
+registrada. Arregla la causa y reanuda:
+
+```bash
+aegis init --from 30      # reanuda desde la fase 30 (las anteriores ya pasaron)
+aegis init --only 60      # repite una sola fase
+aegis init --check        # mide sin cambiar nada
+aegis init-log            # lo mismo que init, dejando un dosier completo de la corrida
+```
+
+`aegis init-log` imprime la ruta del dosier *antes* de empezar, para
+que la conozcas aunque la corrida muera. La caja negra es
+`.init-state/gates.jsonl`; `docs/OPERATE.md` explica por dónde empezar
+a diagnosticar.
+
+Para empezar de cero sobre el mismo host:
+
+```bash
+aegis destroy             # sin --yes es un dry-run: dice qué quitaría
+aegis destroy --yes --k3s # quita el borde, el puente y el clúster
+aegis init --reset-state  # olvida todas las puertas y vuelve a empezar
+```
+
+`aegis destroy` no borra los repos de GitHub: llevan el topic marcador
+del init y una reejecución los reutiliza.
+
+</details>
+
+## Dar de alta una aplicación
+
+Hay una plantilla, `base`: un servicio HTTP mínimo en Go, con su
+contrato, un `Containerfile` que corre sin root, overlays de kustomize
+y el script que escribe el digest. El `Jenkinsfile` no vive en la
+plantilla: `aegis org` lo instancia desde la plantilla canónica.
+
+Todo ocurre en el repo de plataforma de la instancia: ahí viven los
+contratos, en `orgs/`, y ahí se hace el commit.
+
+```bash
+cd ~/aegis/platform
+aegis app new shop --template base   # escribe contrato, esqueleto, derivaciones y secretos; no toca el mundo
+git diff                             # lee lo que derivó
+git add -A && git commit -m "org: shop" && git push
+aegis sync root                      # ArgoCD recoge la organización nueva
+aegis app apply shop                 # crea el repo, la clave de despliegue y el webhook en GitHub
+```
+
+`aegis app apply --check` muestra lo que haría sin tocar nada. Desde
+el primer push al repo de la app, la plataforma la construye, escanea,
+firma, despliega y expone. La plantilla desaparece una vez instanciada:
+desde ahí el contrato y el repo son tuyos y los editas a mano. Para
+cambiar la organización, editas el contrato y vuelves a derivar:
+
+```bash
+$EDITOR orgs/shop.yaml               # añadir postgres, bucket, otro servicio…
+aegis org plan orgs/shop.yaml        # qué cambiaría, sin escribir
+aegis org apply orgs/shop.yaml       # escribe los manifiestos
+aegis secret create orgs/shop.yaml   # si aparecieron secretos nuevos
+```
+
+`seed/platform/docs/platform-for-developers.md` es la página que se
+entrega al equipo que va a hacer push: el ciclo de vida de un push y
+las reglas que lo rechazan.
 
 ## Cómo funciona
 
@@ -105,7 +294,7 @@ consumen.
 | fase | qué hace |
 |---|---|
 | `00-preflight` | Comprueba las precondiciones y muestra los límites conocidos. Lanza el asistente de configuración si no hay `aegis.conf`. Si falta algo, aborta aquí, no a mitad del clúster. |
-| `05-host` | Instala en el host el userland fijado por versión (tofu, sops, age, kubectl, helm, cosign, direnv, jq, git, openssl; `gh` con pin `apt`: basta que esté presente; lo que el init exige es la sesión autenticada), leyendo los pins de `group_vars/all.yml`, con espera del lock de apt. |
+| `05-host` | Instala en el host el userland fijado por versión (tofu, sops, age, kubectl, helm, cosign, direnv, jq, git, openssl; `gh` con pin `apt`: basta que esté presente, y el init lo instala si falta; lo que exige es la sesión autenticada), leyendo los pins de `group_vars/all.yml`, con espera del lock de apt. |
 | `10-age-ceremony` | Genera la clave age (la raíz de confianza), la valida cifrando y descifrando de verdad, deja respaldos y renderiza `.sops.yaml`. Es la única fase que muestra un secreto al operador. |
 | `12-workrepos` | Crea y siembra en GitHub, vía `gh`, los dos repos propios del init (plataforma y canario), marcados con un topic. En reejecución los reutiliza; si el repo existe sin la marca, pregunta al operador antes de marcarlo (y se niega sin terminal). |
 | `15-third-parties` | Credenciales de terceros sin navegador: claves de despliegue (*deploy keys*), HMAC de webhooks y credencial de CI desde la sesión de `gh`. Bajo `EDGE=cloudflare` acuña además tokens acotados de Cloudflare. |
@@ -133,7 +322,7 @@ flowchart LR
         p3["verify/<br/>136 checks y sus dientes"]
         p4["seed/<br/>lo que se distribuye"]
     end
-    subgraph I["la instancia · una máquina · estado vivo"]
+    subgraph I["la instancia · ~/aegis · estado vivo"]
         direction TB
         i1["aegis.conf"]
         i2["platform/<br/>el repo GitOps, en GitHub"]
@@ -211,154 +400,7 @@ antes de subir un `FROM` a mano.
   fuera direcciones e identidades, para que lo que se instala aquí se
   instale en cualquier parte.
 
-![Salidas reales: aegis init --list con las quince fases y aegis verify con 136 checks en verde en los dos perfiles](docs/assets/terminal.svg)
-
-## Antes de empezar: lo que conviene tener listo
-
-Para probarlo **completo** hacen falta GitHub **y** Cloudflare. Sin
-Cloudflare, `EDGE=local` te da la plataforma entera —build, scan,
-firma, admisión, GitOps, observabilidad— sobre nombres que resuelven
-al host, y las puertas del borde público (unas veinte) quedan como *no
-evaluables*. Es una buena primera corrida; no es la corrida completa.
-
-- **GitHub.** Una cuenta con `gh auth login` hecho; el preflight dice
-  qué permisos pide (`repo`, `delete_repo`). El init **crea y posee**
-  dos repos con nombres nuevos, y después uno por aplicación; los
-  *deploy keys* y los webhooks los crea él, no tú. Una cuenta u
-  organización dedicada es lo más cómodo.
-- **Cloudflare, para el perfil `cloudflare`.** Una zona en tu cuenta
-  (un dominio con sus nameservers en Cloudflare), el ID de cuenta y el
-  ID de zona (el asistente los pide), y **una credencial maestra
-  efímera** con la que el init acuña sus dos tokens acotados: tu
-  *Global API Key* o un token de cuenta con el permiso «Account API
-  Tokens: Edit». Vive solo en memoria durante la fase `15`; si la
-  pasas por archivo (`CF_MASTER_FILE`), destrúyelo al terminar — el
-  init te lo recuerda. Conviene saber crear tokens en el panel de
-  Cloudflare antes de sentarse.
-- **Un lugar seguro para la clave age, decidido de antemano.** Es la
-  raíz de confianza: descifra todo, y perderla es perder todo lo
-  cifrado, incluidos los respaldos de estado (van cifrados con ella).
-  La fase `10` la genera, la deja leer **una sola vez y fuera del
-  pane** (en tmpfs, desde otra terminal), y exige un respaldo validado
-  cifrando y descifrando de verdad; sugiere un USB offline más una
-  carpeta fuera de la máquina. Ten listo dónde va a ir (gestor de
-  contraseñas, USB, papel) y que no sea el mismo host. Y **nunca
-  grabes la sesión** (`script`, `tmux pipe-pane`, asciinema) durante
-  esa fase.
-- **Sin operador** (`--non-interactive`): `AEGIS_AGE_BACKUP_FILE`
-  (idealmente en `/dev/shm`) para el respaldo de la clave y
-  `CF_MASTER_FILE` para la credencial de Cloudflare; el init se niega a
-  correr sin ellos.
-- **Un correo de contacto** para los certificados (el asistente lo
-  infiere de `git config`) y una sesión ssh que no se caiga: tmux.
-
-Lo que **no** hace falta preparar: claves de cosign, certificados,
-registros DNS, el túnel, las credenciales del registro interno. Todo
-eso lo genera el init y lo puede rotar `aegis rotate`.
-
-## Requisitos
-
-| | |
-|---|---|
-| **Host** | Linux con `sudo`. Ubuntu es lo que se ha corrido; el playbook que prepara el host exige Ubuntu 24.04 o superior con systemd. El preflight configura `sudo` sin contraseña, instala con `apt` tmux, python3-yaml y jq (y `gh` si falta), y exige curl, git y python3 ya presentes. |
-| **Recursos** | 4 CPU y 8 GB de RAM alcanzan (el preflight avisa por debajo de 7 GB). 25 GB libres en `/`; `/dev/shm` escribible. |
-| **Red** | Salida a internet por IPv4: el preflight sondea github.com, api.github.com, api.cloudflare.com, get.k3s.io, dl.k8s.io y Docker Hub. Reloj en hora (≤ 120 s frente a GitHub) e IPv6 apagado; el preflight hace ambas cosas. |
-| **GitHub** | `gh` autenticado con `gh auth login` (el preflight dice qué permisos pide). El init **crea y posee** dos repos, plataforma y canario, con nombres nuevos. Identidad git global (`user.name`, `user.email`). |
-| **Opcional: Cloudflare** | Una cuenta con una zona, para `EDGE=cloudflare` (hostnames públicos, túnel, TLS de un emisor ACME). Sin ella, `EDGE=local` da la misma plataforma sobre nombres que resuelven al host (vía sslip.io), con TLS de la CA propia de la instancia. |
-
-Un host con restos de otra instancia también funciona (está medido); el
-init avisa si los encuentra.
-
-## Empezar
-
-```bash
-git clone <este repositorio> aegis-infra
-cd aegis-infra
-./bin/aegis preflight      # deja la máquina como la necesita el init, o dice por qué no
-gh auth login              # si el preflight lo pidió; después, preflight otra vez
-tmux new -s aegis          # el init es largo; una sesión ssh caída lo mataría
-./bin/aegis init           # el asistente de configuración y, después, quince fases
-./bin/aegis check          # la ronda rutinaria contra el clúster vivo
-```
-
-En adelante este documento escribe `aegis` a secas; es `./bin/aegis`
-desde el checkout del producto.
-
-El asistente pregunta pocas cosas: el perfil de borde (`cloudflare` o
-`local`), el dueño de GitHub (se infiere de la sesión de `gh`), los
-nombres de los dos repos que el init crea, el dominio raíz (en `local`
-propone uno de sslip.io), un correo de contacto para certificados (se
-infiere de `git config`), el contexto de kubectl, el ClusterIP del
-registro interno y el espacio de trabajo para direnv. Solo bajo
-`cloudflare` pide el ID de cuenta y de zona; solo bajo `local`, dónde
-escucha el puente. Muestra un resumen, pide confirmación y escribe
-`aegis.conf` de forma atómica.
-
-<details>
-<summary><b>Si se cae</b></summary>
-
-La fase `10-age-ceremony` es la única que te muestra un secreto: la
-clave age es la raíz de confianza de la instancia; guárdala donde el
-init te indica. Cuando una fase falla, el init se detiene en ella y
-deja su puerta registrada. Arregla la causa y reanuda:
-
-```bash
-aegis init --from 30      # reanuda desde la fase 30 (las anteriores ya pasaron)
-aegis init --only 60      # repite una sola fase
-aegis init --check        # mide sin cambiar nada
-aegis init --list         # qué fases hay y cuáles pasaron
-aegis init-log            # lo mismo que init, dejando un dosier completo de la corrida
-```
-
-`aegis init-log` imprime la ruta del dosier *antes* de empezar, para
-que la conozcas aunque la corrida muera. La caja negra es
-`.init-state/gates.jsonl`; `docs/OPERATE.md` explica por dónde empezar
-a diagnosticar.
-
-Para empezar de cero sobre el mismo host:
-
-```bash
-aegis destroy             # sin --yes es un dry-run: dice qué quitaría
-aegis destroy --yes --k3s # quita el borde, el puente y el clúster
-aegis init --reset-state  # olvida todas las puertas y vuelve a empezar
-```
-
-`aegis destroy` no borra los repos de GitHub: llevan el topic marcador
-del init y una reejecución los reutiliza.
-
-</details>
-
-## Dar de alta una aplicación
-
-Hay una plantilla, `base`: un servicio HTTP mínimo en Go, con su
-contrato, un `Containerfile` que corre sin root, overlays de kustomize
-y el script que escribe el digest. El `Jenkinsfile` no vive en la
-plantilla: `aegis org` lo instancia desde la plantilla canónica.
-
-```bash
-aegis app new shop --template base   # escribe contrato, esqueleto, derivaciones y secretos; no toca el mundo
-git diff                             # lee lo que derivó
-git add -A && git commit -m "org: shop" && git push
-aegis sync root                      # ArgoCD recoge la organización nueva
-aegis app apply shop                 # crea el repo, la clave de despliegue y el webhook en GitHub
-```
-
-`aegis app apply --check` muestra lo que haría sin tocar nada. Desde
-el primer push al repo de la app, la plataforma la construye, escanea,
-firma, despliega y expone. La plantilla desaparece una vez instanciada:
-desde ahí el contrato y el repo son tuyos y los editas a mano. Para
-cambiar la organización, editas el contrato y vuelves a derivar:
-
-```bash
-$EDITOR orgs/shop.yaml               # añadir postgres, bucket, otro servicio…
-aegis org plan orgs/shop.yaml        # qué cambiaría, sin escribir
-aegis org apply orgs/shop.yaml       # escribe los manifiestos
-aegis secret create orgs/shop.yaml   # si aparecieron secretos nuevos
-```
-
-`seed/platform/docs/platform-for-developers.md` es la página que se
-entrega al equipo que va a hacer push: el ciclo de vida de un push y
-las reglas que lo rechazan.
+![Salidas reales: aegis init --list con las quince fases pasadas y aegis verify con 136 checks en verde en los dos perfiles](docs/assets/terminal.svg)
 
 ## Los comandos
 
@@ -513,12 +555,12 @@ check lo hace cumplir. Este README en español es la página principal
 por ahora; `README.en.md` es la versión en inglés, y la intención es
 que toda la documentación pública termine en inglés. El historial de
 commits está en español a propósito: es registro de trabajo, no
-producto, y se conserva tal cual — cuenta cómo se encontró cada bug.
+producto, y se conserva tal cual: cuenta cómo se encontró cada bug.
 
 Este historial empieza con la reconstrucción v3 y cuenta solo esa
-parte. El grueso del trabajo —la versión 2, que sigue corriendo la
+parte. El grueso del trabajo (la versión 2, que sigue corriendo la
 instancia del autor, sus repos de plataforma y las sesiones que la
-precedieron— vive en repositorios privados y no está aquí, porque
+precedieron) vive en repositorios privados y no está aquí, porque
 lleva la identidad de una instancia concreta. Quizá algún día se
 libere. Lo que sí conviene saber: este proyecto no salió de una sola
 sesión ni de un prompt; cada pieza de arriba tiene detrás corridas que
