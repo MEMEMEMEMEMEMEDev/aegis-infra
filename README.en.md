@@ -4,6 +4,8 @@
 
 Léelo en español: [README.md](README.md)
 
+![What happens to a git push: build, scan, sign, deploy, expose; unsigned, refused](docs/assets/pipeline.svg)
+
 You bring a Linux box and a GitHub account. `aegis init` turns them
 into a Kubernetes platform where every `git push` gets built in an
 unprivileged pod, scanned, signed by digest, deployed by GitOps and
