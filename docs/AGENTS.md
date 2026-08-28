@@ -8,8 +8,8 @@ born from a real incident that cost a run.
 If instead you are on the machine where the platform RUNS →
 `OPERATE.md`. The vocabulary is law and lives in `glossary.md`. The
 historical why of v3 — the working record between the operator and
-Claude — is `plan/`, `ENCARGO.md` and `EJECUTADO.md`, and those stay
-in Spanish on purpose.
+the assistant that helped write it — is kept in a separate, private
+repository, in Spanish, on purpose: it is not part of the product.
 
 ---
 
@@ -37,14 +37,17 @@ The platform repo is not written by hand: it is instantiated from
 `seed/platform/`. The rule is structural — **what does not go in
 through `seed/` did not go in.**
 
-State: **VERSION 2 CLOSED (2026-07-24)** — validated end to end
-against a real VM: 14/14 phases, 146+ gates green including the
-fail-closed ones, an isolated tenant (netpols, RBAC, unprivileged
-build, signature + Enforce admission), and recovery tools
+State: **technical preview** (2026-08-28). The lineage it comes
+from closed as VERSION 2 on 2026-07-24, validated end to end against
+a real VM: 14/14 phases, 146+ gates green including the fail-closed
+ones, an isolated tenant (netpols, RBAC, unprivileged build,
+signature + Enforce admission), and recovery tools
 (backup/restore/rotate/destroy) exercised. v3 is the rebuild of that
 same artifact around the product/instance split and an English
-surface; its plan is in `plan/` and what has been executed is
-tracked in `EJECUTADO.md`.
+surface, and its first complete run on a machine that was not the
+author's happened on 2026-08-27 — twice, the second over the
+leftovers of the first (`journeys/foreign-instance.md`). What is
+still open is listed in the README, under *what is not there yet*.
 
 The canonical sequence of phases and decisions D1–D11 are in
 `platform/docs/architecture/bootstrap.md`. **If that doc and the
@@ -53,17 +56,18 @@ commit.**
 
 ## 2. The two worlds: where you are standing
 
-- **The product repo (the operator's desktop)** — THE repo lives
-  here: `~/Escritorio/workspace/aegis-v3` (git, private remote).
-  This is where you edit, where you run `aegis verify`, where you
-  commit. It is the operator's PRIMARY machine: extreme care with
-  destructive commands (`rm -rf` is effectively forbidden outside
-  scratch).
+- **The product repo (wherever it was cloned)** — this is where
+  you edit, where you run `aegis verify`, where you commit. When it
+  sits on the maintainer's PRIMARY machine, as it usually does:
+  extreme care with destructive commands (`rm -rf` is effectively
+  forbidden outside scratch).
 - **The instance (disposable)** — this is where the init RUNS and
   where all the mutable state lands. It is disposable by design; the
-  product repo never is. v3's first real run goes on the VPS lab, in
-  the local profile (`platform/docs/protocols/vps-lab.md`, and the
-  `aegis vps` command); the house instance comes second.
+  product repo never is. v3's first real runs happened on a
+  throwaway VPS, in the local profile
+  (`platform/docs/protocols/vps-lab.md`, and the `aegis vps`
+  command); the author's own instance still runs the v2 lineage and
+  migrates second.
 
 A wrinkle that used to be here: `aegis preflight` was born on the
 VirtualBox VM v2 ran on and assumed that shape everywhere (it pinned
@@ -73,10 +77,9 @@ exists and sits on 10.0.2.0/24 — and touches no DNS anywhere else; the
 first run on a VPS is what found it.
 
 The plan (the wave roadmap, the run packages, the decisions and the
-dissents) lives in `plan/` inside this repo, together with
-`ENCARGO.md` (what was asked for) and `EJECUTADO.md` (what has been
-done). All three are in Spanish, and stay that way: they are the
-working record, not the product.
+dissents), what was asked for and what has been done are kept in a
+separate private repository, in Spanish, and stay that way: they are
+the working record, not the product.
 
 ## 3. The method (non-negotiable)
 
@@ -289,4 +292,5 @@ the mould:
 ---
 
 *Last updated: 2026-07-24, at the close of VERSION 2. Translated to
-English and brought to the v3 tree on 2026-08-24.*
+English and brought to the v3 tree on 2026-08-24; revised for the
+technical preview on 2026-08-28.*

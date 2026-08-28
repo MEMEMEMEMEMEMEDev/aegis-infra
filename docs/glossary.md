@@ -155,9 +155,10 @@ graduate to §3.
    `already`, not `ok`.
 4. **The message names the command by deriving it from `argv[0]`**,
    never as a literal. Renaming the binary must not orphan the prose.
-5. **Prose in `plan/`, `ENCARGO.md` and `EJECUTADO.md` stays Spanish.**
-   Those are the working record between the operator and Claude, not the
-   product. Everything a stranger can touch is English.
+5. **The working record stays Spanish, and outside this repository.**
+   The plan, the commission and the execution log are between the
+   operator and the assistant, not the product. Everything a stranger
+   can touch is English.
 
 ## 5. Pending coordinated renames — the inventory
 

@@ -7,10 +7,9 @@ diagnose and operate without breaking anything and without
 re-discovering what was already learned the hard way.
 
 If you are going to MODIFY the artifact → `AGENTS.md` (and do it in
-the product repo, not here). For the historical record of how v3
-was built → `plan/` and `EJECUTADO.md`, which stay in Spanish
-because they are the working record between the operator and
-Claude, not the product.
+the product repo, not here). The historical record of how v3 was
+built is kept outside this repository, in Spanish: it is the working
+record between the operator and the assistant, not the product.
 
 ---
 
