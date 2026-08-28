@@ -213,6 +213,49 @@ antes de subir un `FROM` a mano.
 
 ![Salidas reales: aegis init --list con las quince fases y aegis verify con 136 checks en verde en los dos perfiles](docs/assets/terminal.svg)
 
+## Antes de empezar: lo que conviene tener listo
+
+Para probarlo **completo** hacen falta GitHub **y** Cloudflare. Sin
+Cloudflare, `EDGE=local` te da la plataforma entera —build, scan,
+firma, admisión, GitOps, observabilidad— sobre nombres que resuelven
+al host, y las puertas del borde público (unas veinte) quedan como *no
+evaluables*. Es una buena primera corrida; no es la corrida completa.
+
+- **GitHub.** Una cuenta con `gh auth login` hecho; el preflight dice
+  qué permisos pide (`repo`, `delete_repo`). El init **crea y posee**
+  dos repos con nombres nuevos, y después uno por aplicación; los
+  *deploy keys* y los webhooks los crea él, no tú. Una cuenta u
+  organización dedicada es lo más cómodo.
+- **Cloudflare, para el perfil `cloudflare`.** Una zona en tu cuenta
+  (un dominio con sus nameservers en Cloudflare), el ID de cuenta y el
+  ID de zona (el asistente los pide), y **una credencial maestra
+  efímera** con la que el init acuña sus dos tokens acotados: tu
+  *Global API Key* o un token de cuenta con el permiso «Account API
+  Tokens: Edit». Vive solo en memoria durante la fase `15`; si la
+  pasas por archivo (`CF_MASTER_FILE`), destrúyelo al terminar — el
+  init te lo recuerda. Conviene saber crear tokens en el panel de
+  Cloudflare antes de sentarse.
+- **Un lugar seguro para la clave age, decidido de antemano.** Es la
+  raíz de confianza: descifra todo, y perderla es perder todo lo
+  cifrado, incluidos los respaldos de estado (van cifrados con ella).
+  La fase `10` la genera, la deja leer **una sola vez y fuera del
+  pane** (en tmpfs, desde otra terminal), y exige un respaldo validado
+  cifrando y descifrando de verdad; sugiere un USB offline más una
+  carpeta fuera de la máquina. Ten listo dónde va a ir (gestor de
+  contraseñas, USB, papel) y que no sea el mismo host. Y **nunca
+  grabes la sesión** (`script`, `tmux pipe-pane`, asciinema) durante
+  esa fase.
+- **Sin operador** (`--non-interactive`): `AEGIS_AGE_BACKUP_FILE`
+  (idealmente en `/dev/shm`) para el respaldo de la clave y
+  `CF_MASTER_FILE` para la credencial de Cloudflare; el init se niega a
+  correr sin ellos.
+- **Un correo de contacto** para los certificados (el asistente lo
+  infiere de `git config`) y una sesión ssh que no se caiga: tmux.
+
+Lo que **no** hace falta preparar: claves de cosign, certificados,
+registros DNS, el túnel, las credenciales del registro interno. Todo
+eso lo genera el init y lo puede rotar `aegis rotate`.
+
 ## Requisitos
 
 | | |

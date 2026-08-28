@@ -78,6 +78,49 @@ down so that it can be repeated: `docs/journeys/foreign-instance.md`.
 *this* rebuild on a foreign machine (the lineage runs it at home; the
 profile's gates are recorded as not evaluable under `EDGE=local`).
 
+## Before you start: what to have ready
+
+To run it **in full** you need GitHub **and** Cloudflare. Without
+Cloudflare, `EDGE=local` gives you the whole platform — build, scan,
+signature, admission, GitOps, observability — on names that resolve
+to the host, and the public-edge gates (about twenty) are recorded as
+*not evaluable*. It is a good first run; it is not the full one.
+
+- **GitHub.** An account with `gh auth login` done; the preflight
+  says which scopes it asks for (`repo`, `delete_repo`). The init
+  **creates and owns** two repos with new names, and later one per
+  application; deploy keys and webhooks are its job, not yours. A
+  dedicated account or organization is the most comfortable.
+- **Cloudflare, for the `cloudflare` profile.** A zone in your
+  account (a domain whose nameservers point at Cloudflare), the
+  account ID and the zone ID (the wizard asks for them), and **one
+  ephemeral master credential** with which the init mints its two
+  scoped tokens: your *Global API Key* or an account token with the
+  permission "Account API Tokens: Edit". It lives only in memory
+  during phase `15`; if you pass it through a file (`CF_MASTER_FILE`),
+  destroy the file afterwards — the init reminds you. Knowing how to
+  create tokens in the Cloudflare dashboard before you sit down helps.
+- **A safe place for the age key, decided beforehand.** It is the
+  root of trust: it decrypts everything, and losing it is losing
+  everything encrypted, state backups included (they are encrypted
+  with it). Phase `10` generates it, lets you read it **once and
+  outside the pane** (on tmpfs, from another terminal), and demands a
+  backup validated by a real encrypt/decrypt round trip; it suggests
+  an offline USB stick plus a folder off the machine. Have the place
+  ready (password manager, USB, paper) and not on the same host. And
+  **never record the session** (`script`, `tmux pipe-pane`,
+  asciinema) during that phase.
+- **Unattended** (`--non-interactive`): `AEGIS_AGE_BACKUP_FILE`
+  (ideally under `/dev/shm`) for the key's backup and
+  `CF_MASTER_FILE` for the Cloudflare credential; the init refuses to
+  run without them.
+- **A contact email** for certificates (the wizard infers it from
+  `git config`) and an ssh session that will not drop: tmux.
+
+What you do **not** need to prepare: cosign keys, certificates, DNS
+records, the tunnel, the internal registry's credentials. The init
+generates all of it, and `aegis rotate` can rotate it.
+
 ## Requirements
 
 - A Linux host you have `sudo` on. Ubuntu is what has been run; the
