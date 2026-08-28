@@ -461,7 +461,7 @@ amigable para personas no técnicas y desarrolladores junior; el perfil
 `cloudflare` en una máquina ajena, con sus puertas pasando de *no
 evaluable* a medido; más plantillas de aplicación.
 
-## Sobre el idioma
+## Sobre el idioma y el historial
 
 El producto está en inglés: código, identificadores, mensajes, la
 semilla y la documentación interna (`docs/`, `seed/platform/docs/`).
@@ -471,6 +471,15 @@ por ahora; `README.en.md` es la versión en inglés, y la intención es
 que toda la documentación pública termine en inglés. El historial de
 commits está en español a propósito: es registro de trabajo, no
 producto, y se conserva tal cual — cuenta cómo se encontró cada bug.
+
+Este historial empieza con la reconstrucción v3 y cuenta solo esa
+parte. El grueso del trabajo —la versión 2, que sigue corriendo la
+instancia del autor, sus repos de plataforma y las sesiones que la
+precedieron— vive en repositorios privados y no está aquí, porque
+lleva la identidad de una instancia concreta. Quizá algún día se
+libere. Lo que sí conviene saber: este proyecto no salió de una sola
+sesión ni de un prompt; cada pieza de arriba tiene detrás corridas que
+fallaron y checks que nacieron de ellas.
 
 ## Contribuir, seguridad, licencia
 

@@ -187,6 +187,17 @@ Said plainly, because the checks would say it anyway.
   work, and it is being built on top of this one rather than instead
   of it.
 
+## About this history
+
+This history starts with the v3 rebuild and tells only that part. The
+bulk of the work — version 2, which still runs the author's own
+instance, its platform repositories and the sessions before them —
+lives in private repositories and is not here, because it carries the
+identity of one concrete instance. It may be released some day. What
+is worth knowing: this project did not come out of a single session or
+a single prompt; every piece above has failed runs behind it, and
+checks that were born from them.
+
 ## Contributing, security, licence
 
 - `CONTRIBUTING.md` — the method is short and non-negotiable: one
