@@ -1,11 +1,14 @@
-# teeth for check 149 (the service sizes, and the generator that serves them)
+# teeth for check 149 (the service sizes, and the platform that
+# serves and enforces them)
 #
-# The mutations are the ways this really breaks: a step that
-# disappears, a step half written, a generator that stops saying no, a
-# validator that lets a broken plans.yaml through, a services.yaml
-# whose numbers are ignored, and a tenant that gets back the pen over
-# its own size. Each was applied over a copy of the tree
-# and the check went red; the three controls stayed green.
+# The mutations are the ways this really breaks, in the order the
+# mechanism runs: a step that disappears, a step half written, a
+# generator that stops saying no, a validator that lets a broken
+# plans.yaml through, a services.yaml whose numbers are ignored, a sum
+# that is not done, the two objects that make the numbers true in the
+# cluster, and a tenant that gets the pen back over its own size. Each
+# was applied over a copy of the tree and the check went red; the three
+# controls stayed green.
 PLANS="seed/platform/plans.yaml"
 ORG="lib/aegis/org.py"
 
@@ -100,10 +103,69 @@ open(p, "w", encoding="utf-8").write(t.replace(old, new, 1))
 PY
 }
 
+# THE SUM IS NOT DONE. The contract validates, the manifests are
+# written, and the ResourceQuota rejects whichever pod was scheduled
+# last, hours later, with a message about millicores. This is the
+# mutation that was measured to leave the WHOLE tree green before this
+# check covered the arithmetic.
+red_7() {
+    python3 - "$AEGIS_ROOT/$ORG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p, encoding="utf-8").read()
+old = "    _check_quota_arithmetic(c, plans)\n"
+assert t.count(old) == 1
+open(p, "w", encoding="utf-8").write(t.replace(old, "    pass\n", 1))
+PY
+}
+
+# THE POLICY DISAPPEARS. Same measurement: emptying this list deletes
+# the object that fixes every service's size and nothing turned red.
+red_8() {
+    python3 - "$AEGIS_ROOT/$ORG" <<'PY'
+import re, sys
+p = sys.argv[1]; t = open(p, encoding="utf-8").read()
+old = re.compile(r'    sized = \[s for s in sorted\(c\["servicios"\], key=lambda x: x\["nombre"\]\)\n'
+                 r'             if s\["tipo"\] in TYPES_WITH_IMAGE\]\n')
+assert len(old.findall(t)) == 1
+open(p, "w", encoding="utf-8").write(old.sub("    sized = []\n", t, 1))
+PY
+}
+
+# The Policy is still emitted, with the right shape and the wrong
+# numbers: every service gets the DEFAULT size instead of the one its
+# contract asked for. This is the silent one — a `mediano` JVM sized
+# `chico` is OOM killed on start-up and the object looks correct.
+red_9() {
+    python3 - "$AEGIS_ROOT/$ORG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p, encoding="utf-8").read()
+old = '            size = plans["tamano"][s.get("tamano", DEFAULT_SIZE)]\n'
+assert t.count(old) == 1
+open(p, "w", encoding="utf-8").write(
+    t.replace(old, '            size = plans["tamano"][DEFAULT_SIZE]\n', 1))
+PY
+}
+
+# The LimitRange goes back to the numbers of the canonical Deployment
+# template — 50m/32Mi with a ceiling of 200m/64Mi, the exact figures
+# that killed a JVM on start-up — instead of the default step of
+# plans.yaml. The object is there and the floor is a lie.
+red_10() {
+    python3 - "$AEGIS_ROOT/$ORG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p, encoding="utf-8").read()
+old = '    default = plans["tamano"][DEFAULT_SIZE]\n'
+assert t.count(old) == 1
+new = ('    default = {"requests.cpu": "50m", "requests.memory": "32Mi",\n'
+       '               "limits.cpu": "200m", "limits.memory": "64Mi"}\n')
+open(p, "w", encoding="utf-8").write(t.replace(old, new, 1))
+PY
+}
+
 # The tenant gets the pen back: without `kyverno.io/Policy` in its
 # AppProject's blacklist it can ship a Policy of its own into org-<org>
 # and mutate its pods' resources back to whatever it likes.
-red_7() {
+red_11() {
     python3 - "$AEGIS_ROOT/$ORG" <<'PY'
 import sys
 p = sys.argv[1]; t = open(p, encoding="utf-8").read()
