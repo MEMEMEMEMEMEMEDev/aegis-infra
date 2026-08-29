@@ -80,7 +80,6 @@ by_contract = {}   # basename -> why
 # pointing it at the seed as if it were its instance: PLATFORM_DIR is
 # set BEFORE the import because `org.py` resolves its root at load
 # time.
-gen = None
 try:
     # An instrument leaves no trace on the subject. Importing the
     # generator writes __pycache__/ inside the tree this very verifier
@@ -95,10 +94,25 @@ try:
     sys.path.insert(0, str(root/"lib"))
     from aegis import org as gen
 except Exception as e:
-    print(f"  (could not load the product's generator: {e})")
+    # AND THE SAME DISEASE, ONE FLOOR DOWN (measured 2026-08-29). Until
+    # today this was a `print` and a `gen = None` that carried on: with
+    # the generator unreachable, `by_contract` stayed EMPTY, every entry
+    # found a producer somewhere else, and the check said PASS about a
+    # tree it had never read. Its own tooth said so —`red_3` hides
+    # org.py and the check stayed green— and the tooth had been failing
+    # since before this wave, in silence, because a mutation that does
+    # not bite is only visible when somebody runs the whole suite.
+    #
+    # The header of this check spends thirteen lines explaining that
+    # class as the reason v3 exists. It is not a warning: an instrument
+    # that cannot reach its subject has no verdict to give, and the only
+    # honest colour here is red.
+    print(f"FAIL could not load the product's generator ({e}): without it "
+          "the contracts derive no secret at all, so every entry looks "
+          "produced by somebody else and this check would pass green over "
+          "a tree it never read")
+    sys.exit(1)
 try:
-    if gen is None:
-        raise StopIteration
     for c_path in sorted((P/"orgs").glob("*.y*ml")):
         c = yaml.safe_load(c_path.open()) or {}
         for s in gen.secrets_of(c):
@@ -114,8 +128,6 @@ try:
         by_contract[f"secret-garage-{org}.enc.yaml"] = "aegis-secret --reubicar"
     # platform-wide, with its own recipe in aegis-secret:
     by_contract["secret-garage-credentials.enc.yaml"] = "aegis-secret (platform recipe)"
-except StopIteration:
-    pass
 except Exception as e:
     print(f"FAIL could not query the contract generator: {e}")
     sys.exit(1)
