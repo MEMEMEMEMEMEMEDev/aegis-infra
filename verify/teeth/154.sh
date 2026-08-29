@@ -63,6 +63,21 @@ open(p, "w").write(t.replace(old, new, 1))
 PY
 }
 
+# the blocker of the review of 2026-08-29: the headers flattened into a
+# plain dict. Garage answers `content-length:` in lowercase, so the size
+# read back is -1 for EVERY object and the restore, having uploaded the
+# whole bucket, declares itself failed.
+red_5() {
+    python3 - "$AEGIS_ROOT/$DATA" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = "            return r.status, r.read(), r.headers"
+new = "            return r.status, r.read(), dict(r.headers)"
+assert t.count(old) == 1
+open(p, "w").write(t.replace(old, new, 1))
+PY
+}
+
 # control: a comment may name the credential
 control_1() {
     printf '\n# The word password appears here on purpose: a comment explains,\n# it does not execute.\n' \

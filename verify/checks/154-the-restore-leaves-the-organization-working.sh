@@ -85,6 +85,24 @@ want("bucket_listing" in called_by("restore_bucket"),
      "restore_bucket() does not list the bucket afterwards: without the "
      "listing, an object that never got as far as a PUT leaves no trace")
 
+# And the headers that size is read from arrive UNFLATTENED. Header names
+# are case-insensitive and Garage —hyper— answers in lowercase, so over a
+# plain dict `Content-Length` goes missing from a header that is right
+# there: `got` comes out -1 for EVERY object and the restore declares
+# itself failed after having uploaded the whole bucket. Measured over the
+# raw `content-length: 17`: the message gives 17, dict(message) gives -1.
+flat = []
+for n in ast.walk(funcs.get("s3") or ast.parse("")):
+    if isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple) \
+       and len(n.value.elts) == 3:
+        h = n.value.elts[2]
+        if not (isinstance(h, ast.Attribute) and h.attr == "headers"):
+            flat.append(f"line {n.lineno}: returns {ast.unparse(h)}")
+want(not flat,
+     f"s3() transforms the response's headers instead of returning them "
+     f"({'; '.join(flat[:2])}): the lookup stops being case-insensitive, "
+     f"and what is read through it is the size of what was just uploaded")
+
 # A message that gives up. Docstrings are excluded on purpose: they
 # narrate the hole, and narrating it is not reopening it.
 docstrings = set()

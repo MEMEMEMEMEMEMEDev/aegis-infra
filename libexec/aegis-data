@@ -369,11 +369,23 @@ def s3(method, host, path, query, ak, sk, region="garage", body=b""):
     }
     url = f"http://{host}{urllib.parse.quote(path)}" + (f"?{qs}" if qs else "")
     req = urllib.request.Request(url, data=body or None, headers=headers, method=method)
+    # The response's headers travel AS THEY COME and are never flattened
+    # into a plain dict. HTTP header names are case-insensitive; the
+    # mapping urllib returns honours that and a dict does not. Garage is
+    # hyper, and hyper writes them in LOWERCASE in HTTP/1.1 unless it is
+    # asked for title case, which it is not: measured over the raw
+    # `content-length: 17`, `.get("Content-Length", -1)` gives 17 and the
+    # dict's gives -1. Through here goes the size the restore reads back
+    # from the object it has just uploaded and the ETag that lets it skip
+    # what is already identical, so flattening turned every object into
+    # «the bucket returns -1 bytes» and every restore of a bucket into a
+    # failure. Same door as libexec/aegis-check, which reads `.headers`
+    # off the response for the same reason.
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
-            return r.status, r.read(), dict(r.headers)
+            return r.status, r.read(), r.headers
     except urllib.error.HTTPError as e:
-        return e.code, e.read(), dict(e.headers)
+        return e.code, e.read(), e.headers
 
 
 def s3_credential(ns):
