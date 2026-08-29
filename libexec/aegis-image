@@ -1,0 +1,799 @@
+#!/usr/bin/env bash
+# aegis-summary: Ask for a base image: mirrored, scanned, signed, and the FROM to paste
+# aegis-group:   apps
+# aegis-subcommands: request list from check
+# aegis-help:
+# Usage: aegis image request <repo>:<tag> [--bump]
+#                           [--allow <CVE> --until <YYYY-MM-DD> --reason "<text>"]
+#        aegis image list
+#        aegis image from <name>:<tag>
+#        aegis image check
+#
+# request  asks the platform for a base image. It measures the digest the
+#          tag points at TODAY, declares it in mirror-images/images.txt,
+#          fires the mirror job (pull, blocking scan, push, signature)
+#          and prints the one line to paste into a Containerfile.
+#          Running it twice over the same tag writes nothing, commits
+#          nothing and fires nothing: it prints the same line and leaves.
+#          --bump  the upstream tag MOVED and you decide to follow it.
+#                  Without it, a moved tag is an error, not a silent
+#                  re-pin: a new digest is not a new image.
+#          --allow/--until/--reason  the scan went red and the CVE is
+#                  provably not reachable in this binary: writes ONE
+#                  dated, path-scoped exception into
+#                  mirror-images/trivyignore.yaml and retries ONCE.
+#                  All three are required together. There is no --force.
+# list     what is declared, crossed against the internal registry:
+#          name, tag, short digest, mirrored, signed, live exception.
+# from     prints ONLY the FROM line for an image already mirrored, so a
+#          template or a generator can consume it. Nothing on stdout if
+#          it is not there.
+# check    everything declared is mirrored and signed; what is not comes
+#          with the command that fixes it.
+#
+# AEGIS_IMAGE_DRY_RUN=1  request and list explain what they WOULD do and
+#          touch nothing: no cluster, no registry, no git, no build. It
+#          is how this command is exercised where there is no instance.
+#
+# Exit codes: the house's four, plus what each one means here —
+#   0  the image is mirrored and signed; the FROM was printed
+#   1  measured and wrong: the upstream tag moved (use --bump), the scan
+#      went red, or `from`/`check` found something not mirrored
+#   2  COULD NOT EVALUATE: no cluster, no instance, no registry answer
+#   3  invalid usage
+
+# aegis-image — a developer asks for a technology, and gets back the
+# FROM the build will demand.
+#
+# ── why it exists ─────────────────────────────────────────────────
+# Until today, using Python 3.11 or Java 21 meant reading a 462-line
+# protocol, measuring a digest by hand, editing a list, firing a job
+# from the Jenkins console and typing the FROM from memory. Every one
+# of those five steps is a place to be wrong, and being wrong there is
+# expensive in the worst way: the build STARTS and dies later, further
+# away, in somebody else's pipeline.
+#
+# The platform does not get to pick versions for anybody — three
+# Pythons are three lines in the list, and which three is the
+# developer's business. What the platform owes is the other half: FIX
+# the digest of what was asked for, SCAN it, SIGN it, and hand back the
+# exact line. That is this command, and it is the same five steps with
+# the hand taken out.
+#
+# ── what it does NOT do ───────────────────────────────────────────
+# It does not deploy, and it does not bump anybody's FROM. Mirroring an
+# image and putting it in production are two decisions (images.md §2),
+# and this command only ever takes the first. It does not re-pin a
+# moved upstream tag on its own either: --bump is a person saying yes.
+# And it has no --force. The two honest ways out of a red scan are a
+# newer tag or a dated exception that says what was measured; a third
+# one would only be a way of not looking.
+
+set -euo pipefail
+
+# ── canonical preamble (V-102) ───────────────────────────────────────
+# The PRODUCT resolves from this file, following symlinks (phase 05
+# installs /usr/local/bin/aegis as a symlink; with a bare dirname
+# AEGIS_ROOT would be /usr/local). The INSTANCE is lib/paths.sh's
+# business, never this file's.
+if [[ -z "${AEGIS_ROOT:-}" ]]; then
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} image: readlink is missing — I cannot tell where the product lives" >&2; exit 2; }
+    AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+fi
+export AEGIS_ROOT
+# shellcheck source=../lib/paths.sh
+source "$AEGIS_ROOT/lib/paths.sh"
+
+usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
+bad_usage() { printf '%s image: %s\n' "${AEGIS_CMD:-aegis}" "$*" >&2; printf 'try: %s image --help\n' "${AEGIS_CMD:-aegis}" >&2; exit 3; }
+
+# ── arguments, BEFORE anything runs ─────────────────────────────────
+# `--help` is answered here with nothing sourced beyond paths.sh and
+# nothing executed: until 2026-08-26 `aegis preflight --help` installed
+# packages instead of describing itself.
+VERB="${1:-}"; [[ $# -gt 0 ]] && shift
+case "$VERB" in
+    -h|--help|"")               usage; exit 0 ;;
+    request|list|from|check)    ;;
+    *) bad_usage "«$VERB» is not a subcommand (request | list | from | check)" ;;
+esac
+
+REF="" ; BUMP=0 ; ALLOW="" ; UNTIL="" ; REASON=""
+case "$VERB" in
+  request)
+    while (($#)); do
+        case "$1" in
+            -h|--help) usage; exit 0 ;;
+            --bump)    BUMP=1; shift ;;
+            --allow)   [[ $# -ge 2 ]] || bad_usage "--allow needs a CVE identifier"; ALLOW="$2"; shift 2 ;;
+            --allow=*) ALLOW="${1#--allow=}"; shift ;;
+            --until)   [[ $# -ge 2 ]] || bad_usage "--until needs a date (YYYY-MM-DD)"; UNTIL="$2"; shift 2 ;;
+            --until=*) UNTIL="${1#--until=}"; shift ;;
+            --reason)  [[ $# -ge 2 ]] || bad_usage "--reason needs the text of the measurement"; REASON="$2"; shift 2 ;;
+            --reason=*) REASON="${1#--reason=}"; shift ;;
+            --force*)  bad_usage "there is no --force here: a red scan has two honest ways out, a newer tag or a dated exception (--allow/--until/--reason). Both leave a trace; a force leaves none" ;;
+            -*)        bad_usage "unknown flag «$1»" ;;
+            *)         [[ -z "$REF" ]] || bad_usage "one image at a time (already given: «$REF», then «$1»)"
+                       REF="$1"; shift ;;
+        esac
+    done
+    [[ -n "$REF" ]] || bad_usage "request needs an image: <repo>:<tag>"
+    # The three travel together or not at all. An exception with no
+    # measurement is a CVE nobody looks at; one with no end date is
+    # invisible debt (images.md §6, and check 136 refuses both shapes).
+    if [[ -n "$ALLOW$UNTIL$REASON" && ( -z "$ALLOW" || -z "$UNTIL" || -z "$REASON" ) ]]; then
+        bad_usage "--allow, --until and --reason go together: a scan exception is a MEASUREMENT (what was checked), a DATE it stops holding, and the CVE it covers"
+    fi
+    [[ -z "$ALLOW" || "$ALLOW" =~ ^CVE-[0-9]{4}-[0-9]{4,}$ ]] \
+        || bad_usage "«$ALLOW» is not a CVE identifier (CVE-YYYY-NNNN...)"
+    [[ -z "$UNTIL" || "$UNTIL" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
+        || bad_usage "«$UNTIL» is not an ISO date (YYYY-MM-DD): trivy silences forever what it cannot parse"
+    ;;
+  from)
+    [[ $# -ge 1 ]] || bad_usage "from needs an image: <name>:<tag>"
+    case "$1" in -h|--help) usage; exit 0 ;; -*) bad_usage "unknown flag «$1»" ;; esac
+    REF="$1"; shift
+    (($# == 0)) || bad_usage "from takes exactly one argument (got «$1» as well)"
+    ;;
+  list|check)
+    (($# == 0)) || { [[ "$1" == -h || "$1" == --help ]] && { usage; exit 0; }; bad_usage "$VERB takes no arguments (got «$1»)"; }
+    ;;
+esac
+
+# ── the libs (only now: nothing above needed them) ──────────────────
+# common.sh: log_* to stderr, die, retry_net, REGISTRY_HOST_INTERNAL,
+# git_commit_if_changes. secrets.sh: secrets_workdir (tmpfs + shred on
+# exit) and registry_creds. jenkins.sh: the API from inside the pod,
+# next-build-number BEFORE the trigger, wait by number.
+# shellcheck source=../lib/common.sh
+source "$AEGIS_ROOT/lib/common.sh"
+# shellcheck source=../lib/secrets.sh
+source "$AEGIS_ROOT/lib/secrets.sh"
+# shellcheck source=../lib/jenkins.sh
+source "$AEGIS_ROOT/lib/jenkins.sh"
+
+# rc 2 is «the instrument never reached the subject» — not «wrong» and
+# never «empty». die() is rc 1 (measured and wrong); this is the other
+# verdict, and it carries the reason.
+could_not() { log_error "COULD NOT EVALUATE: $*"; exit 2; }
+
+DRY=0; [[ "${AEGIS_IMAGE_DRY_RUN:-0}" == 1 ]] && DRY=1
+dry() { (( DRY == 1 )); }
+
+[[ -f "$AEGIS_CONF" ]] && source "$AEGIS_CONF"
+: "${REGISTRY_CLUSTER_IP:=}"
+
+MIRROR_JOB=mirror-images
+IMAGES_REL="mirror-images/images.txt"
+IGNORE_REL="mirror-images/trivyignore.yaml"
+
+# WHERE THE LIST LIVES. The mirror job reads it out of a checkout of the
+# INSTANCE's platform repo, so that is the copy an edit has to land in —
+# never the seed, which is the product and is read-only during a run.
+# The one exception is the dry run: with no instance on the machine
+# there is still something worth answering, and reading the seed's copy
+# answers it without pretending the instance exists.
+LIST_ROOT="$PLATFORM_DIR"
+if [[ ! -f "$PLATFORM_DIR/$IMAGES_REL" ]]; then
+    if dry && [[ -f "$AEGIS_ROOT/seed/platform/$IMAGES_REL" ]]; then
+        LIST_ROOT="$AEGIS_ROOT/seed/platform"
+        log_warn "dry run with no instance at $PLATFORM_DIR: reading the SEED's list ($LIST_ROOT/$IMAGES_REL). A real run edits the instance's copy and never this one"
+    else
+        could_not "$PLATFORM_DIR/$IMAGES_REL does not exist — there is no instance here, or its platform repo is not the one the mirror job reads"
+    fi
+fi
+IMAGES="$LIST_ROOT/$IMAGES_REL"
+IGNORE="$LIST_ROOT/$IGNORE_REL"
+
+# ═══════════════════════════════════════════════════════════════════
+#  the list: parsing, and the source registry nobody should have to type
+# ═══════════════════════════════════════════════════════════════════
+
+# entries: the file without comments or blank lines. Two fields, tab or
+# spaces, exactly as the job's parser reads them (check 135).
+entries() { grep -vE '^[[:space:]]*(#|$)' "$IMAGES"; }
+
+# default_registry_path: where a bare `python:3.12-slim` comes from.
+# DERIVED from the list and not written here, which is rule 1 of the
+# glossary's §4: if the platform ever moves off this mirror, the entries
+# move and so does this answer — there is no second place to edit. Today
+# it resolves to the public ECR mirror of the official images, chosen
+# because it serves the same bytes as Docker Hub without a pull-rate
+# limit (the mirror job died on a `TOOMANYREQUESTS` once already).
+default_registry_path() {
+    entries | awk '{print $1}' \
+        | sed -n 's|^\(.*/library\)/[^/]*:.*|\1|p' \
+        | sort | uniq -c | sort -rn | awk 'NR==1{print $2}'
+}
+
+# resolve_ref <ref> — sets SRC_REPO (host/path, no tag) and SRC_TAG.
+# The registry-or-not question is Docker's own rule, not a guess: the
+# first segment is a registry when it carries a dot or a port.
+SRC_REPO="" SRC_TAG=""
+resolve_ref() {
+    local ref="$1" last first
+    [[ "$ref" != *@* ]] || bad_usage "give «${ref%%@*}» by TAG, not by digest: measuring the digest is what this command is for"
+    last="${ref##*/}"
+    if [[ "$last" == *:* ]]; then SRC_TAG="${last##*:}"; ref="${ref%:*}"; fi
+    # No tag = no request. `latest` is the mutable pointer this whole
+    # protocol exists to refuse, and inventing one here would be the
+    # platform choosing a version on somebody's behalf — the one thing
+    # it must not do.
+    [[ -n "$SRC_TAG" ]] || bad_usage "«$1» carries no tag: say WHICH version you need (python:3.12-slim, eclipse-temurin:21-jre). A request with no tag is a request for whatever the registry happens to serve today"
+    first="${ref%%/*}"
+    if [[ "$ref" == */* && ( "$first" == *.* || "$first" == *:* || "$first" == localhost ) ]]; then
+        SRC_REPO="$ref"
+    else
+        local pre; pre="$(default_registry_path)"
+        [[ -n "$pre" ]] || die "$IMAGES declares no official-image path to default to: give the full reference, registry included"
+        SRC_REPO="$pre/$ref"
+    fi
+}
+
+# The destination name is the last segment of the source path, which is
+# what every entry in the list already does (`.../library/redis` →
+# `redis`). Derived, so two people asking for the same technology get
+# the same line and not two copies of it under different names.
+dst_of() { printf '%s:%s' "${SRC_REPO##*/}" "$SRC_TAG"; }
+
+# line_for <repo> <tag> — the entry that declares THIS source, or empty.
+# Keyed on repo:tag (what was asked for), never on the digest: the whole
+# point of --bump is that the digest under a tag can change.
+line_for() { entries | awk -v k="$1:$2@" 'index($1, k)==1{print; exit}'; }
+
+# ═══════════════════════════════════════════════════════════════════
+#  the upstream registry: measuring a digest without crane on the host
+# ═══════════════════════════════════════════════════════════════════
+# The host has no crane (the protocol's `crane digest` is what a person
+# types; a command cannot depend on it being installed), so the digest
+# is read the way every registry client reads it: the v2 API, the token
+# dance, and Docker-Content-Digest off the manifest HEAD. It is the same
+# mechanic phase 80 and `aegis ci digests` use against the internal
+# registry, with the anonymous pull token added on top.
+OCI_ACCEPT='application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json'
+
+# docker.io is a NAME, not the endpoint: the registry answers on
+# registry-1.docker.io. A reference that says docker.io and a curl that
+# believes it gets a 404 that looks like «that image does not exist».
+oci_endpoint() { case "$1" in docker.io|index.docker.io) printf 'registry-1.docker.io' ;; *) printf '%s' "$1" ;; esac; }
+
+_oci_call() {   # <HEAD|GET> <url> — prints the http code; body/headers to tmpfs
+    local m="$1" url="$2"
+    local -a args=(-sS --max-time 30 -D "$SECRETS_TMP/oci.hdr" -o "$SECRETS_TMP/oci.body"
+                   -w '%{http_code}' -H "Accept: $OCI_ACCEPT")
+    [[ "$m" == HEAD ]] && args+=(-I)
+    # The bearer travels by -K (a curl config, 600, in tmpfs) and never
+    # by argv: /proc/PID/cmdline is world-readable, and a pull token is
+    # still a credential (rule A27, check 075).
+    [[ -s "$SECRETS_TMP/oci.curlrc" ]] && args+=(-K "$SECRETS_TMP/oci.curlrc")
+    curl "${args[@]}" "$url"
+}
+
+# oci_fetch <HEAD|GET> <url> <repo-path> — one call, and if the registry
+# answers 401 it plays the challenge it just handed us and calls again.
+# Anything that is not a 200 at the end is a failure with its code said
+# out loud: a silent empty answer is the disease, not the diagnosis.
+oci_fetch() {
+    local m="$1" url="$2" path="$3" code chal realm service scope token
+    : > "$SECRETS_TMP/oci.curlrc"
+    code="$(_oci_call "$m" "$url")" || { log_warn "$url: curl could not complete the request"; return 1; }
+    if [[ "$code" == 401 ]]; then
+        chal="$(tr -d '\r' < "$SECRETS_TMP/oci.hdr" | sed -n 's/^[Ww][Ww][Ww]-[Aa]uthenticate:[[:space:]]*[Bb]earer[[:space:]]*//p' | head -1)"
+        [[ -n "$chal" ]] || { log_warn "$url: 401 without a Bearer challenge — this registry wants credentials aegis does not have"; return 1; }
+        realm="$(sed -n 's/.*realm="\([^"]*\)".*/\1/p' <<< "$chal")"
+        service="$(sed -n 's/.*service="\([^"]*\)".*/\1/p' <<< "$chal")"
+        scope="$(sed -n 's/.*scope="\([^"]*\)".*/\1/p' <<< "$chal")"
+        [[ -n "$scope" ]] || scope="repository:$path:pull"
+        [[ -n "$realm" ]] || { log_warn "$url: the challenge names no realm"; return 1; }
+        token="$(curl -fsS --max-time 30 --get \
+                    ${service:+--data-urlencode "service=$service"} \
+                    --data-urlencode "scope=$scope" "$realm" \
+                 | jq -r '.token // .access_token // empty')" || token=""
+        [[ -n "$token" ]] || { log_warn "$realm did not hand out an anonymous pull token"; return 1; }
+        ( umask 077; printf 'header = "Authorization: Bearer %s"\n' "$token" > "$SECRETS_TMP/oci.curlrc" )
+        code="$(_oci_call "$m" "$url")" || return 1
+    fi
+    [[ "$code" == 200 ]] || { log_warn "$url answered HTTP $code"; return 1; }
+    return 0
+}
+
+# upstream_digest — what the tag points at TODAY. Docker-Content-Digest
+# when the registry sends it; otherwise the sha256 of the manifest body,
+# which is the same number by definition.
+upstream_digest() {
+    local host path url d
+    host="$(oci_endpoint "${SRC_REPO%%/*}")"; path="${SRC_REPO#*/}"
+    url="https://$host/v2/$path/manifests/$SRC_TAG"
+    retry_net 3 oci_fetch HEAD "$url" "$path" || return 1
+    d="$(tr -d '\r' < "$SECRETS_TMP/oci.hdr" | awk 'tolower($1)=="docker-content-digest:"{print $2}' | tail -1)"
+    if [[ ! "$d" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+        retry_net 3 oci_fetch GET "$url" "$path" || return 1
+        d="sha256:$(sha256sum < "$SECRETS_TMP/oci.body" | awk '{print $1}')"
+    fi
+    [[ "$d" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+    printf '%s' "$d"
+}
+
+# upstream_newer_tags — the tags upstream publishes that sort ABOVE the
+# one we are on and carry the same shape (`3.12-slim` suggests
+# `3.13-slim`, never `3.13-bookworm`). It is advice, not a decision:
+# whether a newer tag is the right one is not a thing a sort can know,
+# and the answer is printed as a suggestion for a human to weigh.
+upstream_newer_tags() {
+    local host path suffix
+    host="$(oci_endpoint "${SRC_REPO%%/*}")"; path="${SRC_REPO#*/}"
+    oci_fetch GET "https://$host/v2/$path/tags/list" "$path" || return 1
+    suffix="$(sed 's/^[0-9][0-9.]*//' <<< "$SRC_TAG")"
+    jq -r '.tags[]?' < "$SECRETS_TMP/oci.body" \
+      | grep -E "^[0-9][0-9.]*$(sed 's/[][\.*^$/]/\\&/g' <<< "$suffix")$" \
+      | sort -V | awk -v cur="$SRC_TAG" 'seen{print} $0==cur{seen=1}' | tail -3
+}
+
+# ═══════════════════════════════════════════════════════════════════
+#  the internal registry: is it there, and is it signed
+# ═══════════════════════════════════════════════════════════════════
+# Read exactly as `aegis ci digests` reads it: by ClusterIP (the cert's
+# SAN carries it), netrc by file, CA by file, and the digest out of the
+# registry's own manifest — never a build log (check 069).
+reg_ready() {
+    kubectl -n jenkins-system get secret regcred-internal -o name >/dev/null 2>&1 \
+        || could_not "the Secret jenkins-system/regcred-internal is not readable (kubeconfig? is the cluster up?)"
+    kubectl -n cert-manager get secret aegis-internal-ca -o name >/dev/null 2>&1 \
+        || could_not "the Secret cert-manager/aegis-internal-ca is not readable — without the CA the registry's TLS cannot be trusted"
+    if [[ -z "$REGISTRY_CLUSTER_IP" ]]; then
+        REGISTRY_CLUSTER_IP="$(kubectl -n registry-system get svc registry -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
+        [[ -n "$REGISTRY_CLUSTER_IP" ]] \
+            || could_not "no REGISTRY_CLUSTER_IP in $AEGIS_CONF and registry-system/svc/registry has no ClusterIP"
+    fi
+    registry_creds "$REGISTRY_HOST_INTERNAL" "$REGISTRY_CLUSTER_IP"
+    [[ -s "$SECRETS_TMP/registry.netrc" && -s "$SECRETS_TMP/aegis-ca.crt" ]] \
+        || could_not "the registry credential or the CA came out empty from the cluster"
+}
+reg_curl() { retry_net 3 curl -fsS --max-time 30 --netrc-file "$SECRETS_TMP/registry.netrc" --cacert "$SECRETS_TMP/aegis-ca.crt" "$@"; }
+reg_digest() {   # <repo> <tag> — empty if the tag is not there
+    reg_curl -I -H "Accept: $OCI_ACCEPT" "https://$REGISTRY_CLUSTER_IP:5000/v2/$1/manifests/$2" 2>/dev/null \
+      | tr -d '\r' | awk 'tolower($1)=="docker-content-digest:"{print $2}' | tail -1
+}
+# SIGNED, and what that word means here. cosign publishes the signature
+# of <digest> as a tag `sha256-<hex>.sig` in the same repository, so its
+# PRESENCE is a fact this host can measure with the registry API alone —
+# no cosign binary, no public key, nothing to install. What it is not is
+# a cryptographic verification: that one is done where the key already
+# is, by Kyverno at admission (require-aegis-signature) and by the
+# from-guard stage of Jenkinsfile.app at build time. Saying «signed»
+# here and meaning «the signature object exists» is only honest if it is
+# written down, so it is.
+reg_signed() {   # <repo> <digest>
+    local sig="${2/:/-}.sig"
+    reg_curl -o /dev/null -I -H "Accept: $OCI_ACCEPT" \
+        "https://$REGISTRY_CLUSTER_IP:5000/v2/$1/manifests/$sig" >/dev/null 2>&1
+}
+
+from_line() { printf 'FROM %s/%s@%s\n' "$REGISTRY_HOST_INTERNAL" "$1" "$2"; }
+
+# ═══════════════════════════════════════════════════════════════════
+#  the mirror job
+# ═══════════════════════════════════════════════════════════════════
+jenkins_ready() {
+    kubectl -n jenkins-system get sts jenkins -o name >/dev/null 2>&1 \
+        || could_not "jenkins-system/sts/jenkins is not reachable (kubeconfig? is the cluster up?)"
+    jenkins_get_code "/job/$MIRROR_JOB/api/json" 2>/dev/null | grep -q '^200$' \
+        || could_not "Jenkins has no job «$MIRROR_JOB» — did the jenkins App sync the Job DSL?"
+}
+
+# fire_mirror — fires the job and waits. Returns 0 on SUCCESS; on
+# failure it leaves MIRROR_BUILD pointing at the build whose console
+# carries the reason. The retry logic (a FAILURE with a network
+# signature is re-fired, one without is not) is lib/jenkins.sh's, not a
+# second copy of it here.
+MIRROR_BUILD=""
+fire_mirror() {
+    local tries=3 first n res
+    first="$(jenkins_next_build "$MIRROR_JOB")" \
+        || could_not "no nextBuildNumber for $MIRROR_JOB — the Jenkins API stopped answering"
+    MIRROR_BUILD="$first"
+    if jenkins_build_retry "$MIRROR_JOB" 2700 "$tries" ""; then
+        for ((n = first; n < first + tries; n++)); do
+            res="$(jenkins_get "/job/$MIRROR_JOB/$n/api/json" 2>/dev/null | jq -r '.result // empty' 2>/dev/null || true)"
+            [[ "$res" == SUCCESS ]] && { MIRROR_BUILD="$n"; return 0; }
+        done
+        return 0
+    fi
+    # the LAST attempt that produced a verdict is the one whose console
+    # explains the red.
+    for ((n = first + tries - 1; n >= first; n--)); do
+        res="$(jenkins_get "/job/$MIRROR_JOB/$n/api/json" 2>/dev/null | jq -r '.result // empty' 2>/dev/null || true)"
+        [[ -n "$res" ]] && { MIRROR_BUILD="$n"; break; }
+    done
+    return 1
+}
+
+# report_scan <console> <dst> — what the scan found, said in the terms a
+# decision needs: severity, package, the version that fixes it, and the
+# target it was found on (which is what an exception has to be scoped
+# to). The verdict itself came from Jenkins' API, not from this text:
+# prose is what a person reads, never what a program decides on.
+report_scan() {
+    python3 - "$1" "$2" <<'PY'
+import re, sys
+console, dst = open(sys.argv[1], errors="replace").read().split("\n"), sys.argv[2]
+target, rows = None, []
+for i, ln in enumerate(console):
+    s = ln.strip()
+    if i + 1 < len(console) and set(console[i + 1].strip()) == {"="} and s:
+        target = s
+        continue
+    if "CVE-" not in s and "GHSA-" not in s:
+        continue
+    cells = [c.strip() for c in s.split("│") if c.strip()] or s.split()
+    sev = next((c for c in cells if c in ("CRITICAL", "HIGH", "MEDIUM", "LOW")), "")
+    if sev not in ("CRITICAL", "HIGH"):
+        continue
+    ident = next((c for c in cells if c.startswith(("CVE-", "GHSA-"))), "")
+    rows.append((target or "?", sev, cells[0] if cells else "?", ident, cells[-1] if cells else ""))
+if not rows:
+    print("    the console shows no CRITICAL/HIGH row — the red is not the scan's:", file=sys.stderr)
+    print("\n".join("    " + l for l in console[-25:]), file=sys.stderr)
+    sys.exit(0)
+print(f"    {len(rows)} blocking finding(s) on {dst}:", file=sys.stderr)
+for t, sev, pkg, ident, fixed in rows[:20]:
+    print(f"    {sev:<8} {ident:<20} {pkg:<28} fixed in: {fixed}   [on {t}]", file=sys.stderr)
+seen = sorted({t for t, *_ in rows})
+print(f"    scan targets involved (this is what an exception's `paths` must name): {', '.join(seen)}", file=sys.stderr)
+PY
+}
+
+# ═══════════════════════════════════════════════════════════════════
+#  request
+# ═══════════════════════════════════════════════════════════════════
+
+# write_entry — inserts the declaration in the group it belongs to,
+# keeping the file's own headings. The list is read by people as much as
+# by the job: a line appended at the bottom, far from the `# --- ` it
+# belongs under, is how a curated file turns into a dump.
+write_entry() {   # <src-with-digest> <dst>
+    python3 - "$IMAGES" "$1" "$2" <<'PY'
+import sys
+path, src, dst = sys.argv[1:4]
+lines = open(path).read().split("\n")
+# the group a runtime asked for by a developer belongs to; if the file
+# does not carry it, the entry opens it, with the same shape as the rest.
+HEAD = "# --- application runtimes"
+start = next((i for i, l in enumerate(lines) if l.startswith(HEAD)), None)
+row = f"{src}\t{dst}"
+if start is None:
+    while lines and not lines[-1].strip():
+        lines.pop()
+    lines += ["", "# --- application runtimes -------------------------------------------", row, ""]
+else:
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("# --- ")), len(lines))
+    while end > start + 1 and not lines[end - 1].strip():
+        end -= 1
+    lines[end:end] = [row]
+open(path, "w").write("\n".join(lines))
+PY
+}
+
+bump_entry() {   # <repo> <tag> <new-digest>
+    python3 - "$IMAGES" "$1" "$2" "$3" <<'PY'
+import re, sys
+path, repo, tag, digest = sys.argv[1:5]
+txt = open(path).read()
+pat = re.compile(rf"^({re.escape(repo)}:{re.escape(tag)}@)sha256:[0-9a-f]{{64}}", re.M)
+new, n = pat.subn(rf"\g<1>{digest}", txt, count=1)
+if n != 1:
+    sys.exit(f"the entry {repo}:{tag} is not in {path} exactly once ({n} matches)")
+open(path, "w").write(new)
+PY
+}
+
+# write_exception — one dated, path-scoped entry in trivyignore.yaml,
+# in the shape check 136 demands and the file's own comment prescribes:
+# the CVE, the exact scan targets it was found on, the measurement with
+# the day it was made, and the day it stops holding. The file is
+# appended as TEXT and never round-tripped through a YAML dumper: its
+# comments are the measurements, and a dumper would throw them away.
+write_exception() {   # <cve> <until> <reason> <paths...>
+    python3 - "$IGNORE" "$@" <<'PY'
+import datetime, sys, yaml
+path, cve, until, reason = sys.argv[1:5]
+paths = sys.argv[5:]
+if not paths:
+    sys.exit("no scan target to scope the exception to: a path-less entry silences the CVE wherever it appears, which is the wildcard this file forbids")
+today = datetime.date.today()
+end = datetime.date.fromisoformat(until)
+if end <= today:
+    sys.exit(f"--until {until} is not in the future (measured today, {today})")
+limit = today.replace(year=today.year + 1)
+if end > limit:
+    sys.exit(f"--until {until} is more than 12 months after the measurement ({today}): the measurement holds for THIS binary, not for one two rebuilds away")
+txt = open(path).read()
+if f"id: {cve}" in txt:
+    sys.exit(f"{cve} already has an entry in {path}: re-measure the one that is there instead of adding a second")
+body = [
+    "",
+    f"  # {cve} — exception written by the operator on {today} while asking",
+    "  # for this image. The statement is the measurement; when it expires,",
+    "  # trivy reports again and the measurement has to be redone.",
+    f"  - id: {cve}",
+    "    paths: [" + ", ".join(f'"{p}"' for p in paths) + "]",
+    f'    statement: "{reason.rstrip(chr(46))}. Measured {today}."',
+    f"    expired_at: {end.isoformat()}",
+]
+new = txt.rstrip("\n") + "\n" + "\n".join(body) + "\n"
+doc = yaml.safe_load(new)
+if not isinstance(doc, dict) or not isinstance(doc.get("vulnerabilities"), list):
+    sys.exit("the file stopped parsing as a trivy ignore-file after the append — nothing was written")
+open(path, "w").write(new)
+print(f"    {cve} scoped to {', '.join(paths)}, expires {end.isoformat()}", file=sys.stderr)
+PY
+}
+
+commit_list() {   # <message> <paths...>
+    local msg="$1"; shift
+    git -C "$LIST_ROOT" rev-parse --git-dir >/dev/null 2>&1 \
+        || could_not "$LIST_ROOT is not a git repository — the mirror job builds from a commit, so an edit nobody committed is an edit the job never sees"
+    git_commit_if_changes "$LIST_ROOT" "$msg" "$@"
+}
+
+do_request() {
+    resolve_ref "$REF"
+    local dst; dst="$(dst_of)"
+    local repo_name="${dst%%:*}"
+    local existing pinned
+    existing="$(line_for "$SRC_REPO" "$SRC_TAG")"
+    pinned=""; [[ -n "$existing" ]] && pinned="$(awk '{print $1}' <<< "$existing" | sed 's/.*@//')"
+
+    # A destination taken by ANOTHER source is the one collision that
+    # would silently make two technologies share a name in the registry.
+    local clash
+    clash="$(entries | awk -v d="$dst" '$2==d{print $1}' | grep -v "^$SRC_REPO:" || true)"
+    [[ -z "$clash" ]] || die "the destination $dst is already declared for $clash: two sources cannot share one name:tag in the registry"
+
+    if dry; then
+        log_info "dry run — nothing is measured, written, committed or built"
+        printf 'source       %s:%s\n' "$SRC_REPO" "$SRC_TAG"
+        printf 'destination  %s/%s\n' "$REGISTRY_HOST_INTERNAL" "$dst"
+        if [[ -z "$existing" ]]; then
+            printf 'would        measure the digest of the tag, add the line to %s, commit it, fire %s and print the FROM\n' "$IMAGES_REL" "$MIRROR_JOB"
+        elif (( BUMP )); then
+            printf 'declared     %s\n' "$pinned"
+            printf 'would        re-measure the tag and, if it moved, rewrite that digest, commit, fire %s and print the FROM\n' "$MIRROR_JOB"
+        else
+            printf 'declared     %s\n' "$pinned"
+            printf 'would        re-measure the tag: unchanged and already mirrored+signed prints the FROM and writes nothing; moved is an error unless --bump\n'
+        fi
+        return 0
+    fi
+
+    secrets_workdir
+    jenkins_ready
+    reg_ready
+
+    local measured
+    measured="$(upstream_digest)" \
+        || could_not "could not read the digest of $SRC_REPO:$SRC_TAG from its registry — this is NOT «the tag does not exist»: the read itself failed"
+    log_info "$SRC_REPO:$SRC_TAG is $measured today"
+
+    local action="none"
+    if [[ -z "$existing" ]]; then
+        action="add"
+    elif [[ "$pinned" == "$measured" ]]; then
+        action="none"
+    elif (( BUMP )); then
+        action="bump"
+    else
+        # A moved tag is a DECISION, and the platform does not take it.
+        # image-watch already knows whether the candidate is any
+        # cleaner: UpstreamFixAvailable fires only when the image is
+        # vulnerable today AND the tag moved AND the candidate scans
+        # clean. Re-pinning without that is signing somebody else's new
+        # bytes with our key because a string stayed the same.
+        log_error "$SRC_REPO:$SRC_TAG moved upstream:"
+        log_error "  declared $pinned"
+        log_error "  today    $measured"
+        log_error "A new digest is NOT a new image (docs/protocols/images.md §0): the tag moved twice in one day once, and neither move carried the fix."
+        log_error "image-watch already answers whether the candidate is cleaner — the alert UpstreamFixAvailable fires only when it is."
+        log_error "If you decide to follow it: ${AEGIS_CMD:-aegis} image request $REF --bump"
+        return 1
+    fi
+
+    local digest signed=1
+    if [[ "$action" == none ]]; then
+        # IDEMPOTENCE, and the whole point of it: declared with this
+        # digest is not the same as SERVED with it. The registry is
+        # asked, and only when it answers with a mirrored and signed
+        # image does this command write nothing, build nothing and
+        # simply hand back the line.
+        digest="$(reg_digest "$repo_name" "$SRC_TAG")"
+        if [[ -n "$digest" ]] && reg_signed "$repo_name" "$digest"; then
+            log_ok "$dst is already declared at this digest, mirrored and signed — nothing to do"
+            from_line "$dst" "$digest"
+            return 0
+        fi
+        log_warn "$dst is declared at this digest but the registry ${digest:+holds it unsigned}${digest:-does not hold it}: firing $MIRROR_JOB (the list is not touched)"
+    fi
+
+    case "$action" in
+        add)  write_entry "$SRC_REPO:$SRC_TAG@$measured" "$dst"
+              commit_list "feat(mirror): $dst, requested through the image command" "$IMAGES_REL"
+              log_ok "$dst declared in $IMAGES_REL" ;;
+        bump) bump_entry "$SRC_REPO" "$SRC_TAG" "$measured"
+              commit_list "fix(mirror): $dst follows the tag upstream moved to" "$IMAGES_REL"
+              log_ok "$dst re-pinned to $measured" ;;
+    esac
+
+    local attempt=1
+    while :; do
+        if fire_mirror; then break; fi
+
+        local console="$SECRETS_TMP/mirror-console.txt"
+        jenkins_get "/job/$MIRROR_JOB/$MIRROR_BUILD/consoleText" > "$console" 2>/dev/null || : > "$console"
+        log_error "$MIRROR_JOB #$MIRROR_BUILD went red — $dst was NOT mirrored (the scan runs BEFORE the push: nothing entered the registry)"
+        report_scan "$console" "$dst"
+
+        if [[ -z "$ALLOW" || $attempt -gt 1 ]]; then
+            log_error "The two honest ways out:"
+            local newer
+            newer="$(upstream_newer_tags 2>/dev/null | tr '\n' ' ' || true)"
+            if [[ -n "${newer// /}" ]]; then
+                log_error "  1. a newer tag. Upstream publishes, above $SRC_TAG and with the same shape: $newer"
+            else
+                log_error "  1. a newer tag — none newer with the same shape as $SRC_TAG could be listed from upstream; check the image's own release notes"
+            fi
+            log_error "  2. a dated exception, only for a CVE you have MEASURED is not reachable in this binary:"
+            log_error "     ${AEGIS_CMD:-aegis} image request $REF --allow <CVE> --until <YYYY-MM-DD> --reason \"what you measured\""
+            log_error "     It is scoped to the scan targets listed above and expires; there is no --force."
+            return 1
+        fi
+
+        # The exception path, once. A second red after writing it means
+        # the exception did not cover what was blocking, and retrying
+        # again would only be a loop with a file growing inside it.
+        local targets
+        targets="$(python3 - "$console" "$ALLOW" <<'PY'
+import sys
+console = open(sys.argv[1], errors="replace").read().split("\n")
+cve, target, hits = sys.argv[2], None, []
+for i, ln in enumerate(console):
+    s = ln.strip()
+    if i + 1 < len(console) and set(console[i + 1].strip()) == {"="} and s:
+        target = s
+        continue
+    if cve in s and target:
+        hits.append(target)
+print("\n".join(dict.fromkeys(hits)))
+PY
+)"
+        [[ -n "$targets" ]] || die "$ALLOW does not appear in the console of $MIRROR_JOB #$MIRROR_BUILD: an exception for a CVE the scan did not report would silence something nobody measured"
+        # shellcheck disable=SC2086
+        write_exception "$ALLOW" "$UNTIL" "$REASON" $targets \
+            || die "the exception could not be written (nothing was changed)"
+        commit_list "fix(mirror): dated exception for $ALLOW on $dst" "$IGNORE_REL"
+        log_warn "exception written and committed — retrying $MIRROR_JOB ONCE"
+        attempt=2
+    done
+
+    digest="$(reg_digest "$repo_name" "$SRC_TAG")"
+    [[ -n "$digest" ]] \
+        || could_not "$MIRROR_JOB #$MIRROR_BUILD ended SUCCESS and the registry does not serve $dst — the read failed, or the job mirrored something else"
+    reg_signed "$repo_name" "$digest" || signed=0
+    (( signed == 1 )) || die "$dst is in the registry and carries NO signature: Kyverno would reject any pod that used it. Read $MIRROR_JOB #$MIRROR_BUILD — the sign step is the last one and it did not leave its object"
+    log_ok "$dst mirrored, scanned and signed"
+    from_line "$dst" "$digest"
+}
+
+# ═══════════════════════════════════════════════════════════════════
+#  list
+# ═══════════════════════════════════════════════════════════════════
+do_list() {
+    local n=0
+    if dry; then
+        log_info "dry run — the registry is not asked; only what the list DECLARES is shown"
+        printf '%-28s %-22s %-14s %s\n' NAME TAG DIGEST STATE
+        while read -r src dst; do
+            [[ -n "$dst" ]] || continue
+            n=$((n+1))
+            printf '%-28s %-22s %-14s %s\n' "${dst%%:*}" "${dst#*:}" \
+                "$(sed 's/.*@sha256:\(.\{12\}\).*/\1/' <<< "$src")" "declared (not measured: dry run)"
+        done < <(entries)
+        log_ok "$n images declared in $IMAGES_REL"
+        return 0
+    fi
+    secrets_workdir
+    reg_ready
+    # The live exceptions, so a line that is only green because a CVE is
+    # being looked past says so, with the day it stops being looked past.
+    local exc; exc="$SECRETS_TMP/exceptions.txt"; : > "$exc"
+    [[ -f "$IGNORE" ]] && python3 - "$IGNORE" > "$exc" <<'PY'
+import sys, yaml
+doc = yaml.safe_load(open(sys.argv[1])) or {}
+for v in doc.get("vulnerabilities") or []:
+    for p in v.get("paths") or []:
+        print(f"{v.get('id')}\t{v.get('expired_at')}\t{p}")
+PY
+    printf '%-28s %-22s %-14s %-9s %-7s %s\n' NAME TAG DIGEST MIRRORED SIGNED EXCEPTION
+    local unread=0
+    while read -r src dst; do
+        [[ -n "$dst" ]] || continue
+        n=$((n+1))
+        local name="${dst%%:*}" tag="${dst#*:}" d short mirrored signed exline
+        d="$(reg_digest "$name" "$tag" || true)"
+        if [[ -z "$d" ]]; then mirrored=no; signed=no; short="—"
+        else mirrored=yes; short="$(sed 's/^sha256://;s/^\(.\{12\}\).*/\1/' <<< "$d")"
+             if reg_signed "$name" "$d"; then signed=yes; else signed=NO; fi
+        fi
+        # An exception naming this image's own scan target, or the tar
+        # glob every mirrored image is scanned as.
+        exline="$(awk -F'\t' -v n="$name" '$3 ~ /\.tar/ || index($3, n) {printf "%s→%s ", $1, $2}' "$exc" | head -c 60)"
+        printf '%-28s %-22s %-14s %-9s %-7s %s\n' "$name" "$tag" "$short" "$mirrored" "$signed" "${exline:-—}"
+    done < <(entries)
+    (( unread == 0 )) || could_not "$unread read(s) of the registry failed"
+    log_ok "$n images declared; the registry answered for each"
+}
+
+# ═══════════════════════════════════════════════════════════════════
+#  from — the contract other generators consume
+# ═══════════════════════════════════════════════════════════════════
+# ONE line on stdout and nothing else, or nothing at all on stdout and
+# the reason on stderr. Whoever calls this pipes it into a file; a
+# progress message on stdout would end up inside somebody's
+# Containerfile, which is exactly why stdout is sacred here.
+do_from() {
+    local name="${REF%%:*}" tag="${REF#*:}"
+    [[ "$REF" == *:* && -n "$name" && -n "$tag" ]] \
+        || bad_usage "from needs <name>:<tag> as the registry holds it (see: ${AEGIS_CMD:-aegis} image list)"
+    secrets_workdir
+    reg_ready
+    local d
+    d="$(reg_digest "$name" "$tag" || true)"
+    if [[ -z "$d" ]]; then
+        log_error "$name:$tag is not in the internal registry — ask for it: ${AEGIS_CMD:-aegis} image request $name:$tag"
+        return 1
+    fi
+    if ! reg_signed "$name" "$d"; then
+        log_error "$name:$tag is in the registry and carries NO signature object: a pod using it is rejected at admission. Re-run: ${AEGIS_CMD:-aegis} image request $name:$tag"
+        return 1
+    fi
+    from_line "$name:$tag" "$d"
+}
+
+# ═══════════════════════════════════════════════════════════════════
+#  check
+# ═══════════════════════════════════════════════════════════════════
+# Written to be CALLED by the round (`aegis check`) as much as typed:
+# one line per thing that is wrong, each one carrying the command that
+# fixes it, and a verdict in the exit code.
+do_check() {
+    secrets_workdir
+    reg_ready
+    local n=0 bad=0
+    while read -r src dst; do
+        [[ -n "$dst" ]] || continue
+        n=$((n+1))
+        local name="${dst%%:*}" tag="${dst#*:}" srcref="${src%@*}" d
+        d="$(reg_digest "$name" "$tag" || true)"
+        if [[ -z "$d" ]]; then
+            bad=$((bad+1))
+            log_error "$dst declared and NOT mirrored — fix: ${AEGIS_CMD:-aegis} image request $srcref"
+            continue
+        fi
+        if ! reg_signed "$name" "$d"; then
+            bad=$((bad+1))
+            log_error "$dst mirrored and NOT signed (Kyverno rejects it at admission) — fix: ${AEGIS_CMD:-aegis} image request $srcref"
+        fi
+    done < <(entries)
+    (( n > 0 )) || could_not "$IMAGES_REL declares no image: there is nothing to contrast against the registry"
+    if (( bad > 0 )); then
+        log_error "$bad of $n declared images are not usable in a tenant"
+        return 1
+    fi
+    log_ok "the $n declared images are mirrored and signed"
+}
+
+case "$VERB" in
+    request) do_request ;;
+    list)    do_list ;;
+    from)    do_from ;;
+    check)   do_check ;;
+esac
