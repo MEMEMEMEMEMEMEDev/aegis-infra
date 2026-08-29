@@ -173,17 +173,25 @@ IGNORE_REL="mirror-images/trivyignore.yaml"
 # The one exception is the dry run: with no instance on the machine
 # there is still something worth answering, and reading the seed's copy
 # answers it without pretending the instance exists.
-LIST_ROOT="$PLATFORM_DIR"
-if [[ ! -f "$PLATFORM_DIR/$IMAGES_REL" ]]; then
-    if dry && [[ -f "$AEGIS_ROOT/seed/platform/$IMAGES_REL" ]]; then
-        LIST_ROOT="$AEGIS_ROOT/seed/platform"
-        log_warn "dry run with no instance at $PLATFORM_DIR: reading the SEED's list ($LIST_ROOT/$IMAGES_REL). A real run edits the instance's copy and never this one"
-    else
-        could_not "$PLATFORM_DIR/$IMAGES_REL does not exist — there is no instance here, or its platform repo is not the one the mirror job reads"
+# It is resolved ONLY for the subcommands that read the list. `from`
+# asks the registry and nothing else, and it is consumed by generators
+# on machines that have a cluster: making it demand a platform checkout
+# would be answering «there is no instance» to a question about the
+# registry — the wrong verdict, which is worse than none.
+LIST_ROOT="$PLATFORM_DIR" IMAGES="" IGNORE=""
+need_list() {
+    LIST_ROOT="$PLATFORM_DIR"
+    if [[ ! -f "$PLATFORM_DIR/$IMAGES_REL" ]]; then
+        if dry && [[ -f "$AEGIS_ROOT/seed/platform/$IMAGES_REL" ]]; then
+            LIST_ROOT="$AEGIS_ROOT/seed/platform"
+            log_warn "dry run with no instance at $PLATFORM_DIR: reading the SEED's list ($LIST_ROOT/$IMAGES_REL). A real run edits the instance's copy and never this one"
+        else
+            could_not "$PLATFORM_DIR/$IMAGES_REL does not exist — there is no instance here, or its platform repo is not the one the mirror job reads"
+        fi
     fi
-fi
-IMAGES="$LIST_ROOT/$IMAGES_REL"
-IGNORE="$LIST_ROOT/$IGNORE_REL"
+    IMAGES="$LIST_ROOT/$IMAGES_REL"
+    IGNORE="$LIST_ROOT/$IGNORE_REL"
+}
 
 # ═══════════════════════════════════════════════════════════════════
 #  the list: parsing, and the source registry nobody should have to type
@@ -537,6 +545,7 @@ commit_list() {   # <message> <paths...>
 }
 
 do_request() {
+    need_list
     resolve_ref "$REF"
     local dst; dst="$(dst_of)"
     local repo_name="${dst%%:*}"
@@ -687,6 +696,7 @@ PY
 #  list
 # ═══════════════════════════════════════════════════════════════════
 do_list() {
+    need_list
     local n=0
     if dry; then
         log_info "dry run — the registry is not asked; only what the list DECLARES is shown"
@@ -765,6 +775,7 @@ do_from() {
 # one line per thing that is wrong, each one carrying the command that
 # fixes it, and a verdict in the exit code.
 do_check() {
+    need_list
     secrets_workdir
     reg_ready
     local n=0 bad=0
