@@ -36,6 +36,27 @@ check() {
 #     an example nobody could use.
 #   · `Bearer` followed by a token of 16+ characters that is a VALUE.
 #   · `"password": "…"` inline in a JSON, with 12+ characters of value.
+#   · a YAML mapping key whose name ENDS in password — `password:`,
+#     `admin-password:`, `db_password:` — with 12+ characters of value.
+#
+#     This one is a correction made the same day, and the comment it
+#     replaces is the reason it is written out at this length. That
+#     comment said the YAML spelling was «a template hole that already
+#     has an owner (check 003), and measuring it twice is how two rules
+#     drift apart». It was false. Check 003 is titled «placeholders: all
+#     with a declared owner»: it audits the __X__ holes and who owns
+#     them, and it never looks at a literal value. Measured before
+#     writing this — a literal password line added to the seed's
+#     group_vars came out green under 003, 116, 117 and 151 together.
+#     So the spelling most likely to carry a real leak, in a tree that
+#     is almost entirely ansible and kubernetes YAML, was measured by
+#     NOBODY, behind a comment that named a delegate. A delegate that
+#     does not exist is worse than silence: the next reader who sees a
+#     literal password in the seed assumes 003 is looking at it.
+#
+#     The two spellings cannot collide, which is why they are two
+#     regexes and not one: JSON puts the closing quote BETWEEN the word
+#     and the colon (`"password":`) and YAML does not (`password:`).
 #
 #   Allowed, because it is not a value:
 #   · anything carrying `$`, `{`, `<`, `%`, a backtick or a backslash —
@@ -102,6 +123,12 @@ def is_placeholder(v):
 BASIC  = re.compile(r'Basic[ \t]+(\S+)')
 BEARER = re.compile(r'Bearer[ \t]+(\S+)')
 PWJSON = re.compile(r'"password"[ \t]*:[ \t]*"([^"]*)"')
+# the YAML spelling. Anchored to the KEY and not to the word, so
+# `admin-password:` and `db_password:` count and `passwordKey: password`
+# does not (nothing follows its colon that a key could own). Like 116's
+# NAMED regex, it cannot read itself: the literal above has `[` after
+# the word, never a colon.
+PWYAML = re.compile(r'(?:^|[^A-Za-z0-9])[A-Za-z0-9_-]*password[ \t]*:[ \t]*(\S+)', re.I)
 # real base64, padding included; the alphabet is closed on purpose so a
 # hyphenated word ("Basic auth-header") cannot be mistaken for one
 B64 = re.compile(r'^[A-Za-z0-9+/]{16,}={0,2}$')
@@ -142,8 +169,13 @@ for f in sorted(ROOT.rglob("*")):
             if is_placeholder(v) or len(v) < 12:
                 continue
             found.append((f"{where}:{i}", "a password field with a literal value in an inline JSON"))
+        for m in PWYAML.finditer(line):
+            v = value(m.group(1))
+            if is_placeholder(v) or len(v) < 12:
+                continue
+            found.append((f"{where}:{i}", "a password key with a literal value in YAML"))
 
-print(f"    {n_files} files swept for the three shapes (Basic, Bearer, inline JSON password)")
+print(f"    {n_files} files swept for the four shapes (Basic, Bearer, JSON password, YAML password)")
 for where, what in found:
     print(f"    {where} carries {what}: whether or not it opens anything, a public tree "
           "that carries something credential-SHAPED costs an automated alert and a morning "
@@ -156,5 +188,5 @@ EOF
 then :; else D151="$D151 (see the detail above);"; fi
 
 if [[ -n "$D151" ]]; then fail "the product carries a literal credential:$D151"
-else pass "no literal credential in the product: no Basic with base64, no Bearer written as a value, no password inline in a JSON — the placeholders are placeholders"; fi
+else pass "no literal credential in the product: no Basic with base64, no Bearer written as a value, no password with a literal value in a JSON or in YAML — the placeholders are placeholders"; fi
 }

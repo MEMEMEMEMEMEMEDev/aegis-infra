@@ -82,3 +82,28 @@ red_5() {
         >> "$AEGIS_ROOT/docs/OPERATE.md"
 }
 
+# ── the YAML spelling (2026-08-29) ──────────────────────────────────
+# Until this red the check measured the JSON spelling only, and its own
+# comment claimed check 003 owned the YAML one. It does not: 003 audits
+# the __X__ holes and their owners, never a literal value. In a tree that
+# is almost all ansible and kubernetes YAML that left the likeliest shape
+# of a leak unmeasured — and this red is what makes the claim checkable.
+red_6() {
+    printf '\npassword: "tooth-yaml-value-minted-here"\n' \
+        >> "$AEGIS_ROOT/seed/platform/ansible/inventory/group_vars/all.yml"
+}
+
+# control: the YAML spelling holding a template HOLE. This is what the
+# false comment was really thinking of, and it is the case that must stay
+# green — the seed is full of them and check 003 owns their ownership.
+control_4() {
+    printf '\npassword: __GRAFANA_ADMIN_PASS__\n' \
+        >> "$AEGIS_ROOT/seed/platform/ansible/inventory/group_vars/all.yml"
+}
+
+# control: the YAML spelling with the value INTERPOLATED, which is what
+# the templates and the compose files really write
+control_5() {
+    printf '\n# the rendered template writes: password: ${GRAFANA_ADMIN_PASS}\n' \
+        >> "$AEGIS_ROOT/lib/common.sh"
+}
