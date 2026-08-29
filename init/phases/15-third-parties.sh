@@ -118,6 +118,21 @@ if [[ "${EDGE:-cloudflare}" == local ]]; then
     CF_API="$(materialize cf_api_token_empty "")"
     CF_DNS="$(materialize cf_dns_token_empty "")"
     CF_ACCESS=""   # no consumer under local: tokens.enc.yaml is not written
+    # And the fourth thing this phase mints since 2026-08-29: the pair
+    # the backups leave the machine with. It hangs off the same account
+    # as the three above, so with no account it has no subject either —
+    # but its absence costs something different, and that difference is
+    # the reason this says more than «skipped». The other three take
+    # away hostnames, certificates and a login screen; this one takes
+    # away the OFF-SITE COPY. An instance with a local edge captures its
+    # bundles, encrypts them, verifies them, and leaves every one of
+    # them on a disk of the same house — so a fire, a theft or a dead
+    # controller takes the data and its backups together. It is a
+    # legitimate profile and it is not a safe one, and the difference
+    # has to be said where somebody reads it.
+    log_warn "EDGE=local: the R2 credential is NOT minted — there is no Cloudflare account. The backups WILL be captured and encrypted, and they will stay on this machine: with this profile there is no off-site copy unless the operator wires their own transport (AEGIS_BACKUP_SINK, or an R2 account adopted by hand)"
+    gate_no_subject "backup-r2-credential" \
+      "EDGE=local: there is no account to mint an R2 token against, so nothing was measured about the off-site destination. It is NOT that the destination is fine — it is that this instance has none"
 elif [[ -f "$CF_API_FILE" && -f "$CF_DNS_FILE" && -f "$CF_ACCESS_FILE" ]]; then
     log_info "scoped CF tokens already in the store — not asking for the master (re-run)"
     CF_API="$(restore_secret cf_api_token)"
@@ -195,6 +210,101 @@ else
     # compromised CI could take itself out from behind Access.
     CF_ACCESS="$(mint_cf_token cf_access_token aegis-v2-access \
                  "$AEGIS_ROOT/lib/cf-policy-access.py")"
+    # ── 15.1b THE OFF-SITE DESTINATION OF THE BACKUPS ───────────
+    #
+    # A backup that stays on the machine it has to survive is not a
+    # backup, and until today every bundle this platform wrote stayed
+    # there. The pair that gets it out is minted HERE, with the master
+    # still alive, for the same reason the other three are: this is the
+    # one moment in the whole life of the instance when there is a
+    # credential able to create credentials.
+    #
+    # IT IS SCOPED TO ONE BUCKET, and that is the point of minting it
+    # instead of asking for one. `Workers R2 Storage Bucket Item Write`
+    # is a BUCKET-level permission group: the token can read, write and
+    # list objects in the bucket the policy names, and nothing else in
+    # the account. It cannot create buckets, cannot delete them, cannot
+    # touch the zone. If the machine being backed up is compromised, what
+    # the attacker holds is the ability to add and overwrite objects in
+    # one shelf of ciphertext — not to erase the history, which is R2's
+    # own lifecycle rule, and not to reach anything else.
+    #
+    # THE DERIVATION OF THE S3 PAIR IS MEASURED, NOT INVENTED. From
+    # developers.cloudflare.com/r2/api/tokens, read on 2026-08-29:
+    #   · Access Key ID     = the `id` of the API token.
+    #   · Secret Access Key = the SHA-256 hash of the token's `value`.
+    # Getting that wrong is the worst possible way to be wrong here: the
+    # mint succeeds, the phase goes green, and the failure appears the
+    # day somebody needs the copy. So the value never touches argv and
+    # never touches a file — it goes from jq into sha256sum through a
+    # pipe — and `remote adopt` LISTS the destination with the derived
+    # pair before storing it. A credential that was not proved against
+    # the thing it opens is a credential nobody proved.
+    #
+    # The policy is built inline and not in lib/cf-policy-*.py like the
+    # other three. It is not a preference: those three shape a POLICY
+    # over a zone with several permission groups each, and this one is a
+    # single group over a single resource string. A file for four lines
+    # of json would be a fourth place to look.
+    #
+    # THE BUCKET NAME IS ASKED FOR, not built. `aegis data remote bucket`
+    # derives it from the root domain and is the same derivation the PUT
+    # uses; if this phase built its own, a token scoped to one name and a
+    # backup writing to another would both look correct.
+    R2_BUCKET="$(${AEGIS_CMD:-aegis} data remote bucket)" \
+        || die "the destination bucket could not be derived: without it the R2 token would be scoped to a name nobody writes to"
+    python3 - "$SECRETS_TMP/cf_pgroups.json" "$CF_ACCOUNT_ID" "$R2_BUCKET" \
+        > "$SECRETS_TMP/r2_mint.json" <<'EOF' || die "the R2 permission group did not match — check the names the API returned above"
+import json, sys
+groups = json.load(open(sys.argv[1]))["result"]
+account, bucket = sys.argv[2], sys.argv[3]
+# BY NAME against the live API, never an id from memory: the same rule
+# as the other three tokens, and for the same reason (two documented
+# cases of «the pin invented from memory did not exist»).
+WANT = "Workers R2 Storage Bucket Item Write"
+ids = [g["id"] for g in groups if g.get("name") == WANT]
+if not ids:
+    print(f"no permission group named {WANT!r}. Available: "
+          f"{sorted(g.get('name', '') for g in groups)[:40]}", file=sys.stderr)
+    sys.exit(1)
+# The resource string, from the same page of the documentation:
+# com.cloudflare.edge.r2.bucket.<ACCOUNT_ID>_<JURISDICTION>_<BUCKET>.
+# `default` is the jurisdiction of a bucket created without one, which
+# is what tofu/envs/data-r2 creates.
+print(json.dumps({
+    "name": "aegis-v2-backups-r2",
+    "policies": [{
+        "effect": "allow",
+        "resources": {f"com.cloudflare.edge.r2.bucket.{account}_default_{bucket}": "*"},
+        "permission_groups": [{"id": ids[0]}],
+    }],
+}))
+EOF
+    _cf_call POST "/accounts/$CF_ACCOUNT_ID/tokens" "$SECRETS_TMP/r2_mint.json" \
+        > "$SECRETS_TMP/r2_res.json"
+    gate "cf-r2-token-minted" bash -c \
+      "jq -e '.success == true' '$SECRETS_TMP/r2_res.json' >/dev/null"
+    # The two lines `remote adopt` reads. The token's VALUE never lands
+    # anywhere: it goes from jq straight into sha256sum through a pipe,
+    # so it is in no file and in no argv at any point.
+    ( umask 077
+      jq -r '.result.id' "$SECRETS_TMP/r2_res.json" | tr -d '\n' \
+          > "$SECRETS_TMP/r2_credential"
+      printf '\n' >> "$SECRETS_TMP/r2_credential"
+      jq -r '.result.value' "$SECRETS_TMP/r2_res.json" | tr -d '\n' \
+          | sha256sum | cut -d' ' -f1 >> "$SECRETS_TMP/r2_credential" )
+    # And the response dies with the master: it carries the token's
+    # value, which is the secret half before the hash.
+    shred -u "$SECRETS_TMP/r2_res.json"
+    # The store entry is written by the command that OWNS this material,
+    # not by this phase: `remote adopt` is the one that knows how to
+    # prove the pair against the destination before storing it, and
+    # proving it is the difference between a credential and a hope.
+    run_cmd ${AEGIS_CMD:-aegis} data remote adopt \
+        --credentials-file "$SECRETS_TMP/r2_credential" \
+        || die "the R2 pair was minted and the destination did NOT accept it — nothing was stored. A credential that does not open the bucket, sitting in the store, is an off-site copy that exists on paper"
+    log_ok "off-site destination of the backups: scoped R2 token minted for the bucket $R2_BUCKET and adopted"
+
     # the master dies HERE (ephemeral for real):
     shred -u "$CF_MASTER"
     unset CF_AUTH_EMAIL
