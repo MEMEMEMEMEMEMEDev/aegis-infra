@@ -186,6 +186,10 @@ debugging, never as final validation.
   with `--no-ff`. Never commit straight to main without agreement.
 - Never delete or force over something you did not create without
   first looking at what is there.
+- Making a repository public is a one-way door: a force push does not
+  un-publish a blob somebody already cloned. Before it,
+  `protocols/opening-a-repo.md` — the whole history measured by two
+  scanners, not the tree grepped for patterns.
 
 ## 5. Autonomy: when to stop
 

@@ -32,3 +32,8 @@ The rules are written down and enforced: secrets never travel in
 argv, are never printed, and are encrypted at the path they live in.
 `seed/platform/docs/conventions/secrets.md` is the reference;
 `docs/AGENTS.md` §4 is the operational form of it.
+
+Before a repository of this project is made public, its whole history
+is measured by two independent scanners, not grepped for patterns:
+`docs/protocols/opening-a-repo.md` is the procedure, and it exists
+because publishing is the one act here that cannot be undone.
