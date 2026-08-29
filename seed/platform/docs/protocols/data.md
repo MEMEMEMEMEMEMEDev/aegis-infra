@@ -28,14 +28,15 @@ objects — and refuses to call it good if they do not match.
 
 ## 2. What restoring does, in order
 
-1. It opens the bundle with the age key and checks EVERY piece against
-   its sha256 — the SQL files and each object of the bucket. Nothing is
-   written before that, and it is the WHOLE bundle and not each piece as
-   its turn comes up: a mismatch on the last object has to stop the
-   restore before the first one is uploaded, never after.
+1. It opens the bundle with the age key, and each half is checked WHOLE
+   against its sha256 before that half writes anything: the SQL files
+   before the first `psql`, every object of the bucket before the first
+   PUT. The whole half, and not each piece as its turn comes up — a
+   mismatch on the last object has to stop the restore before the first
+   one is uploaded, never after.
 2. It compares the manifest's credential fingerprint against the live
    Secret's. A difference is a brake with `--force`, and the brake is
-   not about repair — the role is realigned three steps below — it is
+   not about repair — the role is realigned four steps below — it is
    about the DECISION: restoring a machine and moving an organization
    into a new one are not the same operation.
 3. It scales the organization's consumers to zero and cuts the leftover
