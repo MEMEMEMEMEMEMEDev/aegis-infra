@@ -75,11 +75,23 @@ if _unexplained:
     sys.exit(1)
 
 IPV4 = re.compile(r'(?<![\d.])((?:\d{1,3}\.){3}\d{1,3})(?![\d.])')
-SKIP_DIRS = {".git", "__pycache__", "teeth"}
+
+# `.git` and `__pycache__` are noise wherever they turn up; verify/teeth
+# is excluded by its PATH and not by its bare name. The difference is not
+# pedantry, and it was pointed out over the sibling check 151: matching
+# the NAME against every component would exempt any future directory
+# called `teeth` at any depth, and what would quietly stop being swept
+# here is ADDRESSES.
+SKIP_ANYWHERE = {".git", "__pycache__"}
+TEETH = ("verify", "teeth")
+
+def is_swept(rel):
+    return not (SKIP_ANYWHERE & set(rel.parts)) and rel.parts[:2] != TEETH
+
 found, n_files = {}, 0
 
 for f in sorted(ROOT.rglob("*")):
-    if not f.is_file() or any(p in SKIP_DIRS for p in f.parts):
+    if not f.is_file() or not is_swept(f.relative_to(ROOT)):
         continue
     try:
         text = f.read_text(encoding="utf-8")
@@ -176,14 +188,19 @@ if _unexplained:
 # naming a machine called `[`. Found by running it, which is the only
 # way this class ever gets found.
 NAMED = re.compile(r'(?:--node-name[= \t]|node[-_]name:[ \t]*|nodeName:[ \t]*)["\']?([A-Za-z0-9$_{<][^"\'\s#]*)')
-SKIP_DIRS = {".git", "__pycache__", "teeth"}
+# by PATH, for the reason written over the address sweep above
+SKIP_ANYWHERE = {".git", "__pycache__"}
+TEETH = ("verify", "teeth")
+
+def is_swept(rel):
+    return not (SKIP_ANYWHERE & set(rel.parts)) and rel.parts[:2] != TEETH
 
 def is_hole(v):
     return bool(set("${}<>") & set(v)) or (v.startswith("__") and v.endswith("__"))
 
 found, n_named = [], 0
 for f in sorted(ROOT.rglob("*")):
-    if not f.is_file() or any(p in SKIP_DIRS for p in f.parts):
+    if not f.is_file() or not is_swept(f.relative_to(ROOT)):
         continue
     try:
         text = f.read_text(encoding="utf-8")
