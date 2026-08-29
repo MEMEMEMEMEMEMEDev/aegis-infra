@@ -103,6 +103,37 @@ want(not flat,
      f"({'; '.join(flat[:2])}): the lookup stops being case-insensitive, "
      f"and what is read through it is the size of what was just uploaded")
 
+# ── 2b. the ORDER, which is the half that no exit code shows ────────
+# Two orders were wrong in the first version of this half and neither of
+# them fails loudly: they leave a state that looks finished.
+#
+# Nothing is written before the WHOLE bundle has been checked against the
+# manifest. Hashing inside the write loop means object N's bad sha256
+# dies with objects 1..N-1 already in the bucket — half a restore, which
+# is the state this command exists to avoid.
+mixed = [f"line {l.lineno}" for l in ast.walk(funcs.get("restore_bucket") or ast.parse(""))
+         if isinstance(l, ast.For)
+         and "sha256" in ast.unparse(l) and "'PUT'" in ast.unparse(l)]
+want(not mixed,
+     f"restore_bucket() verifies the sha256 in the same loop that writes "
+     f"({', '.join(mixed[:2])}): a bundle that does not reproduce itself "
+     f"would be uploaded halfway")
+
+# And the objects go back INSIDE the window that keeps the consumers
+# down. The manifest carries the databases first, so a loop that walks
+# the pieces in order opens the window, closes it, and only then uploads
+# the objects: the application is already serving rows that point at
+# objects still travelling.
+window = ""
+for n in ast.walk(funcs.get("restore") or ast.parse("")):
+    if isinstance(n, ast.Try) and any("scale_consumers_up" in ast.unparse(x)
+                                      for x in n.finalbody):
+        window = "\n".join(ast.unparse(x) for x in n.body)
+want("restore_bucket" in window,
+     "restore() puts the objects back OUTSIDE the window that holds the "
+     "consumers down: the application returns over rows that point at "
+     "objects that have not arrived, which is a 404 in front of a user")
+
 # A message that gives up. Docstrings are excluded on purpose: they
 # narrate the hole, and narrating it is not reopening it.
 docstrings = set()

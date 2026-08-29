@@ -1100,21 +1100,41 @@ def restore_bucket(p, payload):
     """
     ns = f"org-{p['org']}"
     bucket = p["bucket"]
+
+    # THE WHOLE PAYLOAD AGAINST THE MANIFEST, AND ONLY THEN THE FIRST PUT.
+    # This is the order the database half has always followed, and until
+    # the review of 2026-08-29 the comment here claimed it while the code
+    # did the other thing: it hashed each object INSIDE the write loop, so
+    # a bad sha256 on object N died with objects 1..N-1 already in the
+    # bucket. Half a restore is the state this command exists to avoid,
+    # and a comment that lies about the order is worse than no comment,
+    # because the next reader believes it.
+    #
+    # Every mismatch is named at once, and for the same reason the
+    # verification at the end names them all: what to do with a bundle
+    # that does not reproduce itself is a person's decision, and they
+    # decide better seeing the whole list than its first item.
+    broken = []
+    for o in p["objetos"]:
+        src = os.path.join(payload, p["directorio"], o["archivo"])
+        if not os.path.exists(src):
+            broken.append(f"{o['clave']}: it is not in the bundle's payload")
+        elif hashlib.sha256(open(src, "rb").read()).hexdigest() != o["sha256"]:
+            broken.append(f"{o['clave']}: {o['archivo']} does not match its "
+                          f"sha256 from the manifest")
+    if broken:
+        for x in broken[:12]:
+            print(f"  {red}✗{reset} {x}")
+        die(f"{p['org']}/{bucket}: the bundle does not reproduce itself — "
+            f"NOTHING was written")
+
     ak, sk = s3_credential(ns)
     written = identical = 0
     problems = []
     with Tunnel("garage-system", "garage", 3900) as t:
         for o in p["objetos"]:
-            src = os.path.join(payload, p["directorio"], o["archivo"])
-            if not os.path.exists(src):
-                problems.append(f"{o['clave']}: it is not in the bundle's payload")
-                continue
-            data = open(src, "rb").read()
-            # The same order as the database half: everything is checked
-            # against the manifest BEFORE writing anything. A bundle that
-            # does not reproduce itself does not get uploaded halfway.
-            if hashlib.sha256(data).hexdigest() != o["sha256"]:
-                die(f"{o['archivo']} does not match its sha256 from the manifest")
+            data = open(os.path.join(payload, p["directorio"],
+                                     o["archivo"]), "rb").read()
             # md5 for the ETag, which is an S3 identifier and not a
             # security claim — hence usedforsecurity=False, so it also
             # works where the library forbids md5 for hashing.
@@ -1164,17 +1184,33 @@ def restore_bucket(p, payload):
 
 
 def restore(bundle, org, force):
+    """The organization comes back in ONE window with its consumers down.
+
+    The order matters, and it was wrong until the review of 2026-08-29:
+    the loop walked the manifest's pieces, the manifest carries the
+    databases first, so the postgres half opened the window and CLOSED it
+    —`scale_consumers_up` in its `finally`— and only then did the objects
+    go back into the bucket. The application was already serving, against
+    rows pointing at objects still travelling: 404s in front of a user,
+    over data the operator had just been told was restored.
+
+    So the window is opened ONCE for the whole organization, and inside
+    it the OBJECTS go first and the databases after. If that window ever
+    closed halfway, an object without its row is an orphan nobody
+    notices; a row without its object is the 404. The realignment of the
+    role stays the last thing before the consumers come back, which is
+    where it always had to be.
+    """
     tmp, man = open_bundle(bundle)
     try:
         pieces = [p for p in man["piezas"] if p["org"] == org]
         if not pieces:
             die(f"the bundle has nothing of {org!r}. There is: "
                 f"{', '.join(sorted({p['org'] for p in man['piezas']}))}")
-        for p in pieces:
-            if p["tipo"] != "postgres":
-                restore_bucket(p, tmp)
-                continue
+        postgres = [p for p in pieces if p["tipo"] == "postgres"]
+        buckets = [p for p in pieces if p["tipo"] != "postgres"]
 
+        for p in postgres:
             # THE BRAKE, which since the realignment exists is no longer
             # about repair: the dump brings the role's SCRAM hash, and
             # what closes the gap between that hash and the live Secret
@@ -1201,21 +1237,32 @@ def restore(bundle, org, force):
                     die(msg)
                 print(f"  {yellow}!{reset} {msg}\n      {yellow}--force: I go on anyway{reset}")
 
-            pod = f"{p['servicio']}-0"
+            # Every piece against its sha256 BEFORE a single write, which
+            # is the order the objects follow too: a bundle that does not
+            # reproduce itself is not applied halfway.
             for piece in [p["globals"]] + p["bases"]:
                 b_ = open(os.path.join(tmp, piece["archivo"]), "rb").read()
                 if hashlib.sha256(b_).hexdigest() != piece["sha256"]:
                     die(f"{piece['archivo']} does not match its sha256 from the manifest")
 
-            # ── THE PROTOCOL, which is more than a `psql <` ─────────
-            #
-            # The consumers are brought down because a pg_dump with
-            # --clean drops objects the app may be using. And they are
-            # brought back up NO MATTER WHAT: if the restore dies halfway,
-            # leaving the organization at zero replicas would turn a failed
-            # restore into an outage.
-            consumers = scale_consumers_down(p["ns"])
-            try:
+        # ── THE PROTOCOL, which is more than a `psql <` ─────────────
+        #
+        # The consumers are brought down because a pg_dump with --clean
+        # drops objects the app may be using, and they stay down until
+        # BOTH halves are back. They come up NO MATTER WHAT: if the
+        # restore dies halfway, leaving the organization at zero replicas
+        # would turn a failed restore into an outage.
+        #
+        # One organization is ONE namespace —`sources()` derives it that
+        # way and the bucket piece never carried one— so the window is
+        # opened once for the whole restore and not once per piece.
+        ns = postgres[0]["ns"] if postgres else f"org-{org}"
+        consumers = scale_consumers_down(ns)
+        try:
+            for p in buckets:
+                restore_bucket(p, tmp)
+            for p in postgres:
+                pod = f"{p['servicio']}-0"
                 cut_connections(p["ns"], pod)
 
                 # Globals WITHOUT ON_ERROR_STOP: the roles already exist
@@ -1267,16 +1314,24 @@ def restore(bundle, org, force):
                 user = realign_role(p["ns"], pod, p["secreto"], app_db)
                 step(f"role {user} realigned with {p['ns']}/{p['secreto']}: "
                      f"the live credential opens {app_db}")
-            finally:
-                scale_consumers_up(p["ns"], consumers)
+        finally:
+            scale_consumers_up(ns, consumers)
 
-            # ── VERIFICATION, the part that was missing ─────────────
-            #
-            # On 2026-08-09 a restore left the database DELETED and
-            # reported success, because it looked at psql's exit code and
-            # not at the result. Now the inventory is measured again and
-            # compared against the one stored at capture time. If it does
-            # not match, it is not restored, whatever psql says.
+        # ── VERIFICATION, the part that was missing ─────────────────
+        #
+        # On 2026-08-09 a restore left the database DELETED and reported
+        # success, because it looked at psql's exit code and not at the
+        # result. Now the inventory is measured again and compared
+        # against the one stored at capture time. If it does not match,
+        # it is not restored, whatever psql says.
+        #
+        # It runs with the consumers already back up, and that is not an
+        # oversight: what is measured here is the content of the tables,
+        # which a returning application does not change. The bucket
+        # measures itself inside the window, because its own listing —the
+        # only thing that can answer for it— is read there.
+        for p in postgres:
+            pod = f"{p['servicio']}-0"
             problems = []
             alive_dbs = databases_of(p["ns"], pod)
             for database in p["bases"]:

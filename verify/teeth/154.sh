@@ -8,13 +8,11 @@ red_1() {
     python3 - "$AEGIS_ROOT/$DATA" <<'PY'
 import sys
 p = sys.argv[1]; t = open(p).read()
-old = '''            if p["tipo"] != "postgres":
-                restore_bucket(p, tmp)
-                continue'''
-new = '''            if p["tipo"] != "postgres":
+old = '''            for p in buckets:
+                restore_bucket(p, tmp)'''
+new = '''            for p in buckets:
                 print(f"  {yellow}!{reset} {p['bucket']}: restoring objects is "
-                      f"not implemented yet; the bundle DOES have them")
-                continue'''
+                      f"not implemented yet; the bundle DOES have them")'''
 assert t.count(old) == 1
 open(p, "w").write(t.replace(old, new, 1))
 PY
@@ -75,6 +73,41 @@ old = "            return r.status, r.read(), r.headers"
 new = "            return r.status, r.read(), dict(r.headers)"
 assert t.count(old) == 1
 open(p, "w").write(t.replace(old, new, 1))
+PY
+}
+
+# the first of the two orders of the review of 2026-08-29: the sha256
+# goes back INSIDE the write loop, so object N's mismatch dies with
+# objects 1..N-1 already uploaded — half a restore, silent
+red_6() {
+    python3 - "$AEGIS_ROOT/$DATA" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+start = t.index("    # THE WHOLE PAYLOAD AGAINST")
+end = t.index("    ak, sk = s3_credential(ns)", start)
+t = t[:start] + t[end:]
+old = '            data = open(os.path.join(payload, p["directorio"],\n'
+old += '                                     o["archivo"]), "rb").read()\n'
+new = old + '            if hashlib.sha256(data).hexdigest() != o["sha256"]:\n'
+new += '                die("it does not match its sha256 from the manifest")\n'
+assert t.count(old) == 1
+open(p, "w").write(t.replace(old, new, 1))
+PY
+}
+
+# the second: the objects leave the window with the consumers down and
+# go back to travelling with the application already serving
+red_7() {
+    python3 - "$AEGIS_ROOT/$DATA" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+inside = '            for p in buckets:\n                restore_bucket(p, tmp)\n'
+assert t.count(inside) == 1
+t = t.replace(inside, "", 1)
+after = '        finally:\n            scale_consumers_up(ns, consumers)\n'
+assert t.count(after) == 1
+t = t.replace(after, after + '\n        for p in buckets:\n            restore_bucket(p, tmp)\n', 1)
+open(p, "w").write(t)
 PY
 }
 

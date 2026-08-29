@@ -28,29 +28,37 @@ objects — and refuses to call it good if they do not match.
 
 ## 2. What restoring does, in order
 
-1. It opens the bundle with the age key and checks every piece against
-   its sha256. Nothing is written before that.
+1. It opens the bundle with the age key and checks EVERY piece against
+   its sha256 — the SQL files and each object of the bucket. Nothing is
+   written before that, and it is the WHOLE bundle and not each piece as
+   its turn comes up: a mismatch on the last object has to stop the
+   restore before the first one is uploaded, never after.
 2. It compares the manifest's credential fingerprint against the live
    Secret's. A difference is a brake with `--force`, and the brake is
-   not about repair — the role is realigned two steps below — it is
+   not about repair — the role is realigned three steps below — it is
    about the DECISION: restoring a machine and moving an organization
    into a new one are not the same operation.
 3. It scales the organization's consumers to zero and cuts the leftover
    sessions, because a `pg_dump --clean` drops objects the application
-   may be using. They come back up NO MATTER WHAT: leaving the
-   organization at zero replicas would turn a failed restore into an
-   outage.
-4. It loads the roles (globals) and then each database.
-5. **It realigns the role** with the live Secret and PROVES it, opening
-   the database with that credential. This runs inside the window with
-   the consumers still down: the pods return looking for the database,
-   and finding it with the password from the capture would give them a
-   crash loop whose message —authentication failed— points at the
-   application and not at the restore.
-6. **It puts the objects back** into the bucket, with the credential of
-   the destination instance.
-7. It measures: the databases' tables and rows against the manifest,
-   the objects' size and count against the bucket's own listing.
+   may be using. That window covers BOTH halves and it is opened once:
+   it closes when the objects and the databases are back. They come up
+   again NO MATTER WHAT: leaving the organization at zero replicas would
+   turn a failed restore into an outage.
+4. **It puts the objects back** into the bucket, with the credential of
+   the destination instance. They go before the databases, and inside
+   the window, for a reason worth writing down: the rows point at the
+   objects. A row without its object is a 404 in front of a user; an
+   object without its row is an orphan nobody notices. If this ever
+   stops halfway, it stops on the side that hurts less.
+5. It loads the roles (globals) and then each database.
+6. **It realigns the role** with the live Secret and PROVES it, opening
+   the database with that credential. It is the last thing before the
+   consumers return: the pods come back looking for the database, and
+   finding it with the password from the capture would give them a crash
+   loop whose message —authentication failed— points at the application
+   and not at the restore.
+7. It measures: the databases' tables and rows against the manifest, the
+   objects' size and count against the bucket's own listing.
 
 ### The objects, and what it does with what is already there
 
