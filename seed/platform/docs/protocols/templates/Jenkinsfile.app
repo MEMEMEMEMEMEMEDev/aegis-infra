@@ -163,6 +163,10 @@ spec:
   environment {
     REGISTRY = 'registry.registry-system.svc.cluster.local:5000'
     IMAGE    = 'CHANGEME-app'   // the image's name in the registry
+    // ONE origin for the file kaniko builds and the from-guard reads:
+    // two literals would be two places to edit, and the guard would end
+    // up measuring a file the build does not use.
+    CONTAINERFILE = 'Containerfile'
   }
   stages {
     stage('compute-tag') {
@@ -214,6 +218,190 @@ spec:
         }
       }
     }
+    stage('from-guard') {
+      // THE FROM IS PART OF THE SUPPLY CHAIN, and until today nobody
+      // looked at it. Everything downstream of this line is measured —
+      // kaniko builds without privileges, trivy blocks on actionable
+      // CRITICAL/HIGH, cosign signs by digest, Kyverno refuses to admit
+      // what is not signed — and all of it stands on a base image that
+      // was written by hand, in another repo, pulled from the open
+      // internet, under a tag somebody else can repoint. The scan looks
+      // at the RESULT, which is why an unpinned base does not fail: it
+      // succeeds, with different bytes than yesterday.
+      //
+      // Two failures, and they are not the same one:
+      //   · a FROM that is not the internal registry: nothing about
+      //     that image went through our scan or our key, so the pod is
+      //     rejected at admission — after the build spent its minutes,
+      //     in a namespace nobody was looking at, with a message about
+      //     signatures that says nothing about a Containerfile;
+      //   · a FROM by TAG, even ours: the tag is a mutable pointer and
+      //     what Kyverno verifies is a digest. `registry/x:1.2` and
+      //     `registry/x:1.2@sha256:…` build differently on two
+      //     different days and neither build says so.
+      // Both die HERE instead, before a single layer is extracted, with
+      // the one command that fixes them.
+      //
+      // The guard reads the FROMs of this repo's own Containerfile and
+      // asks the two questions of the two containers that can answer
+      // them and are ALREADY in this pod: crane (does the internal
+      // registry hold this digest) and cosign (does its signature
+      // verify against our key). No new container, so the quota
+      // arithmetic of check 036 does not move.
+      //
+      // WHAT IS NOT ASKED. A ref that names an earlier stage of this
+      // same file is not a base image, it is this build's own output;
+      // and a double-underscore placeholder belongs to a template that
+      // has not been instantiated yet (the shape the seed uses, check
+      // 003's vocabulary). Both are skipped, and said out loud.
+      //
+      // BOOTSTRAP TOLERANCE, the same one the scan and sign stages
+      // carry and for the same reason: during init phases 50-70 the
+      // cosign key does not exist yet, so the signature half CANNOT be
+      // measured. It is not skipped quietly — "could not measure" is
+      // printed, travels in the event, and the existence half still
+      // runs. The day the key is there, both halves block.
+      //
+      // NO NEW METRIC, on purpose. This file already pushes
+      // aegis_build_* series that an alert reads; a new series that no
+      // rule and no panel reads is case (d) of the 2026-08-22
+      // observability sweep — paid for and looked at by nobody, which
+      // check 092 refuses. The signal a failed guard emits is the one
+      // that cannot be missed: the build is dead. The event carries the
+      // detail for the record.
+      when { expression { env.SKIP_BUILD != 'true' } }
+      steps {
+        container('crane') {
+          sh '''
+            set -e
+            test -f "${CONTAINERFILE}" || {
+              echo "from-guard: this repo has no ${CONTAINERFILE} — the build stage would not find one either"
+              exit 1
+            }
+            rm -f from-refs from-bad from-msg from-unsigned from-count from-sign-state
+
+            # The FROMs, with the aliases of this same file taken out.
+            # `--platform=` and friends are flags, not references; the
+            # first field that is not one is the image.
+            awk '
+              { sub(/#.*/, "") }
+              toupper($1) == "FROM" {
+                  ref = ""
+                  for (i = 2; i <= NF; i++) { if (substr($i, 1, 2) != "--") { ref = $i; break } }
+                  if (NF >= 3 && toupper($(NF-1)) == "AS") stage[tolower($NF)] = 1
+                  if (ref != "" && !(tolower(ref) in stage)) print ref
+              }
+            ' "${CONTAINERFILE}" > from-refs
+
+            N=0
+            while read -r ref; do
+              [ -n "$ref" ] || continue
+              N=$((N+1))
+              case "$ref" in
+                __*__)
+                  echo "from-guard: ${ref} is an uninstantiated template placeholder — not resolvable here"
+                  continue
+                  ;;
+              esac
+              WHY=""
+              case "$ref" in
+                "${REGISTRY}"/*@sha256:*)
+                  D=${ref##*@sha256:}
+                  [ ${#D} -eq 64 ] || WHY="the digest after @sha256: is not 64 hex characters"
+                  ;;
+                "${REGISTRY}"/*)
+                  WHY="it names the internal registry but by TAG: a tag is a mutable pointer and what Kyverno verifies is a digest"
+                  ;;
+                *)
+                  WHY="it does not come from the internal registry: nothing about that image went through our scan or our key, so a pod that uses it is rejected at admission"
+                  ;;
+              esac
+              if [ -z "$WHY" ]; then
+                crane manifest "$ref" > /dev/null 2>&1 || WHY="the internal registry does not serve that digest (it was never mirrored, or it was garbage-collected)"
+              fi
+              if [ -n "$WHY" ]; then
+                printf '%s\n' "$ref" >> from-bad
+                printf '%s\n' "FROM ${ref} is not mirrored/signed. Run: aegis image request ${ref}  and paste the FROM it prints" >> from-msg
+                printf '%s\n' "    why: ${WHY}" >> from-msg
+              fi
+            done < from-refs
+            printf '%s\n' "$N" > from-count
+            echo "from-guard: ${N} base reference(s) read from ${CONTAINERFILE}"
+          '''
+        }
+        container('cosign') {
+          sh '''
+            set -e
+            if [ ! -f /cosign/keys/cosign.key ]; then
+              echo "WARN: cosign-signing-key missing (bootstrap pre-phase-80) — the SIGNATURE half of from-guard COULD NOT BE MEASURED (the existence half did run)"
+              printf '%s\n' "not-evaluable" > from-sign-state
+              exit 0
+            fi
+            printf '%s\n' "measured" > from-sign-state
+            # The public half is derived from the private key we already
+            # mount: cosign.pub lives in the platform repo, and this pod
+            # is standing in the app's. One less thing to mount, one
+            # less place for the two to drift apart.
+            cosign public-key --key /cosign/keys/cosign.key > from-cosign.pub
+            while read -r ref; do
+              [ -n "$ref" ] || continue
+              case "$ref" in __*__) continue ;; esac
+              if [ -f from-bad ] && grep -qxF "$ref" from-bad; then continue; fi
+              # --insecure-ignore-tlog: the signature is fully verified
+              # against our key; only the public transparency log is
+              # skipped, and it was never used (--tlog-upload=false on a
+              # private registry).
+              cosign verify --key from-cosign.pub \
+                  --registry-cacert /cosign/ca/ca.crt \
+                  --insecure-ignore-tlog=true "$ref" > /dev/null 2>&1 \
+                || printf '%s\n' "$ref" >> from-unsigned
+            done < from-refs
+            rm -f from-cosign.pub
+          '''
+        }
+        sh '''
+          N=$(cat from-count 2>/dev/null || echo 0)
+          STATE=$(cat from-sign-state 2>/dev/null || echo not-evaluable)
+          BAD=0
+          UNSIGNED=0
+          if [ -f from-bad ];      then BAD=$(wc -l < from-bad); fi
+          if [ -f from-unsigned ]; then UNSIGNED=$(wc -l < from-unsigned); fi
+          EVENTO=$(printf \
+            '{"source":"jenkins-build","event":"from-guard","image":"%s","tag":"%s","bases":%s,"unmirrored":%s,"unsigned":%s,"signature_check":"%s","build":"%s","branch":"%s","ts":"%s"}' \
+            "${IMAGE}" "${TAG}" "${N}" "${BAD}" "${UNSIGNED}" "${STATE}" \
+            "${BUILD_NUMBER}" "${BRANCH_NAME}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+          printf 'AEGIS_EVENT %s\n' "$EVENTO"
+          # Same road and the same Content-Type as the report stage: an
+          # `sh` step writes to the remoting channel, not to the
+          # container stdout, so Vector never sees it. Without the
+          # header VictoriaLogs answers 200 and stores zero rows.
+          printf '%s\n' "$EVENTO" \
+            | curl -fsS --max-time 15 \
+                -H 'Content-Type: application/stream+json' --data-binary @- \
+                'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \
+            || echo 'NOTICE: the from-guard event could not be recorded in vlogs-events (the guard does NOT change its verdict over this)'
+
+          if [ "$BAD" -gt 0 ] || [ "$UNSIGNED" -gt 0 ]; then
+            echo "=================== from-guard: STOP ==================="
+            if [ -f from-msg ]; then cat from-msg; fi
+            if [ -f from-unsigned ]; then
+              while read -r r; do
+                printf '%s\n' "FROM ${r} is not mirrored/signed. Run: aegis image request ${r}  and paste the FROM it prints"
+                printf '%s\n' "    why: the registry serves that digest and its signature does NOT verify against the aegis key — Kyverno rejects it at admission"
+              done < from-unsigned
+            fi
+            echo "========================================================"
+            echo "Nothing was built: a base nobody scanned and nobody signed is not a base."
+            exit 1
+          fi
+          if [ "$STATE" = "not-evaluable" ]; then
+            echo "from-guard: ${N} base reference(s) present in the internal registry by digest; their signatures COULD NOT BE MEASURED (no key yet)"
+          else
+            echo "from-guard: ${N} base reference(s), every one from the internal registry, by digest, present and signed"
+          fi
+        '''
+      }
+    }
     stage('build') {
       when { expression { env.SKIP_BUILD != 'true' } }
       steps {
@@ -224,7 +412,7 @@ spec:
           sh '''
             /kaniko/executor \
               --context=dir://${WORKSPACE} \
-              --dockerfile=Containerfile \
+              --dockerfile=${CONTAINERFILE} \
               --destination=${REGISTRY}/${IMAGE}:${TAG} \
               --no-push \
               --tarPath=${WORKSPACE}/image.tar \

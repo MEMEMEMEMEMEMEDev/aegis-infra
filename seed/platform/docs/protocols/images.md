@@ -7,11 +7,14 @@ morning. What changes over time are the LISTS (`images.txt`,
 `base-images/`, `consumers.txt`) and the exceptions
 (`trivyignore.yaml`), not this contract.
 
-Audience: the operator of an aegis instance. You do not have to be the
-author of aegis to read it. If an alert named below wakes you, [§4](#4-what-image-watch-asks-each-morning)
-says what it means and what to do; if you are about to add an image,
-[§2](#2-adding-or-updating-a-mirrored-image) and [§3](#3-owning-a-base)
-are the whole procedure.
+Audience: the operator of an aegis instance, and the developer who
+needs a runtime the platform does not serve yet. You do not have to be
+the author of aegis to read it. If you came here to ask for an image,
+[§2](#2-asking-for-an-image) is one command and you can stop reading
+after it; if an alert named below woke you,
+[§4](#4-what-image-watch-asks-each-morning) says what it means and what
+to do; if what you need is a base aegis builds itself,
+[§3](#3-owning-a-base).
 
 ---
 
@@ -40,6 +43,15 @@ and the platform had no way to say "the fix exists upstream, go get
 it". This protocol closes both: a base aegis OWNS, rebuilt from the
 distribution's packages the morning a fix appears, and a WATCH that
 asks every morning whether what we serve is still clean.
+
+There was a third hole, of a different kind, and it took a year to be
+named because it never broke anything: asking for an image was five
+manual steps. Read the protocol, measure the digest with `crane`, edit
+the list, fire the job from Jenkins' console, type the `FROM` from
+memory. Five places to be wrong, and being wrong in the last one is
+expensive in the worst way — the build STARTS, and dies later, further
+away, in somebody else's pipeline. §2 is those five steps with the hand
+taken out.
 
 ---
 
@@ -86,7 +98,7 @@ Three jobs, three kinds of image, three levels of trust:
 
 | job | what | scan | sign | who fires it |
 |---|---|---|---|---|
-| `mirror-images` | third parties the tenants run (postgres, redis, garage, runtimes) | blocking, with the scoped exceptions of `trivyignore.yaml` | yes, by digest | phase 80 once; a human when `images.txt` changes |
+| `mirror-images` | third parties the tenants run (postgres, redis, garage, runtimes) | blocking, with the scoped exceptions of `trivyignore.yaml` | yes, by digest | phase 80 once; `aegis image request` whenever somebody asks for an image |
 | `base-images` | bases aegis owns (`aegis-base-<member>`) | blocking, **no exceptions** | yes | phase 80 once; image-watch on a fixable CVE; a human |
 | `ci-images` | tooling the pipelines run in (`aegis-ci-*`) | none | no | phase 50 (bootstrap); a human |
 
@@ -104,48 +116,173 @@ once. That is why alert `ImageWatchSilent` means **stopped**, never
 
 ---
 
-## 2. Adding or updating a mirrored image
-
-One line in `mirror-images/images.txt`, two fields:
+## 2. Asking for an image
 
 ```
-<source>:<tag>@sha256:<64 hex>    <destination>:<tag>
+aegis image request <repo>:<tag>
 ```
 
-The source is pinned BY DIGEST: a tag is a pointer whoever controls the
-source registry can repoint. The tag travels IN the reference
-(`name:tag@digest` is a digest reference for every registry client)
-so that the watch can ask, every morning, whether that tag moved
-upstream — and whether what it moved to is any cleaner. Before
-2026-08-27 the tag lived in a comment and no machine could ask.
+One command, and it is the whole procedure. It resolves the source (a
+bare `python:3.12-slim` comes from the public path the list already
+uses for the official images; a reference that carries a registry is
+taken as written), MEASURES the digest that tag points at today,
+declares the line in `mirror-images/images.txt`, commits it, **pushes
+it**, fires `mirror-images` and waits. What it prints, when the scan is
+green, is the one line the build will demand:
 
-Above the line, a comment that says WHY this image and not the
-obvious alternative, and what its known limits are. The file's
-existing entries are the model; a line without its reason is the
-first thing a stranger cannot maintain.
+```
+FROM registry.registry-system.svc.cluster.local:5000/python:3.12-slim@sha256:...
+```
 
-To update one:
+The platform does not choose versions for anybody. Three Pythons are
+three lines, and which three is the developer's business. What the
+platform owes is the other half: fix the digest of what was asked for,
+scan it, sign it, and hand back the exact reference — so that being
+wrong about it is impossible rather than merely discouraged.
 
-1. `crane digest <source>:<new-tag>` — the content the new tag points
-   at today.
-2. Edit the line: tag AND digest in the source, tag in the destination.
-3. Commit, push, run the `mirror-images` job (`aegis ci build`, or the
-   Jenkins console). It pulls, scans against today's DB, pushes and
-   signs. A red run here is the gate working: read the scan, and
-   either pick another tag or — for a binary that cannot be rebuilt —
-   write an exception with its measurement and its `expired_at`
-   ([§5](#5-what-the-loop-does-alone-and-what-it-never-does) says when
-   that is allowed).
-4. Bump the consumer. For a platform type that is `services.yaml`
-   (its digest is the INTERNAL registry's, not the source's — a
-   `crane copy` of a multi-arch index does not preserve it; read it
-   back with `aegis ci digests`) followed by `aegis org apply`. For an
-   app it is the `FROM` in its repo.
+The push is not bookkeeping. `mirror-images` is a pipeline-from-SCM: it
+clones the platform repo at branch `main` and reads `images.txt` out of
+THAT checkout, so a commit that stays on the local disk is an edit the
+job never sees. The job would then re-mirror the previous list, end
+SUCCESS, and the command would go looking in the registry for something
+nobody was ever asked to mirror. The push is verified, and so is the
+result: the command does not fire the job until the remote branch it
+builds from contains the commit.
 
-Step 4 is separate on purpose. **Mirroring does not deploy.** Pulling
-a new image and putting it in production are two decisions, taken by
-the same person but not at the same moment, and the watch only ever
-tells you when step 1 would be worth doing.
+**Running it twice writes nothing.** If the line is already declared at
+that digest and the registry serves it mirrored and signed, the command
+prints the same `FROM` and leaves: no edit, no commit, no build. That
+is not a convenience. It is what makes the command safe to put in a
+README, in a runbook and inside a script.
+
+### The three outcomes
+
+| what happened | what it does | rc |
+|---|---|---|
+| declared at this digest, mirrored and signed | prints the `FROM`; nothing written, committed or built | 0 |
+| new, or declared and not yet served | declares it, commits, pushes, fires `mirror-images`, waits, prints the `FROM` | 0 |
+| the **upstream tag moved** | stops, showing the declared digest and today's | 1 |
+| the **scan went red** | does NOT mirror: lists the blocking findings and names the two ways out | 1 |
+
+**Upstream moved.** A new digest is not a new image (§0), and following
+one is a decision the platform does not take on its own: `--bump` is a
+person saying yes. Before saying it, the watch already knows whether
+the candidate is any cleaner — alert `UpstreamFixAvailable` fires only
+when the image is vulnerable today AND the tag moved AND the candidate
+scans clean.
+
+```
+aegis image request python:3.12-slim --bump
+```
+
+**The scan went red — and first of all, on what.** The job mirrors and
+scans EVERY entry of `images.txt` on every run and fails at the end with
+the list of what broke, so a red build is not by itself evidence about
+the image you asked for. The command reads the console for the entries
+that actually failed before it says anything:
+
+- your image is among them: the findings are reported from ITS block of
+  the console, and the exception, if you write one, is scoped to the
+  scan targets of that block;
+- your image is not among them: it says so, names the entries that did
+  fail, and refuses `--allow` outright. An exception written there would
+  be scoped to another image's finding and would carry your measurement
+  under a binary you never looked at. Those entries are their own
+  requests, with their own measurements.
+- the console names no failing entry at all: the build died before the
+  per-image loop, nothing is attributed to anybody, and the last lines
+  of the build are printed instead.
+
+If your image was mirrored and signed in that same build, you get its
+`FROM` and exit 0, with a warning that `mirror-images` stays red for the
+others — the platform's red belongs to `aegis image check`, not to
+somebody else's request.
+
+When it IS your image, the gate worked, and it worked in the right
+order: the scan runs BEFORE the push, so nothing entered the registry.
+There are exactly two honest ways out.
+
+1. A newer tag. The command lists the ones upstream publishes above
+   this one with the same shape, when it can read them; whether one of
+   them is the right one is not something a sort can know.
+2. A dated exception, and only for a CVE you have MEASURED is not
+   reachable in this binary:
+
+```
+aegis image request postgres:17.10-alpine \
+    --allow CVE-2026-33818 --until 2027-02-28 \
+    --reason "encoding/asn1 is not linked into the binary (0 symbols)"
+```
+
+The three flags travel together because an exception is three things at
+once: the CVE, the measurement that justifies it, and the day the
+measurement stops holding. It is written into `trivyignore.yaml`,
+scoped to the exact scan targets the console reported (never a
+wildcard), and the job is retried ONCE. A second red means the
+exception did not cover what was blocking, and retrying again would
+only be a loop with a file growing inside it.
+
+There is no `--force`, and there will not be. A third way out would
+only be a way of not looking.
+
+### The rest of the surface
+
+| command | answers |
+|---|---|
+| `aegis image list` | what is declared, crossed against the registry: name, tag, short digest, mirrored, signed, live exception with its expiry |
+| `aegis image from` | ONLY the `FROM` line of something already mirrored, so a generator or a template can consume it. Nothing on stdout when it is not there, and a non-zero exit code |
+| `aegis image check` | everything declared is mirrored and signed; whatever is not comes with the command that fixes it |
+
+`AEGIS_IMAGE_DRY_RUN=1` makes `request` and `list` explain what they
+WOULD do and touch nothing: no cluster, no registry, no git, no build.
+
+On the word **signed** in `list` and `check`: what those two measure is
+that the registry holds the signature object cosign publishes for that
+digest. The cryptographic verification happens where the key already
+is — Kyverno at admission, and the `from-guard` stage below at build
+time. Two different facts, and saying so is only honest if it is
+written down.
+
+### What is still not the command's to do
+
+**Bumping the consumer.** Mirroring does not deploy. For a platform
+type that is `services.yaml` (its digest is the INTERNAL registry's,
+not the source's — a `crane copy` of a multi-arch index does not
+preserve it) followed by `aegis org apply`; for an app it is the `FROM`
+in its repo, which is the line `request` just printed. Pulling a new
+image and putting it in production are two decisions, taken by the same
+person but not in the same moment.
+
+**The comment above the line.** The command writes the declaration; it
+cannot write why THIS image and not the obvious alternative, or what
+its known limits are. The file's existing entries are the model, and a
+line without its reason is the first thing a stranger cannot maintain.
+
+### The guard at the other end
+
+A `FROM` printed here is worth exactly what the build does with it, so
+the tenant pipeline stops taking the Containerfile's word for it. The
+`from-guard` stage of `Jenkinsfile.app` — between `detect-change` and
+`build`, so a manifest-only commit does not pay for it and nothing is
+extracted before it runs — reads every `FROM` of the service's
+Containerfile and, for each one that is not a reference to an earlier
+stage of the same file, demands four things: the internal registry, a
+digest, an image the registry actually serves at that digest, and a
+signature that verifies against the aegis key. When one is missing the
+build dies with the sentence that is also the instruction:
+
+```
+FROM <ref> is not mirrored/signed. Run: aegis image request <ref>  and paste the FROM it prints
+```
+
+During init phases 50-70 the cosign key does not exist yet, so the
+signature half CANNOT be measured. It is not skipped quietly: the stage
+says so, the event carries it, and the existence half still runs.
+
+The two ends are one property — nothing runs in a tenant that the
+platform did not scan and sign — and check 147 holds both: the seed's
+own Containerfiles by static reading, every organization's by that
+stage.
 
 ---
 
@@ -321,8 +458,8 @@ The six alerts, and what to do:
 
 | alert | severity | it means | what to do |
 |---|---|---|---|
-| alert `ImageWithFixableVulns` | warning, after 24h | a fixable CVE seen by the watch a day ago is still there. The 24h is the rebuild window: for a base the loop already tried | for an `aegis-base-*`: the distro has no fix yet or the rebuild failed — read the `base-images` console. For a third party: run `crane digest` on the upstream tag and read the next row |
-| alert `UpstreamFixAvailable` | info | three legs on one image: it is vulnerable today, AND the upstream tag moved, AND the candidate scans clean. Only then does re-mirroring help | §2, steps 1-4. Until then `ImageWithFixableVulns` keeps firing for it |
+| alert `ImageWithFixableVulns` | warning, after 24h | a fixable CVE seen by the watch a day ago is still there. The 24h is the rebuild window: for a base the loop already tried | for an `aegis-base-*`: the distro has no fix yet or the rebuild failed — read the `base-images` console. For a third party: §6, which starts by asking the command again |
+| alert `UpstreamFixAvailable` | info | three legs on one image: it is vulnerable today, AND the upstream tag moved, AND the candidate scans clean. Only then does re-mirroring help | `aegis image request <repo>:<tag> --bump`, then bump the consumer (§2). Until then `ImageWithFixableVulns` keeps firing for it |
 | alert `ImageWatchCouldNotEvaluate` | warning | the watch could not scan this image (pull, transport, trivy). Its fixable count is not a measurement | read the `image-watch` console for the error. COULD NOT EVALUATE ≠ clean; the rest of the images ARE measured |
 | alert `BasePropagationFailed` | warning | the base was rebuilt and signed, but this consumer's `FROM` was not bumped: what it deploys still stands on the old base, and nothing in its own pipeline will say so | `base-images` console for that repo; bump by hand if need be, then a build. The alert clears on the next rebuild that propagates |
 | alert `TrivyIgnoreExpiring` | warning, 30 days' notice | an exception in `trivyignore.yaml` has under a month left | re-measure it (its statement says how it was justified and what would close it) or let it expire. Expired = the next mirror run and the next watch go red ON PURPOSE |
@@ -369,8 +506,9 @@ Alone, without a human:
 Never, and by design:
 
 - **re-mirror a third party.** A new digest is a new image somebody
-  else built; a human reads the scan and takes the two decisions of
-  §2.
+  else built. `aegis image request` refuses a moved tag and says so;
+  `--bump` is a person taking the decision, and bumping the consumer is
+  the second, separate one (§2).
 - **lower a severity, or reason about reachability.** The scan blocks
   CRITICAL/HIGH with a fix; that the fronts do not speak QUIC (§0) was
   a fact for the human, not a knob for the scanner.
@@ -383,27 +521,46 @@ Never, and by design:
 - **deploy.** Nothing here touches a tenant's manifest. The base's
   propagation commits a `FROM`; the consumer's own pipeline, with its
   own scan of its own layer, builds and signs the app.
+- **let a `FROM` through on trust.** Neither a human nor the loop
+  decides that a base is fine because it looks fine: the `from-guard`
+  stage asks the registry and the key, on every build, and a build that
+  cannot answer does not build (§2).
 
 ---
 
 ## 6. Handling a CVE by hand when the loop cannot
 
 The loop cannot decide for a third party. When
-alert `ImageWithFixableVulns` fires for one:
+alert `ImageWithFixableVulns` fires for one, the first move is to ask
+the command again for the same thing:
 
-1. `crane digest <source>:<tag>` for the tag we pin AND the next
-   candidate. Compare with `images.txt`. If `UpstreamFixAvailable` is
-   also firing, the watch already scanned the candidate clean; if it
-   is not, either the tag has not moved or the candidate is just as
-   vulnerable — a new digest is not a new image.
-2. If a clean candidate exists: edit the line (tag and digest), run
-   `mirror-images`, bump the consumer. §2, exactly.
-3. If it does not: the fix is not published upstream yet. Either wait
+```
+aegis image request <repo>:<tag>
+```
+
+and read which of the three outcomes of §2 comes back.
+
+1. **It prints the `FROM` and exits 0.** Upstream has not moved and
+   what we serve is what we declared. The CVE is real and there is no
+   fix to pull: the alert stays, which is what it is for, and the
+   decision is between waiting and step 3.
+2. **It says the tag moved.** A candidate exists. If
+   alert `UpstreamFixAvailable` is also firing, the watch already
+   scanned that candidate clean this morning and `--bump` is the whole
+   fix; if it is not firing, the candidate is just as vulnerable — a
+   new digest is not a new image, and re-pinning would buy nothing but
+   a different sha. After a `--bump`, bump the consumer: two decisions,
+   §2.
+3. **Neither of those.** The fix is not published upstream. Either wait
    — the alert stays, which is what it is for — or, for a CVE that is
-   provably not in the binary, an exception in `trivyignore.yaml`
-   with the measurement that proves it and an `expired_at`. An
-   exception without a measurement is a CVE nobody looks at; one
-   without an expiry is invisible debt.
+   provably not in the binary, write the exception with the measurement
+   that proves it and the day it stops holding
+   (`--allow`/`--until`/`--reason`, §2). An exception without a
+   measurement is a CVE nobody looks at; one without an expiry is
+   invisible debt. It goes in `trivyignore.yaml`, entry by entry and
+   never by wildcard, because that is what keeps it from growing on its
+   own: a sixteenth CVE on the same path BREAKS the build and somebody
+   has to redo the measurement.
 
 And the case that started this protocol — a vulnerable base we do
 NOT own, whose upstream has not rebuilt, whose fix the distro already
@@ -428,7 +585,10 @@ The alert `BasePropagationFailed` covers the bump; the app's own build
 failure is visible in Jenkins and in the `jenkins-build` events only. Closing
 it means the watch enumerating what runs (the tenants' Deployments)
 instead of what is listed — a different job, deliberately not this
-one.
+one. What the `from-guard` stage (§2) narrows is the other end of the
+same gap: an app can no longer build on a base that is outside the
+loop, so «what the watch does not look at» and «what the platform
+serves» stopped being two different sets.
 
 - **The platform's own node consumer is in the loop too.** The bucket
   provisioner Job (`bucket.aprovisionador` in `services.yaml`) stands on
