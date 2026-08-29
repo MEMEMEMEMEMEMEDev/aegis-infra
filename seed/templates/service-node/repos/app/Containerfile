@@ -1,5 +1,6 @@
-# __ORG__-app — a node service: tested and installed with the
-# platform's CI node image, run on the node base aegis owns.
+# __ORG__-app — a node service: tested and installed with a node image
+# that carries npm, run on the node runtime that carries neither npm nor
+# a shell.
 #
 # WHY THE FROMs ARE PLACEHOLDERS. `aegis app new` resolves each one
 # against the INTERNAL registry when it instantiates, and writes the
@@ -9,14 +10,20 @@
 # digest cannot be computed here: the mirror rebuilds the manifest as it
 # copies, so upstream's digest is not the one that pulls.
 #
-# WHY THE TWO IMAGES ARE DIFFERENT, being both node. The CI one carries
-# npm and git because it BUILDS; the base carries neither because it
-# RUNS. A package manager inside a tenant pod is a supply-chain tool
-# with nothing to do there — and it is what made the scan block a build
-# over CVEs in packages the runtime never executes. Both are the same
-# 22.23 line and both are musl, so what `npm ci` compiles here is what
-# the runtime expects.
-FROM __FROM_CI_NODE__ AS build
+# WHY THE TWO IMAGES ARE DIFFERENT, being both node. The build one
+# carries npm and a shell because it BUILDS; the runtime one carries
+# neither because it RUNS. A package manager inside a tenant pod is a
+# supply-chain tool with nothing to do there — and it is what made the
+# scan block a build over CVEs in packages the runtime never executes
+# (the story is in mirror-images/images.txt, under this very image).
+#
+# WHY THE RUNTIME IS NOT aegis-base-node, which is what the platform's
+# own backends moved to on 2026-08-27. Not a preference: that image is
+# tagged `<alpine minor>-<build number>`, the number is born in each
+# instance's registry, and `aegis image from` resolves an EXACT tag — so
+# the seed has no tag to name. The README says which one line to change,
+# and why it is worth changing once this repo has built once.
+FROM __FROM_NODE_BUILD__ AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 # `npm ci` and NOT `npm install`: it installs EXACTLY what the lock
@@ -34,10 +41,12 @@ RUN npm test
 # Less surface to scan, and nothing the process does not execute.
 RUN npm prune --omit=dev
 
-FROM __FROM_BASE_NODE__
-# What this base guarantees, and what this file therefore assumes:
-# uid/gid 65532, /app as WORKDIR owned by it, port 8080, and node as the
-# ENTRYPOINT — so the CMD below is a path and nothing else.
+FROM __FROM_NODE__
+# What this base guarantees, and what this file therefore assumes: uid
+# 65532, node as the ENTRYPOINT (so the CMD below is a path and nothing
+# else), and no shell and no npm anywhere in it. There is no RUN in this
+# stage and there cannot be one.
+WORKDIR /app
 COPY --from=build --chown=65532:65532 /app/package.json /app/package-lock.json ./
 COPY --from=build --chown=65532:65532 /app/node_modules ./node_modules
 COPY --chown=65532:65532 src ./src

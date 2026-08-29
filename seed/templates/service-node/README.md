@@ -1,8 +1,28 @@
 # Template `service-node` — a JavaScript server behind the edge
 
-Tested and installed with the platform's CI node image, run on the node
-base aegis owns. It stands up in one run and, from that second on, the
-template is gone from your life: what it wrote is yours (§0.3).
+Tested and installed with a node image that carries npm, run on a node
+runtime that carries neither npm nor a shell. From the second it is
+instantiated the template is gone from your life: what it wrote is
+yours (§0.3).
+
+## Before it will instantiate: one image has to be mirrored
+
+The build image, `node:22.23.1-alpine`, is not in
+`mirror-images/images.txt`. `aegis app new` therefore STOPS before
+writing a single file and prints the exact command that mirrors it —
+read that line off the screen rather than from here, so there is one
+place it can be wrong. The runtime image, `nodejs-distroless:22`, is
+already declared and needs nothing.
+
+That build version is not a choice made here: it is the one
+`ci-images/node/Containerfile` already pins, so what a tenant builds in
+and what the platform's own CI is built from stay the same 22.23 line
+and the same libc — which is what makes the `node_modules` this build
+produces the ones the runtime expects.
+
+Images are mirrored when somebody needs one, not in advance
+(`docs/protocols/images.md` §2). Being told which one, before anything
+is written, is the mechanism working.
 
 ## What you change
 
@@ -30,3 +50,23 @@ template is gone from your life: what it wrote is yours (§0.3).
   the real one on every build.
 - **The public route** — derived by the platform from the contract;
   this repo is not allowed to declare one.
+
+## The one change worth making later: aegis-base-node
+
+On 2026-08-27 the platform's own backends moved off `nodejs-distroless`
+and onto `aegis-base-node`, a base aegis builds and patches — because
+an OpenSSL CVE reached the distroless image and its upstream had not
+rebuilt, so there was no place of ours to run the fix. A template cannot
+start there, and the reason is mechanical rather than a preference: that
+image is tagged `<alpine minor>-<build number>`, the number is born in
+your instance's registry, and what resolves a template's FROM needs an
+exact tag — so the seed has no tag to name.
+
+Once this repo has built once you are past that. From `aegis org apply`
+onwards the repo is listed in `base-images/consumers.txt`, so swapping
+the runtime `FROM` for `aegis-base-node:<tag>@sha256:<digest>` (both
+come from the internal registry's own listing) hands the maintenance of that line to the
+base-images job: it rewrites the digest on every rebuild of the base.
+The contract that image keeps is the same one this file assumes — uid
+65532, `/app` as WORKDIR, port 8080, node as the ENTRYPOINT — so the
+`FROM` is the only line that changes.

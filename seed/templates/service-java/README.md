@@ -1,15 +1,27 @@
 # Template `service-java` — a JVM server behind the edge
 
-Two stages: a JDK to compile, a JRE to run. It stands up in one run and,
-from that second on, the template is gone from your life: what it wrote
-is yours (§0.3).
+Two stages: a JDK to compile, a JRE to run. From the second it is
+instantiated the template is gone from your life: what it wrote is
+yours (§0.3).
 
-## Before it will instantiate
+## It does NOT instantiate as it ships, and here is what it costs
 
-Neither the JDK nor the JRE is mirrored yet: no service in this tree
-runs on a JVM, and images are mirrored when somebody needs one, not in
-advance. Instantiating stops with the exact command that asks for each
-of them. That is the mechanism working, not a bug.
+Neither of its two images is mirrored: no service in this tree runs on a
+JVM, and images are mirrored when somebody needs one, not in advance
+(`docs/protocols/images.md` §2). Instantiating this template therefore
+STOPS before writing a single file, naming the first image it could not
+resolve —`eclipse-temurin:21-jdk-alpine`, then
+`eclipse-temurin:21-jre-alpine`— and printing the exact command that
+mirrors it. Read that line off the screen rather than from here, so
+there is one place it can be wrong.
+
+Mirroring measures the digest the tag points at today, scans it
+—blocking, so a red scan is a red command— and signs it. Two runs, one
+per image, and then `aegis app new` goes through. If you want a
+different JDK, ask for that one instead and change the two values in
+`_FROM_IMAGES` (`libexec/aegis-app`): the platform does not pick
+versions for anybody, and three Java versions are three lines in the
+list.
 
 ## What you change
 

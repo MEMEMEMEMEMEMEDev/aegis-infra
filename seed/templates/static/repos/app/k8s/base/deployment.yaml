@@ -24,8 +24,8 @@ spec:
       # does NOT declare the registry credential.
       # PSS: the namespace is enforce=restricted and the workload
       # DECLARES the whole profile (explicit > magic). The image already
-      # runs as USER 101 (Containerfile) -> runAsNonRoot validates with
-      # no runAsUser here.
+      # runs as USER 65532 (Containerfile) -> runAsNonRoot validates
+      # with no runAsUser here.
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
@@ -43,24 +43,23 @@ spec:
             # inside cannot leave anything behind: the next restart is
             # the original bytes again.
             readOnlyRootFilesystem: true
-          volumeMounts:
-            # nginx is the reason this mount is NOT optional here: its
-            # pid file and its five temp paths live under /tmp (the
-            # base's nginx.conf puts them there precisely so the root
-            # filesystem can be read only). Without this volume the
-            # master fails to write /tmp/nginx.pid and the container
-            # never starts.
-            - {name: tmp, mountPath: /tmp}
+          # NO writable volume, and that is the point of it being
+          # absent: serve.mjs reads files and writes none, so there is
+          # nowhere for anything that gets inside to leave state. The
+          # sibling templates mount an emptyDir on /tmp because their
+          # code may write; this one would be a hole with no user. The
+          # day your front needs to write, add the mount deliberately
+          # and say what writes there.
           readinessProbe:
             httpGet: {path: /healthz, port: 8080}
-          # A front that serves files needs almost nothing. Measured
-          # against the platform's own static fronts: an idle nginx with
-          # 2 workers sits under 10Mi.
+          # This is the same node runtime the service-node template
+          # runs, so it costs the same: a node process with no
+          # dependencies idles around 40Mi of heap plus the runtime,
+          # and serving files off the disk adds no heap of its own. The
+          # limit is where the pod dies, so it is not the average.
           resources:
-            requests: {cpu: 20m, memory: 16Mi}
-            limits: {cpu: 100m, memory: 64Mi}
-      volumes:
-        - {name: tmp, emptyDir: {}}
+            requests: {cpu: 20m, memory: 64Mi}
+            limits: {cpu: 200m, memory: 128Mi}
 ---
 apiVersion: v1
 kind: Service

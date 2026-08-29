@@ -1,5 +1,5 @@
-# __ORG__-app — a static front: compiled with the platform's CI node
-# image, served by the nginx base aegis owns.
+# __ORG__-app — a static front: compiled with a node image that carries
+# npm, served by the node runtime that is mirrored, scanned and signed.
 #
 # ── THE ONLY TWO LINES THAT CHANGE BETWEEN FRAMEWORKS ────────────────
 # Astro, React, Vue and Angular differ here and nowhere else in this
@@ -22,7 +22,11 @@
 # result, which is the hole mirror-images exists to close. And the
 # digest cannot be computed here: the mirror rebuilds the manifest as it
 # copies, so upstream's digest is not the one that pulls.
-FROM __FROM_CI_NODE__ AS build
+#
+# WHY THE RUNTIME IS NODE AND NOT nginx, which is what the platform's
+# own static fronts run on: serve.mjs holds that argument in full, and
+# the one-line move to aegis-base-nginx once this repo has built once.
+FROM __FROM_NODE_BUILD__ AS build
 ARG BUILD_CMD="npm run build"
 ARG OUT_DIR="dist"
 WORKDIR /app
@@ -38,18 +42,20 @@ COPY . .
 # need to know OUT_DIR: one declaration, one place to edit.
 RUN sh -c "$BUILD_CMD" && test -d "$OUT_DIR" && mv "$OUT_DIR" /out
 
-FROM __FROM_BASE_NGINX__
-# What this base guarantees, and what this file therefore assumes: it
-# listens on 8080, it runs as uid 101, the served root is
-# /usr/share/nginx/html, and the `server{}` that gets served is
-# /etc/nginx/conf.d/default.conf. Its temp paths and its pid live under
-# /tmp because a tenant pod's root filesystem is read only.
-COPY --chown=101:101 nginx.conf /etc/nginx/conf.d/default.conf
+FROM __FROM_NODE__
+# What this base guarantees, and what this file therefore assumes: uid
+# 65532, node as the ENTRYPOINT (so the CMD below is a path and nothing
+# else), and no shell, no npm and no package manager anywhere in it.
+# There is no RUN in this stage and there cannot be one.
+WORKDIR /app
 # From the build stage and not from the context: what is served is,
-# provably, what was built.
-COPY --from=build --chown=101:101 /out/ /usr/share/nginx/html/
+# provably, what was built. serve.mjs travels the same way for the same
+# reason — the file that ran in the build is the file that runs here.
+COPY --from=build --chown=65532:65532 /app/serve.mjs ./serve.mjs
+COPY --from=build --chown=65532:65532 /out/ ./public/
 EXPOSE 8080
 # Numeric and non-root: the namespace is PSS restricted, and a
 # `USER name` fails runAsNonRoot because the kubelet cannot read the
 # image's /etc/passwd to prove the name is not root 0.
-USER 101
+USER 65532:65532
+CMD ["/app/serve.mjs"]

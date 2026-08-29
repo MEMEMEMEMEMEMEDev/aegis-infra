@@ -19,7 +19,7 @@ red_1() {
 # the same hole in the runtime stage of another template: whoever adds
 # a template copies a neighbour, and one line is all it takes.
 red_2() {
-    sed -i 's|^FROM __FROM_BASE_NGINX__$|FROM docker.io/nginxinc/nginx-unprivileged:1.27-alpine|' \
+    sed -i 's|^FROM __FROM_NODE__$|FROM docker.io/nginxinc/nginx-unprivileged:1.27-alpine|' \
         "$AEGIS_ROOT/seed/templates/static/repos/app/Containerfile"
 }
 
@@ -40,7 +40,7 @@ red_4() {
 # because the kubelet cannot read the image's /etc/passwd to prove the
 # name is not root.
 red_5() {
-    sed -i 's|^USER 101$|USER nginx|' \
+    sed -i 's|^USER 65532:65532$|USER nonroot|' \
         "$AEGIS_ROOT/seed/templates/static/repos/app/Containerfile"
 }
 
