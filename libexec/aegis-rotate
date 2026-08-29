@@ -498,6 +498,68 @@ check_cf_dns() {
     printf '    %sall the certificates are still Ready%s\n' "$gray" "$reset"
 }
 
+# ── the negative teeth: the wrong credential is MANUFACTURED ─────────
+# Three of the verifiers below prove that a service REJECTS a credential
+# that is not the good one. Until 2026-08-29 that wrong credential was a
+# LITERAL in this file: one password written out three times, once inside
+# a JSON body and twice as the base64 of a Basic header.
+#
+# It opened nothing — the forensics of that morning compared it by sha256
+# against the whole encrypted store and it matched no entry — but that is
+# not the point. A public repository that carries anything
+# credential-SHAPED costs an automated alert and then a morning spent
+# proving a negative, and the next reader has no way of telling this one
+# apart from a leak that is real. The literal was also the thing that
+# needed a `gitleaks:allow` marker at the end of a continued line, and
+# that marker is what broke all three calls (see the note in
+# check_argocd_admin). A tree with zero literals needs no argument and no
+# marker.
+#
+# So the wrong password is MINTED: 32 bytes out of /dev/urandom, which
+# have never been anybody's credential and are gone when the verifier
+# returns. It cannot collide with the real one — that is 256 bits — and
+# it cannot be mistaken for a secret by a scanner, because it is not in
+# the file at all.
+#
+# HEX, and the reason is not cosmetic: the same value has to survive TWO
+# formats. A netrc field ends at the first whitespace, and a JSON string
+# has to escape a quote and a backslash. base64's alphabet carries `+`,
+# `/` and the padding `=`, and a random draw produces them rarely enough
+# that the shape bug would show up weeks later, on somebody else's
+# instance. Hex has sixteen characters and none of them is special in
+# either format; 32 bytes still come out as 64 of them, which is longer
+# than any password this platform issues.
+#
+# `od` and not openssl/base64: coreutils is the one dependency a verifier
+# can assume on a host where the userland install may be what is being
+# diagnosed.
+#
+# It travels through a FILE and never through argv, exactly like the real
+# credential beside it. Not because a thrown-away password needs hiding,
+# but because rule A27 (check 075) is uniform on purpose: whoever audits
+# a curl in this tree must not have to work out which of its arguments
+# were the safe ones.
+# IT REPORTS ITS OWN FAILURE, and the reason is a trap this file is
+# already standing in. Both callers of a check_* function invoke it as
+# `"$fn" || rc=$?`, and an AND-OR list SUSPENDS errexit for everything
+# inside the call — measured, not assumed: a `false` inside a function
+# inside a function called that way does not stop the script. So a mint
+# that failed (a full /dev/shm, a missing od) would NOT abort here: it
+# would leave the file EMPTY, the netrc or the JSON body would carry an
+# empty password, the service would answer 401 to it exactly as it does
+# to a random one, and the negative tooth would come out GREEN having
+# measured nothing. That is the failure this stack exists to refuse —
+# the one that looks like a pass. Returning 1 lets the caller answer
+# COULD NOT EVALUATE (2), which is the honest verdict, and lets it clean
+# up the tmpfs files that DO hold the real credential.
+_wrong_password() {          # <path> — mints it and leaves it at 600
+    local f="$1"
+    : > "$f" || return 1
+    chmod 600 "$f" || return 1
+    od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > "$f" || return 1
+    [[ -s "$f" ]] || return 1     # an empty draw is the silent case above
+}
+
 check_argocd_admin() {
     # The double tooth: the store's password has to GET IN (200) and a
     # made-up one has to be REJECTED (401). Without the second, an
@@ -511,14 +573,27 @@ check_argocd_admin() {
         "$p" > "$p.body"; chmod 600 "$p.body"
     code_ok="$(curl_access -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
         --max-time 30 -d @"$p.body" "https://argocd.$ROOT_DOMAIN/api/v1/session" 2>/dev/null)"
-    # The negative tooth carries NO secret: user admin + a password that is
-    # deliberately wrong, written in plain text so that anyone (or any
-    # scanner) can read that it is not one. If ArgoCD accepted it, the check
-    # would fail loudly. Scanners flag its SHAPE, not its value.
+    # The negative tooth: the SAME request with a manufactured password,
+    # so that the only difference between the two is the password itself.
+    # The body is built by the same one-liner as the positive — a JSON
+    # assembled by hand here is a second way of writing the same thing,
+    # and the two would drift.
+    #
+    # THIS CALL WAS DEAD between 2026-08-29 03:xx and this commit, and
+    # only reading it out loud found it: the line above ended in `\` and
+    # two spaces before the `gitleaks:allow` marker, which bash reads as
+    # an escaped space and NOT as a continuation, so the `#` opened a
+    # comment and the URL on the next line became a command of its own.
+    # curl ran with no URL, code_bad came back empty, and the verifier
+    # would have reported "false password -> (expected 401)" over a
+    # perfectly healthy ArgoCD. A marker that has to be appended to code
+    # is a marker that can break the code; not needing one is the fix.
+    _wrong_password "$p.bad" || { rm -f "$p" "$p.body" "$p.bad"; return 2; }
+    python3 -c 'import json,sys; print(json.dumps({"username":"admin","password":open(sys.argv[1]).read().strip()}))' \
+        "$p.bad" > "$p.bad-body"; chmod 600 "$p.bad-body"
     code_bad="$(curl_access -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
-        --max-time 30 -d '{"username":"admin","password":"contrasena-deliberadamente-incorrecta"}' \  # gitleaks:allow
-        "https://argocd.$ROOT_DOMAIN/api/v1/session" 2>/dev/null)"
-    rm -f "$p" "$p.body"
+        --max-time 30 -d @"$p.bad-body" "https://argocd.$ROOT_DOMAIN/api/v1/session" 2>/dev/null)"
+    rm -f "$p" "$p.body" "$p.bad" "$p.bad-body"
     [[ "$code_ok" == "000" || "$code_bad" == "000" ]] && return 2
     if [[ "$code_ok" == "200" && "$code_bad" == "401" ]]; then
         printf '    %sthe store password gets in (200) and a false one is rejected (401)%s\n' "$gray" "$reset"
@@ -613,12 +688,20 @@ check_grafana_admin() {
     chmod 600 "$p.netrc"
     code_ok="$(curl_access -s -o /dev/null -w '%{http_code}' --max-time 25 \
         --netrc-file "$p.netrc" "https://grafana.$ROOT_DOMAIN/api/user" 2>/dev/null)" || rc=2
-    # the negative carries no secret: user admin + a made-up password,
-    # inline in base64 (admin:contrasena-deliberadamente-incorrecta):
+    # The negative: the same request with a manufactured password. A
+    # second netrc and NOT a hand-built Basic header, for two reasons —
+    # the two requests then differ only in the password (the header was
+    # a second implementation of the same authentication), and nothing
+    # credential-shaped is written down here. The broken continuation
+    # described in check_argocd_admin was in this line too, so this call
+    # was reaching curl with no URL either.
+    _wrong_password "$p.bad" || { rm -f "$p" "$p.netrc" "$p.bad"; return 2; }
+    printf 'machine grafana.%s login %s password %s\n' \
+        "$ROOT_DOMAIN" "$u" "$(cat "$p.bad")" > "$p.bad-netrc"
+    chmod 600 "$p.bad-netrc"
     code_bad="$(curl_access -s -o /dev/null -w '%{http_code}' --max-time 25 \
-        -H 'Authorization: Basic YWRtaW46Y29udHJhc2VuYS1kZWxpYmVyYWRhbWVudGUtaW5jb3JyZWN0YQ==' \  # gitleaks:allow
-        "https://grafana.$ROOT_DOMAIN/api/user" 2>/dev/null)" || rc=2
-    rm -f "$p" "$p.netrc"
+        --netrc-file "$p.bad-netrc" "https://grafana.$ROOT_DOMAIN/api/user" 2>/dev/null)" || rc=2
+    rm -f "$p" "$p.netrc" "$p.bad" "$p.bad-netrc"
     (( rc == 0 )) || return 2
     [[ "$code_ok" == "000" || "$code_bad" == "000" ]] && return 2
     if [[ "$code_ok" == "200" && "$code_bad" == "401" ]]; then
@@ -683,14 +766,20 @@ check_ntfy_operador() {
     code_ok="$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
         --netrc-file "$p.netrc" \
         "https://ntfy.$ROOT_DOMAIN/aegis-alertas/json?poll=1" 2>/dev/null)"
-    # The negative tooth carries NO secret: operador + the same deliberately
-    # wrong password as the other negatives, inline in base64
-    # (operador:contrasena-deliberadamente-incorrecta). A secret scanner sees
-    # an Authorization header and shouts; the value has never opened anything.
+    # The negative: the same read with a manufactured password, through a
+    # second netrc so that the two requests differ only in the password.
+    # ntfy answers 401 to a login that does not verify and 403 to a
+    # request with no credential at all, which is why the acceptance
+    # below takes either — the value here produces the first one.
+    # This line carried the same broken continuation as the other two.
+    _wrong_password "$p.bad" || { rm -f "$p" "$p.netrc" "$p.bad"; return 2; }
+    printf 'machine ntfy.%s login operador password %s\n' \
+        "$ROOT_DOMAIN" "$(cat "$p.bad")" > "$p.bad-netrc"
+    chmod 600 "$p.bad-netrc"
     code_bad="$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
-        -H 'Authorization: Basic b3BlcmFkb3I6Y29udHJhc2VuYS1kZWxpYmVyYWRhbWVudGUtaW5jb3JyZWN0YQ==' \  # gitleaks:allow
+        --netrc-file "$p.bad-netrc" \
         "https://ntfy.$ROOT_DOMAIN/aegis-alertas/json?poll=1" 2>/dev/null)"
-    rm -f "$p" "$p.netrc"
+    rm -f "$p" "$p.netrc" "$p.bad" "$p.bad-netrc"
     [[ "$code_ok" == "000" || "$code_bad" == "000" ]] && return 2
     if [[ "$code_ok" == "200" && "$code_bad" =~ ^40[13]$ ]]; then
         printf '    %sthe store credential reads the topic (200) and a false one is rejected (%s)%s\n' "$gray" "$code_bad" "$reset"

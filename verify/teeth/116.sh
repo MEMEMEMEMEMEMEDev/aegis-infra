@@ -61,3 +61,51 @@ control_3() {
     printf '\n# not-an-address: cloud-init 26.1.0.4 is the version the VPS shipped with\n' \
         >> "$AEGIS_ROOT/lib/common.sh"
 }
+
+# ── the node name (extension of 2026-08-29) ─────────────────────────
+# The regression that SHIPPED: the seed installed k3s with the name the
+# node has on the machine where the seed was first written, so every
+# installation printed one operator's node name in `kubectl get nodes`.
+#
+# Derived from THIS machine and not written out, for the reason red_1
+# above learned: what a tooth writes down it carries forever, in the one
+# directory no sweep looks at. It is also the trick check 117 uses —
+# here it catches this operator's node, on somebody else's it catches
+# theirs.
+red_4() {
+    sed -i "s/^  --node-name=.*$/  --node-name=$(hostname)-primary/" \
+        "$AEGIS_ROOT/seed/platform/ansible/inventory/group_vars/all.yml"
+}
+
+# the same name in the Kubernetes spelling, in a manifest — the place
+# the sweep would have missed if it only knew the k3s flag
+red_5() {
+    printf '\n# pinned with nodeName: %s-primary while the GPU was being debugged\n' \
+        "$(hostname)" >> "$AEGIS_ROOT/seed/platform/k8s/argocd-apps/core.yaml"
+}
+
+# a name is smuggled into the generic table with NO reason — the
+# comfortable way to make this check stop asking about it (red_3's
+# sibling, one table down)
+red_6() {
+    python3 - "$AEGIS_ROOT/verify/checks/116-no-machine-address-is-written-into-the-product.sh" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+anchor = "GENERIC_NODES = {\n"
+assert t.count(anchor) == 1
+open(p, "w").write(t.replace(anchor, anchor + '    "somebodys-laptop": "",\n', 1))
+PY
+}
+
+# control: the generic name is the one the seed is SUPPOSED to write —
+# the same on every installation, so it names nobody
+control_4() {
+    printf '\n# the seed installs the node as --node-name=aegis-node on every machine\n' \
+        >> "$AEGIS_ROOT/lib/common.sh"
+}
+
+# control: a hole is not a name. Filling it is the instance's business.
+control_5() {
+    printf '\n# a chart that pins by hand writes nodeName: __NODE__ and the wizard fills it\n' \
+        >> "$AEGIS_ROOT/lib/common.sh"
+}

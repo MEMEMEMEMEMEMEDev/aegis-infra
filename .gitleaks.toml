@@ -1,0 +1,61 @@
+# .gitleaks.toml — the allowlist of what a secret scanner marks in this
+# tree and is NOT a secret.
+#
+# It exists because of the morning of 2026-08-29: an automated alert on
+# the public repository over a "Bearer Token". Two scanners over the
+# whole history and a sha256 comparison against the encrypted store said
+# false positive — the only credential-shaped strings were three
+# deliberately WRONG passwords belonging to negative teeth. Those
+# literals are gone (the value is manufactured at run time now, see
+# libexec/aegis-rotate), and check 151 makes their return red.
+#
+# What is left is this file, and it is deliberately SHORT. Two rules
+# govern it:
+#
+#   1. An entry with no reason is a hiding place. Every one says WHY the
+#      string is not a secret, and that reason has to be checkable by
+#      whoever reads it — the same bargain check 116's address allowlist
+#      makes.
+#   2. Nothing is allowlisted by PATH alone. `paths` plus `regexes` with
+#      condition = "AND" means the exemption covers one line of one
+#      file; a whole file waived is a file where the next real leak
+#      lands silently.
+#
+# This file tunes the scanner. It does not replace it, and it does not
+# replace check 151, which is static and needs no scanner installed. The
+# protocol that says when and how to run the scanners is
+# docs/protocols/opening-a-repo.md.
+
+[extend]
+useDefault = true
+
+# ── 1. a FILENAME inside a python dict ──────────────────────────────
+# verify/checks/004 maps each .enc.yaml written at run time to the phase
+# that writes it. The value gitleaks marks is "80-supply-chain.sh": 18
+# characters of letters, digits, hyphens and a dot, which is exactly the
+# shape of a generic API key and is in fact the name of a file that
+# exists in this repository. Check it:
+#     grep -n '80-supply-chain.sh",' \
+#       verify/checks/004-generators-ksops-producers-a7-static.sh
+#     ls init/phases/80-supply-chain.sh
+[[allowlists]]
+description = "a phase's filename in the runtime-entry map of check 004, not a key"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^verify/checks/004-generators-ksops-producers-a7-static\.sh$''']
+regexes = ['''"secret-cosign-signing-key\.enc\.yaml":\s+"80-supply-chain\.sh",''']
+
+# ── 2. a connection-URI TEMPLATE inside a comment ────────────────────
+# libexec/aegis-secret explains why the generator uses token_urlsafe and
+# not hex: the credentials it mints travel inside connection URLs, where
+# a character that has to be escaped is a bug that shows up weeks later.
+# The comment writes the shape of such a URL, with the word PASSWORD in
+# capitals where the value would go. It is prose about a format, and
+# there is no user, no host and no value. Check it:
+#     grep -n 'postgres://' libexec/aegis-secret
+[[allowlists]]
+description = "a postgres URI template in a comment that explains the choice of alphabet, with no value in it"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^libexec/aegis-secret$''']
+regexes = ['''^# \(postgres://user:PASSWORD@host\) and in headers''']
