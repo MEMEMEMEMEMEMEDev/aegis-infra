@@ -32,8 +32,8 @@
     <text x="460" y="140"><tspan fill="#7ee787">PASS</tspan> every check has an executable tooth or is on the</text>
     <text x="460" y="162">     debt list, and the list does not lie</text>
     <text x="460" y="204" fill="#7ee787" font-weight="600">══ STATIC VERIFICATION: ALL PASS ══</text>
-    <text x="460" y="232" fill="#7ee787">   profile cloudflare  136 checks, 0 not evaluated</text>
-    <text x="460" y="254" fill="#7ee787">   profile local       136 checks, 0 not evaluated</text>
+    <text x="460" y="232" fill="#7ee787">   profile cloudflare  142 checks, 0 not evaluated</text>
+    <text x="460" y="254" fill="#7ee787">   profile local       142 checks, 0 not evaluated</text>
     <text x="460" y="300"><tspan fill="#7ee787">$</tspan> aegis --help | head -1</text>
     <text x="460" y="328"><tspan font-weight="600">aegis</tspan> — self-hosted GitOps platform · v3.0.0-alpha.1</text>
     <text x="460" y="380" fill="#8b949e" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">Sin clúster: el verificador mide el artefacto. Con clúster:</text>
