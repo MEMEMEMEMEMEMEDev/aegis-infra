@@ -50,11 +50,20 @@ userland_pins:
 # escalation. COUPLED with 20-k3s.sh: the copy to ~/.kube/config MUST
 # be done with privilege, because a user-level cp can no longer read
 # the source. Guarded by check 85 of verify-static.sh.
+#
+# node-name GENERIC (2026-08-29): until this commit it carried the name
+# of the node on the machine where the seed was first written, which is
+# identity of one INSTANCE travelling inside the product — the same
+# class check 116 keeps out for addresses and 117 for people. A name
+# that is the same on every installation names nobody, which is exactly
+# why the private ranges are allowed there. Nothing in the seed reads
+# this value (`grep -rn node-name` returns this line and nothing else);
+# it is what `kubectl get nodes` shows.
 k3s_install_flags: >-
   --write-kubeconfig-mode 600
   --disable=traefik
   --disable=servicelb
-  --node-name=aegis-primary
+  --node-name=aegis-node
 
 # Cilium — hetzner profile ONLY (ADR-0014: kube-router does not
 # enforce NetPol; decision: Cilium). SENTINEL PIN on purpose: phase 20

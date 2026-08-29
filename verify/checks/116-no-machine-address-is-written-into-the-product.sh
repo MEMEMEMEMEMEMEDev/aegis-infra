@@ -1,4 +1,4 @@
-# title: no machine's address is written into the product
+# title: no machine's address and no machine's name is written into the product
 # origin: new in v3 — 2026-08-26, before giving the artifact a remote
 check() {
 # The address of a CONCRETE machine is identity of an INSTANCE, and the
@@ -113,8 +113,101 @@ for ip, where in sorted(found.items()):
           "operator's ~/.ssh/config and in the provider's panel, not here")
 sys.exit(1 if found else 0)
 EOF
-then :; else D116="$D116 (see the detail above);"; fi
+then :; else D116="$D116 an address (see the detail above);"; fi
 
-if [[ -n "$D116" ]]; then fail "an instance's address is baked into the product:$D116"
-else pass "no machine's address is written into the product (private ranges are nobody's, and every public one has a declared owner)"; fi
+# ── the NAME of a machine is an address too ─────────────────────────
+# Extended 2026-08-29. Everything above asks about NUMBERS, and the
+# sweep that found the four IPs was blind to the line that named the
+# node: the seed installed k3s with the name the node has on the machine
+# where the seed was first written. It shipped for months. `kubectl get
+# nodes` on ANY installation would have printed one operator's node
+# name, and the class is precisely the one the header of this check
+# states — «an artifact that names one machine is an artifact that was
+# written for that machine». A hostname is how a machine is addressed
+# where there are no numbers; leaving it out of scope was an accident of
+# the regex, not a decision.
+#
+# HOW IT ASKS, and it is the opposite of the sweep above: there, anything
+# that is not a declared exception is a machine; here, anything that is
+# not a declared GENERIC name is a machine. The direction is inverted on
+# purpose because the population is tiny — the seed writes ONE node name
+# — and because a name has no structure a regex could classify: 10.0.0.1
+# announces that it is private, `aegis-node` and one person's node name
+# are the same seven-to-twenty characters of letters and hyphens. So the
+# generic ones are enumerated, WITH the reason each is generic, and a
+# name arriving without a row is presumed to be somebody's machine.
+#
+# What makes a name generic is not that it looks impersonal: it is that
+# it comes out THE SAME on every installation. That is the very property
+# that lets 10.0.0.0/8 through above — «they name nobody: they are the
+# same everywhere».
+#
+# Placeholders are not names: a value carrying `$`, `{`, `<` or the
+# seed's `__NAME__` spelling is a hole for the instance to fill, and
+# filling it is the instance's business, not the product's.
+if python3 - "$AEGIS_ROOT" <<'EOF'
+import pathlib, re, sys
+
+ROOT = pathlib.Path(sys.argv[1])
+
+# The node names the product is allowed to write, with WHY each one is
+# generic. Same lock as the address table above: a row with no reason is
+# a hiding place, and it is checked, not trusted.
+GENERIC_NODES = {
+    "aegis-node": "the single k3s node the seed installs — the same string on every "
+                  "installation, so it names nobody; seed/platform/ansible/inventory/"
+                  "group_vars/all.yml is the only place that writes it",
+}
+
+_unexplained = [n for n, why in GENERIC_NODES.items() if not (why or "").strip()]
+if _unexplained:
+    print(f"    the generic-node table carries {len(_unexplained)} name(s) with NO reason "
+          f"({', '.join(_unexplained)}): an exception without a reason is a hiding place")
+    sys.exit(1)
+
+# The three spellings a node name arrives in: the k3s flag, the ansible
+# variable, and the Kubernetes field.
+#
+# The capture demands that the value START with a letter, a digit, or
+# the first character of a hole (`$`, `_`, `{`, `<`). That is not
+# cosmetics: with a looser capture this check READS ITSELF — the regex
+# source below contains the literal `nodeName:` followed by a bracket,
+# and the first version of this block accused its own line 170 of
+# naming a machine called `[`. Found by running it, which is the only
+# way this class ever gets found.
+NAMED = re.compile(r'(?:--node-name[= \t]|node[-_]name:[ \t]*|nodeName:[ \t]*)["\']?([A-Za-z0-9$_{<][^"\'\s#]*)')
+SKIP_DIRS = {".git", "__pycache__", "teeth"}
+
+def is_hole(v):
+    return bool(set("${}<>") & set(v)) or (v.startswith("__") and v.endswith("__"))
+
+found, n_named = [], 0
+for f in sorted(ROOT.rglob("*")):
+    if not f.is_file() or any(p in SKIP_DIRS for p in f.parts):
+        continue
+    try:
+        text = f.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        continue
+    for i, line in enumerate(text.splitlines(), 1):
+        for m in NAMED.finditer(line):
+            v = m.group(1)
+            if is_hole(v):
+                continue
+            n_named += 1
+            if v not in GENERIC_NODES:
+                found.append(f"{f.relative_to(ROOT)}:{i} → {v}")
+
+print(f"    {n_named} node name(s) written · {len(GENERIC_NODES)} declared generic")
+for where in found:
+    print(f"    {where}: that is the name of ONE machine, and every installation would "
+          "print it in `kubectl get nodes`. If the name is the same on every install, add "
+          "it to this check's generic table WITH ITS REASON; if it is a machine of the "
+          "operator's, it belongs in their inventory, not in the seed")
+sys.exit(1 if found else 0)
+EOF
+then :; else D116="$D116 a node name (see the detail above);"; fi
+
+if [[ -n "$D116" ]]; then fail "an instance's identity is baked into the product:$D116"
+else pass "no machine's address and no machine's name is written into the product (private ranges are nobody's, every public address has a declared owner, and every node name is the same on every installation)"; fi
 }
