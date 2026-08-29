@@ -12,6 +12,21 @@ deleted repository does not un-publish it either. Everything here
 therefore happens BEFORE, and what is measured is the whole history, not
 the tree.
 
+**Where this file lives, and why it is not with the other protocols.**
+There are two protocol trees in this repository and they are not the
+same kind of thing. `seed/platform/docs/protocols/` is INSTANTIATED: it
+travels inside the seed into every instance's platform repo, and every
+document in it tells an operator how to run their own machine — issue a
+key, attach a subsystem, rotate a credential. This protocol has no
+operator and no instance. Its subject is the ARTIFACT: it is run once,
+by whoever maintains this repository, on the repository itself, and
+shipping it into every installation would be handing each operator a
+procedure for a decision that is not theirs to make. So it sits in
+`docs/`, beside `AGENTS.md` — the contract for the person who MODIFIES
+the artifact — and that is the audience it is written for. The split is
+the same one the whole project runs on: `AGENTS.md` for the product,
+`OPERATE.md` and the seed's protocols for an instance.
+
 ---
 
 ## 1. The scanners read the HISTORY, not HEAD
