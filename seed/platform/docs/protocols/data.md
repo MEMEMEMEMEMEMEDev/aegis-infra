@@ -118,6 +118,18 @@ its last value for ever, and without something dated to compare against,
 stale is indistinguishable from healthy. It is the same pair the image
 watch uses.
 
+A database that does not answer its size goes out as `-1` and is left
+OUT of the organization's total: counting it as zero would make a failed
+measurement look like an empty database. The total is then a FLOOR, and
+`aegis data size` says so on stderr, naming the ones that did not answer.
+
+The label values are escaped where they are written. Three of the four
+come out of a contract and are validated; `database` comes out of the
+live server, where the tenant names it. A quote or a line break in it
+does not spoil one series: it makes the LINE malformed, and the
+collector rejects the whole batch — one organization's database would
+silence the measurement of every organization.
+
 The command pushes nothing. Where the series go —a host timer, the round
 of checks— is decided outside, because a tool that measures and also
 decides where to report is a tool you cannot use for anything else.

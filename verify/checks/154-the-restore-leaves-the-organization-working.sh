@@ -253,6 +253,19 @@ want("file=sys.stderr" in code_of("measure"),
      "measure() does not send its prose to stderr: stdout carries the "
      "series and nothing else, so it can be piped where they are collected")
 
+# And what did not answer is NAMED. A database whose size could not be
+# read is left out of the total —counting it as zero would make a failed
+# measurement look like an empty database— so the total is a floor, and a
+# floor that nobody declares is a figure passing for the weight. Each one
+# goes out as -1 in its own series; here it is measured that the command
+# also says it in words to the person reading.
+floor = [n for n in ast.walk(funcs.get("measure") or ast.parse(""))
+         if isinstance(n, ast.Compare) and "bytes" in ast.unparse(n)]
+want(floor,
+     "measure() does not separate the databases that did not answer "
+     "their size: they are out of the total, so without naming them the "
+     "figure is a floor passing for the weight")
+
 # The names, against the convention the rest of the platform already
 # speaks: the `aegis_` prefix, the unit at the end, the identity in
 # labels. A series without the prefix is one that nobody's dashboard
@@ -266,6 +279,33 @@ for n in ast.walk(funcs.get("metrics") or ast.parse("")):
 want(len(series) >= 3, f"metrics() emits {len(series)} series: too few to be the measurement")
 stray = sorted(s for s in series if not s.startswith("aegis_"))
 want(not stray, f"series outside the convention (they do not start with aegis_): {stray}")
+
+# And every label value is ESCAPED where it is written. `org`, `service`
+# and `bucket` are validated by lib/aegis/org.py, `database` is not: it
+# comes from the live server, where the tenant is superuser of its own
+# instance and names it. A quote there does not spoil one series, it
+# makes the LINE malformed — and /api/v1/import/prometheus rejects the
+# whole batch, so one organization's database would silence the
+# measurement of all of them.
+bare = []
+for n in ast.walk(funcs.get("metrics") or ast.parse("")):
+    if not isinstance(n, ast.JoinedStr):
+        continue
+    prev = ""
+    for piece in n.values:
+        if isinstance(piece, ast.Constant):
+            prev = piece.value if isinstance(piece.value, str) else ""
+        elif isinstance(piece, ast.FormattedValue):
+            if prev.endswith('="'):
+                escaped = isinstance(piece.value, ast.Call) and \
+                    getattr(piece.value.func, "id", "") == "label_value"
+                if not escaped:
+                    bare.append(f"line {piece.lineno}: {ast.unparse(piece.value)}")
+            prev = ""
+want(not bare,
+     f"metrics() writes a label value without escaping it "
+     f"({'; '.join(bare[:2])}): a database name with a quote or a line "
+     f"break makes the line malformed and the collector rejects the batch")
 
 m_ = re.search(r'^# aegis-subcommands:[ \t]*(.*)$', src, re.M)
 want(m_ is not None and "size" in m_.group(1).split(),

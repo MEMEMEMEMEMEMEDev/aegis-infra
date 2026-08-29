@@ -161,6 +161,37 @@ open(p, "w").write(t.replace(old, new, 1))
 PY
 }
 
+# the measurement that one tenant can turn off for everybody: the label
+# values interpolated raw. A database called `we"ird` makes the line
+# malformed, and the collector rejects the WHOLE batch
+red_11() {
+    python3 - "$AEGIS_ROOT/$DATA" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = 'database="{label_value(b["nombre"])}"'
+new = 'database="{b["nombre"]}"'
+assert t.count(old) == 1
+open(p, "w").write(t.replace(old, new, 1))
+PY
+}
+
+# the floor that passes for the weight: the databases that did not answer
+# their size go back to being invisible, and the total —which leaves them
+# out— is read as the whole thing
+red_12() {
+    python3 - "$AEGIS_ROOT/$DATA" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+start = t.index('            blind = [x["nombre"]')
+end = t.index('        else:\n            print(f"  {gray}', start)
+new = '''            print(f"  {gray}·{reset} postgres {m['ns']}/{m['servicio']}: "
+                  f"{m['bytes']} bytes in {len(m['bases'])} databases",
+                  file=sys.stderr)
+'''
+open(p, "w").write(t[:start] + new + t[end:])
+PY
+}
+
 # control: a comment may name the credential
 control_1() {
     printf '\n# The word password appears here on purpose: a comment explains,\n# it does not execute.\n' \

@@ -1432,6 +1432,12 @@ def sizes(only_org=None):
                          f"SELECT pg_database_size({sql_literal(database)})")
             bases.append({"nombre": database,
                           "bytes": int(n) if rc == 0 and n.isdigit() else -1})
+        # What did not answer is left OUT of the total and is not counted
+        # as a zero: a zero would make a failed measurement look like an
+        # empty database. So the total is a FLOOR, each database that did
+        # not answer goes out as -1 in its own series, and `measure`
+        # names them — a sum that quietly drops what it could not measure
+        # is the same lie as a restore that reports success.
         measured.append({"tipo": "postgres", "org": b["org"], "ns": b["ns"],
                          "servicio": b["servicio"], "bases": bases,
                          "bytes": sum(x["bytes"] for x in bases if x["bytes"] >= 0)})
@@ -1445,6 +1451,25 @@ def sizes(only_org=None):
                          "bucket": bk["bucket"], "objetos": len(objects),
                          "bytes": sum(o["bytes"] for o in objects if o["bytes"] >= 0)})
     return measured
+
+
+def label_value(value):
+    """A label value in the exposition format: `\\`, `"` and the line break.
+
+    It is not decoration. Of the four labels emitted here, three come out
+    of a contract and go through lib/aegis/org.py's
+    `^[a-z][a-z0-9-]{2,29}$`; `database` comes out of the LIVE SERVER,
+    where the tenant —superuser of its own instance— names it. A quote in
+    it does not spoil one series: it makes the LINE malformed, and
+    /api/v1/import/prometheus rejects the whole batch, so one
+    organization's database would silence the measurement of every
+    organization. A line break is worse: the series splits in two.
+
+    The three validated ones go through here as well, on purpose: an
+    escape that depends on remembering who validated what is an escape
+    that will be forgotten.
+    """
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
 def metrics(measured):
@@ -1471,19 +1496,26 @@ def metrics(measured):
     for m in measured:
         if m["org"] not in orgs:
             orgs.append(m["org"])
+        # Every label value goes out through `label_value`, one by one and
+        # not through a variable prepared above: the rule «a label is
+        # escaped where it is written» is one a reader can check at a
+        # glance, and check 154 measures exactly that.
         if m["tipo"] == "postgres":
             for b in m["bases"]:
-                lines.append(f'aegis_org_database_bytes{{org="{m["org"]}",'
-                             f'service="{m["servicio"]}",'
-                             f'database="{b["nombre"]}"}} {b["bytes"]}')
+                lines.append(
+                    f'aegis_org_database_bytes{{org="{label_value(m["org"])}",'
+                    f'service="{label_value(m["servicio"])}",'
+                    f'database="{label_value(b["nombre"])}"}} {b["bytes"]}')
         else:
-            lines.append(f'aegis_org_bucket_bytes{{org="{m["org"]}",'
-                         f'bucket="{m["bucket"]}"}} {m["bytes"]}')
-            lines.append(f'aegis_org_bucket_objects{{org="{m["org"]}",'
-                         f'bucket="{m["bucket"]}"}} {m["objetos"]}')
+            lines.append(
+                f'aegis_org_bucket_bytes{{org="{label_value(m["org"])}",'
+                f'bucket="{label_value(m["bucket"])}"}} {m["bytes"]}')
+            lines.append(
+                f'aegis_org_bucket_objects{{org="{label_value(m["org"])}",'
+                f'bucket="{label_value(m["bucket"])}"}} {m["objetos"]}')
     for org in orgs:
         lines.append(f'aegis_org_data_measured_timestamp_seconds'
-                     f'{{org="{org}"}} {now}')
+                     f'{{org="{label_value(org)}"}} {now}')
     return lines
 
 
@@ -1501,8 +1533,15 @@ def measure(only_org):
                                             f"contracts" if only_org else ""))
     for m in measured:
         if m["tipo"] == "postgres":
+            blind = [x["nombre"] for x in m["bases"] if x["bytes"] < 0]
             print(f"  {gray}·{reset} postgres {m['ns']}/{m['servicio']}: {m['bytes']} "
-                  f"bytes in {len(m['bases'])} databases", file=sys.stderr)
+                  f"bytes in {len(m['bases']) - len(blind)} databases",
+                  file=sys.stderr)
+            if blind:
+                print(f"  {yellow}!{reset} {m['ns']}/{m['servicio']}: {len(blind)} "
+                      f"database(s) did not answer their size "
+                      f"({', '.join(blind[:5])}) — the figure above is a FLOOR "
+                      f"and not the weight", file=sys.stderr)
         else:
             print(f"  {gray}·{reset} bucket   {m['bucket']}: {m['bytes']} bytes in "
                   f"{m['objetos']} objects", file=sys.stderr)
