@@ -89,13 +89,31 @@ function underRoot(pathname) {
     return abs === ROOT || abs.startsWith(ROOT + sep) ? abs : null
 }
 
+// A file, an index.html inside a directory, or nothing. Deliberately
+// NOT recursive: a directory literally named index.html would make a
+// recursive version walk as deep as the filesystem allows.
 async function fileFor(abs) {
     try {
         const s = await stat(abs)
-        if (s.isDirectory()) return await fileFor(join(abs, 'index.html'))
-        return s.isFile() ? abs : null
+        if (s.isFile()) return abs
+        if (!s.isDirectory()) return null
+        const i = join(abs, 'index.html')
+        return (await stat(i)).isFile() ? i : null
     } catch {
         return null
+    }
+}
+
+// /docs and /docs/ are not the same document root for a browser: with
+// no trailing slash every relative href in the page resolves one level
+// up, and the page loads with its stylesheet missing and no error
+// anywhere. The redirect is what every static server does, and it is
+// the reason a directory is not simply served in place.
+async function isDir(abs) {
+    try {
+        return (await stat(abs)).isDirectory()
+    } catch {
+        return false
     }
 }
 
@@ -117,6 +135,12 @@ const server = createServer(async (req, res) => {
 
     const abs = underRoot(pathname)
     if (abs === null) return send(res, 400, 'bad request\n')
+
+    if (!pathname.endsWith('/') && await isDir(abs)) {
+        const to = pathname + '/' + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '')
+        res.writeHead(301, { location: to })
+        return res.end()
+    }
 
     let file = await fileFor(abs)
     if (file === null && SPA_FALLBACK) file = await fileFor(join(ROOT, 'index.html'))
