@@ -21,6 +21,16 @@ check() {
 # same class check 075 watches over curl. So the third property is
 # measured here too, at the file level and not at the line level.
 #
+# The adversarial review of 2026-08-29 added the ones that no exit code
+# shows: the two ORDERS (nothing is written before the whole bundle has
+# been checked, and the objects come back inside the window that holds
+# the consumers down), the fact that the proof of the login is worth
+# something only over the loopback —without `-h` the pg_hba trusts the
+# connection and the property empties out while the check stays green—,
+# and the two escapes that protect what does NOT come out of a contract:
+# the database name reaches a `sh -c` and a metric label, and it is named
+# by the tenant.
+#
 # It reads the file with `ast` and not with grep, for a reason that
 # matters to the teeth: a COMMENT and a DOCSTRING may narrate the hole
 # that was closed —that narration is worth more than the code— while a
@@ -318,5 +328,5 @@ for m in bad:
 sys.exit(1 if bad else 0)
 PY
 if [[ -n "$D154" ]]; then fail "the restore does not leave the organization working:$D154"
-else pass "restore realigns the role and proves it, puts the objects back and measures them, no password travels in argv, and the weight of the data comes out as aegis_ series"; fi
+else pass "restore realigns the role and proves it over the loopback, puts the objects back inside the window and after checking the whole bundle, no password travels in argv nor a database name raw into the shell, and the weight comes out as escaped aegis_ series"; fi
 }
