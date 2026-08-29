@@ -11,6 +11,8 @@
 #
 # request  asks the platform for a base image. It measures the digest the
 #          tag points at TODAY, declares it in mirror-images/images.txt,
+#          commits AND PUSHES that edit (the mirror job clones the repo
+#          from its remote: an unpushed commit is an edit it never sees),
 #          fires the mirror job (pull, blocking scan, push, signature)
 #          and prints the one line to paste into a Containerfile.
 #          Running it twice over the same tag writes nothing, commits
@@ -537,11 +539,38 @@ print(f"    {cve} scoped to {', '.join(paths)}, expires {end.isoformat()}", file
 PY
 }
 
+# commit_list — the edit lands where the JOB reads it, which is not this
+# disk. The mirror job is a pipeline-from-SCM: it clones
+# `__PLATFORM_REPO__` at branch main (the Job DSL in
+# k8s/base/platform/jenkins/values.yaml) and does readFile over THAT
+# checkout. So a commit that stays local is an edit the job never sees,
+# and the three shapes of that bug are all silent:
+#   · a first request: the job re-mirrors the OLD list, ends SUCCESS,
+#     and the registry does not serve the new image — the command then
+#     blames the registry for a push that never happened;
+#   · a --bump: the job re-mirrors the OLD digest, ends SUCCESS, the
+#     registry serves it, and the FROM printed carries a digest the list
+#     on disk no longer declares. Green and lying, which is worse;
+#   · an --allow: the retry fires a job that never sees trivyignore.yaml
+#     and comes back red identical, so the exception looks not to work.
+# git_push_verified is the house helper for exactly this class (a failed
+# push that carries on cost run #9). The equality against @{upstream}
+# afterwards is the property itself and not the push's exit code: what
+# has to be true is that the remote branch NOW CONTAINS this commit.
 commit_list() {   # <message> <paths...>
     local msg="$1"; shift
     git -C "$LIST_ROOT" rev-parse --git-dir >/dev/null 2>&1 \
         || could_not "$LIST_ROOT is not a git repository — the mirror job builds from a commit, so an edit nobody committed is an edit the job never sees"
     git_commit_if_changes "$LIST_ROOT" "$msg" "$@"
+    git -C "$LIST_ROOT" rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1 \
+        || could_not "$LIST_ROOT has no upstream branch: the mirror job clones the platform repo from its remote, and a commit with nowhere to go is an edit the job never sees"
+    git_push_verified "$LIST_ROOT"
+    local head up
+    head="$(git -C "$LIST_ROOT" rev-parse HEAD)"
+    up="$(git -C "$LIST_ROOT" rev-parse '@{upstream}' 2>/dev/null || true)"
+    [[ "$head" == "$up" ]] \
+        || could_not "the push left $LIST_ROOT at $head and its remote branch at ${up:-nothing}: the mirror job reads the REMOTE, so it would build the list as it was before this edit"
+    log_info "the edit is on the remote branch the mirror job builds from ($head)"
 }
 
 do_request() {
@@ -564,10 +593,10 @@ do_request() {
         printf 'source       %s:%s\n' "$SRC_REPO" "$SRC_TAG"
         printf 'destination  %s/%s\n' "$REGISTRY_HOST_INTERNAL" "$dst"
         if [[ -z "$existing" ]]; then
-            printf 'would        measure the digest of the tag, add the line to %s, commit it, fire %s and print the FROM\n' "$IMAGES_REL" "$MIRROR_JOB"
+            printf 'would        measure the digest of the tag, add the line to %s, commit AND PUSH it (the job clones the remote), fire %s and print the FROM\n' "$IMAGES_REL" "$MIRROR_JOB"
         elif (( BUMP )); then
             printf 'declared     %s\n' "$pinned"
-            printf 'would        re-measure the tag and, if it moved, rewrite that digest, commit, fire %s and print the FROM\n' "$MIRROR_JOB"
+            printf 'would        re-measure the tag and, if it moved, rewrite that digest, commit AND PUSH it, fire %s and print the FROM\n' "$MIRROR_JOB"
         else
             printf 'declared     %s\n' "$pinned"
             printf 'would        re-measure the tag: unchanged and already mirrored+signed prints the FROM and writes nothing; moved is an error unless --bump\n'

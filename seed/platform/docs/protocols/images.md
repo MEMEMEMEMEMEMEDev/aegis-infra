@@ -126,9 +126,9 @@ One command, and it is the whole procedure. It resolves the source (a
 bare `python:3.12-slim` comes from the public path the list already
 uses for the official images; a reference that carries a registry is
 taken as written), MEASURES the digest that tag points at today,
-declares the line in `mirror-images/images.txt`, commits it, fires
-`mirror-images` and waits. What it prints, when the scan is green, is
-the one line the build will demand:
+declares the line in `mirror-images/images.txt`, commits it, **pushes
+it**, fires `mirror-images` and waits. What it prints, when the scan is
+green, is the one line the build will demand:
 
 ```
 FROM registry.registry-system.svc.cluster.local:5000/python:3.12-slim@sha256:...
@@ -139,6 +139,15 @@ three lines, and which three is the developer's business. What the
 platform owes is the other half: fix the digest of what was asked for,
 scan it, sign it, and hand back the exact reference — so that being
 wrong about it is impossible rather than merely discouraged.
+
+The push is not bookkeeping. `mirror-images` is a pipeline-from-SCM: it
+clones the platform repo at branch `main` and reads `images.txt` out of
+THAT checkout, so a commit that stays on the local disk is an edit the
+job never sees. The job would then re-mirror the previous list, end
+SUCCESS, and the command would go looking in the registry for something
+nobody was ever asked to mirror. The push is verified, and so is the
+result: the command does not fire the job until the remote branch it
+builds from contains the commit.
 
 **Running it twice writes nothing.** If the line is already declared at
 that digest and the registry serves it mirrored and signed, the command
@@ -151,7 +160,7 @@ README, in a runbook and inside a script.
 | what happened | what it does | rc |
 |---|---|---|
 | declared at this digest, mirrored and signed | prints the `FROM`; nothing written, committed or built | 0 |
-| new, or declared and not yet served | declares it, commits, fires `mirror-images`, waits, prints the `FROM` | 0 |
+| new, or declared and not yet served | declares it, commits, pushes, fires `mirror-images`, waits, prints the `FROM` | 0 |
 | the **upstream tag moved** | stops, showing the declared digest and today's | 1 |
 | the **scan went red** | does NOT mirror: lists the blocking findings and names the two ways out | 1 |
 
