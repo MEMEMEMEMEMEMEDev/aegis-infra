@@ -1163,13 +1163,15 @@ def restore(bundle, org, force):
                 restore_bucket(p, tmp)
                 continue
 
-            # THE GUARD THAT PREVENTS "I restored and it does not connect":
-            # the dump brings the role's SCRAM hash, so the restored
-            # database will again expect the password that was there AT
-            # CAPTURE TIME. If the Secret rotated since then, restoring
-            # leaves the database asking for one and the pod presenting
-            # another, and the symptom —auth failed— does not look like the
-            # cause.
+            # THE BRAKE, which since the realignment exists is no longer
+            # about repair: the dump brings the role's SCRAM hash, and
+            # what closes the gap between that hash and the live Secret
+            # is the ALTER ROLE further down. What this fingerprint
+            # detects is something the tool cannot decide on its own —
+            # the credential is not the one from the capture, so either
+            # it rotated or this bundle comes from ANOTHER instance, and
+            # moving an organization into a new machine is not the same
+            # operation as restoring one.
             live = credential_fingerprint(p["ns"], p["secreto"])
             expected = p.get("credencial_sha256")
             if expected and live and live != expected:
