@@ -1,0 +1,10 @@
+# What the image build has no business seeing. k8s/ and ci/ are the
+# DEPLOYMENT's files: they change on every release and, inside the build
+# context, every change to them would invalidate the layer cache of a
+# build whose result they cannot affect.
+node_modules
+dist
+k8s
+ci
+Containerfile
+.dockerignore

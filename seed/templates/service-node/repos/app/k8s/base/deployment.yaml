@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Platform convention: the contract's `app` service is named
+  # `<organizacion>-app`. The generated NetworkPolicy selects by the
+  # label `app: __ORG__-app` and the derived IngressRoute looks for the
+  # Service `__ORG__-app` on 8080 — these names are NOT free.
+  name: __ORG__-app
+  labels: {app: __ORG__-app}
+spec:
+  replicas: 1
+  # With 1 replica the default rolling update (maxUnavailable 25% -> 1)
+  # leaves ~30s of Bad Gateway on every update. Surge first, kill after
+  # = zero window; the transient extra pod fits in the `pequena` quota.
+  strategy:
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app: __ORG__-app}
+  template:
+    metadata:
+      labels: {app: __ORG__-app}
+    spec:
+      # The pull secret comes from the namespace's default SA: the app
+      # does NOT declare the registry credential.
+      # PSS: the namespace is enforce=restricted and the workload
+      # DECLARES the whole profile (explicit > magic). The image already
+      # runs as USER 65532 (Containerfile) -> runAsNonRoot validates
+      # with no runAsUser here.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: app
+          # The IMAGE is governed by the overlay (kustomize images) and
+          # the pipeline writes the DIGEST into it on every build. This
+          # reference is only the base the overlay rewrites.
+          image: registry.registry-system.svc.cluster.local:5000/__ORG__-app
+          ports: [{containerPort: 8080}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            # The image is not writable at runtime, so whoever gets
+            # inside cannot leave anything behind: the next restart is
+            # the original bytes again.
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            # The one writable place. node itself needs none of it, but
+            # anything that does —an upload being parsed, a report being
+            # rendered— writes here and nowhere else. Keep it that way:
+            # a second writable mount is a second place state can hide.
+            - {name: tmp, mountPath: /tmp}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080}
+          # A node process with no dependencies idles around 40Mi of
+          # heap plus the runtime. The limit is where the pod dies, so
+          # it is not the average: raise it before you raise the plan.
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 192Mi}
+      volumes:
+        - {name: tmp, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: __ORG__-app
+spec:
+  selector: {app: __ORG__-app}
+  # The platform ALWAYS routes to port 8080 of the Service (convention
+  # of the derived IngressRoute): this port is not changed here, it is
+  # changed in the contract.
+  ports: [{port: 8080, targetPort: 8080}]

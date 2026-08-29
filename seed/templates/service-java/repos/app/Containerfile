@@ -1,0 +1,60 @@
+# __ORG__-app — a java service in two stages: a JDK to compile, a JRE to
+# run.
+#
+# WHY THE FROMs ARE PLACEHOLDERS. `aegis app new` resolves each one
+# against the INTERNAL registry when it instantiates, and writes the
+# reference pinned by digest. An image pulled off the internet by tag is
+# a mutable pointer inside the pipeline that afterwards signs the
+# result, which is the hole mirror-images exists to close. And the
+# digest cannot be computed here: the mirror rebuilds the manifest as it
+# copies, so upstream's digest is not the one that pulls.
+#
+# NEITHER OF THE TWO IS MIRRORED YET, and that is not an oversight: no
+# service in this tree runs on a JVM, and an image gets mirrored when
+# somebody needs it, not in advance. Instantiating this template
+# therefore stops with the exact command that asks for them — which is
+# the whole point of asking the live registry instead of guessing.
+#
+# WHY A JRE AND NOT THE JDK FOR THE RUNTIME. The JDK carries javac, jar,
+# jlink and the whole tool chain: a compiler inside a tenant pod, with
+# nothing to compile, that the scan has to argue about every week. Same
+# criterion that keeps npm out of the node base.
+FROM __FROM_JDK__ AS build
+WORKDIR /src
+COPY src ./src
+COPY tests ./tests
+# NO MAVEN, NO GRADLE, and no dependency: javac over the JDK's own
+# libraries. It is the same deliberate zero as the other templates (an
+# empty tree cannot rot), and it is what lets this build run with no
+# egress at all — a tenant build runs inside the cluster, where reaching
+# a package repository is a decision somebody has to make. When you do
+# adopt a build tool, that decision comes first.
+RUN javac -d /out $(find src -name '*.java')
+# THE TESTS ARE THE IMAGE'S DOOR, not decoration: the canonical
+# Jenkinsfile does not run them, so this RUN is the only gate. A red
+# test kills the build here and the image never comes to exist.
+RUN javac -cp /out -d /test-classes $(find tests -name '*.java') \
+ && java -cp /out:/test-classes AppTest
+
+FROM __FROM_JRE__
+WORKDIR /app
+COPY --from=build --chown=65532:65532 /out /app/classes
+EXPOSE 8080
+# Numeric and non-root: the namespace is PSS restricted, and a
+# `USER name` fails runAsNonRoot because the kubelet cannot read the
+# image's /etc/passwd to prove the name is not root 0.
+USER 65532:65532
+# -XX:MaxRAMPercentage AND NOT -Xmx: the JVM reads the container's
+# cgroup limit, so one number in k8s/base/deployment.yaml governs both
+# the pod and the heap. With -Xmx here they are two numbers that drift,
+# and the day the limit is lowered the JVM is killed while it reserves a
+# heap it was still promised.
+# -XX:+ExitOnOutOfMemoryError: without it a JVM that runs out of heap
+# keeps the process alive, answering nothing, and the readinessProbe is
+# the only thing that notices. Dying is what makes kubelet restart it.
+# -Djava.io.tmpdir=/tmp: the one writable path (see the deployment).
+ENTRYPOINT ["java", \
+            "-XX:MaxRAMPercentage=70", \
+            "-XX:+ExitOnOutOfMemoryError", \
+            "-Djava.io.tmpdir=/tmp", \
+            "-cp", "/app/classes", "App"]

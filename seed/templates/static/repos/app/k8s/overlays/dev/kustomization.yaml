@@ -1,0 +1,27 @@
+# Deployment overlay. The pipeline's `deploy` stage WRITES here, so this
+# file is not optional: without it, `node ci/write-digest.mjs` stops
+# with "I did not find these images" and the build fails — on purpose: a
+# deployment that cannot find where to write the digest has to shout,
+# not leave the old version in place.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+
+# IMAGES GO BY DIGEST, NOT BY TAG: Kyverno rewrites the image adding the
+# verified digest to it, and with a tag here git and cluster ALWAYS
+# differ (eternal ArgoCD OutOfSync, or auto-sync turned off). With the
+# digest, the mutation is a no-op and auto-sync stays alive.
+#
+# THE DIGEST BELOW IS A MARKER of sixty-four zeros, and it is deliberate
+# that it be obviously false: until the pipeline runs for the first
+# time, no image of this app exists. The sign-up order prevents it:
+# first the pipeline runs (writing the real digest here) and only then
+# the Application syncs. If the cluster sees these zeros, somebody
+# inverted the order — ImagePullBackOff is exactly the right warning.
+#
+# The name HAS to be the same one the Jenkinsfile uses in
+# ${REGISTRY}/${IMAGE}, or write-digest.mjs does not find it.
+images:
+  - name: registry.registry-system.svc.cluster.local:5000/__ORG__-app
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Platform convention: the contract's `app` service is named
+  # `<organizacion>-app`. The generated NetworkPolicy selects by the
+  # label `app: __ORG__-app` and the derived IngressRoute looks for the
+  # Service `__ORG__-app` on 8080 — these names are NOT free.
+  name: __ORG__-app
+  labels: {app: __ORG__-app}
+spec:
+  replicas: 1
+  # With 1 replica the default rolling update (maxUnavailable 25% -> 1)
+  # leaves ~30s of Bad Gateway on every update. Surge first, kill after
+  # = zero window; the transient extra pod fits in the `pequena` quota.
+  strategy:
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app: __ORG__-app}
+  template:
+    metadata:
+      labels: {app: __ORG__-app}
+    spec:
+      # The pull secret comes from the namespace's default SA: the app
+      # does NOT declare the registry credential.
+      # PSS: the namespace is enforce=restricted and the workload
+      # DECLARES the whole profile (explicit > magic). The image already
+      # runs as USER 101 (Containerfile) -> runAsNonRoot validates with
+      # no runAsUser here.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: app
+          # The IMAGE is governed by the overlay (kustomize images) and
+          # the pipeline writes the DIGEST into it on every build. This
+          # reference is only the base the overlay rewrites.
+          image: registry.registry-system.svc.cluster.local:5000/__ORG__-app
+          ports: [{containerPort: 8080}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            # The image is not writable at runtime, so whoever gets
+            # inside cannot leave anything behind: the next restart is
+            # the original bytes again.
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            # nginx is the reason this mount is NOT optional here: its
+            # pid file and its five temp paths live under /tmp (the
+            # base's nginx.conf puts them there precisely so the root
+            # filesystem can be read only). Without this volume the
+            # master fails to write /tmp/nginx.pid and the container
+            # never starts.
+            - {name: tmp, mountPath: /tmp}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080}
+          # A front that serves files needs almost nothing. Measured
+          # against the platform's own static fronts: an idle nginx with
+          # 2 workers sits under 10Mi.
+          resources:
+            requests: {cpu: 20m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+      volumes:
+        - {name: tmp, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: __ORG__-app
+spec:
+  selector: {app: __ORG__-app}
+  # The platform ALWAYS routes to port 8080 of the Service (convention
+  # of the derived IngressRoute), and for a `estatico` service the
+  # contract cannot even declare another one.
+  ports: [{port: 8080, targetPort: 8080}]

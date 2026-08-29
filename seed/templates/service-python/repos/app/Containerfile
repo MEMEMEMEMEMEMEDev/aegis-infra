@@ -1,0 +1,57 @@
+# __ORG__-app — a python service, built and run on the same mirrored
+# image.
+#
+# WHY THE FROM IS A PLACEHOLDER. `aegis app new` resolves it against the
+# INTERNAL registry when it instantiates, and writes the reference
+# pinned by digest. An image pulled off the internet by tag is a mutable
+# pointer inside the pipeline that afterwards signs the result, which is
+# the hole mirror-images exists to close. And the digest cannot be
+# computed here: the mirror rebuilds the manifest as it copies, so
+# upstream's digest is not the one that pulls.
+#
+# ONE STAGE AND NOT TWO, unlike the node and java templates. A second
+# stage buys nothing while there is nothing to leave behind: with no
+# dependencies there is no compiler and no build cache to strip. The day
+# you install wheels that need a toolchain (anything with C behind it),
+# split it: build in this image, then COPY the site-packages into a
+# fresh one. What you must not do is add a compiler to the runtime.
+FROM __FROM_PYTHON__
+
+# PYTHONDONTWRITEBYTECODE: the tenant pod's root filesystem is READ
+# ONLY, so python cannot write the __pycache__ it tries to create beside
+# every module on first import. It fails silently and re-parses the
+# source on every start — a slow container and no error anywhere. Say
+# no explicitly instead.
+# PYTHONUNBUFFERED: without it stdout is block-buffered when it is not a
+# terminal, so the pod's log arrives in 4KB lumps, minutes late, and
+# empty exactly when you are watching a crash.
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+COPY requirements.txt ./
+# COMMENTED ON PURPOSE, and not forgotten: with an empty requirements
+# this line is a no-op that still costs an egress the build does not
+# have. Tenant builds run inside the cluster, where reaching PyPI is a
+# decision somebody has to make (an index mirror, or an egress rule) —
+# not something a template should assume. Uncomment it the day you have
+# dependencies AND that decision:
+#   RUN pip install --no-cache-dir --require-hashes -r requirements.txt
+# `--require-hashes` is the pip equivalent of `npm ci`: it installs the
+# exact artifacts that were reviewed, not whatever resolves today.
+
+COPY src ./src
+COPY tests ./tests
+# THE TEST STAGE IS THE IMAGE'S DOOR, not decoration: the canonical
+# Jenkinsfile does not run the suite, so this RUN is the only gate. A
+# red test kills the build here and the image never comes to exist.
+RUN python -m unittest discover -s tests -t . -v
+
+EXPOSE 8080
+# Numeric and non-root: the namespace is PSS restricted, and a
+# `USER name` fails runAsNonRoot because the kubelet cannot read the
+# image's /etc/passwd to prove the name is not root 0. The uid does not
+# have to EXIST in the image — the kubelet compares numbers, and
+# everything COPYed above is world-readable.
+USER 65532:65532
+CMD ["python", "-m", "src.server"]

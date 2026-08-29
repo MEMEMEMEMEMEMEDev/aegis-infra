@@ -1,0 +1,55 @@
+# __ORG__-app — a static front: compiled with the platform's CI node
+# image, served by the nginx base aegis owns.
+#
+# ── THE ONLY TWO LINES THAT CHANGE BETWEEN FRAMEWORKS ────────────────
+# Astro, React, Vue and Angular differ here and nowhere else in this
+# file. They are ARGs so you can also override them per build without
+# editing:
+#
+#   framework      BUILD_CMD          OUT_DIR
+#   Astro          npm run build      dist
+#   Vite (React)   npm run build      dist
+#   Vite (Vue)     npm run build      dist
+#   Angular        npm run build      dist/<project>/browser
+#
+# Everything below the build stage assumes only that OUT_DIR ends up
+# holding plain files a browser can fetch.
+#
+# WHY THE FROMs ARE PLACEHOLDERS. `aegis app new` resolves each one
+# against the INTERNAL registry when it instantiates, and writes the
+# reference pinned by digest. An image pulled off the internet by tag is
+# a mutable pointer inside the pipeline that afterwards signs the
+# result, which is the hole mirror-images exists to close. And the
+# digest cannot be computed here: the mirror rebuilds the manifest as it
+# copies, so upstream's digest is not the one that pulls.
+FROM __FROM_CI_NODE__ AS build
+ARG BUILD_CMD="npm run build"
+ARG OUT_DIR="dist"
+WORKDIR /app
+# The lock first and alone: this layer is only rebuilt when the
+# dependencies change, not on every edit of a component.
+COPY package.json package-lock.json ./
+# `npm ci` and NOT `npm install`: it installs EXACTLY what the lock
+# says. `npm install` may resolve a different tree than the one that was
+# tested, in CI, silently.
+RUN npm ci --no-audit --no-fund
+COPY . .
+# The output is moved to a FIXED path so that the runtime stage does not
+# need to know OUT_DIR: one declaration, one place to edit.
+RUN sh -c "$BUILD_CMD" && test -d "$OUT_DIR" && mv "$OUT_DIR" /out
+
+FROM __FROM_BASE_NGINX__
+# What this base guarantees, and what this file therefore assumes: it
+# listens on 8080, it runs as uid 101, the served root is
+# /usr/share/nginx/html, and the `server{}` that gets served is
+# /etc/nginx/conf.d/default.conf. Its temp paths and its pid live under
+# /tmp because a tenant pod's root filesystem is read only.
+COPY --chown=101:101 nginx.conf /etc/nginx/conf.d/default.conf
+# From the build stage and not from the context: what is served is,
+# provably, what was built.
+COPY --from=build --chown=101:101 /out/ /usr/share/nginx/html/
+EXPOSE 8080
+# Numeric and non-root: the namespace is PSS restricted, and a
+# `USER name` fails runAsNonRoot because the kubelet cannot read the
+# image's /etc/passwd to prove the name is not root 0.
+USER 101
