@@ -185,3 +185,72 @@ new = '        404) return 1 ;;\n        401) log_warn "the internal registry re
 open(p, "w").write(t.replace(old, new, 1))
 PY
 }
+
+# ── whose red is it ──────────────────────────────────────────────────
+# the scan report goes back to reading the WHOLE console. It is the
+# defect as it was verified over a real console shape: asking for
+# python:3.12-slim the day postgres:17.10-alpine grows a CRITICAL prints
+# postgres's rows under the python request, and the `paths:` of the
+# exception the command then suggests name postgres's scan target.
+red_9() {
+    python3 - "$AEGIS_ROOT/$IMG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = '        report_scan "$slice" "$dst"\n'
+assert t.count(old) == 1
+open(p, "w").write(t.replace(old, '        report_scan "$console" "$dst"\n', 1))
+PY
+}
+
+# the attribution disappears: every red of the job is blamed on whatever
+# image was asked for. «$dst was NOT mirrored» becomes a sentence the
+# command has not measured and, when the entry that failed was another,
+# a false one.
+red_10() {
+    python3 - "$AEGIS_ROOT/$IMG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+a = t.index('        # WHOSE RED IS IT')
+b = t.index('        slice="$SECRETS_TMP/mirror-console-entry.txt"')
+open(p, "w").write(t[:a] + '        local slice\n' + t[b:])
+PY
+}
+
+# the --allow guard goes: the build failed on another entry and the
+# command still writes the exception, scoped to that entry's scan
+# targets, with the operator's measurement under a binary they never
+# looked at.
+red_11() {
+    python3 - "$AEGIS_ROOT/$IMG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+a = t.index('            [[ -z "$ALLOW" ]] \\\n')
+b = t.index('            red_elsewhere=1\n')
+open(p, "w").write(t[:a] + t[b:])
+PY
+}
+
+# control: the sentence that names the other failed entries is prose.
+# Rewording it changes nothing about who the red is attributed to.
+control_5() {
+    python3 - "$AEGIS_ROOT/$IMG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = 'each one is its own request, with its own measurement; nothing below is about them'
+assert t.count(old) == 1
+open(p, "w").write(t.replace(old, 'those are separate requests with separate measurements', 1))
+PY
+}
+
+# control: the console gets read one more time, for a legitimate extra
+# piece of evidence. More reading is not less discipline.
+control_6() {
+    python3 - "$AEGIS_ROOT/$IMG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = '        report_scan "$slice" "$dst"\n'
+assert t.count(old) == 1
+new = old + '        log_error "  the entry\'s block of the console is $(wc -l < "$slice") lines long"\n'
+open(p, "w").write(t.replace(old, new, 1))
+PY
+}

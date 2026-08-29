@@ -458,6 +458,63 @@ fire_mirror() {
     return 1
 }
 
+# THE JOB IS NOT ABOUT ONE IMAGE. `mirror-images` pulls, scans, pushes
+# and signs EVERY entry of images.txt on every run (the
+# `MIRROR_ENTRIES.each` of its Jenkinsfile); a broken entry is noted
+# down, the loop carries on, and the build fails at the end with the
+# whole list. So the red of a build is not evidence about the image
+# somebody happened to ask for today, and until this was written it was
+# reported as if it were: asking for python:3.12-slim the day
+# postgres:17.10-alpine grew a CRITICAL produced «python:3.12-slim was
+# NOT mirrored», the CRITICAL rows of postgres listed underneath, and a
+# suggested `--allow <postgres CVE>` under the python request — a dated
+# exception filed against the wrong binary, with a measurement about
+# another one attached to it.
+#
+# The console names who failed twice, and both are read here: one
+# `FAILED <dst>: <message>` per broken entry, and the final
+# `images that failed (N): a, b`.
+failed_entries() {   # <console>
+    python3 - "$1" <<'PY'
+import re, sys
+console = open(sys.argv[1], errors="replace").read().split("\n")
+out = [m.group(1) for m in (re.match(r"FAILED (\S+):", l.strip()) for l in console) if m]
+if not out:
+    for l in console:
+        m = re.search(r"images that failed \(\d+\): (.+)$", l)
+        if m:
+            out = [x.strip() for x in m.group(1).split(",") if x.strip()]
+print("\n".join(dict.fromkeys(out)))
+PY
+}
+
+# console_slice <console> <dst> — the part of the console that belongs to
+# ONE entry. The job echoes `================ <dst> ================`
+# before each one, and that separator is the only thing that scopes a
+# trivy row to the image it was found on: the scan runs over
+# `mirror.tar`, so the target names trivy prints carry no trace of which
+# entry they came from.
+console_slice() {   # <console> <dst>
+    python3 - "$1" "$2" <<'PY'
+import sys
+console, dst = open(sys.argv[1], errors="replace").read().split("\n"), sys.argv[2]
+out, on = [], False
+for ln in console:
+    s = ln.strip()
+    if s.startswith("================") and s.endswith("================"):
+        mid = s.strip("=").strip()
+        # trivy underlines each scan target with a bare row of "=", and
+        # report_scan needs those to find the targets: a separator with
+        # nothing between the bars is not the job's, it is the scan's.
+        if mid:
+            on = (mid == dst)
+            continue
+    if on:
+        out.append(ln)
+print("\n".join(out))
+PY
+}
+
 # report_scan <console> <dst> — what the scan found, said in the terms a
 # decision needs: severity, package, the version that fixes it, and the
 # target it was found on (which is what an exception has to be scoped
@@ -711,14 +768,42 @@ do_request() {
               log_ok "$dst re-pinned to $measured" ;;
     esac
 
-    local attempt=1
+    local attempt=1 red_elsewhere=0
     while :; do
         if fire_mirror; then break; fi
 
         local console="$SECRETS_TMP/mirror-console.txt"
         jenkins_get "/job/$MIRROR_JOB/$MIRROR_BUILD/consoleText" > "$console" 2>/dev/null || : > "$console"
+
+        # WHOSE RED IS IT — answered before a single word is said about
+        # $dst, because «$dst was NOT mirrored» is plainly false when the
+        # red belonged to another entry.
+        local culprits others slice
+        culprits="$(failed_entries "$console")"
+        if [[ -z "$culprits" ]]; then
+            log_error "$MIRROR_JOB #$MIRROR_BUILD went red and its console names no failing entry: the build died before or outside the per-image loop, so nothing can be attributed — least of all to $dst. The last lines of that build:"
+            tail -25 "$console" | sed 's/^/    /' >&2
+            return 1
+        fi
+        if ! grep -qxF "$dst" <<< "$culprits"; then
+            log_error "$MIRROR_JOB #$MIRROR_BUILD went red, and NOT on $dst. What failed: $(tr '\n' ' ' <<< "$culprits")"
+            log_error "The job mirrors every entry of $IMAGES_REL on every run, so that red was there before this request and belongs to those entries (${AEGIS_CMD:-aegis} image list names their sources)."
+            [[ -z "$ALLOW" ]] \
+                || die "--allow $ALLOW was given while asking for $dst, and $dst is not what failed: the exception would be scoped to another image's scan targets and would carry your measurement under a binary you did not measure. Ask for THAT image, with its own measurement"
+            red_elsewhere=1
+            break
+        fi
+
+        # Scoped to this entry's block. Without it the CRITICAL rows of
+        # every other broken image get printed under this request, and
+        # the `paths:` of an exception would be scoped to them.
+        slice="$SECRETS_TMP/mirror-console-entry.txt"
+        console_slice "$console" "$dst" > "$slice"
         log_error "$MIRROR_JOB #$MIRROR_BUILD went red — $dst was NOT mirrored (the scan runs BEFORE the push: nothing entered the registry)"
-        report_scan "$console" "$dst"
+        others="$(grep -vxF "$dst" <<< "$culprits" | tr '\n' ' ')"
+        [[ -z "${others// /}" ]] \
+            || log_warn "that build also failed on: ${others}— each one is its own request, with its own measurement; nothing below is about them"
+        report_scan "$slice" "$dst"
 
         if [[ -z "$ALLOW" || $attempt -gt 1 ]]; then
             log_error "The two honest ways out:"
@@ -739,7 +824,7 @@ do_request() {
         # the exception did not cover what was blocking, and retrying
         # again would only be a loop with a file growing inside it.
         local targets
-        targets="$(python3 - "$console" "$ALLOW" <<'PY'
+        targets="$(python3 - "$slice" "$ALLOW" <<'PY'
 import sys
 console = open(sys.argv[1], errors="replace").read().split("\n")
 cve, target, hits = sys.argv[2], None, []
@@ -753,7 +838,7 @@ for i, ln in enumerate(console):
 print("\n".join(dict.fromkeys(hits)))
 PY
 )"
-        [[ -n "$targets" ]] || die "$ALLOW does not appear in the console of $MIRROR_JOB #$MIRROR_BUILD: an exception for a CVE the scan did not report would silence something nobody measured"
+        [[ -n "$targets" ]] || die "$ALLOW does not appear in the part of $MIRROR_JOB #$MIRROR_BUILD's console that belongs to $dst: an exception for a CVE this image's scan did not report would silence something nobody measured on it. If it is another entry's finding, that entry is its own request"
         # shellcheck disable=SC2086
         write_exception "$ALLOW" "$UNTIL" "$REASON" $targets \
             || die "the exception could not be written (nothing was changed)"
@@ -767,13 +852,20 @@ PY
     # verdict: «it answered and it does not have it» is measured and
     # wrong (rc 1); «it did not answer» is the instrument not reaching
     # the subject (rc 2).
+    local outcome="ended SUCCESS"
+    (( red_elsewhere == 0 )) || outcome="did not fail on $dst but went red on other entries"
     rc=0; digest="$(reg_digest "$repo_name" "$SRC_TAG")" || rc=$?
-    (( rc != 2 )) || could_not "$MIRROR_JOB #$MIRROR_BUILD ended SUCCESS and the internal registry did not answer: whether $dst is there cannot be said from here"
-    (( rc == 0 )) || die "$MIRROR_JOB #$MIRROR_BUILD ended SUCCESS and the registry answers that it does not serve $dst — read that build: the push step is where the bytes were supposed to land"
+    (( rc != 2 )) || could_not "$MIRROR_JOB #$MIRROR_BUILD $outcome and the internal registry did not answer: whether $dst is there cannot be said from here"
+    (( rc == 0 )) || die "$MIRROR_JOB #$MIRROR_BUILD $outcome and the registry answers that it does not serve $dst — read that build: the push step is where the bytes were supposed to land"
     rc=0; reg_signed "$repo_name" "$digest" || rc=$?
     (( rc != 2 )) || could_not "the internal registry did not answer about the signature of $dst"
     (( rc == 0 )) || die "$dst is in the registry and carries NO signature: Kyverno would reject any pod that used it. Read $MIRROR_JOB #$MIRROR_BUILD — the sign step is the last one and it did not leave its object"
     log_ok "$dst mirrored, scanned and signed"
+    # The verdict is about $dst and says only that. The job stays red for
+    # the others, and `aegis image check` is where that surfaces as a red
+    # for the platform instead of for this request.
+    (( red_elsewhere == 0 )) \
+        || log_warn "$MIRROR_JOB is still red for the other entries named above: this exit code is about $dst, and ${AEGIS_CMD:-aegis} image check is what reports the rest"
     from_line "$dst" "$digest"
 }
 

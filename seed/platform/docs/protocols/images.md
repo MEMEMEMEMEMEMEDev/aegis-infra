@@ -175,7 +175,30 @@ scans clean.
 aegis image request python:3.12-slim --bump
 ```
 
-**The scan went red.** The gate is working, and it worked in the right
+**The scan went red — and first of all, on what.** The job mirrors and
+scans EVERY entry of `images.txt` on every run and fails at the end with
+the list of what broke, so a red build is not by itself evidence about
+the image you asked for. The command reads the console for the entries
+that actually failed before it says anything:
+
+- your image is among them: the findings are reported from ITS block of
+  the console, and the exception, if you write one, is scoped to the
+  scan targets of that block;
+- your image is not among them: it says so, names the entries that did
+  fail, and refuses `--allow` outright. An exception written there would
+  be scoped to another image's finding and would carry your measurement
+  under a binary you never looked at. Those entries are their own
+  requests, with their own measurements.
+- the console names no failing entry at all: the build died before the
+  per-image loop, nothing is attributed to anybody, and the last lines
+  of the build are printed instead.
+
+If your image was mirrored and signed in that same build, you get its
+`FROM` and exit 0, with a warning that `mirror-images` stays red for the
+others — the platform's red belongs to `aegis image check`, not to
+somebody else's request.
+
+When it IS your image, the gate worked, and it worked in the right
 order: the scan runs BEFORE the push, so nothing entered the registry.
 There are exactly two honest ways out.
 

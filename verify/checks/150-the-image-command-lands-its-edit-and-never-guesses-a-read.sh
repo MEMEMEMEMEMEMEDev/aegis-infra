@@ -102,6 +102,43 @@ if grep -q 'unread=0' <<< "$LB"; then
         || D150="$D150 do_list declares the unread counter and never increments it: the could_not that reads it is dead code, and an unreachable registry prints a full table of «no»;"
 fi
 
-if [[ -n "$D150" ]]; then fail "the image command's edit does not reach the job, or its reads are guessed:$D150"
-else pass "aegis image commits, pushes and verifies the remote branch before firing the job that reads it, and never turns an unanswered read into a verdict"; fi
+# ── the red of the job belongs to the entry that failed ──────────────
+# `mirror-images` mirrors and scans EVERY entry of images.txt on every
+# run and fails at the end with the list of what broke. Attributing that
+# red to whatever image was asked for today produced, verified over a
+# real console: «python:3.12-slim was NOT mirrored», the CRITICAL rows
+# of postgres listed under it, and `--allow <postgres CVE>` suggested
+# under the python request — a dated exception filed against the wrong
+# binary, carrying a measurement about another one.
+for fn in failed_entries console_slice; do
+    [[ -n "$(body_nc "$fn" "$IMG")" ]] \
+        || D150="$D150 aegis-image has no $fn: without it the console of a build that mirrors every entry cannot be scoped to the one that was asked for;"
+done
+LN_ATTR="$(grep -n 'failed_entries' <<< "$DR" | head -1 | cut -d: -f1)"
+LN_BLAME="$(grep -n 'was NOT mirrored' <<< "$DR" | head -1 | cut -d: -f1)"
+if [[ -z "$LN_ATTR" ]]; then
+    D150="$D150 do_request never asks which entries the build actually failed on: «X was NOT mirrored» is then said about whichever image was requested, true or not;"
+elif [[ -n "$LN_BLAME" ]] && (( LN_ATTR > LN_BLAME )); then
+    D150="$D150 do_request blames the requested image before reading who failed (line $LN_BLAME of the body, attribution at $LN_ATTR): the sentence is printed and only then checked;"
+fi
+grep -q 'report_scan "$slice"' <<< "$DR" \
+    || D150="$D150 do_request does not scope the scan report to this entry's block of the console: the findings of every other broken image get printed under this request, and an exception's paths would be scoped to them;"
+grep -q 'report_scan "$console"' <<< "$DR" \
+    && D150="$D150 do_request reports the scan over the WHOLE console: that is the defect itself — the rows belong to whatever entry produced them, not to the one that was asked for;"
+grep -q 'python3 - "$slice" "$ALLOW"' <<< "$DR" \
+    || D150="$D150 the scan targets an exception is scoped to are read from the whole console instead of this entry's block: the paths written into trivyignore.yaml would name another image's scan;"
+# The exception cannot be written under a request that did not fail.
+awk '
+  index($0, "grep -qxF")   { a = NR }
+  index($0, "red_elsewhere=1") { b = NR }
+  { L[NR] = $0 }
+  END {
+      if (!a || !b || a >= b) exit 1
+      for (i = a; i <= b; i++) if (index(L[i], "-z \"$ALLOW\"")) exit 0
+      exit 1
+  }' <<< "$DR" \
+    || D150="$D150 --allow is not refused when the build did not fail on the image being requested: the operator would write a dated exception, under the wrong request, whose measurement talks about another binary;"
+
+if [[ -n "$D150" ]]; then fail "the image command's edit does not reach the job, its reads are guessed, or a red is blamed on the wrong image:$D150"
+else pass "aegis image pushes what it commits before firing the job that reads it, never turns an unanswered read into a verdict, and blames a red only on the entry that produced it"; fi
 }
