@@ -1,8 +1,12 @@
 # teeth for check 151 (the product carries no literal credential)
 #
-# The three reds are the three shapes the check names, and red_1 is the
-# regression itself: what libexec/aegis-rotate carried until 2026-08-29
-# and what an automated scan flagged in the public repository.
+# One red per shape the check names, and red_1 is the regression itself:
+# what libexec/aegis-rotate carried until 2026-08-29 and what an
+# automated scan flagged in the public repository. red_4 and red_5 are
+# the same day's second lesson — the first three reds all wrote the
+# token BARE, on a line of its own, and that agreement between them is
+# what let a token pasted inside the syntax it belongs to pass green for
+# half a day.
 
 # an Authorization Basic with REAL base64 comes back into the tree.
 #
@@ -58,3 +62,23 @@ control_3() {
     printf '\n# the template writes: Authorization: Bearer __CF_TUNNEL_TOKEN__\n' \
         >> "$AEGIS_ROOT/seed/platform/ansible/inventory/group_vars/all.yml"
 }
+
+# ── inside the syntax the token belongs to (2026-08-29) ─────────────
+# The false negative these two were written for: `}` and `>` were on the
+# interpolation list, so the capture that runs to the `"}` closing a JSON
+# object, or to the `>` closing an HTML attribute, was read as a
+# placeholder and dropped. Pasting a token inside the body it travels in
+# is the most natural way for one to arrive, and it is the shape of the
+# alert that started this check — the first three reds all missed it
+# because they all wrote the token bare.
+red_4() {
+    printf '\n# the paste came in whole: {"Authorization": "Bearer tooth-bearer-inside-a-json"}\n' \
+        >> "$AEGIS_ROOT/lib/common.sh"
+}
+
+# the `>` half of the same fix: an HTML attribute closes the value too
+red_5() {
+    printf '\n<meta name="api-auth" content="Bearer tooth-token-in-an-html-attribute">\n' \
+        >> "$AEGIS_ROOT/docs/OPERATE.md"
+}
+

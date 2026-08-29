@@ -36,17 +36,29 @@ check() {
 #     an example nobody could use.
 #   · `Bearer` followed by a token of 16+ characters that is a VALUE.
 #   · `"password": "…"` inline in a JSON, with 12+ characters of value.
-#     Only the JSON spelling: a YAML `password:` in the seed is a
-#     template hole and already has an owner (check 003), and measuring
-#     it twice from two places is how two rules drift apart.
 #
 #   Allowed, because it is not a value:
-#   · anything carrying `$`, `{`, `}`, `<`, `>`, `%`, a backtick or a
-#     backslash — a shell/python/JS interpolation, a printf format, or
-#     a documentation placeholder such as `Bearer <key>`. This is why
+#   · anything carrying `$`, `{`, `<`, `%`, a backtick or a backslash —
+#     a shell/python/JS interpolation, a printf format, or a
+#     documentation placeholder such as `Bearer <key>`. This is why
 #     prose needs no exemption of its own: a document that writes the
 #     placeholder passes, and a document that pastes a REAL token does
 #     not, which is the behaviour wanted.
+#
+#     Only the OPENING characters are on that list, and that is a
+#     correction made the same day: `}` and `>` were on it too, and
+#     they turned the promise above into a lie. A real token pasted
+#     inside a JSON body — `{"Authorization": "Bearer <32 real
+#     characters>"}` — came out GREEN, because the capture runs to the
+#     `"}` that closes the object and that `}` was then read as an
+#     interpolation. The same for a Basic inside a JSON, and for a
+#     token inside an HTML attribute, which `>` closed. That is the
+#     most natural way for a token to arrive — inside the body it
+#     belongs to — and it is the shape of the alert that started all
+#     this. The closing punctuation of the surrounding syntax is
+#     TRIMMED by value() now instead of being read as a hole, and an
+#     interpolation still passes, because `${VAR}` and `<key>` are
+#     unmistakable by their opening character alone.
 #   · a value spelled `__NAME__` — the seed's placeholder convention,
 #     whose owner is check 003. It needs a rule of its own and it was
 #     the first thing the tooth found: underscore is not one of the
@@ -66,11 +78,23 @@ if python3 - "$AEGIS_ROOT" <<'EOF'
 import pathlib, re, sys
 
 ROOT = pathlib.Path(sys.argv[1])
-SKIP_DIRS = {".git", "__pycache__", "teeth"}
+
+# `.git` and `__pycache__` are noise wherever they appear; verify/teeth
+# is excluded by its PATH and not by its bare name. The difference is not
+# pedantry: `p in SKIP_DIRS for p in f.parts` would exempt any future
+# directory called `teeth` at any depth, and here the thing that would
+# stop being swept is CREDENTIALS.
+SKIP_ANYWHERE = {".git", "__pycache__"}
+TEETH = ("verify", "teeth")
+
+def is_swept(rel):
+    return not (SKIP_ANYWHERE & set(rel.parts)) and rel.parts[:2] != TEETH
 
 # A value that carries any of these is an interpolation, a format string
 # or a documentation placeholder — not something anybody can log in with.
-NOT_A_VALUE = set("${}<>%`\\")
+# OPENING characters only: see the header for what putting `}` and `>` in
+# here cost.
+NOT_A_VALUE = set("${<%`\\")
 
 def is_placeholder(v):
     return bool(NOT_A_VALUE & set(v)) or (v.startswith("__") and v.endswith("__"))
@@ -84,19 +108,23 @@ B64 = re.compile(r'^[A-Za-z0-9+/]{16,}={0,2}$')
 
 def value(raw):
     """the token with the punctuation of the surrounding syntax removed
-    (the quote that closes a shell -H, a trailing comma in a dict)"""
-    return raw.strip("'\",;)")
+    (the quote that closes a shell -H, a trailing comma in a dict, the
+    `"}` that closes the JSON object the header was pasted into, the `>`
+    that closes an HTML attribute)"""
+    return raw.strip("'\",;)}>]")
 
 found, n_files = [], 0
 for f in sorted(ROOT.rglob("*")):
-    if not f.is_file() or any(p in SKIP_DIRS for p in f.parts):
+    if not f.is_file():
+        continue
+    where = f.relative_to(ROOT)
+    if not is_swept(where):
         continue
     try:
         text = f.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
         continue
     n_files += 1
-    where = f.relative_to(ROOT)
     for i, line in enumerate(text.splitlines(), 1):
         for m in BASIC.finditer(line):
             v = value(m.group(1))
