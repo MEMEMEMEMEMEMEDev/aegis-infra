@@ -539,10 +539,25 @@ check_cf_dns() {
 # but because rule A27 (check 075) is uniform on purpose: whoever audits
 # a curl in this tree must not have to work out which of its arguments
 # were the safe ones.
+# IT REPORTS ITS OWN FAILURE, and the reason is a trap this file is
+# already standing in. Both callers of a check_* function invoke it as
+# `"$fn" || rc=$?`, and an AND-OR list SUSPENDS errexit for everything
+# inside the call — measured, not assumed: a `false` inside a function
+# inside a function called that way does not stop the script. So a mint
+# that failed (a full /dev/shm, a missing od) would NOT abort here: it
+# would leave the file EMPTY, the netrc or the JSON body would carry an
+# empty password, the service would answer 401 to it exactly as it does
+# to a random one, and the negative tooth would come out GREEN having
+# measured nothing. That is the failure this stack exists to refuse —
+# the one that looks like a pass. Returning 1 lets the caller answer
+# COULD NOT EVALUATE (2), which is the honest verdict, and lets it clean
+# up the tmpfs files that DO hold the real credential.
 _wrong_password() {          # <path> — mints it and leaves it at 600
     local f="$1"
-    : > "$f"; chmod 600 "$f"
-    od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > "$f"
+    : > "$f" || return 1
+    chmod 600 "$f" || return 1
+    od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > "$f" || return 1
+    [[ -s "$f" ]] || return 1     # an empty draw is the silent case above
 }
 
 check_argocd_admin() {
@@ -573,7 +588,7 @@ check_argocd_admin() {
     # would have reported "false password -> (expected 401)" over a
     # perfectly healthy ArgoCD. A marker that has to be appended to code
     # is a marker that can break the code; not needing one is the fix.
-    _wrong_password "$p.bad"
+    _wrong_password "$p.bad" || { rm -f "$p" "$p.body" "$p.bad"; return 2; }
     python3 -c 'import json,sys; print(json.dumps({"username":"admin","password":open(sys.argv[1]).read().strip()}))' \
         "$p.bad" > "$p.bad-body"; chmod 600 "$p.bad-body"
     code_bad="$(curl_access -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
@@ -680,7 +695,7 @@ check_grafana_admin() {
     # credential-shaped is written down here. The broken continuation
     # described in check_argocd_admin was in this line too, so this call
     # was reaching curl with no URL either.
-    _wrong_password "$p.bad"
+    _wrong_password "$p.bad" || { rm -f "$p" "$p.netrc" "$p.bad"; return 2; }
     printf 'machine grafana.%s login %s password %s\n' \
         "$ROOT_DOMAIN" "$u" "$(cat "$p.bad")" > "$p.bad-netrc"
     chmod 600 "$p.bad-netrc"
@@ -757,7 +772,7 @@ check_ntfy_operador() {
     # request with no credential at all, which is why the acceptance
     # below takes either — the value here produces the first one.
     # This line carried the same broken continuation as the other two.
-    _wrong_password "$p.bad"
+    _wrong_password "$p.bad" || { rm -f "$p" "$p.netrc" "$p.bad"; return 2; }
     printf 'machine ntfy.%s login operador password %s\n' \
         "$ROOT_DOMAIN" "$(cat "$p.bad")" > "$p.bad-netrc"
     chmod 600 "$p.bad-netrc"
