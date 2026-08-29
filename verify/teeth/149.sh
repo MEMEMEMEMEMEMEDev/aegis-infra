@@ -2,8 +2,9 @@
 #
 # The mutations are the ways this really breaks: a step that
 # disappears, a step half written, a generator that stops saying no, a
-# validator that lets a broken plans.yaml through, and a services.yaml
-# whose numbers are ignored. Each was applied over a copy of the tree
+# validator that lets a broken plans.yaml through, a services.yaml
+# whose numbers are ignored, and a tenant that gets back the pen over
+# its own size. Each was applied over a copy of the tree
 # and the check went red; the three controls stayed green.
 PLANS="seed/platform/plans.yaml"
 ORG="lib/aegis/org.py"
@@ -96,6 +97,19 @@ new = ('    declared = (cat["tipos"][kind] or {}).get("recursos") or {}\n'
         '    return {k: declared.get(k, PLATFORM_RESOURCES[kind][k])\n'
         '            for k in PLATFORM_RESOURCES[kind]}\n')
 open(p, "w", encoding="utf-8").write(t.replace(old, new, 1))
+PY
+}
+
+# The tenant gets the pen back: without `kyverno.io/Policy` in its
+# AppProject's blacklist it can ship a Policy of its own into org-<org>
+# and mutate its pods' resources back to whatever it likes.
+red_7() {
+    python3 - "$AEGIS_ROOT/$ORG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p, encoding="utf-8").read()
+old = "    - {{group: kyverno.io, kind: Policy}}\n"
+assert t.count(old) == 1
+open(p, "w", encoding="utf-8").write(t.replace(old, "", 1))
 PY
 }
 

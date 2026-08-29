@@ -1,4 +1,4 @@
-# title: a service's size is a word with four numbers behind it, and neither plans.yaml nor services.yaml gets to be half written
+# title: a service's size is a word with four numbers behind it, neither file gets to be half written, and the tenant cannot take the pen back
 # origin: new in v3 — 2026-08-29, a service's resources lived in the tenant's repo: 50m/32Mi for everything, and that kills a JVM on start-up
 check() {
 # WHAT THIS PROTECTS, in the order the mechanism runs.
@@ -17,6 +17,13 @@ check() {
 #    Invalid naming the file, never a python traceback: a KeyError says
 #    neither which file nor what is missing from it.
 #
+# 3. THE PEN. The Policy is namespaced and lives in org-<org>, which is
+#    the one namespace the tenant's AppProject may write. Without
+#    `kyverno.io/Policy` in its namespaceResourceBlacklist the tenant
+#    can ship a Policy of its own and undo the platform's numbers,
+#    leaving only the ResourceQuota —the coarse wall `tamano` exists to
+#    refine— holding.
+#
 # WHAT IS DERIVED AND WHAT IS TYPED, because the difference is the
 # check's own honesty:
 #   derived from lib/aegis/org.py  the four keys a size is made of
@@ -24,8 +31,8 @@ check() {
 #                                  gets when it names none
 #                                  (DEFAULT_SIZE), and the table of
 #                                  what a provided service asks for
-#   derived from plans.yaml        which plan gives least, so the
-#                                  contract that must go through is
+#   derived from plans.yaml        which plan gives least and which
+#                                  gives most, so the contracts are
 #                                  built from the file's own arithmetic
 #                                  and not from numbers typed here,
 #                                  which would rot the first time a plan
@@ -114,13 +121,22 @@ def mem(d):
 
 
 if not usable:
-    print("    plans.yaml does not hold together: the rejections were not "
-          "exercised", file=sys.stderr)
+    print("    plans.yaml does not hold together: the rejections and the "
+          "boundary were not exercised", file=sys.stderr)
 else:
-    # Derived, never typed: the plan that gives least is what makes the
-    # positive case real —the largest one would never be tight— and a
-    # number typed here would rot the first time a plan is re-tuned.
+    # Derived, never typed: the plan that gives least and the size that
+    # asks most are what make the «does not fit» case real, and a number
+    # typed here would rot the first time a step is re-tuned.
     smallest = min(quotas, key=lambda q: mem(quotas[q]))
+    largest = max(quotas, key=lambda q: mem(quotas[q]))
+    biggest = max(sizes, key=lambda s: mem(sizes[s]))
+    # The contract everything that RENDERS below is built from: two
+    # services that must not come out sized alike —one names a `tamano`
+    # and the other takes the default— plus a database, which is what
+    # the platform provides and the contract has no say over.
+    svcs = [{"nombre": "api", "tipo": "worker", "tamano": biggest},
+            {"nombre": "front", "tipo": "worker"},
+            {"nombre": "datos", "tipo": "postgres"}]
 
     # ── 2a. a size plans.yaml does not carry is REFUSED ──────────────
     invented = "no-such-size"
@@ -254,17 +270,48 @@ else:
                    f"than one that is rejected, because whoever wrote it believes "
                    f"they sized something")
 
+    # ── 5. and the tenant cannot take the pen back ──────────────────
+    (tmp / "orgs" / "talla.yaml").write_text(
+        yaml.safe_dump(contract(largest, svcs), sort_keys=False), encoding="utf-8")
+    try:
+        projects = [d for d in yaml.safe_load_all(gen.render_appprojects())
+                    if isinstance(d, dict)
+                    and (d.get("metadata") or {}).get("name") == "aegis-tenant-talla"]
+    except Exception as e:                               # noqa: BLE001
+        projects = []
+        bad.append(f"the tenant's AppProject does not render: {type(e).__name__}({e})")
+    if not projects:
+        bad.append("no AppProject was derived for an organization that declares a "
+                   "repo: the boundary this check measures does not exist")
+    else:
+        blocked = {(e.get("group"), e.get("kind")) for e
+                   in projects[0]["spec"].get("namespaceResourceBlacklist") or []}
+        for group, kind, why in (
+                ("kyverno.io", "Policy",
+                 "the Policy that fixes each service's size is namespaced and "
+                 "lives in org-<org>, the one namespace this project may write: "
+                 "without this line the tenant ships a Policy of its own, mutates "
+                 "its pods back to whatever it likes, and what is left holding is "
+                 "the ResourceQuota — the coarse wall `tamano` exists to refine"),
+                ("", "ResourceQuota",
+                 "the organization would raise its own ceiling"),
+                ("", "LimitRange",
+                 "the organization would rewrite the floor the platform set")):
+            if (group, kind) not in blocked:
+                bad.append(f"the tenant's AppProject does not blacklist "
+                           f"{(group + '/') if group else ''}{kind}: {why}")
+
 shutil.rmtree(tmp, ignore_errors=True)
 print(f"    {len(sizes)} sizes in plans.yaml · {len(gen.SIZE_KEYS)} numbers each · "
-      f"default `{gen.DEFAULT_SIZE}` · a partial plans.yaml and a partial "
-      f"services.yaml both rejected", file=sys.stderr)
+      f"default `{gen.DEFAULT_SIZE}` · a partial plans.yaml, a partial "
+      f"services.yaml and the tenant's blacklist exercised", file=sys.stderr)
 for m in bad:
     print(f"    {m}", file=sys.stderr)
 sys.exit(1 if bad else 0)
 PY
 if [[ -n "$D149" ]]; then
-    fail "the service sizes are not a vocabulary the generator can serve$D149"
+    fail "the service sizes are not a vocabulary the platform can serve and keep$D149"
 else
-    pass "a size is a word with four numbers behind it, and a plans.yaml or a services.yaml with a hole in it is refused by name instead of surfacing as a traceback"
+    pass "a size is a word with four numbers behind it, a plans.yaml or a services.yaml with a hole in it is refused by name, and the tenant cannot write the Policy that sizes it"
 fi
 }

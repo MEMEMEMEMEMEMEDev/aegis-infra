@@ -2460,6 +2460,17 @@ spec:
   namespaceResourceBlacklist:
     - {{group: "", kind: ResourceQuota}}
     - {{group: "", kind: LimitRange}}
+    # And the Kyverno Policy, since 2026-08-29, for the SAME reason as
+    # the two above: it is where each service's size is fixed. Kyverno's
+    # namespaced Policy is written INSIDE org-{org}, which is the one
+    # namespace this project may write, so without this line the tenant
+    # could ship a Policy of its own that mutates its pods' resources
+    # back to whatever it likes. What would be left holding is the
+    # ResourceQuota — the coarse wall that `tamano` exists precisely to
+    # refine, since it does not stop one service from eating another's
+    # share. Taking the pen away is the only bound an AppProject can
+    # express: it filters by kind, never by the contents of a field.
+    - {{group: kyverno.io, kind: Policy}}
     - {{group: rbac.authorization.k8s.io, kind: Role}}
     - {{group: rbac.authorization.k8s.io, kind: RoleBinding}}
     # And it CANNOT write its own routing (#54). This is the one that
