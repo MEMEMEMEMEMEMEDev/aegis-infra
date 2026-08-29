@@ -209,6 +209,34 @@ for call in ast.walk(tree):
                     argv_hits.append(f"line {element.lineno}: argv interpolates «{ident}»")
 want(not argv_hits, f"a credential travels in argv: {'; '.join(sorted(set(argv_hits))[:3])}")
 
+# ── 3b. and nothing else travels raw into the pod's shell ───────────
+# What the pod runs is a `sh -c` script. The database name that goes into
+# it does NOT come from a contract: it comes from the live server, where
+# the tenant —POSTGRES_USER is the superuser of its own instance— can
+# CREATE DATABASE with the name it likes, backtick and `$(...)` included.
+# `sql_literal` protects the SQL and not the shell, and json.dumps quotes
+# with DOUBLE quotes, inside which the shell still expands. So every
+# interpolation of a command script has to come out of `shq` (or of
+# `sql_identifier`, for a name that is SQL and not an argument).
+raw_shell = []
+for n in ast.walk(tree):
+    if not isinstance(n, ast.JoinedStr):
+        continue
+    text = ast.unparse(n)
+    if "$POSTGRES_USER" not in text and "exec psql" not in text:
+        continue
+    for piece in n.values:
+        if not isinstance(piece, ast.FormattedValue):
+            continue
+        quoted = isinstance(piece.value, ast.Call) and \
+            getattr(piece.value.func, "id", "") in ("shq", "sql_identifier")
+        if not quoted:
+            raw_shell.append(f"line {piece.lineno}: {ast.unparse(piece.value)}")
+want(not raw_shell,
+     f"a command script interpolates without quoting for the shell "
+     f"({'; '.join(sorted(set(raw_shell))[:3])}): a database name with a "
+     f"backtick becomes a command substitution inside the pod")
+
 # ── 4. what an organization weighs can be asked for from outside ────
 # The instance's storage class is local-path: it does not measure or
 # limit the disk a PVC really uses, so nobody outside the pod could say

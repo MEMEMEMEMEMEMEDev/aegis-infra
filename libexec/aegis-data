@@ -279,8 +279,14 @@ def shq(value):
     """A shell argument, quoted.
 
     Nothing that goes through here is a secret —a secret does not travel
-    in argv, see `realign_role`— but a role and a database name come out
-    of a contract, and a contract is text a person writes.
+    in argv, see `realign_role`—: what this protects is the OTHER layer.
+    What the pod runs is a `sh -c` script, and into that script go the
+    role and the database name. The role comes out of a contract, which
+    is text a person writes; the database name comes out of the LIVE
+    SERVER, where the tenant —POSTGRES_USER is the superuser of its own
+    instance— can create one with whatever name it likes. `sql_literal`
+    and `sql_identifier` protect the SQL; this protects the shell that
+    carries it.
     """
     return "'" + value.replace("'", "'\\''") + "'"
 
@@ -493,9 +499,23 @@ def credential_fingerprint(ns, secret):
 
 
 def psql(ns, pod, database, sql):
-    """A one-line query against a database, returns stdout."""
+    """A one-line query against a database, returns stdout.
+
+    Both interpolations go through `shq`, and the query used to go
+    through `json.dumps`. What the pod runs is a `sh -c` script, and
+    json.dumps quotes with DOUBLE quotes — inside which the shell still
+    expands `$` and the backtick. `sql_literal` protects the SQL; the
+    shell is another layer and wants its own quoting.
+
+    It is not hypothetical about the database name: it does not come from
+    a contract, it comes from `databases_of()`, that is, from the live
+    server. The tenant's application connects as POSTGRES_USER, which is
+    the superuser of ITS instance, and can `CREATE DATABASE` with the
+    name it likes — a name with `$(...)` would be a command substitution
+    inside its own postgres container.
+    """
     r = kubectl(["exec", "-n", ns, pod, "--", "sh", "-c",
-                 f'psql -U "$POSTGRES_USER" -d {database} -Atc {json.dumps(sql)}'])
+                 f'psql -U "$POSTGRES_USER" -d {shq(database)} -Atc {shq(sql)}'])
     return (r.stdout or "").strip(), r.returncode
 
 
@@ -562,7 +582,8 @@ def capture_database(b, target):
     databases = []
     for database in databases_of(ns, pod):
         d = kubectl(["exec", "-n", ns, pod, "--", "sh", "-c",
-                     f'pg_dump -U "$POSTGRES_USER" --clean --if-exists -d {database}'],
+                     f'pg_dump -U "$POSTGRES_USER" --clean --if-exists '
+                     f'-d {shq(database)}'],
                     binary=True)
         if d.returncode != 0:
             die(f"the pg_dump of {database} failed: "
@@ -1293,11 +1314,13 @@ def restore(bundle, org, force):
                     alive_dbs = databases_of(p["ns"], pod)
                     if database["nombre"] not in alive_dbs:
                         psql(p["ns"], pod, "postgres",
-                             f'CREATE DATABASE "{database["nombre"]}"')
+                             "CREATE DATABASE "
+                             + sql_identifier(database["nombre"]))
                         step(f"database {database['nombre']} did not exist: recreated")
                     sql = open(os.path.join(tmp, database["archivo"]), "rb").read()
                     r = kubectl(["exec", "-i", "-n", p["ns"], pod, "--", "sh", "-c",
-                                 f'psql -U "$POSTGRES_USER" -d {database["nombre"]} '
+                                 f'psql -U "$POSTGRES_USER" '
+                                 f'-d {shq(database["nombre"])} '
                                  f'-v ON_ERROR_STOP=1'],
                                 binary=True, stdin_data=sql)
                     err = (r.stderr or b"").decode(errors="replace")

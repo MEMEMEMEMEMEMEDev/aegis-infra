@@ -146,6 +146,21 @@ open(p, "w").write(t.replace(old, new, 1))
 PY
 }
 
+# the shell under the SQL: the query goes back to json.dumps —DOUBLE
+# quotes, where `$` and the backtick still expand— and the database name
+# goes in raw. The name comes from the live server, where the tenant is
+# superuser and can create one called `$(...)`
+red_10() {
+    python3 - "$AEGIS_ROOT/$DATA" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = 'f\'psql -U "$POSTGRES_USER" -d {shq(database)} -Atc {shq(sql)}\''
+new = 'f\'psql -U "$POSTGRES_USER" -d {database} -Atc {json.dumps(sql)}\''
+assert t.count(old) == 1
+open(p, "w").write(t.replace(old, new, 1))
+PY
+}
+
 # control: a comment may name the credential
 control_1() {
     printf '\n# The word password appears here on purpose: a comment explains,\n# it does not execute.\n' \
