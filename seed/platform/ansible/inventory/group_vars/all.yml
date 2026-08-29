@@ -59,6 +59,33 @@ userland_pins:
 # why the private ranges are allowed there. Nothing in the seed reads
 # this value (`grep -rn node-name` returns this line and nothing else);
 # it is what `kubectl get nodes` shows.
+#
+# MIGRATION, and it is not cosmetic on a LIVE instance. In the tree the
+# rename is inert; in a cluster the node name is a scheduling key and
+# the anchor of every local-path volume, because the provisioner stamps
+# the PV it creates with a nodeAffinity to the node the pod ran on.
+# playbooks/install-k3s.yml runs the installer only
+# `when: k3s_version not in k3s_ver.stdout`, so an instance already on
+# this k3s version does NOT re-run it and keeps the node it has (the
+# author's own is still the old `aegis-primary`). The next BUMP of
+# k3s_version does re-run it, and the installer rewrites the service's
+# ExecStart out of these flags: k3s then registers under the new name,
+# the old Node object is left orphaned, and the volumes pinned to it —
+# garage-system and every organization's data — stop being schedulable.
+# Silently: the pod goes Pending and nothing says why.
+#
+# So on an instance that already exists, do NOT let the rename ride
+# along with a k3s bump. Either keep the old name for that instance
+# (override k3s_install_flags in the instance's own inventory — this is
+# the seed's default, not a law), or rename ON PURPOSE, as a migration
+# of its own: back up first, and afterwards delete the orphaned Node
+# object and restore the volumes onto the new one.
+#
+# NOT MEASURED AGAINST A LIVE CLUSTER — it is derived from what the
+# playbook and the provisioner do, and it is the first thing to exercise
+# the next time there is an instance to bump. Said out loud here because
+# a migration note that exists only in a commit message is a note nobody
+# reads at the moment it matters.
 k3s_install_flags: >-
   --write-kubeconfig-mode 600
   --disable=traefik
