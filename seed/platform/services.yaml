@@ -175,14 +175,20 @@ tipos:
           'pg_dumpall -U "$POSTGRES_USER" --globals-only'
         kubectl exec -n org-<org> <service>-0 -- sh -c
           'pg_dump -U "$POSTGRES_USER" --clean --if-exists -d <database>'
+      # The globals first and then each archive, over STDIN; afterwards
+      # the role is realigned against the LIVE Secret and the credential
+      # is proved over the loopback, because the dump carries the SCRAM
+      # hash that was right on the machine that took the capture and
+      # wrong on any other (check 154).
+      #
+      # THE VALUE OF THESE KEYS IS THE COMMAND AND NOTHING ELSE. The
+      # reasoning goes in comments, above, where it belongs: check 156
+      # reads these scalars looking for a credential in argv, and prose
+      # that TALKS about one is indistinguishable from one that puts it
+      # there.
       restore: |
         kubectl exec -i -n org-<org> <service>-0 -- sh -c
           'psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1'
-        the globals first and then each archive, over STDIN; afterwards
-        the role is realigned against the LIVE Secret and the credential
-        is proved over the loopback, because the dump carries the SCRAM
-        hash that was right on the machine that took it and wrong on any
-        other (check 154).
 
   # A cache per organization. It holds a COPY of what somebody else
   # already owns — rendered pages, sessions, a shopping cart on its way
@@ -310,6 +316,11 @@ tipos:
       # deletes the credential the restore is about to need. What is
       # captured is the tenant's databases; the credential is not
       # captured because the live Secret is the authority.
+      # The credential is read from the mounted Secret into a shell
+      # variable and the script travels on STDIN. `listDatabases` needs
+      # authentication and mongosh takes no password from a file, so the
+      # here-document is the only road that keeps it off the command
+      # line.
       databases: |
         kubectl exec -n org-<org> <service>-0 -- sh -c '
           U=$(cat /etc/aegis/credential/usuario)
@@ -321,10 +332,11 @@ tipos:
           .filter(n => !["admin", "local", "config"].includes(n))
           .join("\n")
         EOF'
-        the credential is read from the mounted Secret into a shell
-        variable and the script travels on STDIN: `listDatabases` needs
-        authentication and mongosh has no --password-file, so the only
-        road that keeps it out of argv is the here-document.
+      # `--config` is the database tools' documented way of taking the
+      # password from a FILE; the flag that takes it inline would put it
+      # in argv. The file is built by redirection —`printf` writes the
+      # key, `cat` writes the value— so the material is not an argument
+      # of anything either, and /tmp is the emptyDir this pod mounts.
       dump: |
         kubectl exec -n org-<org> <service>-0 -- sh -c '
           umask 077
@@ -335,11 +347,11 @@ tipos:
                     --config=/tmp/aegis-dump.yaml \
                     --db=<database> --archive --gzip --quiet
           rc=$?; rm -f /tmp/aegis-dump.yaml; exit $rc'
-        `--config` is the tools' documented way of taking the password
-        from a FILE; --password would put it in argv. The file is built
-        by redirection —`printf` writes the key, `cat` writes the value—
-        so the material is not an argument of anything either, and /tmp
-        is the emptyDir this pod already mounts.
+      # The archive arrives on STDIN, one database at a time. `--drop`
+      # with `--nsInclude` scoped to that database drops the COLLECTIONS
+      # it is about to restore and nothing else: without the scope it
+      # would reach the admin database, which is the accident the
+      # comment above names.
       restore: |
         kubectl exec -i -n org-<org> <service>-0 -- sh -c '
           umask 077
@@ -351,11 +363,6 @@ tipos:
                        --archive --gzip --drop --nsInclude="<database>.*" \
                        --quiet
           rc=$?; rm -f /tmp/aegis-dump.yaml; exit $rc'
-        the archive arrives on STDIN, one database at a time. `--drop`
-        with `--nsInclude` scoped to that database drops the COLLECTIONS
-        it is about to restore and nothing else: without the scope it
-        would reach the admin database, and that is the accident this
-        block's comment names.
 
 # S3 storage is not a service `tipo` but a section of the contract
 # (`almacenamiento.bucket`): an organization does not deploy a Garage,
