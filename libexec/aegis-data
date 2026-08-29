@@ -95,18 +95,23 @@ postgres  `pg_dumpall`, NOT `pg_dump`. Measured: the ROLES live outside
           (there is a `postgres` one besides the contract's).
 
 bucket    Listing and download over S3 with a SigV4 signature. The object
-          is stored with its key and its ETag, and the ETag is
-          re-verified when restoring.
+          travels with its key and its sha256; on restoring, the sha256
+          is re-verified before writing and the size after.
 
 THE PASSWORD IS NOT COPIED INTO THE BUNDLE, its FINGERPRINT is stored.
 The globals dump already brings each role's SCRAM hash, so the restored
-database accepts the original password — the one that goes on living in
-the Secret. What can go wrong is that the Secret rotated BETWEEN the
-capture and the restore: there the restored database would expect one
-password and the pod would present another. That is why the manifest
-stores the sha256 of the one that was there, and `restore` COMPARES.
-Copying the secret would have hidden that discrepancy by creating it in
-silence; storing the fingerprint detects it.
+database accepts the password THAT WAS THERE AT CAPTURE TIME. That is
+right on the machine that took the capture and wrong on any other one:
+the new instance generated its own credential, the dump knows nothing
+about it, and the database ends up expecting one password while the pod
+presents another. The manifest therefore stores the sha256 of the one
+that was there —`restore` COMPARES, and a difference is worth a person,
+because restoring a machine is not the same operation as moving an
+organization into a new one— and once the dump is loaded, `restore`
+REALIGNS the role with the live Secret and proves that the credential
+opens the database. Copying the secret into the bundle would have hidden
+the discrepancy by creating it in silence; storing the fingerprint
+detects it, and realigning closes it.
 """
 import argparse
 import base64
@@ -242,6 +247,46 @@ def kubectl(args, binary=False, stdin_data=None):
     return r
 
 
+def secret_value(ns, secret, key):
+    """One key of a Secret, in bytes. It is used, never printed.
+
+    There is ONE door and it returns bytes: whoever calls it decides what
+    to do with them, and nobody has the excuse of dumping the whole
+    object with `-o yaml` to see what is inside. It exists because the
+    restore needs the credential OF THE INSTANCE IT IS RESTORING INTO —
+    the bundle deliberately carries none.
+    """
+    r = kubectl(["get", "secret", secret, "-n", ns, "-o",
+                 "jsonpath={.data." + key + "}"])
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    return base64.b64decode(r.stdout.strip())
+
+
+def shq(value):
+    """A shell argument, quoted.
+
+    Nothing that goes through here is a secret —a secret does not travel
+    in argv, see `realign_role`— but a role and a database name come out
+    of a contract, and a contract is text a person writes.
+    """
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def sql_identifier(name):
+    return '"' + name.replace('"', '""') + '"'
+
+
+def sql_literal(value):
+    """A SQL string literal.
+
+    With `standard_conforming_strings` —on by default since 9.1, and the
+    engine here is 17— the backslash is an ordinary character, so
+    doubling the quote is the whole escape.
+    """
+    return "'" + value.replace("'", "''") + "'"
+
+
 # ── discovery ───────────────────────────────────────────────────────
 #
 # The same as aegis registry and for the same reason: the list is NOT
@@ -319,6 +364,60 @@ def s3(method, host, path, query, ak, sk, region="garage", body=b""):
         return e.code, e.read(), dict(e.headers)
 
 
+def s3_credential(ns):
+    """The S3 pair of a namespace, out of its live `garage` Secret.
+
+    Capture reads it to take the objects out; restore reads it to put
+    them back — and on restore it is decisive that it be THIS instance's
+    and not the bundle's: a bundle carries objects, never keys, so
+    restoring on a new machine has to sign with the pair that machine
+    generated.
+    """
+    ak = secret_value(ns, "garage", "AWS_ACCESS_KEY_ID")
+    sk = secret_value(ns, "garage", "AWS_SECRET_ACCESS_KEY")
+    if ak is None or sk is None:
+        die(f"no S3 credential in {ns}/garage")
+    return ak.decode().strip(), sk.decode().strip()
+
+
+def bucket_listing(host, bucket, ak, sk):
+    """Every object in a bucket: its key and its size, paging included.
+
+    ONE lister for the three that need it —capture, restore and the
+    measurement—, because the paging of ListObjectsV2 is exactly the kind
+    of detail that gets written well once and badly the other two times:
+    forgetting the continuation token does not fail, it returns the first
+    thousand objects and says nothing.
+
+    The size comes out of the listing itself, which is why asking how much
+    a bucket weighs costs one request per thousand objects and not one
+    request per object.
+    """
+    objects, token, go_on = [], None, True
+    while go_on:
+        q = {"list-type": "2"}
+        if token:
+            q["continuation-token"] = token
+        st, body, _ = s3("GET", host, f"/{bucket}", q, ak, sk)
+        if st != 200:
+            die(f"listing {bucket} gave HTTP {st}: {body[:200]!r}")
+        root = ET.fromstring(body)
+        nsx = {"s3": root.tag.split("}")[0].strip("{")} if "}" in root.tag else {}
+
+        def h(n, p_):
+            return n.find(f"s3:{p_}", nsx) if nsx else n.find(p_)
+
+        for c in (root.findall("s3:Contents", nsx) if nsx else root.findall("Contents")):
+            size = h(c, "Size")
+            objects.append({"clave": h(c, "Key").text,
+                            "bytes": int(size.text) if size is not None else -1})
+        tr = h(root, "IsTruncated")
+        go_on = tr is not None and tr.text == "true"
+        nt = h(root, "NextContinuationToken")
+        token = nt.text if nt is not None else None
+    return objects
+
+
 class Tunnel:
     """port-forward to Garage's S3.
 
@@ -365,11 +464,8 @@ class Tunnel:
 # ── capture ─────────────────────────────────────────────────────────
 def credential_fingerprint(ns, secret):
     """sha256 of the live password, WITHOUT bringing it into the bundle."""
-    r = kubectl(["get", "secret", secret, "-n", ns, "-o",
-                 "jsonpath={.data.password}"])
-    if r.returncode != 0 or not r.stdout.strip():
-        return None
-    return hashlib.sha256(base64.b64decode(r.stdout.strip())).hexdigest()
+    v = secret_value(ns, secret, "password")
+    return hashlib.sha256(v).hexdigest() if v is not None else None
 
 
 def psql(ns, pod, database, sql):
@@ -471,44 +567,24 @@ def capture_database(b, target):
 
 
 def capture_bucket(bk, target):
-    r = kubectl(["get", "secret", "garage", "-n", bk["ns"], "-o", "json"])
-    if r.returncode != 0:
-        die(f"no S3 credential in {bk['ns']}/garage")
-    d = json.loads(r.stdout)["data"]
-    ak = base64.b64decode(d["AWS_ACCESS_KEY_ID"]).decode().strip()
-    sk = base64.b64decode(d["AWS_SECRET_ACCESS_KEY"]).decode().strip()
-
+    ak, sk = s3_credential(bk["ns"])
     obj_dir = os.path.join(target, f"{bk['org']}-bucket")
     os.makedirs(obj_dir, exist_ok=True)
     objects = []
     with Tunnel("garage-system", "garage", 3900) as t:
-        go_on, token = True, None
-        while go_on:
-            q = {"list-type": "2"}
-            if token:
-                q["continuation-token"] = token
-            st, body, _ = s3("GET", t.host, f"/{bk['bucket']}", q, ak, sk)
+        for listed in bucket_listing(t.host, bk["bucket"], ak, sk):
+            key = listed["clave"]
+            st, data, _ = s3("GET", t.host, f"/{bk['bucket']}/{key}", {}, ak, sk)
             if st != 200:
-                die(f"listing {bk['bucket']} gave HTTP {st}: {body[:200]!r}")
-            root = ET.fromstring(body)
-            nsx = {"s3": root.tag.split("}")[0].strip("{")} if "}" in root.tag else {}
-            def h(n, p):
-                return n.find(f"s3:{p}", nsx) if nsx else n.find(p)
-            for c in (root.findall("s3:Contents", nsx) if nsx else root.findall("Contents")):
-                key = h(c, "Key").text
-                st2, data, headers = s3("GET", t.host,
-                                        f"/{bk['bucket']}/{key}", {}, ak, sk)
-                if st2 != 200:
-                    die(f"downloading {key} gave HTTP {st2}")
-                safe = key.replace("/", "%2F")
-                open(os.path.join(obj_dir, safe), "wb").write(data)
-                objects.append({"clave": key, "archivo": safe,
-                                "bytes": len(data),
-                                "sha256": hashlib.sha256(data).hexdigest()})
-            tr = h(root, "IsTruncated")
-            go_on = tr is not None and tr.text == "true"
-            nt = h(root, "NextContinuationToken")
-            token = nt.text if nt is not None else None
+                die(f"downloading {key} gave HTTP {st}")
+            # The key becomes a FLAT name: a key with slashes is a
+            # directory tree the tar would have to reproduce, and the
+            # restore reads the key from the manifest anyway.
+            safe = key.replace("/", "%2F")
+            open(os.path.join(obj_dir, safe), "wb").write(data)
+            objects.append({"clave": key, "archivo": safe,
+                            "bytes": len(data),
+                            "sha256": hashlib.sha256(data).hexdigest()})
     return {"tipo": "bucket", "org": bk["org"], "bucket": bk["bucket"],
             "directorio": f"{bk['org']}-bucket", "objetos": objects,
             "total_bytes": sum(o["bytes"] for o in objects)}
@@ -889,6 +965,180 @@ def cut_connections(ns, pod):
              'WHERE pid <> pg_backend_pid() AND datname IS NOT NULL;"'])
 
 
+def role_can_log_in(ns, pod, user, password, database):
+    """Opens the database WITH the Secret's credential, the way the app does.
+
+    Over the unix socket this would prove NOTHING: the image's pg_hba
+    trusts local connections, so a wrong password gets in all the same and
+    the test would be green by construction. 127.0.0.1 goes through the
+    `host` rules, which are the ones the application meets — the same
+    principle as everywhere else here: the defining test is the one the
+    real consumer makes.
+
+    The password reaches the container over stdin and is read by the shell
+    that is already inside. It never appears in argv, not on the host's
+    side and not in the pod's, which is where `/proc/PID/cmdline` is
+    world-readable.
+    """
+    r = kubectl(["exec", "-i", "-n", ns, pod, "--", "sh", "-c",
+                 "IFS= read -r PGPASSWORD; export PGPASSWORD; "
+                 f"exec psql -h 127.0.0.1 -U {shq(user)} -d {shq(database)} "
+                 f"-Atc {shq('SELECT 1')}"],
+                binary=True, stdin_data=(password + "\n").encode())
+    return r.returncode == 0 and (r.stdout or b"").strip() == b"1"
+
+
+def realign_role(ns, pod, secret, database):
+    """Puts the role's password back in step with the Secret of THIS instance.
+
+    The globals dump carries the SCRAM hash each role had AT CAPTURE
+    TIME, so loading it reinstalls the OLD password. Restoring on the
+    machine that took the capture, that is exactly what you want.
+    Restoring on a NEW one it is not: that instance generated its own
+    credential, with its own key, and the dump knows nothing about it —
+    the database ends up expecting one password and the pod presenting
+    another. The symptom is an `authentication failed` in the
+    application, which looks like a bug in the application.
+
+    Measured in the rehearsal of 2026-08-27: the restore finished, said
+    it was verified, and the organization did not come up until somebody
+    typed an ALTER ROLE by hand. A step that is documented and not
+    executed is a step that does not exist.
+
+    The password never becomes an argument: the statement travels as
+    psql's script, over stdin, the same road the dump takes.
+    """
+    user = secret_value(ns, secret, "usuario")
+    password = secret_value(ns, secret, "password")
+    if user is None or password is None:
+        die(f"{ns}/{secret} does not carry `usuario` and `password`: the role "
+            f"cannot be realigned, and a restore without realigning leaves the "
+            f"application locked out of its own database")
+    user = user.decode(errors="replace").strip()
+    password = password.decode(errors="replace")
+    if any(c in password for c in "\r\n\x00"):
+        die(f"the password in {ns}/{secret} carries a line break: it cannot "
+            f"travel over a line-oriented channel — and the container's "
+            f"environment variable would not carry it either, so the "
+            f"credential is already broken before this")
+
+    sql = (f"ALTER ROLE {sql_identifier(user)} WITH LOGIN "
+           f"PASSWORD {sql_literal(password)};\n")
+    r = kubectl(["exec", "-i", "-n", ns, pod, "--", "sh", "-c",
+                 'psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1'],
+                binary=True, stdin_data=sql.encode())
+    if r.returncode != 0:
+        # Its output is NOT reproduced, and that is not laziness: on a
+        # syntax error psql echoes the offending LINE, and that line is
+        # the one carrying the credential.
+        die(f"the ALTER ROLE over {ns}/{pod} failed (psql rc {r.returncode}). "
+            f"Its output is not shown: the statement that failed carries the "
+            f"credential")
+    if not role_can_log_in(ns, pod, user, password, database):
+        die(f"the ALTER ROLE reported no error and the credential of "
+            f"{ns}/{secret} still does not open {database}. That the command "
+            f"did not complain is not proof: the drill of 2026-08-09 reported "
+            f"success over a database that had been deleted")
+    return user
+
+
+def restore_bucket(p, payload):
+    """Puts the bundle's objects back into the destination's bucket.
+
+    Until 2026-08-27 this half printed «not implemented» and stopped. The
+    database came back and the bucket did not, which is the worst of the
+    three possible states: the rows that came back point at objects that
+    are no longer there, and nothing says so out loud — the application
+    serves 404s over data the operator believes restored.
+
+    Three decisions, with their reasons:
+
+    · THE CREDENTIAL IS THE DESTINATION'S. The bundle carries objects,
+      never keys, so the pair comes out of the live `garage` Secret of
+      the organization's namespace. The namespace is not in the manifest
+      either (the bucket piece never carried one): it is derived the way
+      `sources()` derives it — one organization, one `org-<name>`.
+
+    · AN OBJECT THAT IS ALREADY THERE IS OVERWRITTEN, unless it is
+      IDENTICAL. Restoring means bringing the organization back to the
+      captured state, and the database half already overwrites
+      (`pg_dump --clean`); skipping the objects would leave the two
+      halves at different dates, which is the very inconsistency this
+      command exists to avoid. Identical is skipped by CONTENT and not
+      by name —the ETag of a single-part upload is the md5 of the body—
+      so re-running a restore is cheap and, above all, what the report
+      says it wrote is what actually changed.
+
+    · WHAT IS ONLY IN THE DESTINATION IS NOT DELETED, it is named. An
+      object the bucket has and the bundle does not is later than the
+      capture; deleting it would turn a restore into a loss no bundle
+      can undo. Naming it is enough for whoever is restoring to decide.
+    """
+    ns = f"org-{p['org']}"
+    bucket = p["bucket"]
+    ak, sk = s3_credential(ns)
+    written = identical = 0
+    problems = []
+    with Tunnel("garage-system", "garage", 3900) as t:
+        for o in p["objetos"]:
+            src = os.path.join(payload, p["directorio"], o["archivo"])
+            if not os.path.exists(src):
+                problems.append(f"{o['clave']}: it is not in the bundle's payload")
+                continue
+            data = open(src, "rb").read()
+            # The same order as the database half: everything is checked
+            # against the manifest BEFORE writing anything. A bundle that
+            # does not reproduce itself does not get uploaded halfway.
+            if hashlib.sha256(data).hexdigest() != o["sha256"]:
+                die(f"{o['archivo']} does not match its sha256 from the manifest")
+            # md5 for the ETag, which is an S3 identifier and not a
+            # security claim — hence usedforsecurity=False, so it also
+            # works where the library forbids md5 for hashing.
+            etag = hashlib.md5(data, usedforsecurity=False).hexdigest()
+            st, _, headers = s3("HEAD", t.host, f"/{bucket}/{o['clave']}", {}, ak, sk)
+            if st == 200 and (headers.get("ETag") or "").strip('"') == etag:
+                identical += 1
+                step(f"object {o['clave']}: already identical ({len(data)} bytes)")
+                continue
+            st, body, _ = s3("PUT", t.host, f"/{bucket}/{o['clave']}", {}, ak, sk,
+                             body=data)
+            if st not in (200, 201):
+                problems.append(f"{o['clave']}: PUT gave HTTP {st}: {body[:120]!r}")
+                continue
+            st, _, headers = s3("HEAD", t.host, f"/{bucket}/{o['clave']}", {}, ak, sk)
+            got = int(headers.get("Content-Length", -1)) if st == 200 else -1
+            if got != len(data):
+                problems.append(f"{o['clave']}: written, and the bucket returns "
+                                f"{got} bytes where {len(data)} were expected")
+                continue
+            written += 1
+            step(f"object {o['clave']}: {len(data)} bytes written")
+        # And the count, which is the part a per-object loop cannot give:
+        # an object that never got as far as a PUT leaves no trace in the
+        # loop, and the listing is where its absence has a shape.
+        alive = {x["clave"]: x["bytes"] for x in bucket_listing(t.host, bucket, ak, sk)}
+
+    for o in p["objetos"]:
+        if o["clave"] not in alive:
+            problems.append(f"{o['clave']}: it is NOT in the bucket after restoring")
+        elif alive[o["clave"]] != o["bytes"]:
+            problems.append(f"{o['clave']}: {alive[o['clave']]} bytes in the bucket, "
+                            f"{o['bytes']} were expected")
+    if problems:
+        for x in problems[:12]:
+            print(f"  {red}✗{reset} {x}")
+        die(f"{p['org']}/{bucket}: the objects do NOT reproduce what was captured "
+            f"— I do not call it good")
+    later = sorted(set(alive) - {o["clave"] for o in p["objetos"]})
+    if later:
+        print(f"  {yellow}!{reset} {len(later)} object(s) live in {bucket} and are not "
+              f"in the bundle (later than the capture): "
+              f"{', '.join(later[:5])} — they are NOT deleted")
+    ok(f"{p['org']}/{bucket} restored and VERIFIED ({written} written, {identical} "
+       f"already identical, {len(p['objetos'])} objects, "
+       f"{sum(o['bytes'] for o in p['objetos'])} bytes)")
+
+
 def restore(bundle, org, force):
     tmp, man = open_bundle(bundle)
     try:
@@ -898,8 +1148,7 @@ def restore(bundle, org, force):
                 f"{', '.join(sorted({p['org'] for p in man['piezas']}))}")
         for p in pieces:
             if p["tipo"] != "postgres":
-                print(f"  {yellow}!{reset} {p['bucket']}: restoring objects is "
-                      f"not implemented yet; the bundle DOES have them")
+                restore_bucket(p, tmp)
                 continue
 
             # THE GUARD THAT PREVENTS "I restored and it does not connect":
@@ -912,13 +1161,16 @@ def restore(bundle, org, force):
             live = credential_fingerprint(p["ns"], p["secreto"])
             expected = p.get("credencial_sha256")
             if expected and live and live != expected:
-                msg = (f"the credential of {p['ns']}/{p['secreto']} ROTATED after "
-                       f"this capture.\n"
-                       f"      The dump will reinstall the old password and the pod "
-                       f"will present the new one.\n"
-                       f"      Restore the Secret from git at that date's commit too, "
-                       f"or rotate\n"
-                       f"      the credential AFTER restoring.")
+                msg = (f"the credential of {p['ns']}/{p['secreto']} is NOT the one "
+                       f"that was there at capture time.\n"
+                       f"      Either it rotated, or this bundle comes from ANOTHER "
+                       f"instance — and the second case\n"
+                       f"      deserves a person, because it is not the same thing to "
+                       f"restore a machine as to move\n"
+                       f"      an organization into a new one. The role is realigned "
+                       f"with the live Secret\n"
+                       f"      once the dump is loaded, so what is missing here is the "
+                       f"decision, not the repair.")
                 if not force:
                     die(msg)
                 print(f"  {yellow}!{reset} {msg}\n      {yellow}--force: I go on anyway{reset}")
@@ -966,6 +1218,29 @@ def restore(bundle, org, force):
                         for l in serious[:8]:
                             print(f"      {gray}{l}{reset}")
                     step(f"database {database['nombre']} applied ({len(sql)} bytes)")
+
+                # ── THE ROLE, BACK IN STEP WITH THIS INSTANCE ───────
+                #
+                # Here, and not after bringing the consumers back up: the
+                # pods return looking for the database, and finding it
+                # with the password from the capture gives them a crash
+                # loop whose message —authentication failed— points at the
+                # application and not at the restore.
+                #
+                # It runs ALWAYS, including when the fingerprint matched:
+                # setting the password the role already has costs one
+                # statement, and the alternative is a branch that only
+                # gets exercised on the day it matters.
+                #
+                # The database it proves the login against is the
+                # organization's own (`POSTGRES_DB` is the organization's
+                # name); if the bundle does not carry it, `postgres`,
+                # which every server has.
+                app_db = (p["org"] if any(b["nombre"] == p["org"] for b in p["bases"])
+                          else "postgres")
+                user = realign_role(p["ns"], pod, p["secreto"], app_db)
+                step(f"role {user} realigned with {p['ns']}/{p['secreto']}: "
+                     f"the live credential opens {app_db}")
             finally:
                 scale_consumers_up(p["ns"], consumers)
 
