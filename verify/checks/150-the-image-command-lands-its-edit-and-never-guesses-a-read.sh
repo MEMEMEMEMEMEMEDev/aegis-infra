@@ -1,4 +1,4 @@
-# title: the image command's edit reaches the branch the job builds from
+# title: the image command lands its edit where the job reads it, and never guesses a read
 # origin: new in v3 — 2026-08-29, adversarial review of `aegis image`: it committed the list and never pushed it
 check() {
 # `aegis image request` is the only command in the product that EDITS
@@ -54,6 +54,54 @@ N_C="$(grep -cE '(^|[^_[:alnum:]])commit_list ' <<< "$DR" || true)"
 (( N_W >= 3 && N_C == N_W )) \
     || D150="$D150 do_request calls $N_W writer(s) of the list and $N_C commit_list(s): a write with no commit beside it is a file the job never reads (three writers expected: write_entry, bump_entry, write_exception);"
 
-if [[ -n "$D150" ]]; then fail "the image command's edit does not reach the job:$D150"
-else pass "aegis image commits, pushes and verifies the remote branch before firing the job that reads it"; fi
+# ── the read path: a socket that did not answer is not a verdict ─────
+# The header of libexec/aegis-image promises the house's third exit
+# code for «no registry answer», and it was not being paid. `curl -f`
+# returns the same failed exit for a 404 and for a refused connection,
+# and the caller read that as «the image is not mirrored». MEASURED with
+# REGISTRY_CLUSTER_IP=127.0.0.1: `image check` reported the seven
+# declared images as «declared and NOT mirrored», each line offering to
+# fire a mirror build; `image from` —the contract the generators
+# consume— answered rc 1, «is not in the internal registry», to a
+# question it had never managed to ask.
+# joined, because the curl of reg_head is split over five lines and a
+# flag on a continuation is still a flag.
+RH="$(body_nc reg_head "$IMG" | sed -e ':a' -e '/\\$/{N;s/\\\n/ /;ba}')"
+[[ -n "$RH" ]] || D150="$D150 aegis-image has no reg_head: the single place where a read of the internal registry becomes an HTTP code is gone;"
+grep -qE '(^|[[:space:]])-[a-zA-Z]*f[a-zA-Z]*([[:space:]]|$)|--fail' <<< "$RH" \
+    && D150="$D150 reg_head asks curl to fail on an HTTP error (-f/--fail): a 404 and a refused connection then come back as the same exit, and «the registry does not have it» stops being distinguishable from «the registry did not answer»;"
+grep -q '%{http_code}' <<< "$RH" \
+    || D150="$D150 reg_head does not read the HTTP code: without it there is nothing to tell the two failures apart with;"
+for fn in reg_digest reg_signed; do
+    B="$(body_nc "$fn" "$IMG")"
+    grep -qE '^[[:space:]]*404\)' <<< "$B" \
+        || D150="$D150 $fn does not treat 404 as its own answer: the registry saying «I do not have it» is the only failure that is a VERDICT about the image;"
+    grep -qE 'return 2' <<< "$B" \
+        || D150="$D150 $fn never returns 2: a read that did not happen would come back as a measurement;"
+done
+
+# Every subcommand that reads the registry has to ASK whether the read
+# happened. A caller that only looks at the value cannot tell an empty
+# answer from no answer at all.
+for fn in do_request do_list do_from do_check; do
+    B="$(body_nc "$fn" "$IMG")"
+    grep -qE 'reg_digest|reg_signed' <<< "$B" || continue
+    grep -qE '\(\([[:space:]]*(rc|sg)[[:space:]]*[!=]=[[:space:]]*2[[:space:]]*\)\)' <<< "$B" \
+        || D150="$D150 $fn reads the internal registry and never asks whether the read happened: an unanswered socket comes out of it as a verdict about the image;"
+done
+# The swallow, by name. `|| true` over a read is the idiom that turns
+# «it did not answer» into «it is empty», which is the bug itself.
+SWALLOW="$(nc "$IMG" | grep -nE 'reg_(digest|signed)[^|]*\|\|[[:space:]]*true' | tr '\n' ' ' || true)"
+[[ -n "$SWALLOW" ]] \
+    && D150="$D150 a read of the registry is swallowed with || true ($SWALLOW): the failure of the read becomes an empty value, and the empty value becomes a verdict;"
+# The counter that was declared and never incremented: dead code that
+# made `list` promise a verdict it could not give.
+LB="$(body_nc do_list "$IMG")"
+if grep -q 'unread=0' <<< "$LB"; then
+    grep -q 'unread=$((unread+1))' <<< "$LB" \
+        || D150="$D150 do_list declares the unread counter and never increments it: the could_not that reads it is dead code, and an unreachable registry prints a full table of «no»;"
+fi
+
+if [[ -n "$D150" ]]; then fail "the image command's edit does not reach the job, or its reads are guessed:$D150"
+else pass "aegis image commits, pushes and verifies the remote branch before firing the job that reads it, and never turns an unanswered read into a verdict"; fi
 }

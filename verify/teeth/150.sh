@@ -85,3 +85,103 @@ new = 'log_info "pushed: the remote branch the mirror job clones is at $head"'
 open(p, "w").write(t.replace(old, new, 1))
 PY
 }
+
+# ── the read path ────────────────────────────────────────────────────
+# `curl -f` comes back. It is the original bug in one character: a 404
+# and a refused connection exit the same, and the caller reports «not
+# mirrored» for a registry that is merely unreachable.
+red_5() {
+    python3 - "$AEGIS_ROOT/$IMG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = "    retry_net 3 curl -sS --max-time 30 \\\n"
+assert t.count(old) == 1
+open(p, "w").write(t.replace(old, "    retry_net 3 curl -fsS --max-time 30 \\\n", 1))
+PY
+}
+
+# the 404 stops being its own answer: every non-200 becomes «it is not
+# there». The registry answering 503 would then be reported as an image
+# nobody mirrored, and the remedy printed would fire a build for it.
+red_6() {
+    python3 - "$AEGIS_ROOT/$IMG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = """    case "$code" in
+        200) ;;
+        404) return 1 ;;
+        *)   log_warn "the internal registry answered HTTP $code for $1:$2 — a code is not a verdict about the image"; return 2 ;;
+    esac
+"""
+assert t.count(old) == 1
+new = """    case "$code" in
+        200) ;;
+        *)   return 1 ;;
+    esac
+"""
+open(p, "w").write(t.replace(old, new, 1))
+PY
+}
+
+# the swallow comes back to `from`, which is the contract the generators
+# consume: an unanswered read becomes an empty value and the empty value
+# becomes «it is not in the internal registry», rc 1.
+red_7() {
+    python3 - "$AEGIS_ROOT/$IMG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = '''    d="$(reg_digest "$name" "$tag")" || rc=$?
+    (( rc != 2 )) || could_not "the internal registry did not answer about $name:$tag — nothing is said about whether it is mirrored"
+'''
+assert t.count(old) == 1
+new = '''    d="$(reg_digest "$name" "$tag" || true)"
+    [[ -z "$d" ]] && rc=1
+'''
+open(p, "w").write(t.replace(old, new, 1))
+PY
+}
+
+# the counter of unread rows goes back to being dead code. It is the
+# defect exactly as it was found: `local unread=0` declared, the
+# could_not that reads it written, and nothing in between incrementing
+# it — so an unreachable registry prints a full table of «no» and exits 0.
+red_8() {
+    python3 - "$AEGIS_ROOT/$IMG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = '        if (( rc == 2 )); then unread=$((unread+1)); mirrored="?"; signed="?"; short="—"\n'
+assert t.count(old) == 1
+new = '        if (( rc == 2 )); then mirrored="?"; signed="?"; short="—"\n'
+t = t.replace(old, new, 1)
+old2 = '             case "$sg" in 0) signed=yes ;; 1) signed=NO ;; *) signed="?"; unread=$((unread+1)) ;; esac\n'
+assert t.count(old2) == 1
+t = t.replace(old2, '             case "$sg" in 0) signed=yes ;; 1) signed=NO ;; *) signed="?" ;; esac\n', 1)
+open(p, "w").write(t)
+PY
+}
+
+# control: reg_head grows a legitimate curl flag that has an f in it and
+# is not --fail. A mention is not a use, and neither is a letter.
+control_3() {
+    python3 - "$AEGIS_ROOT/$IMG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = "        -o /dev/null -D \"$SECRETS_TMP/reg.hdr\" -w '%{http_code}' \\\n"
+assert t.count(old) == 1
+new = "        --no-keepalive -o /dev/null -D \"$SECRETS_TMP/reg.hdr\" -w '%{http_code}' \\\n"
+open(p, "w").write(t.replace(old, new, 1))
+PY
+}
+
+# control: a fourth HTTP code gets its own message. Telling 503 from 401
+# is more detail, not less discipline.
+control_4() {
+    python3 - "$AEGIS_ROOT/$IMG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = '        404) return 1 ;;\n        *)   log_warn "the internal registry answered HTTP $code for the signature of $1@$2"; return 2 ;;\n'
+assert t.count(old) == 1
+new = '        404) return 1 ;;\n        401) log_warn "the internal registry refused the credential"; return 2 ;;\n        *)   log_warn "the internal registry answered HTTP $code for the signature of $1@$2"; return 2 ;;\n'
+open(p, "w").write(t.replace(old, new, 1))
+PY
+}

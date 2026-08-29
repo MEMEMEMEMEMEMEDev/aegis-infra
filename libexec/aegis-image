@@ -359,10 +359,46 @@ reg_ready() {
     [[ -s "$SECRETS_TMP/registry.netrc" && -s "$SECRETS_TMP/aegis-ca.crt" ]] \
         || could_not "the registry credential or the CA came out empty from the cluster"
 }
-reg_curl() { retry_net 3 curl -fsS --max-time 30 --netrc-file "$SECRETS_TMP/registry.netrc" --cacert "$SECRETS_TMP/aegis-ca.crt" "$@"; }
-reg_digest() {   # <repo> <tag> — empty if the tag is not there
-    reg_curl -I -H "Accept: $OCI_ACCEPT" "https://$REGISTRY_CLUSTER_IP:5000/v2/$1/manifests/$2" 2>/dev/null \
-      | tr -d '\r' | awk 'tolower($1)=="docker-content-digest:"{print $2}' | tail -1
+# reg_head <repo> <reference> — ONE HEAD against the internal registry.
+# It prints the HTTP code and leaves the headers in tmpfs; it fails only
+# when the registry never answered at all.
+#
+# WHY NOT `curl -f`. With -f a 404 and a refused connection come back as
+# the same failed exit, and the caller that reads «failed» as «the image
+# is not there» reports rc 1 —measured and wrong— for a registry that is
+# merely unreachable. Measured with REGISTRY_CLUSTER_IP pointed at
+# 127.0.0.1: `image check` said «declared and NOT mirrored» for the seven
+# declared images and offered to fire seven mirror builds; `image from`,
+# which is the contract the generators consume, answered «it is not in
+# the internal registry» to a question it had not been able to ask. The
+# header of this file promises the third verdict for exactly this («2
+# COULD NOT EVALUATE: no cluster, no instance, no registry answer») and
+# this is where it is earned.
+reg_head() {   # <repo> <reference>
+    retry_net 3 curl -sS --max-time 30 \
+        --netrc-file "$SECRETS_TMP/registry.netrc" --cacert "$SECRETS_TMP/aegis-ca.crt" \
+        -o /dev/null -D "$SECRETS_TMP/reg.hdr" -w '%{http_code}' \
+        -I -H "Accept: $OCI_ACCEPT" \
+        "https://$REGISTRY_CLUSTER_IP:5000/v2/$1/manifests/$2"
+}
+
+# reg_digest <repo> <tag> — the digest the registry SERVES, with the
+# three verdicts kept apart:
+#   0  it serves it, and the digest is on stdout
+#   1  it answered, and it does not have it
+#   2  it did not answer, or answered something that is not an answer
+reg_digest() {   # <repo> <tag>
+    local code d
+    code="$(reg_head "$1" "$2")" || return 2
+    case "$code" in
+        200) ;;
+        404) return 1 ;;
+        *)   log_warn "the internal registry answered HTTP $code for $1:$2 — a code is not a verdict about the image"; return 2 ;;
+    esac
+    d="$(tr -d '\r' < "$SECRETS_TMP/reg.hdr" | awk 'tolower($1)=="docker-content-digest:"{print $2}' | tail -1)"
+    [[ "$d" =~ ^sha256:[0-9a-f]{64}$ ]] \
+        || { log_warn "the internal registry served $1:$2 without a Docker-Content-Digest header"; return 2; }
+    printf '%s' "$d"
 }
 # SIGNED, and what that word means here. cosign publishes the signature
 # of <digest> as a tag `sha256-<hex>.sig` in the same repository, so its
@@ -373,10 +409,14 @@ reg_digest() {   # <repo> <tag> — empty if the tag is not there
 # from-guard stage of Jenkinsfile.app at build time. Saying «signed»
 # here and meaning «the signature object exists» is only honest if it is
 # written down, so it is.
-reg_signed() {   # <repo> <digest>
-    local sig="${2/:/-}.sig"
-    reg_curl -o /dev/null -I -H "Accept: $OCI_ACCEPT" \
-        "https://$REGISTRY_CLUSTER_IP:5000/v2/$1/manifests/$sig" >/dev/null 2>&1
+reg_signed() {   # <repo> <digest> — 0 signed · 1 no signature object · 2 no answer
+    local code
+    code="$(reg_head "$1" "${2/:/-}.sig")" || return 2
+    case "$code" in
+        200) return 0 ;;
+        404) return 1 ;;
+        *)   log_warn "the internal registry answered HTTP $code for the signature of $1@$2"; return 2 ;;
+    esac
 }
 
 from_line() { printf 'FROM %s/%s@%s\n' "$REGISTRY_HOST_INTERNAL" "$1" "$2"; }
@@ -636,20 +676,30 @@ do_request() {
         return 1
     fi
 
-    local digest signed=1
+    local digest rc=0
     if [[ "$action" == none ]]; then
         # IDEMPOTENCE, and the whole point of it: declared with this
         # digest is not the same as SERVED with it. The registry is
         # asked, and only when it answers with a mirrored and signed
         # image does this command write nothing, build nothing and
         # simply hand back the line.
-        digest="$(reg_digest "$repo_name" "$SRC_TAG")"
-        if [[ -n "$digest" ]] && reg_signed "$repo_name" "$digest"; then
-            log_ok "$dst is already declared at this digest, mirrored and signed — nothing to do"
-            from_line "$dst" "$digest"
-            return 0
+        #
+        # And an unanswered read is NOT «it is not there»: taking it for
+        # one fires a whole mirror build —every entry pulled, scanned and
+        # signed again— over an image that may be perfect.
+        digest="$(reg_digest "$repo_name" "$SRC_TAG")" || rc=$?
+        (( rc != 2 )) || could_not "the internal registry did not answer about $dst: nothing can be concluded, and firing $MIRROR_JOB over an unanswered read would be acting on a guess"
+        if (( rc == 0 )); then
+            local sg=0; reg_signed "$repo_name" "$digest" || sg=$?
+            (( sg != 2 )) || could_not "the internal registry did not answer about the signature of $dst"
+            if (( sg == 0 )); then
+                log_ok "$dst is already declared at this digest, mirrored and signed — nothing to do"
+                from_line "$dst" "$digest"
+                return 0
+            fi
         fi
-        log_warn "$dst is declared at this digest but the registry ${digest:+holds it unsigned}${digest:-does not hold it}: firing $MIRROR_JOB (the list is not touched)"
+        local held="does not hold it"; (( rc == 0 )) && held="holds it unsigned"
+        log_warn "$dst is declared at this digest but the registry $held: firing $MIRROR_JOB (the list is not touched)"
     fi
 
     case "$action" in
@@ -712,11 +762,17 @@ PY
         attempt=2
     done
 
-    digest="$(reg_digest "$repo_name" "$SRC_TAG")"
-    [[ -n "$digest" ]] \
-        || could_not "$MIRROR_JOB #$MIRROR_BUILD ended SUCCESS and the registry does not serve $dst — the read failed, or the job mirrored something else"
-    reg_signed "$repo_name" "$digest" || signed=0
-    (( signed == 1 )) || die "$dst is in the registry and carries NO signature: Kyverno would reject any pod that used it. Read $MIRROR_JOB #$MIRROR_BUILD — the sign step is the last one and it did not leave its object"
+    # The two failures used to be one message that blamed the registry
+    # for both. They are not the same fact and they do not have the same
+    # verdict: «it answered and it does not have it» is measured and
+    # wrong (rc 1); «it did not answer» is the instrument not reaching
+    # the subject (rc 2).
+    rc=0; digest="$(reg_digest "$repo_name" "$SRC_TAG")" || rc=$?
+    (( rc != 2 )) || could_not "$MIRROR_JOB #$MIRROR_BUILD ended SUCCESS and the internal registry did not answer: whether $dst is there cannot be said from here"
+    (( rc == 0 )) || die "$MIRROR_JOB #$MIRROR_BUILD ended SUCCESS and the registry answers that it does not serve $dst — read that build: the push step is where the bytes were supposed to land"
+    rc=0; reg_signed "$repo_name" "$digest" || rc=$?
+    (( rc != 2 )) || could_not "the internal registry did not answer about the signature of $dst"
+    (( rc == 0 )) || die "$dst is in the registry and carries NO signature: Kyverno would reject any pod that used it. Read $MIRROR_JOB #$MIRROR_BUILD — the sign step is the last one and it did not leave its object"
     log_ok "$dst mirrored, scanned and signed"
     from_line "$dst" "$digest"
 }
@@ -756,18 +812,23 @@ PY
     while read -r src dst; do
         [[ -n "$dst" ]] || continue
         n=$((n+1))
-        local name="${dst%%:*}" tag="${dst#*:}" d short mirrored signed exline
-        d="$(reg_digest "$name" "$tag" || true)"
-        if [[ -z "$d" ]]; then mirrored=no; signed=no; short="—"
+        local name="${dst%%:*}" tag="${dst#*:}" d short mirrored signed exline rc=0 sg=0
+        # A row of «no» for a registry that never answered is a table
+        # that reads as a verdict and is not one. Unread rows say `?`,
+        # and the command's exit code says COULD NOT EVALUATE.
+        d="$(reg_digest "$name" "$tag")" || rc=$?
+        if (( rc == 2 )); then unread=$((unread+1)); mirrored="?"; signed="?"; short="—"
+        elif (( rc == 1 )); then mirrored=no; signed=no; short="—"
         else mirrored=yes; short="$(sed 's/^sha256://;s/^\(.\{12\}\).*/\1/' <<< "$d")"
-             if reg_signed "$name" "$d"; then signed=yes; else signed=NO; fi
+             reg_signed "$name" "$d" || sg=$?
+             case "$sg" in 0) signed=yes ;; 1) signed=NO ;; *) signed="?"; unread=$((unread+1)) ;; esac
         fi
         # An exception naming this image's own scan target, or the tar
         # glob every mirrored image is scanned as.
         exline="$(awk -F'\t' -v n="$name" '$3 ~ /\.tar/ || index($3, n) {printf "%s→%s ", $1, $2}' "$exc" | head -c 60)"
         printf '%-28s %-22s %-14s %-9s %-7s %s\n' "$name" "$tag" "$short" "$mirrored" "$signed" "${exline:-—}"
     done < <(entries)
-    (( unread == 0 )) || could_not "$unread read(s) of the registry failed"
+    (( unread == 0 )) || could_not "$unread read(s) of the internal registry never got an answer (rows marked ?): what the table shows for those images is not a measurement"
     log_ok "$n images declared; the registry answered for each"
 }
 
@@ -784,13 +845,21 @@ do_from() {
         || bad_usage "from needs <name>:<tag> as the registry holds it (see: ${AEGIS_CMD:-aegis} image list)"
     secrets_workdir
     reg_ready
-    local d
-    d="$(reg_digest "$name" "$tag" || true)"
-    if [[ -z "$d" ]]; then
+    local d rc=0 sg=0
+    # `from` is the contract the generators consume, and a generator
+    # takes «it is not there» for a measured answer. So an unanswered
+    # read has to come out as the third verdict and never as the first:
+    # a template that stops being generated because the socket was shut
+    # is a different bug from one whose base was never mirrored.
+    d="$(reg_digest "$name" "$tag")" || rc=$?
+    (( rc != 2 )) || could_not "the internal registry did not answer about $name:$tag — nothing is said about whether it is mirrored"
+    if (( rc == 1 )); then
         log_error "$name:$tag is not in the internal registry — ask for it: ${AEGIS_CMD:-aegis} image request $name:$tag"
         return 1
     fi
-    if ! reg_signed "$name" "$d"; then
+    reg_signed "$name" "$d" || sg=$?
+    (( sg != 2 )) || could_not "the internal registry did not answer about the signature of $name:$tag"
+    if (( sg == 1 )); then
         log_error "$name:$tag is in the registry and carries NO signature object: a pod using it is rejected at admission. Re-run: ${AEGIS_CMD:-aegis} image request $name:$tag"
         return 1
     fi
@@ -807,23 +876,42 @@ do_check() {
     need_list
     secrets_workdir
     reg_ready
-    local n=0 bad=0
+    local n=0 bad=0 unread=0
     while read -r src dst; do
         [[ -n "$dst" ]] || continue
         n=$((n+1))
-        local name="${dst%%:*}" tag="${dst#*:}" srcref="${src%@*}" d
-        d="$(reg_digest "$name" "$tag" || true)"
-        if [[ -z "$d" ]]; then
+        local name="${dst%%:*}" tag="${dst#*:}" srcref="${src%@*}" d rc=0 sg=0
+        d="$(reg_digest "$name" "$tag")" || rc=$?
+        # An unreachable registry used to come out of here as «declared
+        # and NOT mirrored», once per entry, each line offering to fire a
+        # mirror build. This check is CALLED by the round, so that was a
+        # red verdict for the whole platform written off one unanswered
+        # socket.
+        if (( rc == 2 )); then
+            unread=$((unread+1))
+            log_warn "$dst: the internal registry did not answer — this is not «not mirrored», it is not measured"
+            continue
+        fi
+        if (( rc == 1 )); then
             bad=$((bad+1))
             log_error "$dst declared and NOT mirrored — fix: ${AEGIS_CMD:-aegis} image request $srcref"
             continue
         fi
-        if ! reg_signed "$name" "$d"; then
+        reg_signed "$name" "$d" || sg=$?
+        if (( sg == 2 )); then
+            unread=$((unread+1))
+            log_warn "$dst: the internal registry did not answer about its signature — not measured"
+        elif (( sg == 1 )); then
             bad=$((bad+1))
             log_error "$dst mirrored and NOT signed (Kyverno rejects it at admission) — fix: ${AEGIS_CMD:-aegis} image request $srcref"
         fi
     done < <(entries)
     (( n > 0 )) || could_not "$IMAGES_REL declares no image: there is nothing to contrast against the registry"
+    # COULD NOT EVALUATE wins over the partial answer: the question is
+    # «is EVERYTHING declared mirrored and signed», and it has no answer
+    # while a single entry is unread. What was measured is printed above
+    # all the same — a verdict withheld is not evidence withheld.
+    (( unread == 0 )) || could_not "$unread of the $n declared images could not be read from the internal registry: the question this command answers is about all of them"
     if (( bad > 0 )); then
         log_error "$bad of $n declared images are not usable in a tenant"
         return 1
