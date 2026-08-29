@@ -123,6 +123,7 @@ servicios:
     tipo: estatico              # nginx serving a build
     repo: github.com/ORG/veterinaria-front
     publico: /                  # path under `dominio`
+    # NO `tamano`: a static front takes the default, `chico`.
     # NO `usa`: a static front end has nowhere to keep a credential.
     # Whatever needs AI or the bucket goes behind the `http`.
   - nombre: api
@@ -130,6 +131,7 @@ servicios:
     repo: github.com/ORG/veterinaria-api
     puerto: 8080
     publico: /api
+    tamano: mediano             # chico | mediano | grande. Never a number.
     usa: [bucket, ai, postgres] # explicit network grants
   - nombre: db
     tipo: postgres              # the platform provides it: no repo
@@ -169,6 +171,115 @@ shared — a `DROP` in one cannot touch its neighbour.
 demands that the generator reject it **naming the right reason**: a
 rejection for the wrong reason would come out green all the same, and
 that is a mistake already made four times this week.
+
+### What a service asks for: `tamano`
+
+`cuota` is the ceiling of the WHOLE organization. `tamano` is how much
+of it each service takes. They are two different walls and this is the
+one that was missing until 2026-08-29.
+
+What was there before: the resources of a service lived in the
+Deployment of the tenant's own repo, and the canonical template asked
+for `50m`/`32Mi` with a ceiling of `200m`/`64Mi`. Those numbers are
+right for a compiled binary and they **kill a JVM during start-up** —
+the pod is OOM killed, the event names memory, and nothing points back
+at the template. Meanwhile the only thing the platform controlled was
+the namespace quota, which is too coarse to keep one service from
+eating another's share.
+
+| `tamano` | what it is for |
+|---|---|
+| `chico` | a compiled binary — Go, Rust — or a static front served by nginx |
+| `mediano` | a JVM, or an interpreter with its dependencies loaded |
+| `grande` | something that really works: it holds connections, keeps a cache, moves uploads |
+
+**It carries no numbers, by the same rule as `cuota`.** The four figures
+of each step — what it reserves and what it caps, of CPU and of memory —
+live in `plans.yaml`. If `memoria: 512Mi` were written here, resizing
+thirty organizations would be a migration instead of one edit. It is
+also why re-tuning a step is **not** a new version of the contract (§8):
+the contract names no number, so it cannot fall out of date because of
+one.
+
+**The default is `chico`**, and it exists so that adding this field was
+not a migration: every contract written before it goes on validating and
+renders exactly as it did. A `postgres` **rejects** `tamano` — what a
+service the platform provides asks for is decided by `services.yaml`,
+along with its image, its port and its disk, and a field that would be
+ignored is worse than one that is refused.
+
+**If the sum does not fit, the generator refuses and shows the
+account.** It adds up every service's declared size — plus what the
+platform provides, the database included — and compares it with the
+plan's quota:
+
+```
+✗ the services of this organization do not fit in its quota plan.
+
+  requests.memory
+    the services ask  api (grande) 1024Mi + datos (postgres, provided
+                      by the platform) 256Mi + front (grande) 1024Mi
+                      = 2304Mi
+    plan `pequena` gives    2048Mi
+
+  TWO WAYS OUT, and they are the whole list:
+    · raise the organization's `cuota` (try: mediana, grande)
+    · lower some service's `tamano` (grande -> mediano -> chico)
+```
+
+The arithmetic is written out on purpose. Left to the cluster, the same
+mistake arrives as a `ResourceQuota` rejecting whichever pod happened to
+be scheduled last, hours later, in a message about millicores — and
+whoever reads it has to redo this sum by hand to find out whether the
+answer is a bigger plan or a smaller service. The count is **one replica
+per service**: the contract has no `replicas` field, so this is the
+floor. The quota is still the wall that actually holds; this is the
+warning that gets there first.
+
+**What comes out of it in the cluster**, and it is two objects with two
+different jobs:
+
+- a **LimitRange** in the namespace, carrying the default step. It fills
+  in what a container did not declare. With a `ResourceQuota` over
+  requests and limits, a container that declares no resources is
+  *rejected* by the apiserver with a message that names the quota and
+  never the Deployment that forgot the block; this turns that rejection
+  into a default.
+- a **namespaced Kyverno `Policy`**, one rule per service, that fixes
+  requests and limits to what its `tamano` asks for. It patches the
+  **Pod** and never the Deployment: the Deployment is what ArgoCD
+  compares against git, and mutating it would leave desired ≠ live
+  forever — whose obvious way out, `ignoreDifferences`, switches
+  auto-sync off (#36). Pods come from no git, so there is no drift to
+  produce.
+
+**And the organization cannot write that Policy.** It is namespaced and
+it lives in `org-<org>` — the one namespace the tenant's AppProject may
+write — so `kyverno.io/Policy` sits in that project's
+`namespaceResourceBlacklist`, next to `ResourceQuota` and `LimitRange`
+and for the same reason. Without the line the tenant ships a Policy of
+its own, mutates its pods back to whatever it likes, and what is left
+holding is the quota: the coarse wall this field exists to refine. An
+AppProject filters by *kind* and never by the contents of a field, so
+taking the pen away is the only bound it knows how to express.
+
+**A half-copied `plans.yaml` is refused by name.** The file is judged
+before the contract that names its words: the `tamano:` section has to
+be there, the default step has to be in it — it is read even by an
+organization whose every service asked for something else, because the
+LimitRange is written from it — every step has to carry its four
+numbers, and every quota plan its seven. This matters on the adoption
+path: an instance older than the field takes the section across **by
+hand**, and a copy that brings only the steps that instance happens to
+use used to surface as a `KeyError` from inside the render, which names
+neither the file nor what is missing from it.
+
+**What a provided service asks for is decided by `services.yaml`, all
+four numbers or none.** A `recursos:` block there wins over the
+generator's table, but it may not be half written and it may not carry a
+key nobody reads: `request.memory` — one missing `s` — used to be
+dropped in silence, leaving whoever wrote it believing they had resized
+the database while the manifest carried the old figure.
 
 ### The schema's rules
 
@@ -387,7 +498,9 @@ before the first file is written. Never a half-generated tree.
 ```
 k8s/organizations/org-veterinaria/
   bundle.yaml            Namespace (with the enforce label), ResourceQuota,
-                         LimitRange, default ServiceAccount with regcred
+                         LimitRange with the default `tamano`, the Kyverno
+                         Policy that fixes each service's size, default
+                         ServiceAccount with regcred
   appproject.yaml        AppProject aegis-tenant-veterinaria, cluster-scoped []
   netpol.yaml            default-deny + the grants the contract asked for
   apps.yaml              one ArgoCD Application per service

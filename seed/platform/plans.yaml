@@ -49,6 +49,78 @@ cuota:
     persistentvolumeclaims: "20"
     requests.storage: 200Gi
 
+tamano:
+  # WHAT A SERVICE ASKS FOR, as opposed to `cuota`, which is what the
+  # WHOLE organization may take. They are two different ceilings and
+  # mixing them up is the mistake this section exists to make
+  # impossible: `cuota` is the wall the apiserver enforces on the
+  # namespace; `tamano` is each service's share inside that wall.
+  #
+  # WHY IT WAS MISSING, and what it cost. Until 2026-08-29 a service's
+  # resources lived in the Deployment of the tenant's OWN repo, and the
+  # canonical template asked for 50m/32Mi with a ceiling of 200m/64Mi.
+  # Those numbers are right for a compiled binary and they KILL a JVM
+  # before it finishes its first garbage collection — the pod is OOM
+  # killed during start-up and the message names memory, never the
+  # template. So the only two ceilings the platform controlled were the
+  # namespace quota (too coarse: it does not stop one service from
+  # eating the other's share) and a number nobody on the platform's
+  # side had ever chosen.
+  #
+  # The names are STEPS and they name a WORKLOAD SHAPE, not a number,
+  # for the same reason the quota plans do: the day the hardware
+  # changes, this is one file and not thirty contracts.
+  #
+  # The `limits/requests` gap is deliberately WIDE. requests is what the
+  # scheduler reserves and what the quota charges for; limits is the
+  # ceiling under a burst. A service that starts up, compiles or warms a
+  # cache needs far more CPU for thirty seconds than it does for the
+  # rest of the day, and charging it the peak forever is how a
+  # single-node cluster runs out of schedulable CPU with the machine at
+  # 4% use.
+  #
+  # Memory is the opposite case and that asymmetry is on purpose: CPU
+  # over the limit is THROTTLED, memory over the limit is KILLED. So the
+  # CPU ceiling can be generous and the memory one has to be a number
+  # somebody actually measured.
+
+  # A COMPILED BINARY: Go, Rust, or a static front served by nginx.
+  # 64Mi of request because an nginx serving a build sits at ~10Mi and a
+  # small Go server at ~20Mi; the rest is head-room so that a spike does
+  # not land on the ceiling. The 500m limit is start-up: even a static
+  # front spends its first second reading its config and its files.
+  chico:
+    requests.cpu: 50m
+    requests.memory: 64Mi
+    limits.cpu: 500m
+    limits.memory: 128Mi
+
+  # A JVM, or an interpreter with its dependencies loaded (node with a
+  # framework, python with an ORM). 512Mi of REQUEST is the number that
+  # makes this step exist at all: a JVM reserves heap, metaspace and
+  # code cache before running a single line, and under ~256Mi it does
+  # not fail slowly — it does not start. The 1 CPU limit is the JIT,
+  # which is the CPU-hungriest minute of the process' life and then
+  # never happens again.
+  mediano:
+    requests.cpu: 200m
+    requests.memory: 512Mi
+    limits.cpu: "1"
+    limits.memory: 1Gi
+
+  # SOMETHING THAT REALLY WORKS: it holds connections, keeps a cache in
+  # memory, processes uploads. This step is not "the same but more": it
+  # is the one that stops fitting, and that is the point. A `pequena`
+  # organization holds ONE grande service plus its database and no more
+  # — the arithmetic in the generator says so out loud instead of
+  # letting the quota reject the third pod at deploy time with a
+  # message about millicores.
+  grande:
+    requests.cpu: 500m
+    requests.memory: 1Gi
+    limits.cpu: "2"
+    limits.memory: 2Gi
+
 ai:
   # The currency is the TOKEN, not the request. A request can cost 10
   # tokens or 3,000; charging per request rewards exactly the abuse we

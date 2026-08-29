@@ -109,6 +109,34 @@ build_copy() {
             done
         fi
     done < <(_renames)
+
+    # And the `tamano:` section, which is NOT a rename: it is a section
+    # the seed grew on 2026-08-29 and the reference instance predates.
+    # v3's generator DEMANDS it —the numbers live in that file or they
+    # live nowhere— so without this the subject would die on every
+    # contract and the harness would report the absence of a section as
+    # a difference in the render.
+    #
+    # Copied FROM THE SEED and not typed here, for the same reason
+    # consumers.txt is: a table typed into a test is a second source of
+    # truth, and it drifts.
+    python3 - "$d/plans.yaml" "$AEGIS_ROOT/seed/platform/plans.yaml" <<'SIZES'
+import re, sys
+dst, src = sys.argv[1], sys.argv[2]
+if re.search(r"(?m)^tamano:", open(dst, encoding="utf-8").read()):
+    sys.exit(0)
+m = re.search(r"(?ms)^tamano:.*?(?=^[a-z][a-z0-9_]*:|\Z)",
+              open(src, encoding="utf-8").read())
+if m is None:
+    sys.exit("the seed's plans.yaml has no `tamano:` section to copy")
+chunk = m.group(0).rstrip().splitlines()
+# the comment block that INTRODUCES the next key belongs to that key,
+# not to this section: dropped, or it would travel out of context
+while chunk and chunk[-1].lstrip().startswith("#"):
+    chunk.pop()
+with open(dst, "a", encoding="utf-8") as f:
+    f.write("\n" + "\n".join(chunk) + "\n")
+SIZES
 }
 
 build_copy "$TMP/v2" v2 ; cp -a "$TMP/v2" "$TMP/v2-base"
@@ -224,9 +252,38 @@ DELIBERATE = [
 ]
 
 
+# The same, for whole OBJECTS v2 never emitted. A separate list because
+# it answers a different question —not "this field changed" but "this
+# object is new"— and it silences only the direction that can be
+# deliberate: v3 emitting something v2 does not. An object v3 STOPPED
+# emitting is still a failure, because that is what a lost derivation
+# looks like.
+DELIBERATE_OBJECTS = [
+    ("LimitRange",
+     "v3 gives every organization a LimitRange with the default `tamano` "
+     "and v2 gave none: with a ResourceQuota over requests/limits, a "
+     "container that declares no resources is REJECTED by the apiserver, "
+     "with a message that names the quota and never the Deployment that "
+     "forgot the block (2026-08-29)"),
+    ("Policy",
+     "v3 emits a namespaced Kyverno Policy that fixes each service's "
+     "requests and limits from the `tamano` its contract asks for; v2 "
+     "left them in the Deployment of the tenant's repo, where 50m/32Mi "
+     "kills a JVM on start-up and no number was the platform's to "
+     "choose (2026-08-29)"),
+]
+
+
 def deliberate(path):
     for suffix, why in DELIBERATE:
         if path.endswith(suffix):
+            return why
+    return None
+
+
+def deliberate_object(kind):
+    for k, why in DELIBERATE_OBJECTS:
+        if k == kind:
             return why
     return None
 
@@ -295,7 +352,11 @@ for f3 in sorted(v3.glob(GLOB)):
         if k not in ib:
             bad.append(f"{rel}: v3 does NOT emit {k}")
         elif k not in ia:
-            bad.append(f"{rel}: v3 emits {k}, which v2 does not")
+            why = deliberate_object(k[0])
+            if why:
+                DECLARED.append((f"{k[0]}/{k[2]}", why))
+            else:
+                bad.append(f"{rel}: v3 emits {k}, which v2 does not")
         else:
             d = diff(ia[k], ib[k], "/".join(x for x in k if x))
             if d:

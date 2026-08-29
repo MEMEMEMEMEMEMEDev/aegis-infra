@@ -122,6 +122,188 @@ USES = {"ai", "bucket", "postgres", "internet"}
 # traffic — a silent failure, which is the worst kind.
 STATIC_PORT = 8080
 
+# ── how much each service asks for ───────────────────────────────────
+#
+# The contract says a WORD (`tamano: mediano`); the numbers live in
+# plans.yaml, by the same rule as `cuota`. The reason is the one written
+# at the head of that file: reajusting thirty organizations has to be
+# editing one file, not thirty contracts.
+#
+# The default exists so that adding this field is not a MIGRATION. Three
+# real contracts were written before it and get re-applied unchanged; a
+# field with no default would have turned an addition into a version
+# bump, which §8 of the protocol reserves for changes to the contract
+# itself. `chico` is the honest default: it is what the canonical
+# Deployment template was already asking for.
+DEFAULT_SIZE = "chico"
+
+# The four numbers a size is made of. Named the same way the quota names
+# them —dotted, K8s' own spelling— so that the arithmetic compares like
+# with like and nobody has to translate between two vocabularies while
+# reading an error.
+SIZE_KEYS = ("requests.cpu", "requests.memory", "limits.cpu", "limits.memory")
+
+# The seven the ResourceQuota is written from, in the order it writes
+# them. ONE list with TWO readers —the loop that renders the object and
+# the validation that demands the plan carry it— because two lists is
+# how a plan validates clean and then dies with a KeyError halfway
+# through the render, with a python traceback where the product had
+# promised a rejection naming a file.
+QUOTA_KEYS = SIZE_KEYS + ("pods", "persistentvolumeclaims", "requests.storage")
+
+# What the services the PLATFORM provides ask for. This is the fallback,
+# not the source: services.yaml decides everything else about a provided
+# type (image, digest, port, disk, uid) and it decides this too the day
+# it carries a `recursos:` block. Until then the answer lives HERE and in
+# exactly one place, which is the point — the manifest render_data writes
+# and the sum the quota arithmetic charges read the same table. A
+# database rendered with one figure and counted with another is a quota
+# rejection nobody can trace back to a file.
+PLATFORM_RESOURCES = {
+    "postgres": {"requests.cpu": "100m", "requests.memory": "256Mi",
+                 "limits.cpu": "1", "limits.memory": "1Gi"},
+}
+
+
+def _q(v):
+    """A K8s quantity, quoted only when it would otherwise be a number.
+
+    `cpu: 1` unquoted is an integer and the apiserver rejects the object;
+    `cpu: "100m"` quoted is legal but noise.
+
+    IT IS NOT THE RULE THE ResourceQuota FOLLOWS, and until 2026-08-29
+    this docstring claimed it was. That loop quotes ALWAYS, and it is
+    right to: its values sit alone on a line whose key is fixed, so a
+    blanket quote costs one character and removes a class of bug. Here
+    the values sit inside a flow mapping that a human reads
+    (`{cpu: 500m, memory: 64Mi}`), and quoting the four of them turns a
+    line somebody has to scan into noise. Two writers, two rules, and
+    the difference is deliberate — which is worth saying, because a
+    comment claiming a unification that does not exist is how the next
+    reader "fixes" the wrong one.
+    """
+    s = str(v)
+    return f'"{s}"' if re.fullmatch(r"[0-9]+(\.[0-9]+)?", s) else s
+
+
+def _cpu(q):
+    """A CPU quantity -> millicores. `2` is 2000m, `500m` is 500m."""
+    s = str(q).strip()
+    return int(s[:-1]) if s.endswith("m") else int(float(s) * 1000)
+
+
+# Two-letter units FIRST: `Ki` has to win over `K`, or a `Ki` is read as
+# a `K` with a stray letter and the sum comes out ~2.4% short — small
+# enough never to be noticed and big enough to admit a contract that
+# does not fit.
+_MEM_UNITS = (("Ki", 2 ** 10), ("Mi", 2 ** 20), ("Gi", 2 ** 30), ("Ti", 2 ** 40),
+              ("K", 10 ** 3), ("M", 10 ** 6), ("G", 10 ** 9), ("T", 10 ** 12))
+
+
+def _mem(q):
+    """A memory quantity -> bytes."""
+    s = str(q).strip()
+    for unit, mult in _MEM_UNITS:
+        if s.endswith(unit):
+            return int(float(s[: -len(unit)]) * mult)
+    return int(float(s))
+
+
+def _cpu_str(millis):
+    return f"{millis // 1000}" if millis % 1000 == 0 else f"{millis}m"
+
+
+def _mem_str(byts):
+    gi = 2 ** 30
+    return f"{byts // gi}Gi" if byts >= gi and byts % gi == 0 else f"{byts // 2 ** 20}Mi"
+
+
+# The fine-grained twin of each writer above. One comparison is written
+# in ONE unit or it is not a comparison: `2304Mi` sitting next to `2Gi`
+# makes the reader do the conversion the message exists to spare them.
+_FINE = {_cpu_str: lambda millis: f"{millis}m",
+         _mem_str: lambda byts: f"{byts // 2 ** 20}Mi"}
+
+
+def _writer(write, values):
+    """The writer that renders EVERY side of one comparison alike."""
+    if all(not write(v).endswith(("m", "Mi")) for v in values):
+        return write
+    return _FINE[write]
+
+
+# (key, how it is read, how it is written back). The four dimensions the
+# arithmetic below adds up, in the order an error should read them:
+# what is RESERVED first —which is what the scheduler and the quota
+# really charge for— and the ceilings after.
+DIMENSIONS = (("requests.cpu", _cpu, _cpu_str),
+              ("requests.memory", _mem, _mem_str),
+              ("limits.cpu", _cpu, _cpu_str),
+              ("limits.memory", _mem, _mem_str))
+
+
+def _quantity(where, key, value):
+    """The value, once it is certain the arithmetic can read it.
+
+    `_cpu`/`_mem` raise ValueError on anything they cannot parse, and a
+    ValueError escaping validate() is a python traceback where the
+    product had promised «Invalid: <what, and in which file>». These
+    four numbers are SUMMED against the quota before a byte is written,
+    so a value nobody can add is not a cosmetic problem: it is either a
+    traceback here or a rejection by the apiserver hours later.
+    """
+    read = _cpu if key.endswith(".cpu") else _mem
+    try:
+        n = read(value)
+    except (TypeError, ValueError):
+        n = 0
+    if n <= 0:
+        raise Invalid(
+            f"{where}, {key}: {value!r} is not a quantity that can be added up.\n"
+            f"  It has to be a positive K8s quantity — `500m`, `2`, `512Mi`, `1Gi`.")
+    return value
+
+
+def platform_resources(cat, kind):
+    """What a platform-provided service asks for, services.yaml first.
+
+    ALL FOUR OR NONE, and never key by key. Until 2026-08-29 the
+    fallback was per key, and MEASURED over a copy of the seed that
+    meant this: adding `recursos:` to `tipos.postgres` with one typo —
+    `request.memory`, without the `s` — produced
+    `{'requests.cpu': '250m', 'requests.memory': '256Mi', ...}`. The
+    misspelt key was dropped without a word, the table below won, and
+    the operator who believed they had resized the database got the old
+    figure in the manifest with verify all green.
+
+    It is the argument `_type_coherence` already makes: a field that is
+    ignored is worse than one that is rejected, because whoever wrote it
+    believes they sized something.
+    """
+    declared = (cat["tipos"][kind] or {}).get("recursos")
+    if declared is None:
+        return dict(PLATFORM_RESOURCES[kind])
+    where = f"services.yaml, tipos.{kind}.recursos"
+    if not isinstance(declared, dict):
+        raise Invalid(f"{where} is not a mapping of the four numbers.")
+    unknown = sorted(k for k in declared if k not in SIZE_KEYS)
+    if unknown:
+        raise Invalid(
+            f"{where}: {', '.join(repr(k) for k in unknown)} is not one of the "
+            f"four numbers.\n"
+            f"  They are: {', '.join(SIZE_KEYS)} — K8s' own spelling, dotted, the\n"
+            f"  same one the quota plans use so that the sum compares like with\n"
+            f"  like. A key nobody reads would be ignored in silence.")
+    absent = [k for k in SIZE_KEYS if k not in declared]
+    if absent:
+        raise Invalid(
+            f"{where} declares {', '.join(absent)} nowhere.\n"
+            f"  The four go together or none of them does. Filling the gaps from\n"
+            f"  the generator's own table would mean a service sized half from\n"
+            f"  this file and half from the code, and no reader of either could\n"
+            f"  say which figure the pod ends up with.")
+    return {k: _quantity(where, k, declared[k]) for k in SIZE_KEYS}
+
 
 def _type_coherence(n, kind, s):
     """A `tipo` that restricts nothing is not a type, it is a label.
@@ -195,6 +377,13 @@ def _type_coherence(n, kind, s):
             raise Invalid(
                 f"service {n!r} is postgres and declares usa: {s['usa']}.\n"
                 f"  A database does not consume services: it lends them.")
+        if has("tamano"):
+            raise Invalid(
+                f"service {n!r} is postgres and declares `tamano`.\n"
+                f"  What a provided service asks for is decided by services.yaml,\n"
+                f"  together with its image, its port and its disk. A `tamano` here\n"
+                f"  would be ignored, and a field that is ignored is worse than one\n"
+                f"  that is rejected: whoever wrote it believes they sized something.")
 
 
 def capabilities():
@@ -240,7 +429,175 @@ def _require(d, field, where):
     return d[field]
 
 
+def declared_sizes(c, plans):
+    """(name, what it is called, its four numbers) for every service.
+
+    Two origins, and they are not the same kind of fact:
+
+      a service somebody BUILDS  asks with the contract's `tamano` word,
+                                 resolved against plans.yaml
+      a service the PLATFORM provides (today only `postgres`) asks with
+                                 services.yaml — the contract has no say
+                                 over the resources of an image it did
+                                 not choose
+
+    Both go into the same list because the quota charges for both. A sum
+    that only counted what the tenant declared would approve a contract
+    the apiserver then rejects, and the rejection would name millicores
+    and not the database that was left out of the account.
+    """
+    cat = None
+    out = []
+    for s in sorted(c["servicios"], key=lambda x: x["nombre"]):
+        if s["tipo"] in PLATFORM_RESOURCES:
+            if cat is None:
+                cat = yaml.safe_load(open(SERVICES, encoding="utf-8"))
+            out.append((s["nombre"], f"{s['tipo']}, provided by the platform",
+                        platform_resources(cat, s["tipo"])))
+        else:
+            label = s.get("tamano", DEFAULT_SIZE)
+            out.append((s["nombre"], label, plans["tamano"][label]))
+    return out
+
+
+def _fits_in(plans, quota_name, sizes):
+    """Would these services fit in that plan? Used only to suggest one."""
+    quota = plans["cuota"][quota_name]
+    return all(sum(read(r[key]) for _, _, r in sizes) <= read(quota[key])
+               for key, read, _ in DIMENSIONS)
+
+
+def _check_quota_arithmetic(c, plans):
+    """The sum of the sizes has to fit inside the plan. With the account shown.
+
+    WHY IT IS DONE HERE and not left to the cluster: a ResourceQuota
+    rejects the pod that does not fit —not the contract, and not the one
+    that caused it—. The message names millicores, arrives at deploy
+    time, and blames whichever service happened to be scheduled last.
+    Whoever reads it then has to redo this arithmetic BY HAND to find
+    out whether the answer is a bigger plan or a smaller service.
+
+    So the error carries the account written out. An error that reports
+    a sum without showing its terms makes you recompute what the machine
+    already computed, and that is the whole reason this is not just a
+    boolean.
+
+    ONE REPLICA PER SERVICE is what is counted, and that is said out
+    loud in the message: the contract has no `replicas` field —numbers do
+    not go in the contract— so the sum is the floor, not the ceiling. The
+    quota stays the wall that actually holds; this is the warning that
+    arrives before the wall.
+    """
+    quota = plans["cuota"][c["cuota"]]
+    sizes = declared_sizes(c, plans)
+    over = []
+    for key, read, write in DIMENSIONS:
+        terms = [read(r[key]) for _, _, r in sizes]
+        asked, given = sum(terms), read(quota[key])
+        if asked > given:
+            w = _writer(write, terms + [asked, given])
+            account = " + ".join(f"{n} ({label}) {w(v)}"
+                                 for (n, label, _), v in zip(sizes, terms))
+            over.append(f"  {key}\n"
+                        f"    the services ask  {account}\n"
+                        f"                      = {w(asked)}\n"
+                        f"    plan `{c['cuota']}` gives    {w(given)}")
+    if not over:
+        return
+    bigger = [q for q in plans["cuota"] if _fits_in(plans, q, sizes)]
+    # The ladder, ordered by what each step RESERVES and not by the order
+    # they happen to sit in the file: an arrow that points the wrong way
+    # is worse than no arrow.
+    ladder = sorted(plans["tamano"], key=lambda k: -_mem(plans["tamano"][k]["requests.memory"]))
+    raise Invalid(
+        "the services of this organization do not fit in its quota plan.\n\n"
+        + "\n\n".join(over) + "\n\n"
+        "  TWO WAYS OUT, and they are the whole list:\n"
+        f"    · raise the organization's `cuota` "
+        f"({'try: ' + ', '.join(bigger) if bigger else 'no plan in plans.yaml holds this'})\n"
+        f"    · lower some service's `tamano` ({' -> '.join(ladder)})\n"
+        "  The numbers are in plans.yaml; the contract names no numbers (§3 of\n"
+        "  the protocol). The count is ONE replica per service: the quota is\n"
+        "  still the wall, this is the warning that gets there first.")
+
+
+def _check_plans(plans):
+    """plans.yaml carries what this generator is about to index.
+
+    A SEPARATE PASS over the whole file, and not a lookup as each value
+    is needed, because the values this code reads are not only the ones
+    a contract names. MEASURED on 2026-08-29 over a copy of the seed:
+    with `chico` deleted from the `tamano:` section, a contract asking
+    for `grande` validated CLEAN and died inside render_bundle with
+    `KeyError('chico')` — the namespace's LimitRange is written from the
+    default step whether or not anybody asked for it; deleting only
+    `chico.limits.memory` gave `KeyError('limits.memory')`. The same
+    holds for the quota plans this file's `_fits_in` walks when it looks
+    for a bigger one to suggest.
+
+    And it lands exactly on the adoption path this field documents: an
+    instance older than the section adopts it by COPYING it across, and
+    a copy that brings only the steps that instance happens to use is
+    the partial copy this refuses. A python traceback is not a verdict —
+    it names neither the file nor what is missing from it, which is the
+    whole reason the block below was written instead of a lookup.
+
+    Returns the `tamano` section, which is what validate() goes on to
+    check the contracts' words against.
+    """
+    if not plans.get("cuota"):
+        raise Invalid(
+            "plans.yaml carries no `cuota:` section.\n"
+            "  It is where the organization's ceiling comes from; the contract\n"
+            "  names one of its plans and never a number (§3 of the protocol).")
+    sizes = plans.get("tamano")
+    if not sizes:
+        raise Invalid(
+            "plans.yaml carries no `tamano:` section.\n"
+            "  Every service asks for a size by NAME and the numbers live there,\n"
+            "  next to the quota plans. The seed ships the section; an instance\n"
+            "  older than the field adopts it by copying it across (`aegis dev\n"
+            "  seed diff` shows the gap).")
+    if DEFAULT_SIZE not in sizes:
+        raise Invalid(
+            f"plans.yaml declares no tamano `{DEFAULT_SIZE}`.\n"
+            f"  It is not one step among several: it is the one every service\n"
+            f"  that names no `tamano` gets, and the one the namespace's\n"
+            f"  LimitRange is written from — so it is read even by an\n"
+            f"  organization whose every service asked for something else.")
+    for name in sorted(sizes):
+        numbers = sizes[name] or {}
+        absent = [k for k in SIZE_KEYS if k not in numbers]
+        if absent:
+            raise Invalid(
+                f"plans.yaml: tamano {name!r} does not declare "
+                f"{', '.join(absent)}.\n"
+                f"  A size that does not say what it reserves AND what it caps is\n"
+                f"  half a size: the LimitRange and the admission patch that come\n"
+                f"  out of it would be written with a hole in them.")
+        for k in SIZE_KEYS:
+            _quantity(f"plans.yaml, tamano {name!r}", k, numbers[k])
+    for name in sorted(plans["cuota"]):
+        numbers = plans["cuota"][name] or {}
+        absent = [k for k in QUOTA_KEYS if k not in numbers]
+        if absent:
+            raise Invalid(
+                f"plans.yaml: cuota plan {name!r} does not declare "
+                f"{', '.join(absent)}.\n"
+                f"  The ResourceQuota is written from the seven, and the sum of\n"
+                f"  the sizes is compared against the first four. A plan missing\n"
+                f"  one of them cannot be told that a contract does not fit in it.")
+        for k in SIZE_KEYS:
+            _quantity(f"plans.yaml, cuota {name!r}", k, numbers[k])
+    return sizes
+
+
 def validate(c, plans):
+    # plans.yaml before the contract: the contract names words that only
+    # mean something if that file carries them, and an error about a
+    # word is misleading when the table it is looked up in is the thing
+    # that is broken.
+    sizes = _check_plans(plans)
     if not isinstance(c, dict):
         raise Invalid("the contract is not a YAML mapping")
     _only(c, {"version", "organizacion", "dominio", "cuota", "repo",
@@ -316,7 +673,8 @@ def validate(c, plans):
         # had pinned something. The version of a service provided by the
         # platform is decided by services.yaml, and that is what it is
         # for.
-        _only(s, {"nombre", "tipo", "repo", "puerto", "publico", "usa"}, "servicios[]")
+        _only(s, {"nombre", "tipo", "repo", "puerto", "publico", "usa", "tamano"},
+              "servicios[]")
         n = _require(s, "nombre", "servicios[]")
         if n in seen:
             raise Invalid(f"service {n!r} declared twice")
@@ -325,6 +683,18 @@ def validate(c, plans):
         if kind not in TYPES:
             raise Invalid(f"service {n!r}: tipo {kind!r} unknown. There is: {', '.join(sorted(TYPES))}")
         _type_coherence(n, kind, s)
+        # `tamano` is OPTIONAL and has a default, so that adding it broke no
+        # contract that was already written. What it may NOT be is a word
+        # plans.yaml does not know: the same rejection, and the same
+        # sentence, the organization's `cuota` already gets.
+        if kind not in PLATFORM_RESOURCES:
+            label = s.get("tamano", DEFAULT_SIZE)
+            if label not in sizes:
+                raise Invalid(
+                    f"service {n!r}: tamano {label!r} does not exist. There is: "
+                    f"{', '.join(sorted(sizes))}\n"
+                    f"  If a new one is needed, A SIZE IS ADDED to plans.yaml.\n"
+                    f"  Numbers do not go in the contract (§3 of the protocol).")
         for u in s.get("usa") or []:
             if u not in USES:
                 raise Invalid(f"service {n!r}: usa {u!r} unknown ({' | '.join(sorted(USES))})")
@@ -392,6 +762,12 @@ def validate(c, plans):
                 f"  traefik keeps one and the other never receives traffic. There is\n"
                 f"  no error to give it away — the app starts up healthy and stays mute.")
         claimed[s["publico"]] = s["nombre"]
+
+    # ── and it all has to FIT ──────────────────────────────────────
+    # Last, because it needs every service already validated: a sum over
+    # a contract with an unknown `tipo` or an unknown `tamano` would
+    # report an arithmetic problem where there is a spelling one.
+    _check_quota_arithmetic(c, plans)
     return c
 
 
@@ -461,8 +837,7 @@ spec:
   # Plan `{c["cuota"]}` from plans.yaml. The numbers are NOT edited
   # here: you change the plan, or you change the contract's `cuota`.
   hard:""")
-    for k in ("requests.cpu", "requests.memory", "limits.cpu", "limits.memory",
-              "pods", "persistentvolumeclaims", "requests.storage"):
+    for k in QUOTA_KEYS:
         # By hand and not with yaml.safe_dump: for a lone scalar,
         # safe_dump emits the end-of-document marker `...`, which split
         # the stream in the middle of the ResourceQuota. A K8s quantity
@@ -486,6 +861,126 @@ imagePullSecrets:
   # declare registry credentials.
   - name: regcred-internal
 """)
+    # ── the size of each service ──────────────────────────────────
+    #
+    # Two objects and they do DIFFERENT jobs. Reading them as one is
+    # the mistake to avoid:
+    #
+    #   the LimitRange   FILLS IN what a container did not say. With a
+    #                    ResourceQuota on requests/limits, a pod that
+    #                    declares no resources at all is REJECTED by the
+    #                    apiserver ("must specify limits.cpu") — a
+    #                    message that names the quota and never the
+    #                    Deployment that forgot the block. The
+    #                    LimitRange turns that rejection into a default.
+    #
+    #   the Policy       OVERRIDES what the container DID say, per
+    #                    service, with the `tamano` its contract asked
+    #                    for. The LimitRange cannot do this: its
+    #                    `default` only applies where nothing was
+    #                    declared, and a tenant Deployment declares.
+    #
+    # And the order works out because they run in that order: the
+    # LimitRanger is a built-in admission plugin and the webhooks are
+    # the LAST link of the mutating chain, so what the platform decides
+    # is what the container ends up with.
+    default = plans["tamano"][DEFAULT_SIZE]
+    lines.append(f"""\
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {ns}-tamano-por-omision
+  namespace: {ns}
+spec:
+  limits:
+    # Type Container and NOT Pod: the quota charges per container and a
+    # Pod-level default is silent about a sidecar.
+    - type: Container
+      # `{DEFAULT_SIZE}` from plans.yaml — the same default a contract gets when
+      # it names no `tamano`, so the floor and the word agree.
+      defaultRequest: {{cpu: {_q(default["requests.cpu"])}, memory: {_q(default["requests.memory"])}}}
+      default: {{cpu: {_q(default["limits.cpu"])}, memory: {_q(default["limits.memory"])}}}
+""")
+    # The patch, one rule per service that comes out of somebody's build.
+    # A service the platform provides is NOT here: its resources are
+    # rendered into its own manifest (datos.yaml) from services.yaml, and
+    # a second authority over the same numbers is how they drift apart.
+    sized = [s for s in sorted(c["servicios"], key=lambda x: x["nombre"])
+             if s["tipo"] in TYPES_WITH_IMAGE]
+    if sized:
+        lines.append(f"""\
+---
+# WHY A PATCH ON ADMISSION AND NOT A NUMBER IN THE TENANT'S REPO.
+#
+# Until 2026-08-29 a service's resources lived in the Deployment of its
+# own repo, and the canonical template asked 50m/32Mi with a ceiling of
+# 200m/64Mi. That is right for a compiled binary and it KILLS a JVM
+# during start-up: the pod is OOM killed, the event names memory, and
+# nothing points at the template. Sizing is a platform decision — it is
+# the platform that owns the quota those numbers are spent against —
+# and the contract is where it gets asked for, in words.
+#
+# IT MUTATES THE POD, NEVER THE DEPLOYMENT, and that is not a detail.
+# The Deployment is what ArgoCD compares against git: mutating it makes
+# desired != live forever, and the obvious way out —ignoreDifferences—
+# TURNS OFF the auto-sync (finding #36, measured). Pods come from no
+# git, so patching them produces no drift at all.
+#
+# The label is `app: <org>-<service>`, the same one the NetworkPolicies
+# in netpol.yaml select on: ONE convention, imposed by the platform, or
+# a pod ends up with the network of one service and the size of another.
+apiVersion: kyverno.io/v1
+kind: Policy
+metadata:
+  name: {ns}-tamanos
+  namespace: {ns}
+  labels: {{aegis.dev/part-of: aegis-organizaciones}}
+spec:
+  # A namespaced Policy and not a ClusterPolicy: this governs ONE
+  # organization, and the project that deploys this bundle has
+  # cluster-scoped narrowed to `Namespace` on purpose.
+  #
+  # background: false — there is nothing to re-evaluate in the
+  # background. A running pod's resources are immutable, so a
+  # background sweep could only report what it cannot change; `mutate`
+  # belongs to admission and says so.
+  background: false
+  webhookConfiguration:
+    # Fail, like the signature policy that already covers this
+    # namespace. A pod admitted while Kyverno was down would run with
+    # the tenant repo's numbers and be charged against this quota, which
+    # is precisely the state this policy exists to end.
+    failurePolicy: Fail
+  # Every rule is a `foreach` over the containers because their NAMES
+  # belong to the tenant and cannot be known from here; a strategic
+  # merge needs the name to find its target. initContainers are
+  # deliberately OUT — an init that runs for two seconds does not
+  # deserve the service's whole share, and the LimitRange above already
+  # keeps it from being rejected for declaring nothing.
+  rules:""")
+        for s in sized:
+            size = plans["tamano"][s.get("tamano", DEFAULT_SIZE)]
+            lines.append(f"""\
+    - name: tamano-{s['nombre']}
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              selector:
+                matchLabels: {{app: {org}-{s['nombre']}}}
+      mutate:
+        foreach:
+          - list: "request.object.spec.containers"
+            patchStrategicMerge:
+              spec:
+                containers:
+                  - name: "{{{{ element.name }}}}"
+                    # `tamano: {s.get("tamano", DEFAULT_SIZE)}` in the contract
+                    resources:
+                      requests: {{cpu: {_q(size["requests.cpu"])}, memory: {_q(size["requests.memory"])}}}
+                      limits: {{cpu: {_q(size["limits.cpu"])}, memory: {_q(size["limits.memory"])}}}""")
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -504,6 +999,7 @@ def render_data(c, h):
     ns = f"org-{org}"
     cat = yaml.safe_load(open(SERVICES, encoding="utf-8"))
     t = cat["tipos"]["postgres"]
+    pgres = platform_resources(cat, "postgres")
     image = f"{cat['registro']}/{t['imagen']}@{t['digest']}"
 
     parts = [HEADER.format(org=org, hash=h), f"""\
@@ -611,9 +1107,13 @@ spec:
             allowPrivilegeEscalation: false
             capabilities: {{drop: [ALL]}}
             readOnlyRootFilesystem: true
+          # The SAME four numbers the quota arithmetic charges this
+          # database for (platform_resources). Rendering one figure and
+          # counting another is how a contract passes validation and the
+          # apiserver then rejects the pod.
           resources:
-            requests: {{cpu: 100m, memory: 256Mi}}
-            limits: {{cpu: "1", memory: 1Gi}}
+            requests: {{cpu: {_q(pgres["requests.cpu"])}, memory: {_q(pgres["requests.memory"])}}}
+            limits: {{cpu: {_q(pgres["limits.cpu"])}, memory: {_q(pgres["limits.memory"])}}}
       volumes:
         - name: tmp
           emptyDir: {{}}
@@ -1960,6 +2460,17 @@ spec:
   namespaceResourceBlacklist:
     - {{group: "", kind: ResourceQuota}}
     - {{group: "", kind: LimitRange}}
+    # And the Kyverno Policy, since 2026-08-29, for the SAME reason as
+    # the two above: it is where each service's size is fixed. Kyverno's
+    # namespaced Policy is written INSIDE org-{org}, which is the one
+    # namespace this project may write, so without this line the tenant
+    # could ship a Policy of its own that mutates its pods' resources
+    # back to whatever it likes. What would be left holding is the
+    # ResourceQuota — the coarse wall that `tamano` exists precisely to
+    # refine, since it does not stop one service from eating another's
+    # share. Taking the pen away is the only bound an AppProject can
+    # express: it filters by kind, never by the contents of a field.
+    - {{group: kyverno.io, kind: Policy}}
     - {{group: rbac.authorization.k8s.io, kind: Role}}
     - {{group: rbac.authorization.k8s.io, kind: RoleBinding}}
     # And it CANNOT write its own routing (#54). This is the one that
