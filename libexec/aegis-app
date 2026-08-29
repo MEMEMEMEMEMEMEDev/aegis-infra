@@ -29,12 +29,25 @@ THE BORDER (the house rule, carved here as in aegis-org)
 The two subcommands live on either side of the SAME line, and that line
 is the whole design (journeys/design.md §0.2 and §3):
 
-  `new`    WRITES FILES AND NEVER TOUCHES THE WORLD. Contract, staging,
-           derivations, encrypted secrets: everything is a git diff,
-           everything is reviewable, nothing left this machine. It does not
-           use `gh`, it does not use the network. Generating is harmless.
-  `apply`  TALKS TO THE WORLD (GitHub) AND NEVER WRITES INTO THE REPOS —
+  `new`    WRITES FILES AND CHANGES NOTHING OUTSIDE THIS MACHINE.
+           Contract, staging, derivations, encrypted secrets: everything
+           is a git diff, everything is reviewable, nothing left here. It
+           does not use `gh` and it creates nothing anywhere.
+  `apply`  CHANGES THE WORLD (GitHub) AND NEVER WRITES INTO THE REPOS —
            neither into platform/ nor into the app's repo WITH HISTORY.
+
+The line is «who can leave a mark outside», and it is NOT «who opens a
+socket» — since 2026-08-29 `new --template` does open one. Every FROM in
+a template is a placeholder, and resolving it means ASKING the internal
+registry (through `aegis image from`) for the digest the mirror gave that
+image, which nothing on this disk knows: crane rebuilds the manifest as
+it copies, so images.txt's digest is upstream's and pulls nothing here.
+So `--template` needs a cluster, the registry's ClusterIP and the
+registry credential, and it can fail for lack of any of them — before it
+writes a single file. The read is idempotent and leaves no trace; the
+border it does not cross is still the one that matters. Without
+`--template` nothing is asked of anybody: the artisan path is a pure
+local derivation.
 
 It is the mirror of aegis-org's «IT DOES NOT TALK TO THE CLUSTER», split
 in two: between generating and executing there is a PAUSE with a human
@@ -64,8 +77,20 @@ done / already / COULD NOT EVALUATE. The third is a WARNING and never an
 approval: not being able to look is not the same as being fine (the rc 2
 of aegis-edge and aegis-webhook, from the same disease E). Re-running with
 everything done ends up as pure «already» — converge, do not execute
-(journeys/design.md §0.4). It holds for both subcommands: `new` re-run
-with everything done also ends up as pure «already».
+(journeys/design.md §0.4). It holds for `apply`, and for `new` WITHOUT
+`--template`, which only re-derives.
+
+It does NOT hold for `new --template`, and the honest thing is to say so
+here rather than let somebody discover it: a second run STOPS, because a
+contract that already exists is not trampled (it is the only truth,
+§0.1). And even against an untouched staging area the answer can be
+«files differ» rather than «already», by design: the FROM this command
+writes is a DIGEST measured against the registry at that instant, so
+after the mirror rebuilds a base the same template renders different
+bytes — and different bytes are not trampled either, they are reported.
+That is convergence over a moving measurement, which is not the same
+thing as idempotence, and calling it idempotent would be a promise
+broken by the first re-mirror.
 
     aegis app new tienda --template base   # contract + skeleton + derive
     aegis app new tienda                   # artisan: the contract is already
@@ -738,7 +763,7 @@ def new(org, template, tot):
                     f"({gen.VALID_NAME.pattern}); the namespace is going to be org-{org} "
                     f"and the contract would reject it anyway, better here and now")
     contract = os.path.join(ORGS_DIR, f"{org}.yaml")
-    print(f"\n{org}  {gray}(new — files only: none of this touches the world){reset}")
+    print(f"\n{org}  {gray}(new — files only: nothing is created outside this machine){reset}")
 
     if template:
         # ── step 1: a live contract is NOT trampled ───────────────
@@ -751,9 +776,9 @@ def new(org, template, tot):
         d = _template(template)
         values = _values_for(org)
         # The base images LAST and before anything is written: this is
-        # the only step that needs the world (the live registry), and it
-        # is the one that can honestly say no. Failing here leaves the
-        # disk exactly as it was.
+        # the only step that leaves this machine (a read of the internal
+        # registry), and the only one that can honestly say no. Failing
+        # here leaves the disk exactly as it was.
         values.update(_from_values(d))
         # ── steps 2 and 3: contract + skeletons ───────────────────
         _instantiate_contract(org, d, values, tot)
@@ -774,7 +799,7 @@ def new(org, template, tot):
 
     # ── step 6: the summary and the pause ─────────────────────────
     staging = os.path.join(STAGING_DIR, org)
-    print(f"\n{green}ready{reset} — it has been written, nothing touched the world:")
+    print(f"\n{green}ready{reset} — it has been written, and nothing was created outside:")
     print(f"  {gray}contract:{reset}  orgs/{org}.yaml")
     if os.path.isdir(staging):
         n = sum(len(fs) for _, _, fs in os.walk(staging))
@@ -946,12 +971,16 @@ def main():
     p = argparse.ArgumentParser(prog=cli.cmd("app"), description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     # Subcommands and not flags: `new` (journeys §3, files only) lives
-    # next to `apply` (the world only), and the house's border is
-    # precisely that line — the order of the help tells it.
+    # next to `apply` (which changes the world), and the house's border
+    # is precisely that line — the order of the help tells it. `new` may
+    # READ the registry (the template FROMs); what it may not do is
+    # leave a mark anywhere but this disk.
     s = sub.add_parser("new",
                        help="writes the WHOLE sign-up into files: contract from a "
-                            "template, skeleton, derivations, secrets. "
-                            "It never touches the world")
+                            "template, skeleton, derivations, secrets. It creates "
+                            "nothing outside this machine (with --template it does "
+                            "READ the internal registry, to pin every base image "
+                            "by digest)")
     s.add_argument("organization", metavar="ORG",
                    help="the name of the new organization")
     s.add_argument("--template", metavar="T", dest="template",
@@ -968,9 +997,11 @@ def main():
     a = p.parse_args()
 
     if a.cmd == "new":
-        # Without a gh check ON PURPOSE: this side of the border talks to
-        # nobody, and demanding a session in order to write files would be
-        # lying about what it does.
+        # Without a gh check ON PURPOSE: this side of the border creates
+        # nothing in GitHub, and demanding a session in order to write
+        # files would be lying about what it does. What `--template` does
+        # need —a live registry— is asked for where it is used, and its
+        # absence is reported as COULD NOT EVALUATE, never as approval.
         tot = {"already": 0, "done": 0, "would": 0, "not_evaluable": 0}
         rc = new(a.organization, a.template, tot)
         if tot["not_evaluable"]:
