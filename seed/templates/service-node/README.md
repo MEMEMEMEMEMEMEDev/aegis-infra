@@ -46,6 +46,11 @@ is written, is the mechanism working.
 - **The two `FROM` lines** — resolved against the internal registry at
   instantiation and pinned by digest. The build image carries npm, the
   runtime one does not, and that asymmetry is the point.
+- **`RUN npm ci ... && mkdir -p node_modules`** — the `mkdir` is load
+  bearing while your dependency tree is empty: `npm ci` creates no
+  `node_modules` at all in that case (measured: «up to date in 134ms»,
+  and no directory), and the runtime stage's `COPY` of a path that does
+  not exist aborts the build with an error that never mentions npm.
 - **The digest marker in `k8s/overlays/dev/`** — the pipeline writes
   the real one on every build.
 - **The public route** — derived by the platform from the contract;

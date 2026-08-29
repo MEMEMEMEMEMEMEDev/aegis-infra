@@ -29,7 +29,16 @@ COPY package.json package-lock.json ./
 # `npm ci` and NOT `npm install`: it installs EXACTLY what the lock
 # says. `npm install` may resolve a different tree than the one that was
 # tested, in CI, silently.
-RUN npm ci --no-audit --no-fund
+#
+# The `mkdir` is not belt and braces: with an EMPTY dependency tree —
+# which is how this template ships, on purpose — `npm ci` creates no
+# node_modules at all. Measured on 2026-08-29: `npm ci` says «up to date
+# in 140ms» and leaves no directory, and the COPY in the runtime stage
+# then aborts the build on a path that does not exist, with an error
+# that says nothing about npm. The directory is created here so that the
+# first build works with zero dependencies and every one you add later
+# lands in it.
+RUN npm ci --no-audit --no-fund && mkdir -p node_modules
 COPY src ./src
 COPY tests ./tests
 # THE TEST STAGE IS THE IMAGE'S DOOR, not decoration: the canonical
@@ -39,6 +48,8 @@ COPY tests ./tests
 RUN npm test
 # Only production travels onward: devDependencies stay in this stage.
 # Less surface to scan, and nothing the process does not execute.
+# Measured in the same session: prune leaves the empty directory the
+# line above created, so there is nothing to re-create here.
 RUN npm prune --omit=dev
 
 FROM __FROM_NODE__
