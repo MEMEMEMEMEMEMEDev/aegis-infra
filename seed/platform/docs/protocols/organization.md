@@ -253,6 +253,34 @@ different jobs:
   auto-sync off (#36). Pods come from no git, so there is no drift to
   produce.
 
+**And the organization cannot write that Policy.** It is namespaced and
+it lives in `org-<org>` — the one namespace the tenant's AppProject may
+write — so `kyverno.io/Policy` sits in that project's
+`namespaceResourceBlacklist`, next to `ResourceQuota` and `LimitRange`
+and for the same reason. Without the line the tenant ships a Policy of
+its own, mutates its pods back to whatever it likes, and what is left
+holding is the quota: the coarse wall this field exists to refine. An
+AppProject filters by *kind* and never by the contents of a field, so
+taking the pen away is the only bound it knows how to express.
+
+**A half-copied `plans.yaml` is refused by name.** The file is judged
+before the contract that names its words: the `tamano:` section has to
+be there, the default step has to be in it — it is read even by an
+organization whose every service asked for something else, because the
+LimitRange is written from it — every step has to carry its four
+numbers, and every quota plan its seven. This matters on the adoption
+path: an instance older than the field takes the section across **by
+hand**, and a copy that brings only the steps that instance happens to
+use used to surface as a `KeyError` from inside the render, which names
+neither the file nor what is missing from it.
+
+**What a provided service asks for is decided by `services.yaml`, all
+four numbers or none.** A `recursos:` block there wins over the
+generator's table, but it may not be half written and it may not carry a
+key nobody reads: `request.memory` — one missing `s` — used to be
+dropped in silence, leaving whoever wrote it believing they had resized
+the database while the manifest carried the old figure.
+
 ### The schema's rules
 
 1. **Unknown fields = error.** They are not ignored in silence. A typo
