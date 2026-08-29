@@ -1,4 +1,4 @@
-# title: every template is complete and no template FROM comes off the internet
+# title: every template is complete, and every FROM resolves to a mirrored image
 # origin: new in v3 — 2026-08-29, the day `base` was the only template and its two FROMs were docker.io
 check() {
 # seed/templates/<name>/ is the ONLY thing a new organization is handed:
@@ -38,13 +38,35 @@ check() {
 #    as it copies, so images.txt's digest pulls nothing here), or an
 #    already-pinned `@sha256:` reference. Never a bare tag.
 #
+# 3. THE PLACEHOLDER POINTS SOMEWHERE. Until 2026-08-29 property 2 was
+#    all this asked, and it said PASS over six templates of which three
+#    could not be instantiated at all: `__FROM_BASE_NGINX__` meant
+#    `aegis-base-nginx:3.22`, a tag base-images does not publish and
+#    never will (it tags `<minor>-<build number>`; «No floating tag,
+#    ever»), and `__FROM_CI_NODE__` meant an image ci-images pushes
+#    without signing, which is what the resolver refuses. A placeholder
+#    that resolves to nothing is a FROM off the internet with a nicer
+#    face: the pipeline fails either way, only later and with an error
+#    about a manifest. So the placeholders are crossed against the table
+#    that owns them (`_FROM_IMAGES` in libexec/aegis-app) and the table
+#    against mirror-images/images.txt — and a row images.txt does not
+#    declare yet is legal only if every template using it SAYS SO in its
+#    README, naming the image. «It does not instantiate today» is a fact
+#    the operator has to read before spending an afternoon on it, not
+#    after.
+#
 # And the USER, which is one line and the difference between a pod that
 # runs and a pod that is rejected at admission: tenant namespaces are
-# PSS restricted, so the last USER of the final stage has to be NUMERIC
-# and not 0. `USER nginx` fails runAsNonRoot because the kubelet cannot
-# read the image's /etc/passwd to prove the name is not root. Same
-# clause check 138 asserts on the bases the platform owns, for the same
-# reason, one level up.
+# PSS restricted, so the USER IN FORCE AT THE END OF THE FINAL STAGE has
+# to be NUMERIC and not 0. The final stage, and not the last line of the
+# file: until 2026-08-29 this read `grep USER | tail -1`, so a
+# `USER 65532` in a BUILD stage with nothing in the runtime one
+# satisfied it — while the image that actually runs is root and is
+# rejected at admission. A USER does not survive a FROM: every stage
+# starts at its own base image's user. `USER nginx` fails runAsNonRoot
+# because the kubelet cannot read the image's /etc/passwd to prove the
+# name is not root. Same clause check 138 asserts on the bases the
+# platform owns, for the same reason, one level up.
 T="$SEED/templates"
 [[ -d "$T" ]] || { fail "$T does not exist: the template catalogue is gone and there is nothing to instantiate from"; return; }
 D148=""
@@ -83,11 +105,14 @@ for tpl in "$T"/*/; do
             grep -qE '(__FROM_[A-Z0-9_]+__|@sha256:[0-9a-f]{64})' <<< "$from" && continue
             D148="$D148 $s: «$(echo "$from" | tr -s ' ')» is neither a __FROM_*__ placeholder nor pinned by @sha256: — an image by tag is a mutable pointer entering the pipeline that signs the result;"
         done <<< "$(grep -E '^[[:space:]]*FROM[[:space:]]' <<< "$code" || true)"
-        last_user="$(grep -E '^[[:space:]]*USER[[:space:]]' <<< "$code" | tail -1 | awk '{print $2}')"
+        # The USER IN FORCE at the end of the file: every FROM opens a
+        # new stage and clears it, because a stage starts at its base
+        # image's user and inherits nothing from the stage before it.
+        last_user="$(awk '/^[[:space:]]*FROM[[:space:]]/{u=""} /^[[:space:]]*USER[[:space:]]/{u=$2} END{print u}' <<< "$code")"
         if [[ -z "$last_user" ]]; then
-            D148="$D148 $s: no USER: the image runs as root and PSS restricted rejects it at admission;"
+            D148="$D148 $s: the FINAL stage declares no USER: what runs is root, and PSS restricted rejects it at admission (a USER in an earlier stage does not carry over);"
         elif ! [[ "$last_user" =~ ^[1-9][0-9]*(:[0-9]+)?$ ]]; then
-            D148="$D148 $s: the last USER is '$last_user', and it has to be numeric and not 0: runAsNonRoot cannot be proven for a name (the kubelet does not read the image's /etc/passwd);"
+            D148="$D148 $s: the final stage's USER is '$last_user', and it has to be numeric and not 0: runAsNonRoot cannot be proven for a name (the kubelet does not read the image's /etc/passwd);"
         fi
     done
 done
@@ -95,6 +120,73 @@ done
 # `--template` has no catalogue, and this check stopped measuring.
 (( n_tpl > 0 )) || D148="$D148 seed/templates/ has no template: the catalogue --template offers is empty;"
 printf '    %s template(s) · %s Containerfile(s)\n' "$n_tpl" "$n_cf"
+# ── property 3, in python: the table is a python dict and images.txt a
+# two-column file, and reading both with `ast` and `awk` beats a grep
+# that would go stale the first time either changes shape.
+ROOT="$AEGIS_ROOT" python3 - <<'P3' || D148="$D148 (the placeholder/table detail is above);"
+import ast, os, pathlib, re, sys
+
+root = pathlib.Path(os.environ["ROOT"])
+seed = root / "seed"
+bad = []
+
+src = (root / "libexec" / "aegis-app").read_text(errors="replace")
+table = None
+for node in ast.walk(ast.parse(src)):
+    if (isinstance(node, ast.Assign) and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "_FROM_IMAGES"):
+        table = ast.literal_eval(node.value)
+if table is None:
+    print("    libexec/aegis-app declares no _FROM_IMAGES: the placeholders "
+          "have no owner and every template FROM resolves to nothing",
+          file=sys.stderr)
+    sys.exit(1)
+
+# The DESTINATION column of the mirror list: what the internal registry
+# ends up holding, which is what a template FROM is asked to resolve to.
+images = seed / "platform" / "mirror-images" / "images.txt"
+declared = set()
+for ln in images.read_text(errors="replace").splitlines():
+    ln = ln.strip()
+    if not ln or ln.startswith("#"):
+        continue
+    f = ln.split()
+    if len(f) >= 2:
+        declared.add(f[1])
+
+ph_re = re.compile(r"__FROM_[A-Z0-9_]+__")
+n_ph = 0
+for tpl in sorted(d for d in (seed / "templates").iterdir() if d.is_dir()):
+    used = set()
+    for f in sorted(tpl.rglob("*")):
+        if f.is_file():
+            try:
+                used |= set(ph_re.findall(f.read_text(encoding="utf-8")))
+            except (UnicodeDecodeError, OSError):
+                continue
+    readme = tpl / "README.md"
+    text = readme.read_text(errors="replace") if readme.is_file() else ""
+    for ph in sorted(used):
+        n_ph += 1
+        if ph not in table:
+            bad.append(f"    {tpl.name}: {ph} belongs to no table — "
+                       f"_FROM_IMAGES (libexec/aegis-app) owns the placeholders, "
+                       f"and one it does not know stops `app new` after it has "
+                       f"already resolved every other value")
+        elif table[ph] not in declared and table[ph] not in text:
+            bad.append(f"    {tpl.name}: {ph} means {table[ph]}, which "
+                       f"mirror-images/images.txt does not declare, and this "
+                       f"template's README never names it — so the template does "
+                       f"not instantiate and nothing warns the operator first")
+
+print(f"    {n_ph} FROM placeholder(s) crossed against _FROM_IMAGES "
+      f"({len(table)} rows) and {len(declared)} mirrored image(s)", file=sys.stderr)
+for m in bad:
+    print(m, file=sys.stderr)
+sys.exit(1 if bad else 0)
+P3
+
 if [[ -n "$D148" ]]; then fail "templates:$D148"
-else pass "$n_tpl template(s) complete (contract, skeleton, k8s/base + overlay, ci and README) and no FROM off the internet: placeholder or digest, numeric non-root USER"; fi
+else pass "$n_tpl template(s) complete (contract, skeleton, k8s/base + overlay, ci and README), every FROM a placeholder its table resolves or a digest, and every FINAL stage numeric and non-root"; fi
 }

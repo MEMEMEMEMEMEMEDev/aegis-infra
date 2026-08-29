@@ -59,3 +59,38 @@ control_2() {
     printf '\n# it used to say FROM docker.io/library/alpine:3.21, and that was the hole\n' \
         >> "$AEGIS_ROOT/seed/templates/base/repos/app/Containerfile"
 }
+
+# THE HOLE THE `tail -1` LEFT: a USER in the BUILD stage and none in the
+# final one. The image that RUNS is root, PSS restricted rejects it at
+# admission — and the old check read the last USER of the FILE, so it
+# said PASS. A USER does not survive a FROM.
+red_6() {
+    f="$AEGIS_ROOT/seed/templates/base/repos/app/Containerfile"
+    sed -i 's|^USER 65532:65532$||' "$f"
+    sed -i 's|^WORKDIR /src$|WORKDIR /src\nUSER 65532:65532|' "$f"
+}
+
+# a placeholder nobody owns: _FROM_IMAGES does not know it, so
+# `app new --template` dies after having resolved every other value,
+# and the template can never be instantiated. Property 2 still sees a
+# well-formed __FROM_*__ and is happy.
+red_7() {
+    sed -i 's|^FROM __FROM_ALPINE__$|FROM __FROM_DEBIAN__|' \
+        "$AEGIS_ROOT/seed/templates/base/repos/app/Containerfile"
+}
+
+# an image the mirror list does not declare is legal — that is how the
+# java template ships — but ONLY while the README says so. Take the
+# name out of the README and the template becomes one that stops
+# halfway through an afternoon with no warning anywhere.
+red_8() {
+    sed -i '/node:22.23.1-alpine/d' "$AEGIS_ROOT/seed/templates/static/README.md"
+}
+
+# control: a row in _FROM_IMAGES that no template uses yet cannot turn
+# it red. The table is allowed to be ahead of the catalogue; what is
+# forbidden is a template ahead of the table.
+control_3() {
+    sed -i 's|^    "__FROM_PYTHON__": "python:3.12-slim",$|    "__FROM_PYTHON__": "python:3.12-slim",\n    "__FROM_REDIS__": "redis:8.6.4-alpine",|' \
+        "$AEGIS_ROOT/libexec/aegis-app"
+}
