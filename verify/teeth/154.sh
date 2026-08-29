@@ -50,6 +50,19 @@ open(p, "w").write(t.replace(old, new, 1))
 PY
 }
 
+# the measurement, out of the convention: a series without the aegis_
+# prefix is one that no dashboard and no rule of this platform finds
+red_4() {
+    python3 - "$AEGIS_ROOT/$DATA" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = 'aegis_org_bucket_bytes{{org="'
+new = 'org_bucket_bytes{{org="'
+assert t.count(old) == 1
+open(p, "w").write(t.replace(old, new, 1))
+PY
+}
+
 # control: a comment may name the credential
 control_1() {
     printf '\n# The word password appears here on purpose: a comment explains,\n# it does not execute.\n' \

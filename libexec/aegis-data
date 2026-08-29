@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # aegis-summary: Captures and restores the tenants' DATA
 # aegis-group:   backup
-# aegis-subcommands: backup list restore
+# aegis-subcommands: backup list restore size
 """aegis-data — captures and restores the tenants' DATA.
 
 It is the other half of `aegis state backup`. That one backs up the
@@ -14,6 +14,7 @@ to put.
     aegis data backup                    # one bundle PER ORGANIZATION
     aegis data list <bundle.age>         # what is inside, without restoring
     aegis data restore <bundle.age> --org ejemplo [--force]
+    aegis data size [--org ejemplo]      # what it weighs, as metrics
 
 ── ONE BUNDLE PER ORGANIZATION, IN ITS OWN FOLDER ──────────────────
 
@@ -112,6 +113,17 @@ REALIGNS the role with the live Secret and proves that the credential
 opens the database. Copying the secret into the bundle would have hidden
 the discrepancy by creating it in silence; storing the fingerprint
 detects it, and realigning closes it.
+
+── WHAT IT WEIGHS ──────────────────────────────────────────────────
+
+The instance's storage class is local-path: it does not measure or limit
+the disk a PVC really uses, so the cluster cannot answer how much an
+organization weighs — what `kubectl` returns is the size that was
+REQUESTED. `size` asks the ones that do know (postgres for its
+databases, the bucket listing for its objects) and prints `aegis_org_*`
+series on stdout, in the same format every other producer on this
+platform speaks. It pushes nothing: where those series go is decided by
+whoever calls it.
 """
 import argparse
 import base64
@@ -1278,6 +1290,119 @@ def restore(bundle, org, force):
     return 0
 
 
+# ── how much it weighs ──────────────────────────────────────────────
+def sizes(only_org=None):
+    """What each organization's data weighs, asked of whoever knows.
+
+    The instance's storage class is local-path: it neither measures nor
+    limits the disk a PVC really uses. `kubectl` gives back the size that
+    was REQUESTED, which is a promise and not a measurement, so until
+    this existed the only honest answer to «how much does this
+    organization weigh?» was to open the pod by hand. A number nobody can
+    obtain is a number nobody watches, and the first sign of a full disk
+    is postgres refusing to write.
+
+    So it is asked of the two that do know: postgres about its databases
+    (`pg_database_size`) and the bucket's own listing about its objects.
+    Both are cheap — the listing already carries every object's size, so
+    a bucket costs one request per thousand objects and not one per
+    object.
+
+    It is a FUNCTION and not only a verb of the CLI because whoever
+    watches the platform has to consume the NUMBER, not parse a sentence:
+    `metrics()` turns this into series, and where they are pushed is the
+    caller's decision.
+    """
+    databases, buckets = sources()
+    measured = []
+    for b in databases:
+        if only_org and b["org"] != only_org:
+            continue
+        bases = []
+        for database in databases_of(b["ns"], b["pod"]):
+            n, rc = psql(b["ns"], b["pod"], "postgres",
+                         f"SELECT pg_database_size({sql_literal(database)})")
+            bases.append({"nombre": database,
+                          "bytes": int(n) if rc == 0 and n.isdigit() else -1})
+        measured.append({"tipo": "postgres", "org": b["org"], "ns": b["ns"],
+                         "servicio": b["servicio"], "bases": bases,
+                         "bytes": sum(x["bytes"] for x in bases if x["bytes"] >= 0)})
+    for bk in buckets:
+        if only_org and bk["org"] != only_org:
+            continue
+        ak, sk = s3_credential(bk["ns"])
+        with Tunnel("garage-system", "garage", 3900) as t:
+            objects = bucket_listing(t.host, bk["bucket"], ak, sk)
+        measured.append({"tipo": "bucket", "org": bk["org"], "ns": bk["ns"],
+                         "bucket": bk["bucket"], "objetos": len(objects),
+                         "bytes": sum(o["bytes"] for o in objects if o["bytes"] >= 0)})
+    return measured
+
+
+def metrics(measured):
+    """The measurement in the exposition format the rest of the platform speaks.
+
+    Same convention as the producers that already live in the seed
+    (`aegis_image_watch_*`, `aegis_trivy_db_updated_timestamp_seconds`):
+    the `aegis_` prefix, the unit at the end of the name, and the identity
+    in LABELS and never in the name — a metric per organization would be a
+    metric nobody can aggregate.
+
+    And a timestamp beside the figures, which is what lets a rule notice
+    that the measurement went SILENT: a gauge that stops being written
+    keeps its last value for ever, and stale is indistinguishable from
+    healthy without something dated to compare against. It is the same
+    pair the image watch uses, and for the same reason.
+
+    It returns lines and pushes nothing. Where they go —a host timer, the
+    round of checks— is decided outside: this command does not reach into
+    another one.
+    """
+    now = int(time.time())
+    lines, orgs = [], []
+    for m in measured:
+        if m["org"] not in orgs:
+            orgs.append(m["org"])
+        if m["tipo"] == "postgres":
+            for b in m["bases"]:
+                lines.append(f'aegis_org_database_bytes{{org="{m["org"]}",'
+                             f'service="{m["servicio"]}",'
+                             f'database="{b["nombre"]}"}} {b["bytes"]}')
+        else:
+            lines.append(f'aegis_org_bucket_bytes{{org="{m["org"]}",'
+                         f'bucket="{m["bucket"]}"}} {m["bytes"]}')
+            lines.append(f'aegis_org_bucket_objects{{org="{m["org"]}",'
+                         f'bucket="{m["bucket"]}"}} {m["objetos"]}')
+    for org in orgs:
+        lines.append(f'aegis_org_data_measured_timestamp_seconds'
+                     f'{{org="{org}"}} {now}')
+    return lines
+
+
+def measure(only_org):
+    """The measurement on STDOUT, ready to be piped where it is collected.
+
+    stdout carries ONLY the series — nothing else — so the output goes
+    straight into whoever ingests it without a filter in between. What a
+    person reads goes to stderr. It is the same rule the rest of the
+    product follows with anything whose value gets captured.
+    """
+    measured = sizes(only_org)
+    if not measured:
+        die("no organization to measure" + (f": {only_org!r} is not one of the "
+                                            f"contracts" if only_org else ""))
+    for m in measured:
+        if m["tipo"] == "postgres":
+            print(f"  {gray}·{reset} postgres {m['ns']}/{m['servicio']}: {m['bytes']} "
+                  f"bytes in {len(m['bases'])} databases", file=sys.stderr)
+        else:
+            print(f"  {gray}·{reset} bucket   {m['bucket']}: {m['bytes']} bytes in "
+                  f"{m['objetos']} objects", file=sys.stderr)
+    for line in metrics(measured):
+        print(line)
+    return 0
+
+
 def main():
     # Rule 1: verbs, not flags. And the same pair of names as
     # `aegis state`, because they are the same operation over another
@@ -1293,15 +1418,24 @@ def main():
     s.add_argument("--org", required=True,
                    help="restoring EVERYTHING in one go is not an operation worth making easy")
     s.add_argument("--force", action="store_true",
-                    help="go on even if the credential rotated since the capture")
+                    help="go on even if the credential is not the one from the capture")
+    # `size` and not a flag of `backup`: measuring is not a step of
+    # capturing. It is asked for on its own —from a timer, from a round
+    # of checks— and it writes nothing.
+    s = sub.add_parser("size", help="what the data weighs, as metrics on stdout")
+    s.add_argument("--org", default=None, metavar="ORG",
+                   help="only this organization (default: all of them)")
     a = ap.parse_args()
     a.capture_dir   = a.directory if a.verb == "backup" else None
     a.list_bundle   = a.bundle if a.verb == "list" else None
     a.restore_bundle = a.bundle if a.verb == "restore" else None
     if a.verb != "restore":
-        a.org = None
         a.force = False
+    if a.verb not in ("restore", "size"):
+        a.org = None
 
+    if a.verb == "size":
+        return measure(a.org)
     if a.list_bundle:
         return list_bundle(a.list_bundle)
     if a.restore_bundle:

@@ -1,4 +1,4 @@
-# title: `data restore` leaves the organization working: the role in step, the objects back, no password in argv
+# title: `data restore` leaves the organization working, and what it weighs can be asked for
 # origin: new in v3 — the rehearsal on a foreign instance, 2026-08-27
 check() {
 # A restore that finishes and reports success is not a restore. The
@@ -134,11 +134,46 @@ for call in ast.walk(tree):
                     argv_hits.append(f"line {element.lineno}: argv interpolates «{ident}»")
 want(not argv_hits, f"a credential travels in argv: {'; '.join(sorted(set(argv_hits))[:3])}")
 
+# ── 4. what an organization weighs can be asked for from outside ────
+# The instance's storage class is local-path: it does not measure or
+# limit the disk a PVC really uses, so nobody outside the pod could say
+# how much an organization weighs. A number that cannot be obtained is a
+# number nobody watches, and the first sign of a full disk is postgres
+# refusing to write.
+want("sizes" in funcs and "metrics" in funcs,
+     "there is no function that measures what an organization's data weighs")
+want("pg_database_size" in code_of("sizes"),
+     "sizes() does not ask postgres for the size of its databases")
+want("bucket_listing" in called_by("sizes"),
+     "sizes() does not measure the bucket")
+want("file=sys.stderr" in code_of("measure"),
+     "measure() does not send its prose to stderr: stdout carries the "
+     "series and nothing else, so it can be piped where they are collected")
+
+# The names, against the convention the rest of the platform already
+# speaks: the `aegis_` prefix, the unit at the end, the identity in
+# labels. A series without the prefix is one that nobody's dashboard
+# finds.
+import re
+series = set()
+for n in ast.walk(funcs.get("metrics") or ast.parse("")):
+    if isinstance(n, ast.Constant) and isinstance(n.value, str):
+        series.update(re.findall(r'[A-Za-z_][A-Za-z0-9_]*_(?:bytes|objects|timestamp_seconds)',
+                                 n.value))
+want(len(series) >= 3, f"metrics() emits {len(series)} series: too few to be the measurement")
+stray = sorted(s for s in series if not s.startswith("aegis_"))
+want(not stray, f"series outside the convention (they do not start with aegis_): {stray}")
+
+m_ = re.search(r'^# aegis-subcommands:[ \t]*(.*)$', src, re.M)
+want(m_ is not None and "size" in m_.group(1).split(),
+     "the command does not declare the subcommand that measures: the menu "
+     "and check 106 read exactly that line")
+
 print(f"    {measured} properties measured over libexec/{target.name}", file=sys.stderr)
 for m in bad:
     print(m, file=sys.stderr)
 sys.exit(1 if bad else 0)
 PY
 if [[ -n "$D154" ]]; then fail "the restore does not leave the organization working:$D154"
-else pass "restore realigns the role and proves it, puts the objects back and measures them, and no password travels in argv"; fi
+else pass "restore realigns the role and proves it, puts the objects back and measures them, no password travels in argv, and the weight of the data comes out as aegis_ series"; fi
 }
