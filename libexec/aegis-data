@@ -1038,8 +1038,24 @@ def realign_role(ns, pod, secret, database):
         die(f"{ns}/{secret} does not carry `usuario` and `password`: the role "
             f"cannot be realigned, and a restore without realigning leaves the "
             f"application locked out of its own database")
-    user = user.decode(errors="replace").strip()
-    password = password.decode(errors="replace")
+    # STRICT, and it dies instead of repairing. `errors="replace"` turns
+    # each invalid byte into U+FFFD in silence, and what would be
+    # installed by the ALTER ROLE is THAT mutilated string — while the pod
+    # keeps receiving the raw bytes in its environment variable. The proof
+    # underneath would not catch it either: it would compare the mutilated
+    # password against itself and come out green. The same shape as the
+    # line break below, and the same conclusion: the credential is already
+    # broken before this, and repairing it in silence only moves the
+    # failure to the application.
+    try:
+        user = user.decode().strip()
+        password = password.decode()
+    except UnicodeDecodeError:
+        die(f"the credential of {ns}/{secret} is not valid UTF-8: it cannot "
+            f"become a SQL statement without mutilating it, and a mutilated "
+            f"password would be installed here and then verified against "
+            f"itself — green, with the application locked out. Regenerate "
+            f"the Secret")
     if any(c in password for c in "\r\n\x00"):
         die(f"the password in {ns}/{secret} carries a line break: it cannot "
             f"travel over a line-oriented channel — and the container's "

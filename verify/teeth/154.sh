@@ -126,6 +126,26 @@ open(p, "w").write(t.replace(old, new, 1))
 PY
 }
 
+# the silent repair: the credential decoded with errors=replace. Each
+# invalid byte becomes U+FFFD, the ALTER ROLE installs the mutilated
+# string and the proof compares it against itself — green, and the
+# application, which gets the raw bytes, stays out
+red_9() {
+    python3 - "$AEGIS_ROOT/$DATA" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = '''    try:
+        user = user.decode().strip()
+        password = password.decode()
+    except UnicodeDecodeError:'''
+new = '''    user = user.decode(errors="replace").strip()
+    password = password.decode(errors="replace")
+    if False:'''
+assert t.count(old) == 1
+open(p, "w").write(t.replace(old, new, 1))
+PY
+}
+
 # control: a comment may name the credential
 control_1() {
     printf '\n# The word password appears here on purpose: a comment explains,\n# it does not execute.\n' \

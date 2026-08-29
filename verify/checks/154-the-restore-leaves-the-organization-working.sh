@@ -87,6 +87,19 @@ want("127.0.0.1" in code_of("role_can_log_in"),
      "connection, a wrong password enters the same, and the proof is "
      "green by construction")
 
+# And it is not repaired in silence. `errors="replace"` turns an invalid
+# byte into U+FFFD, the ALTER ROLE installs THAT string, and the proof
+# above compares the mutilated password against itself: green, with the
+# application —which receives the raw bytes in its environment variable—
+# locked out of its own database. That is exactly the failure mode this
+# check exists for, reached by another road.
+lax = [w for w in ("errors='replace'", 'errors="replace"')
+       if w in code_of("realign_role")]
+want(not lax,
+     "realign_role() decodes the credential with errors=replace: an "
+     "invalid byte becomes U+FFFD, the role gets a mutilated password "
+     "and the proof compares it against itself")
+
 # ── 2. the objects come back, and what came back is measured ────────
 want("restore_bucket" in called_by("restore"),
      "restore() does not restore the objects of the bucket")
