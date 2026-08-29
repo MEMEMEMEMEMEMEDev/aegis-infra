@@ -1,9 +1,10 @@
 # teeth for check 149 (the service sizes, and the generator that serves them)
 #
-# The mutations are the three ways this can really break: a step that
-# disappears, a step that is half written, and a generator that stops
-# saying no. Each was applied over a copy of the tree and the check went
-# red; both controls stayed green.
+# The mutations are the ways this really breaks: a step that
+# disappears, a step half written, a generator that stops saying no, a
+# validator that lets a broken plans.yaml through, and a services.yaml
+# whose numbers are ignored. Each was applied over a copy of the tree
+# and the check went red; the three controls stayed green.
 PLANS="seed/platform/plans.yaml"
 ORG="lib/aegis/org.py"
 
@@ -67,6 +68,37 @@ open(p, "w", encoding="utf-8").write(t.replace(old, "            if False:\n", 1
 PY
 }
 
+# plans.yaml stops being judged before the contract that names its
+# words. This is the adoption path the field documents —an older
+# instance copies the section across BY HAND— and without the pass the
+# partial copy comes back as KeyError from inside the render.
+red_5() {
+    python3 - "$AEGIS_ROOT/$ORG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p, encoding="utf-8").read()
+old = '    if not plans.get("cuota"):\n'
+assert t.count(old) == 1
+open(p, "w", encoding="utf-8").write(
+    t.replace(old, '    return plans.get("tamano")\n' + old, 1))
+PY
+}
+
+# The `recursos:` of services.yaml go back to being filled in KEY BY
+# KEY from the generator's table: one misspelt key is dropped without a
+# word and the operator who resized the database gets the old figure.
+red_6() {
+    python3 - "$AEGIS_ROOT/$ORG" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p, encoding="utf-8").read()
+old = '    declared = (cat["tipos"][kind] or {}).get("recursos")\n'
+assert t.count(old) == 1
+new = ('    declared = (cat["tipos"][kind] or {}).get("recursos") or {}\n'
+        '    return {k: declared.get(k, PLATFORM_RESOURCES[kind][k])\n'
+        '            for k in PLATFORM_RESOURCES[kind]}\n')
+open(p, "w", encoding="utf-8").write(t.replace(old, new, 1))
+PY
+}
+
 # control: a comment is not a size
 control_1() {
     printf '\n# a legitimate note about how these steps were chosen\n' \
@@ -84,5 +116,22 @@ old = "    limits.cpu: \"2\"\n    limits.memory: 2Gi\n"
 assert t.count(old) == 1
 open(p, "w", encoding="utf-8").write(
     t.replace(old, "    limits.cpu: \"3\"\n    limits.memory: 3Gi\n", 1))
+PY
+}
+
+# control: services.yaml declaring THE FOUR numbers of the database is
+# legitimate — it is the file that decides the image, the port and the
+# disk, and the day it decides this too the generator has to obey it.
+control_3() {
+    python3 - "$AEGIS_ROOT/seed/platform/services.yaml" <<'PY'
+import re, sys
+p = sys.argv[1]; t = open(p, encoding="utf-8").read()
+m = re.search(r"(?m)^  postgres:\n", t)
+assert m, "services.yaml has no `postgres:` type"
+open(p, "w", encoding="utf-8").write(
+    t[:m.end()]
+    + "    recursos:\n      requests.cpu: 250m\n      requests.memory: 512Mi\n"
+      "      limits.cpu: \"2\"\n      limits.memory: 2Gi\n"
+    + t[m.end():])
 PY
 }
