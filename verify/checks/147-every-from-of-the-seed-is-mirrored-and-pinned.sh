@@ -39,10 +39,15 @@ check() {
 #     already demands the digest pin there; demanding the registry too
 #     would make the base impossible.
 #
-# THE RECORTE, said out loud. Two Containerfiles in the seed pull from
-# the internet today and neither is this change's to fix: the canary and
-# the app template are somebody else's file in the wave that brought
-# `aegis image`. They are named one by one below, and the naming has a
+# THE RECORTE, said out loud. ONE Containerfile in the seed still pulls
+# from the internet: the canary's. It was two when this check was
+# written —the app template was the other— and the template stopped
+# being one INSIDE THE SAME WAVE, when the branch that rewrote the
+# templates turned its FROMs into placeholders. The lock below is what
+# said so: the merge went red on integration with «the recorte no longer
+# has a subject», and closing it was deleting one row. A row that
+# survives the file it describes is exactly the hole this shape avoids.
+# They are named one by one below, and the naming has a
 # LOCK: a listed path that no longer exists, or that has BECOME
 # compliant, turns this check red. That is deliberate and it is check
 # 199's lesson — an allowlist nobody has to shrink is an allowlist that
@@ -65,7 +70,7 @@ REG="$(sed -n 's/^REGISTRY_HOST_INTERNAL="\([^"]*\)".*/\1/p' "$LIBS/common.sh" |
 # The classes that cannot stand on the mirror, and the files that simply
 # have not been moved yet. Both are paths relative to seed/.
 EXEMPT_CLASS=("platform/ci-images/" "platform/base-images/")
-EXEMPT_TODO=("canary/Containerfile" "templates/base/repos/app/Containerfile")
+EXEMPT_TODO=("canary/Containerfile")
 
 is_exempt_class() { local p="$1" c; for c in "${EXEMPT_CLASS[@]}"; do [[ "$p" == "$c"* ]] && return 0; done; return 1; }
 is_exempt_todo()  { local p="$1" c; for c in "${EXEMPT_TODO[@]}";  do [[ "$p" == "$c"  ]] && return 0; done; return 1; }
