@@ -2039,6 +2039,47 @@ def remote_adopt(credentials_file):
     return 0
 
 
+def remote_push_bundle(bundle, prefix):
+    """Sends out a bundle this command did not make.
+
+    It exists for the OTHER half. `aegis state backup` writes the
+    platform's bundle —the store's secrets, the init's trail, the edge's
+    tfstate— into the same tree, and it does not know how to send it
+    anywhere: with the data and without the state you have a dump nobody
+    knows where to put. Until that command learns the road, this verb is
+    the road, and the protocol says to use it.
+
+    The prefix is asked for and not guessed: what this receives is a
+    file, and a file does not say which organization it belongs to. The
+    same guard as every other exit applies — age's header or nothing.
+    """
+    with open(bundle, "rb") as f:
+        if f.read(len(AGE_MAGIC)) != AGE_MAGIC:
+            die(f"{os.path.basename(bundle)} is NOT an age-encrypted file and "
+                f"NOTHING was uploaded: only ciphertext leaves this machine")
+    cfg = remote_config()
+    pair = remote_credential()
+    data = open(bundle, "rb").read()
+    key = f"{prefix}/{os.path.basename(bundle)}"
+    st, body, _ = remote_s3("PUT", key, body=data, timeout=600, cfg=cfg, pair=pair)
+    if st not in (200, 201):
+        die(f"{key} did NOT leave the machine: HTTP {st} ({body[:160]!r})")
+    st, _, headers = remote_s3("HEAD", key, cfg=cfg, pair=pair)
+    got = int(headers.get("Content-Length", -1)) if st == 200 else -1
+    if got != len(data):
+        die(f"{key}: uploaded, and the destination returns {got} bytes where "
+            f"{len(data)} were expected — it is not called good")
+    side = remote_sidecar(bundle, prefix)
+    st, body, _ = remote_s3("PUT", key + ".manifiesto.json",
+                            body=json.dumps(side, indent=2,
+                                            ensure_ascii=False).encode(),
+                            cfg=cfg, pair=pair)
+    if st not in (200, 201):
+        die(f"{key} went up and its manifest did NOT ({st})")
+    ok(f"off-site: {cfg['bucket']}/{key} ({len(data)} bytes) and its manifest")
+    return 0
+
+
 def remote_inventory():
     """What is at the destination, grouped by organization.
 
@@ -2197,9 +2238,24 @@ CADENCE_FLOOR_S = 3600
 CADENCE_CEILING_S = 24 * 3600
 CADENCE_DEFAULT = "24h"
 CADENCE_UNIT = "aegis-backup.timer"
-CADENCE_DROPIN = f"/etc/systemd/system/{CADENCE_UNIT}.d/aegis-cadence.conf"
 NTFY_TOPIC = "aegis-alertas"
 NTFY_USER = "puente"
+
+
+def cadence_dropin_path():
+    """Where the cadence override lives, and why it is a USER unit.
+
+    The capture runs as the operator and not as root, for the reason
+    this file's opening argues at length: it needs the age key, the
+    kubeconfig and a `kubectl exec` into every tenant. So the timer is a
+    user unit, its drop-in lives under the operator's own configuration,
+    and changing the cadence needs no privilege at all — which is what
+    lets this command write it instead of printing a recipe for somebody
+    to paste wrong.
+    """
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, "systemd", "user", f"{CADENCE_UNIT}.d",
+                        "aegis-cadence.conf")
 
 
 def parse_duration(text):
@@ -2236,10 +2292,11 @@ def cadence_dropin(text):
 
 def cadence_current():
     """What the machine has installed, read and not assumed."""
-    if os.path.isfile(CADENCE_DROPIN):
-        for line in open(CADENCE_DROPIN, encoding="utf-8"):
+    path = cadence_dropin_path()
+    if os.path.isfile(path):
+        for line in open(path, encoding="utf-8"):
             if line.startswith("OnUnitActiveSec=") and line.split("=", 1)[1].strip():
-                return line.split("=", 1)[1].strip(), CADENCE_DROPIN
+                return line.split("=", 1)[1].strip(), path
     return CADENCE_DEFAULT, f"the shipped {CADENCE_UNIT} (no drop-in)"
 
 
@@ -2422,11 +2479,16 @@ def remote_cadence(set_to):
         entry = cadence_gate(set_to, seconds)
         ok(f"confirmed on the second channel by {entry['quien']} at "
            f"{entry['cuando']} — recorded in the instance's trail")
-    print(cadence_dropin(set_to))
-    print(f"  {gray}·{reset} install it as {CADENCE_DROPIN} and reload:",
-          file=sys.stderr)
-    print(f"  {gray}    systemctl daemon-reload && systemctl restart "
-          f"{CADENCE_UNIT}{reset}", file=sys.stderr)
+    else:
+        cadence_record(set_to, seconds, "terminal")
+    path = cadence_dropin_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(cadence_dropin(set_to))
+    ok(f"cadence {current} -> {set_to}  ({path})")
+    print(f"  {gray}·{reset} it takes effect on the next reload:", file=sys.stderr)
+    print(f"  {gray}    systemctl --user daemon-reload && systemctl --user "
+          f"restart {CADENCE_UNIT}{reset}", file=sys.stderr)
     return 0
 
 
@@ -2439,6 +2501,8 @@ def remote_main(a):
         return 0
     if a.remote_verb == "adopt":
         return remote_adopt(a.credentials_file)
+    if a.remote_verb == "push":
+        return remote_push_bundle(a.bundle, a.prefix)
     if a.remote_verb == "list":
         return remote_list()
     if a.remote_verb == "status":
@@ -2489,6 +2553,11 @@ def main():
     r.add_argument("--credentials-file", required=True, metavar="FILE",
                    help="two lines: access key id and secret access key. A "
                         "file and never argv, which is world-readable in /proc")
+    r = rsub.add_parser("push", help="sends out a bundle this command did not make")
+    r.add_argument("bundle", metavar="BUNDLE.age")
+    r.add_argument("--prefix", default="platform", metavar="PREFIX",
+                   help="the folder at the destination (default: platform, "
+                        "which is where the STATE bundle belongs)")
     rsub.add_parser("list", help="what is at the destination, and how old")
     rsub.add_parser("status", help="the freshness of the destination, as metrics")
     r = rsub.add_parser("cadence", help="the clock: how often the backup runs")

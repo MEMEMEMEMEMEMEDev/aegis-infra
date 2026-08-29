@@ -1,0 +1,33 @@
+[Unit]
+Description=aegis: the backup clock (every 24h by default)
+Documentation=file:///usr/local/share/aegis/systemd/README.md
+
+[Timer]
+Unit=aegis-backup.service
+
+# THE CADENCE. 24h by default, and the only place it is written.
+# `aegis data remote cadence --set <duration>` writes a drop-in that
+# RESETS this list before setting its own value; between 1h and 24h it
+# does so freely, and under 1h it asks the operator for a code that
+# arrives on their phone. Editing this line by hand skips that door —
+# which is why the door is a brake on the tooling and not a lock on the
+# machine, and why who confirmed what is recorded in the instance's
+# trail.
+OnUnitActiveSec=24h
+
+# The first run after a boot waits: at minute zero the cluster is still
+# coming up, kubectl answers nothing useful, and a capture that finds no
+# StatefulSets aborts saying the contracts and the cluster disagree —
+# a red that means «too early», which is the worst kind.
+OnBootSec=15min
+
+# RandomizedDelaySec spreads the run so that it does not always land on
+# the same minute of the day; Persistent catches up on a run the machine
+# missed while it was off, which on a desktop is most nights. Without it
+# a machine that sleeps at 23:00 and wakes at 09:00 can go days without
+# a backup and the timer will look healthy the whole time.
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
