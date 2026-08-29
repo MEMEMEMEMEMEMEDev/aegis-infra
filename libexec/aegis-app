@@ -405,6 +405,133 @@ def _template(name):
 PLACEHOLDER = re.compile(r"__[A-Z0-9_]+__")
 
 
+# ── the images a template starts FROM ─────────────────────────────────
+#
+# WHY A PLACEHOLDER AND NOT THE IMAGE WRITTEN OUT. Until 2026-08-29 the
+# `base` template shipped `FROM docker.io/library/golang` and
+# `FROM docker.io/library/alpine`: an image pulled off the internet, by
+# a mutable tag, into the very pipeline that then signs the result. That
+# is the hole mirror-images exists to close (see its header, and the
+# canary that was the last place it hid), reopened one level down — and
+# reopened by the file that teaches every new organization how to build.
+# So every FROM of every template is a placeholder, and the value is
+# asked for at the moment of instantiating.
+#
+# WHY IT IS ASKED OF THE LIVE REGISTRY AND NOT READ OUT OF
+# seed/platform/mirror-images/images.txt, which carries a digest for
+# every mirrored image and is right there in the tree. Because that
+# digest is the UPSTREAM one: crane rebuilds the manifest when it
+# copies, so the same bytes get a different name inside. A FROM
+# assembled from images.txt pins a digest the internal registry has
+# never heard of, and the build dies on the pull with an error that
+# talks about a manifest and not about this decision. Only the live
+# registry knows the answer, and asking it is `aegis image`'s job.
+#
+# The table maps the placeholder to WHAT IS ASKED FOR (<name>:<tag>).
+# The ANSWER —the reference with the internal digest— never lives here.
+_FROM_IMAGES = {
+    # Mirrored third parties: the tag is the destination column of
+    # seed/platform/mirror-images/images.txt, which is where a new one
+    # is added first.
+    "__FROM_GOLANG__": "golang:1.26.6-alpine",
+    "__FROM_ALPINE__": "alpine:3.21",
+    "__FROM_PYTHON__": "python:3.12-slim",
+    # Built by the platform's own ci-images job, which DERIVES the tag
+    # from the FROM of ci-images/node/Containerfile. It is the image
+    # every pipeline already builds in, so a template that compiles
+    # javascript compiles in the same place its CI does.
+    "__FROM_CI_NODE__": "aegis-ci-node:22.23.1-alpine",
+    # Bases the platform OWNS. base-images publishes
+    # `<alpine minor>-<build padded to 6>` and never a floating tag, so
+    # the build number is not knowable from the seed: what is asked for
+    # is the minor the seed pins, and resolving it to the newest build
+    # of that minor is the registry's business, not this table's.
+    "__FROM_BASE_NGINX__": "aegis-base-nginx:3.22",
+    "__FROM_BASE_NODE__": "aegis-base-node:3.22",
+    # A JDK/JRE pair NOBODY has mirrored yet, and that is the point: the
+    # java template exists so that whoever needs java is told, in one
+    # command, exactly what to ask for. Until it is mirrored,
+    # instantiating that template fails — loudly, and before a single
+    # file is written.
+    "__FROM_JDK__": "eclipse-temurin:21-jdk-alpine",
+    "__FROM_JRE__": "eclipse-temurin:21-jre-alpine",
+}
+
+_FROM_PLACEHOLDER = re.compile(r"__FROM_[A-Z0-9_]+__")
+
+# The CONTRACT of `aegis image from`: one line on stdout and nothing
+# else, the whole FROM, against the internal registry and pinned by
+# digest. It is matched and not merely captured because an answer of
+# another shape is a third outcome —the command ran and said something
+# I do not understand— and collapsing it into "not mirrored" would send
+# the operator to mirror an image that is already there.
+_FROM_ANSWER = re.compile(
+    r"FROM (registry\.registry-system\.svc\.cluster\.local:5000/"
+    r"[^\s@]+@sha256:[0-9a-f]{64})")
+
+
+def _from_reference(ref):
+    """The image reference behind one __FROM_*__, asked of the registry."""
+    try:
+        rc, out, err = cli.run("image", "from", ref)
+    except cli.CouldNotEvaluate as e:
+        raise Error(
+            f"I cannot resolve the template's base image {ref}: {e}\n"
+            f"  Every FROM of a template is a placeholder on purpose, and only the\n"
+            f"  live registry knows the digest it resolves to (the mirror rewrites\n"
+            f"  the manifest, so upstream's digest is not the one that pulls here).\n"
+            f"  Writing the placeholder through would hand you a Containerfile that\n"
+            f"  fails a pipeline later, which is worse than failing now.")
+    line = (out or "").strip()
+    if rc != 0:
+        last = ((err or out or "").strip().splitlines() or [""])[-1]
+        raise Error(
+            f"{ref} is not in the internal registry"
+            + (f" — {last}" if last else "")
+            + f"\n  Ask for it and re-run this very command, which converges:\n"
+              f"    {cli.cmd('image request')} {ref}")
+    m = _FROM_ANSWER.fullmatch(line)
+    if m is None:
+        raise Error(
+            f"{cli.cmd('image from')} {ref} answered something that is not a FROM\n"
+            f"  line pinned by digest against the internal registry: {line!r}\n"
+            f"  That is not «it is missing»: it is «I could not understand the\n"
+            f"  answer», and writing it into a Containerfile would carry the\n"
+            f"  confusion into the app's repo.")
+    # The keyword stays in the template (`FROM __FROM_X__ AS build`), so
+    # what is substituted is the reference alone. Matching the whole line
+    # first is what proves the answer is the shape that was asked for.
+    return m.group(1)
+
+
+def _from_values(template_dir):
+    """Every __FROM_*__ the template uses, resolved BEFORE anything is written.
+
+    Whole-template and up front on purpose: if one base is missing, the
+    operator finds out with ZERO files on disk. Resolving file by file
+    would leave a contract written and a Containerfile half rendered,
+    and `new` converges by re-running — over a state that is now a lie.
+    """
+    wanted = set()
+    for d, _, files in os.walk(template_dir):
+        for a in sorted(files):
+            try:
+                text = open(os.path.join(d, a), encoding="utf-8").read()
+            except (UnicodeDecodeError, OSError):
+                continue        # a binary in a template is not a FROM
+            wanted |= set(_FROM_PLACEHOLDER.findall(text))
+    values = {}
+    for ph in sorted(wanted):
+        if ph not in _FROM_IMAGES:
+            raise Error(
+                f"the template asks for {ph} and this command does not know which\n"
+                f"  image that is. A new base is TWO lines: its row in _FROM_IMAGES\n"
+                f"  (here, the only owner of the template placeholders) and its line\n"
+                f"  in the platform's mirror list.")
+        values[ph] = _from_reference(_FROM_IMAGES[ph])
+    return values
+
+
 def _values_for(org):
     """The template's placeholders, ALL derivable from the name.
 
@@ -563,6 +690,11 @@ def new(org, template, tot):
                 f"  WITHOUT --template: `aegis app new {org}`")
         d = _template(template)
         values = _values_for(org)
+        # The base images LAST and before anything is written: this is
+        # the only step that needs the world (the live registry), and it
+        # is the one that can honestly say no. Failing here leaves the
+        # disk exactly as it was.
+        values.update(_from_values(d))
         # ── steps 2 and 3: contract + skeletons ───────────────────
         _instantiate_contract(org, d, values, tot)
         _instantiate_skeletons(org, d, values, tot)

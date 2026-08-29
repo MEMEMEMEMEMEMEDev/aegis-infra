@@ -1,15 +1,33 @@
-# __ORG__-app — builder pinned to a SUPPORTED LINE (the toolchain pin
-# ages; the pipeline's Trivy scan watches it and blocks when it piles
-# up CVEs — that red build is the signal to bump it here).
-FROM docker.io/library/golang:1.26-alpine AS build
+# __ORG__-app — a Go service in two stages, built and run on images that
+# came in through the mirror.
+#
+# WHY THE TWO FROMs ARE PLACEHOLDERS. Until 2026-08-29 they read
+# `FROM docker.io/library/golang:1.26-alpine` and
+# `FROM docker.io/library/alpine:3.21`: pulled off the internet, by a
+# mutable tag, in the pipeline that afterwards signs the result with the
+# aegis key. It is exactly what mirror-images/images.txt exists to
+# forbid, and it was the template teaching it to every new organization.
+# `aegis app new` resolves each one against the internal registry at
+# instantiation time and writes the reference pinned BY DIGEST — a
+# digest that is NOT upstream's, because the mirror rebuilds the
+# manifest as it copies, which is why nothing in this tree can compute
+# it offline.
+#
+# The toolchain pin ages, and that is watched: the pipeline's Trivy scan
+# blocks when the compiler's stdlib piles up CVEs, and that red build is
+# the signal to mirror a newer golang and re-instantiate this line. No
+# line of your code can fix a CVE that belongs to the compiler.
+FROM __FROM_GOLANG__ AS build
 WORKDIR /src
 COPY go.mod main.go ./
 RUN CGO_ENABLED=0 go build -o /app .
 
-FROM docker.io/library/alpine:3.21
+FROM __FROM_ALPINE__
 COPY --from=build /app /usr/local/bin/app
-# Non-root ALWAYS: the organization's namespace is PSS restricted and a
-# root container does not even get to start.
+# Non-root ALWAYS, and NUMERIC: the organization's namespace is PSS
+# restricted, so a root container does not even get to start, and a
+# `USER name` fails runAsNonRoot because the kubelet cannot read the
+# image's /etc/passwd to prove the name is not root.
 USER 65532:65532
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/app"]

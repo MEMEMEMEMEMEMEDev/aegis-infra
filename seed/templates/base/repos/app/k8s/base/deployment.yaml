@@ -39,6 +39,14 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
+            # A container that cannot write its own image cannot be
+            # persistently modified by whoever gets inside it: the next
+            # restart is the original bytes again. PSS restricted does
+            # not demand it, the platform does — and it is free here
+            # because a static Go binary writes nothing. Whatever needs
+            # to write mounts an emptyDir on /tmp (see the `static`
+            # template, whose nginx does exactly that).
+            readOnlyRootFilesystem: true
           readinessProbe:
             httpGet: {path: /healthz, port: 8080}
           resources:
