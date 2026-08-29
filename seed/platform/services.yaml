@@ -68,6 +68,46 @@
 # daily watch alerts on and what it never does by itself — is
 # docs/protocols/images.md.
 
+# ── A TYPE WITH STATE OWES ITS BACKUP ─────────────────────────────
+#
+# Every type in this catalogue that holds something declares `backup:`,
+# and there are exactly two legitimate answers:
+#
+#   method: dump   it says HOW, with the commands `aegis data` runs —
+#                  `dump:` and `restore:`, verbatim, no credential in
+#                  argv and `kubectl exec` as the transport.
+#   method: none   it says WHY NOT, in `reason:`. A cache that rebuilds
+#                  itself from its own source of truth is this case.
+#
+# There is no third answer, and saying nothing is not one of them: a
+# type that declares no backup and a type that declares `none` look
+# identical from outside, and the first is how something ends up
+# unprotected without anybody having decided it. Check 156 measures it.
+#
+# And the two halves have to agree: a type WITH `disco:` has to be
+# dumped (a volume nobody captures is the false promise itself) and a
+# type with `method: none` may not have one. The generator refuses both
+# crossings by name.
+#
+# ── A DIGEST THAT IS NOT THERE YET ────────────────────────────────
+#
+# A type may be declared before its image has been mirrored. It then
+# carries no `digest:` and a `pending:` block instead, with the exact
+# commands that produce the number and the reason it cannot be produced
+# from here. The generator REFUSES any contract that declares such a
+# type and prints those commands; it does not render a plausible
+# reference. That is the whole point of a file that pins by digest: a
+# digest nobody measured is not a pin, it is a guess with 64 hex digits
+# of confidence painted on it.
+#
+# The new keys of this file —`backup`, `pending`, `component`, `gid`—
+# are ENGLISH, next to the Spanish ones that were already here. That is
+# not inconsistency: `imagen`, `puerto` and `disco` are a §5A row of
+# docs/glossary.md and move the day that whole group moves, while
+# anything born now is English from birth. It is the same rule the
+# image chain followed on 2026-08-27, and for the same reason: adding
+# Spanish to a rename that is already scheduled makes the rename bigger.
+
 version: 1
 
 registro: registry.registry-system.svc.cluster.local:5000
@@ -92,6 +132,230 @@ tipos:
     # alpine runs as the `postgres` user (UID 70) and needs to write in
     # PGDATA. The rest of the filesystem is mounted read-only.
     uid: 70
+    # The GROUP is declared, never derived from the uid. Here the two
+    # coincide; in redis below they do NOT (999:1000, measured in the
+    # image's own config). `fsGroup` is what makes the volume and the
+    # emptyDirs writable, so a group guessed from the uid «because it
+    # usually matches» is a start-up that dies on «permission denied»
+    # over a path the message never names.
+    gid: 70
+    # The label every object of this type carries, and the one the
+    # `usa:` NetworkPolicy selects. The CATALOGUE decides it because the
+    # catalogue is what knows whether a type holds the organization's
+    # data or a copy of somebody else's: `libexec/aegis-data` backs up
+    # the StatefulSets labelled `aegis.dev/component=datos` and only
+    # those, so this word is the difference between being backed up and
+    # not being backed up.
+    component: datos
+    backup:
+      # WHAT `aegis data` ALREADY DOES, written down where the type is
+      # declared so that the two cannot drift apart in silence. A
+      # stateful type that does not say how it is backed up is a false
+      # promise, and this file is where the promise is made.
+      #
+      # Two constraints shape every line below and neither is
+      # negotiable:
+      #   · the transport is `kubectl exec`. A tenant namespace's egress
+      #     is closed except for DNS, so a pod CAN dump its database and
+      #     CANNOT get the dump out over the network (measured
+      #     2026-08-09; the reasoning is in aegis-data's own header).
+      #   · no credential in argv, because /proc/<pid>/cmdline is
+      #     readable by anything in the pod. postgres needs none here —
+      #     over the unix socket it is its own superuser — and the two
+      #     types below read theirs out of the mounted Secret.
+      method: dump
+      # The globals APART and one archive PER DATABASE, never a single
+      # `pg_dumpall --clean`: that emits DROP DATABASE and DROP ROLE, the
+      # DROP ROLE of the role you are connected with always fails, and
+      # with ON_ERROR_STOP=1 the restore aborts having ALREADY dropped
+      # the database. It happened live on 2026-08-09 and the command
+      # reported success.
+      dump: |
+        kubectl exec -n org-<org> <service>-0 -- sh -c
+          'pg_dumpall -U "$POSTGRES_USER" --globals-only'
+        kubectl exec -n org-<org> <service>-0 -- sh -c
+          'pg_dump -U "$POSTGRES_USER" --clean --if-exists -d <database>'
+      restore: |
+        kubectl exec -i -n org-<org> <service>-0 -- sh -c
+          'psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1'
+        the globals first and then each archive, over STDIN; afterwards
+        the role is realigned against the LIVE Secret and the credential
+        is proved over the loopback, because the dump carries the SCRAM
+        hash that was right on the machine that took it and wrong on any
+        other (check 154).
+
+  # A cache per organization. It holds a COPY of what somebody else
+  # already owns — rendered pages, sessions, a shopping cart on its way
+  # to a database — and that sentence is what decides the two questions
+  # below.
+  redis:
+    imagen: redis
+    # NO `digest:`, and that is not an oversight. The digest that goes
+    # here is the INTERNAL registry's, and it is NOT the one images.txt
+    # pins: a `crane copy` of a multi-architecture index does not
+    # preserve it (postgres, measured 2026-08-04:
+    # 742f40ea... at the origin, fe30b547... inside). It can only be READ
+    # off a live registry, and this image has not been mirrored by any
+    # instance yet — writing a plausible number here would be inventing
+    # the one fact this whole file exists to pin.
+    tag_origen: 8.6.4-alpine # informational: what is being read
+    pending:
+      commands:
+        - aegis image check
+        - aegis image from redis:8.6.4-alpine
+      reason: |
+        The line is already declared in mirror-images/images.txt, so
+        nothing has to be asked for: `aegis image check` says whether it
+        is mirrored and signed and prints the command that fixes it if
+        it is not, and `aegis image from` prints the FROM whose digest
+        is the one that goes in `digest:` above. Until then the
+        generator REFUSES a contract that declares this type, naming
+        these two commands. A type nobody can deploy is honest; a type
+        deployed from a guessed digest is an ImagePullBackOff with a
+        manifest that looks right.
+    puerto: 6379 # measured: the image EXPOSEs 6379
+    # NO `disco`, and this is the decision the type turns on.
+    #
+    # A cache with a disk survives a restart WITH STALE CONTENT, and
+    # that is worse than surviving empty: an empty cache is refilled
+    # from the source of truth on the next request, while a full one
+    # answers with rows that were deleted while it was down. A disk also
+    # turns the cache into something that LOOKS backed up and is not.
+    # If what is wanted is data that has to survive, what is wanted is
+    # not a cache: it is `postgres` or `mongodb`, which are on either
+    # side of this entry and both carry their volume and their dump.
+    #
+    # No `disco` renders no PersistentVolumeClaim: /data is an emptyDir,
+    # `save ""` and `appendonly no` mean nothing is ever written to it,
+    # and a restart starts cold on purpose.
+    uid: 999 # measured in the image's config: adduser -u 999 redis
+    gid: 1000 # ...and addgroup -g 1000: the two do NOT coincide here
+    # `cache` and not `datos`: what `aegis data` captures are the
+    # StatefulSets labelled `datos`, and a cache in that set would be a
+    # backup of a copy — bytes in the bundle that nobody may restore
+    # (see `backup.reason`).
+    component: cache
+    backup:
+      # THE SECOND LEGITIMATE ANSWER, and the reason it is written down
+      # rather than left out: a type that says nothing about its backup
+      # and a type that says «none» are indistinguishable from the
+      # outside, and the first one is how something ends up unprotected
+      # without anybody deciding it.
+      method: none
+      reason: |
+        There is nothing here that is not somewhere else. Restoring a
+        cache would be putting back entries that were computed before
+        the restore, on top of a database that has just gone back in
+        time — the exact shape of a stale read, and one nobody would
+        think to look for.
+
+        THE OTHER HALF OF THAT SENTENCE, and it is a real limit of this
+        platform today: `aegis data restore` scales the namespace's
+        consumers down and back up, and this pod is NOT a consumer (it
+        carries `aegis.dev/component`, which is precisely what that
+        selector excludes). So it keeps running across a restore with
+        whatever it had cached. The honest fix is for the restore to
+        restart the cache inside its window; until it does, a restore of
+        an organization that uses a cache is followed by deleting the
+        cache pod BY HAND. Said here because an undeclared limit is a
+        limit that surprises somebody at the worst moment.
+
+  # A document database per organization. Same rule as postgres: NOT
+  # shared, one per organization, so that a `dropDatabase` in one cannot
+  # touch its neighbour.
+  mongodb:
+    imagen: mongo
+    # NO `digest:` and, unlike redis, not even a line in images.txt: this
+    # image has never been mirrored, scanned or signed by this platform,
+    # and it CANNOT be, from here — mirroring needs a live registry and a
+    # Jenkins job. `pending.commands` is the whole path, and the first of
+    # them is what writes the images.txt line (measuring the upstream
+    # digest itself, which is the only place that number may come from).
+    tag_origen: 8.0.24
+    pending:
+      commands:
+        - aegis image request mongo:8.0.24
+        - aegis image from mongo:8.0.24
+      reason: |
+        8.0 and not 8.3, by the same criterion that picked postgres 17
+        over 18: 8.0 is the release series MongoDB supports for years,
+        and 8.1/8.2/8.3 are the rapid releases in between. 8.0.24 was
+        the newest 8.0 published on public.ecr.aws/docker/library/mongo
+        on 2026-08-29, measured against the registry's tag list; if a
+        newer patch is out by the time this is run, `aegis image request
+        mongo:8.0.<newer>` is the command and this tag moves with it.
+
+        AND A SECOND PRECONDITION, which the mirror does not cover:
+        `aegis data` has to learn this type before an organization may
+        depend on it. The dump and the restore below are the contract it
+        has to implement, and until it does, `aegis data capture` finds
+        a StatefulSet labelled `datos` that comes out of no postgres
+        contract and STOPS — which is the right behaviour (it refuses to
+        back up blind) and is also a broken backup for every other
+        organization on the instance. See §3 of the protocol.
+    puerto: 27017
+    # It DOES carry a disk: this is where the organization's documents
+    # live, and losing them is losing the organization. The floor, for
+    # the smallest organization, same as postgres.
+    disco: 2Gi
+    uid: 999 # measured: useradd --uid 999 --system --gid mongodb
+    gid: 999 # ...and groupadd --gid 999 mongodb
+    component: datos
+    backup:
+      method: dump
+      # ONE ARCHIVE PER DATABASE and NEVER the system ones (admin, local,
+      # config). It is the same lesson postgres paid for on 2026-08-09,
+      # in mongo's dialect: `admin` holds the root user this platform
+      # generates and keeps encrypted in git, and a `--drop` over it
+      # deletes the credential the restore is about to need. What is
+      # captured is the tenant's databases; the credential is not
+      # captured because the live Secret is the authority.
+      databases: |
+        kubectl exec -n org-<org> <service>-0 -- sh -c '
+          U=$(cat /etc/aegis/credential/usuario)
+          P=$(cat /etc/aegis/credential/password)
+          mongosh --quiet <<EOF
+        db.getSiblingDB("admin").auth("$U", "$P")
+        db.adminCommand({listDatabases: 1, nameOnly: true}).databases
+          .map(d => d.name)
+          .filter(n => !["admin", "local", "config"].includes(n))
+          .join("\n")
+        EOF'
+        the credential is read from the mounted Secret into a shell
+        variable and the script travels on STDIN: `listDatabases` needs
+        authentication and mongosh has no --password-file, so the only
+        road that keeps it out of argv is the here-document.
+      dump: |
+        kubectl exec -n org-<org> <service>-0 -- sh -c '
+          umask 077
+          { printf "password: "; cat /etc/aegis/credential/password; } \
+            > /tmp/aegis-dump.yaml
+          mongodump --username="$(cat /etc/aegis/credential/usuario)" \
+                    --authenticationDatabase=admin \
+                    --config=/tmp/aegis-dump.yaml \
+                    --db=<database> --archive --gzip --quiet
+          rc=$?; rm -f /tmp/aegis-dump.yaml; exit $rc'
+        `--config` is the tools' documented way of taking the password
+        from a FILE; --password would put it in argv. The file is built
+        by redirection —`printf` writes the key, `cat` writes the value—
+        so the material is not an argument of anything either, and /tmp
+        is the emptyDir this pod already mounts.
+      restore: |
+        kubectl exec -i -n org-<org> <service>-0 -- sh -c '
+          umask 077
+          { printf "password: "; cat /etc/aegis/credential/password; } \
+            > /tmp/aegis-dump.yaml
+          mongorestore --username="$(cat /etc/aegis/credential/usuario)" \
+                       --authenticationDatabase=admin \
+                       --config=/tmp/aegis-dump.yaml \
+                       --archive --gzip --drop --nsInclude="<database>.*" \
+                       --quiet
+          rc=$?; rm -f /tmp/aegis-dump.yaml; exit $rc'
+        the archive arrives on STDIN, one database at a time. `--drop`
+        with `--nsInclude` scoped to that database drops the COLLECTIONS
+        it is about to restore and nothing else: without the scope it
+        would reach the admin database, and that is the accident this
+        block's comment names.
 
 # S3 storage is not a service `tipo` but a section of the contract
 # (`almacenamiento.bucket`): an organization does not deploy a Garage,
