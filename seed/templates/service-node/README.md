@@ -70,8 +70,9 @@ exact tag — so the seed has no tag to name.
 Once this repo has built once you are past that. From `aegis org apply`
 onwards the repo is listed in `base-images/consumers.txt`, so swapping
 the runtime `FROM` for `aegis-base-node:<tag>@sha256:<digest>` (both
-come from the internal registry's own listing) hands the maintenance of that line to the
-base-images job: it rewrites the digest on every rebuild of the base.
+come from the internal registry's own listing) hands that line's
+maintenance to the base-images job: it rewrites the digest on every
+rebuild of the base.
 The contract that image keeps is the same one this file assumes — uid
 65532, `/app` as WORKDIR, port 8080, node as the ENTRYPOINT — so the
 `FROM` is the only line that changes.

@@ -44,8 +44,8 @@ spec:
             # restart is the original bytes again. PSS restricted does
             # not demand it, the platform does — and it is free here
             # because a static Go binary writes nothing. Whatever needs
-            # to write mounts an emptyDir on /tmp (see the `static`
-            # template, whose nginx does exactly that).
+            # to write mounts an emptyDir on /tmp (see the
+            # `service-node` and `service-java` templates, which do).
             readOnlyRootFilesystem: true
           readinessProbe:
             httpGet: {path: /healthz, port: 8080}
