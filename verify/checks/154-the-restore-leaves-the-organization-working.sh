@@ -73,6 +73,19 @@ want("stdin_data" in code_of("realign_role"),
 want("role_can_log_in" in called_by("realign_role"),
      "realign_role() does not verify that the credential opens the "
      "database: that the command did not complain is not proof")
+# And that verification goes over the LOOPBACK, which is the whole
+# property. Over the unix socket it would prove nothing: the image's
+# pg_hba trusts local connections, so a wrong password gets in all the
+# same and the test is green by construction. Dropping `-h 127.0.0.1` is
+# the most likely mutation of the real world —somebody simplifying an
+# exec— and it empties the property that gives this check its name
+# without turning anything red. Measured on 2026-08-29: with the flag
+# removed the check went on passing, which is why the line is here.
+want("127.0.0.1" in code_of("role_can_log_in"),
+     "role_can_log_in() does not open the connection over the loopback: "
+     "over the socket the pg_hba of the image trusts the local "
+     "connection, a wrong password enters the same, and the proof is "
+     "green by construction")
 
 # ── 2. the objects come back, and what came back is measured ────────
 want("restore_bucket" in called_by("restore"),

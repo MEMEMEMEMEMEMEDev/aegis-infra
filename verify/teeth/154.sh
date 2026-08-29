@@ -111,6 +111,21 @@ open(p, "w").write(t)
 PY
 }
 
+# the mutation that emptied the check without turning it red: somebody
+# simplifies the exec and takes the loopback out. Over the unix socket
+# the pg_hba of the image trusts the connection, so the proof that the
+# credential opens the database passes with ANY password
+red_8() {
+    python3 - "$AEGIS_ROOT/$DATA" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = 'exec psql -h 127.0.0.1 -U '
+new = 'exec psql -U '
+assert t.count(old) == 1
+open(p, "w").write(t.replace(old, new, 1))
+PY
+}
+
 # control: a comment may name the credential
 control_1() {
     printf '\n# The word password appears here on purpose: a comment explains,\n# it does not execute.\n' \
