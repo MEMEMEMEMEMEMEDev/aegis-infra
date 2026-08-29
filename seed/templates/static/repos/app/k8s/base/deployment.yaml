@@ -9,7 +9,7 @@ metadata:
   labels: {app: __ORG__-app}
 spec:
   replicas: 1
-  # With 1 replica the default rolling update (maxUnavailable 25% → 1)
+  # With 1 replica the default rolling update (maxUnavailable 25% -> 1)
   # leaves ~30s of Bad Gateway on every update. Surge first, kill after
   # = zero window; the transient extra pod fits in the `pequena` quota.
   strategy:
@@ -22,10 +22,10 @@ spec:
     spec:
       # The pull secret comes from the namespace's default SA: the app
       # does NOT declare the registry credential.
-      # PSS: the namespace is enforce=restricted — the workload DECLARES
-      # the whole profile (explicit > magic). The image already runs as
-      # USER 65532 (Containerfile) → runAsNonRoot validates with no
-      # runAsUser here.
+      # PSS: the namespace is enforce=restricted and the workload
+      # DECLARES the whole profile (explicit > magic). The image already
+      # runs as USER 65532 (Containerfile) -> runAsNonRoot validates
+      # with no runAsUser here.
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
@@ -39,19 +39,27 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
-            # A container that cannot write its own image cannot be
-            # persistently modified by whoever gets inside it: the next
-            # restart is the original bytes again. PSS restricted does
-            # not demand it, the platform does — and it is free here
-            # because a static Go binary writes nothing. Whatever needs
-            # to write mounts an emptyDir on /tmp (see the
-            # `service-node` and `service-java` templates, which do).
+            # The image is not writable at runtime, so whoever gets
+            # inside cannot leave anything behind: the next restart is
+            # the original bytes again.
             readOnlyRootFilesystem: true
+          # NO writable volume, and that is the point of it being
+          # absent: serve.mjs reads files and writes none, so there is
+          # nowhere for anything that gets inside to leave state. The
+          # sibling templates mount an emptyDir on /tmp because their
+          # code may write; this one would be a hole with no user. The
+          # day your front needs to write, add the mount deliberately
+          # and say what writes there.
           readinessProbe:
             httpGet: {path: /healthz, port: 8080}
+          # This is the same node runtime the service-node template
+          # runs, so it costs the same: a node process with no
+          # dependencies idles around 40Mi of heap plus the runtime,
+          # and serving files off the disk adds no heap of its own. The
+          # limit is where the pod dies, so it is not the average.
           resources:
-            requests: {cpu: 50m, memory: 32Mi}
-            limits: {cpu: 200m, memory: 64Mi}
+            requests: {cpu: 20m, memory: 64Mi}
+            limits: {cpu: 200m, memory: 128Mi}
 ---
 apiVersion: v1
 kind: Service
@@ -60,7 +68,6 @@ metadata:
 spec:
   selector: {app: __ORG__-app}
   # The platform ALWAYS routes to port 8080 of the Service (convention
-  # of the derived IngressRoute): this port is not changed here, it is
-  # changed in the contract… and today the contract does not change it
-  # either.
+  # of the derived IngressRoute), and for a `estatico` service the
+  # contract cannot even declare another one.
   ports: [{port: 8080, targetPort: 8080}]

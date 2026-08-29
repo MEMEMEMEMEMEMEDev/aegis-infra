@@ -45,3 +45,21 @@ By editing **the contract**, which is the only truth, and reapplying:
 steps for you.) The app's code is customized in ITS repo, like any
 other repo: the living reference for a fuller path —two images,
 database, bucket, AI— is `ejemplo-app` (orgs/ejemplo.yaml).
+
+## The two `FROM` lines
+
+They are placeholders (`__FROM_GOLANG__`, `__FROM_ALPINE__`) that
+`aegis app new` resolves against the INTERNAL registry when it
+instantiates, writing the reference pinned by digest. Until 2026-08-29
+they read `docker.io/library/...`: an image pulled off the internet, by
+a mutable tag, in the very pipeline that afterwards signs the result —
+the hole the image mirror exists to close, taught to every new
+organization by the template. The digest cannot be computed offline:
+the mirror rebuilds the manifest as it copies, so upstream's digest is
+not the one that pulls here.
+
+## The other templates
+
+`static` (Astro, React, Vue, Angular), `service-node`,
+`service-python`, `service-java` and `worker-go` — the same structure,
+each with its own README saying what to change and what not.

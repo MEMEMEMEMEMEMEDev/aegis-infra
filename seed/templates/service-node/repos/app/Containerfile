@@ -1,0 +1,69 @@
+# __ORG__-app — a node service: tested and installed with a node image
+# that carries npm, run on the node runtime that carries neither npm nor
+# a shell.
+#
+# WHY THE FROMs ARE PLACEHOLDERS. `aegis app new` resolves each one
+# against the INTERNAL registry when it instantiates, and writes the
+# reference pinned by digest. An image pulled off the internet by tag is
+# a mutable pointer inside the pipeline that afterwards signs the
+# result, which is the hole mirror-images exists to close. And the
+# digest cannot be computed here: the mirror rebuilds the manifest as it
+# copies, so upstream's digest is not the one that pulls.
+#
+# WHY THE TWO IMAGES ARE DIFFERENT, being both node. The build one
+# carries npm and a shell because it BUILDS; the runtime one carries
+# neither because it RUNS. A package manager inside a tenant pod is a
+# supply-chain tool with nothing to do there — and it is what made the
+# scan block a build over CVEs in packages the runtime never executes
+# (the story is in mirror-images/images.txt, under this very image).
+#
+# WHY THE RUNTIME IS NOT aegis-base-node, which is what the platform's
+# own backends moved to on 2026-08-27. Not a preference: that image is
+# tagged `<alpine minor>-<build number>`, the number is born in each
+# instance's registry, and `aegis image from` resolves an EXACT tag — so
+# the seed has no tag to name. The README says which one line to change,
+# and why it is worth changing once this repo has built once.
+FROM __FROM_NODE_BUILD__ AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+# `npm ci` and NOT `npm install`: it installs EXACTLY what the lock
+# says. `npm install` may resolve a different tree than the one that was
+# tested, in CI, silently.
+#
+# The `mkdir` is not belt and braces: with an EMPTY dependency tree —
+# which is how this template ships, on purpose — `npm ci` creates no
+# node_modules at all. Measured on 2026-08-29: `npm ci` says «up to date
+# in 140ms» and leaves no directory, and the COPY in the runtime stage
+# then aborts the build on a path that does not exist, with an error
+# that says nothing about npm. The directory is created here so that the
+# first build works with zero dependencies and every one you add later
+# lands in it.
+RUN npm ci --no-audit --no-fund && mkdir -p node_modules
+COPY src ./src
+COPY tests ./tests
+# THE TEST STAGE IS THE IMAGE'S DOOR, not decoration: the canonical
+# Jenkinsfile does not run the suite (its node container is for the
+# deploy stage), so this RUN is the only gate. A red test kills the
+# build here and the image never comes to exist.
+RUN npm test
+# Only production travels onward: devDependencies stay in this stage.
+# Less surface to scan, and nothing the process does not execute.
+# Measured in the same session: prune leaves the empty directory the
+# line above created, so there is nothing to re-create here.
+RUN npm prune --omit=dev
+
+FROM __FROM_NODE__
+# What this base guarantees, and what this file therefore assumes: uid
+# 65532, node as the ENTRYPOINT (so the CMD below is a path and nothing
+# else), and no shell and no npm anywhere in it. There is no RUN in this
+# stage and there cannot be one.
+WORKDIR /app
+COPY --from=build --chown=65532:65532 /app/package.json /app/package-lock.json ./
+COPY --from=build --chown=65532:65532 /app/node_modules ./node_modules
+COPY --chown=65532:65532 src ./src
+EXPOSE 8080
+# Numeric and non-root: the namespace is PSS restricted, and a
+# `USER name` fails runAsNonRoot because the kubelet cannot read the
+# image's /etc/passwd to prove the name is not root 0.
+USER 65532:65532
+CMD ["/app/src/server.js"]

@@ -29,12 +29,25 @@ THE BORDER (the house rule, carved here as in aegis-org)
 The two subcommands live on either side of the SAME line, and that line
 is the whole design (journeys/design.md §0.2 and §3):
 
-  `new`    WRITES FILES AND NEVER TOUCHES THE WORLD. Contract, staging,
-           derivations, encrypted secrets: everything is a git diff,
-           everything is reviewable, nothing left this machine. It does not
-           use `gh`, it does not use the network. Generating is harmless.
-  `apply`  TALKS TO THE WORLD (GitHub) AND NEVER WRITES INTO THE REPOS —
+  `new`    WRITES FILES AND CHANGES NOTHING OUTSIDE THIS MACHINE.
+           Contract, staging, derivations, encrypted secrets: everything
+           is a git diff, everything is reviewable, nothing left here. It
+           does not use `gh` and it creates nothing anywhere.
+  `apply`  CHANGES THE WORLD (GitHub) AND NEVER WRITES INTO THE REPOS —
            neither into platform/ nor into the app's repo WITH HISTORY.
+
+The line is «who can leave a mark outside», and it is NOT «who opens a
+socket» — since 2026-08-29 `new --template` does open one. Every FROM in
+a template is a placeholder, and resolving it means ASKING the internal
+registry (through `aegis image from`) for the digest the mirror gave that
+image, which nothing on this disk knows: crane rebuilds the manifest as
+it copies, so images.txt's digest is upstream's and pulls nothing here.
+So `--template` needs a cluster, the registry's ClusterIP and the
+registry credential, and it can fail for lack of any of them — before it
+writes a single file. The read is idempotent and leaves no trace; the
+border it does not cross is still the one that matters. Without
+`--template` nothing is asked of anybody: the artisan path is a pure
+local derivation.
 
 It is the mirror of aegis-org's «IT DOES NOT TALK TO THE CLUSTER», split
 in two: between generating and executing there is a PAUSE with a human
@@ -64,8 +77,20 @@ done / already / COULD NOT EVALUATE. The third is a WARNING and never an
 approval: not being able to look is not the same as being fine (the rc 2
 of aegis-edge and aegis-webhook, from the same disease E). Re-running with
 everything done ends up as pure «already» — converge, do not execute
-(journeys/design.md §0.4). It holds for both subcommands: `new` re-run
-with everything done also ends up as pure «already».
+(journeys/design.md §0.4). It holds for `apply`, and for `new` WITHOUT
+`--template`, which only re-derives.
+
+It does NOT hold for `new --template`, and the honest thing is to say so
+here rather than let somebody discover it: a second run STOPS, because a
+contract that already exists is not trampled (it is the only truth,
+§0.1). And even against an untouched staging area the answer can be
+«files differ» rather than «already», by design: the FROM this command
+writes is a DIGEST measured against the registry at that instant, so
+after the mirror rebuilds a base the same template renders different
+bytes — and different bytes are not trampled either, they are reported.
+That is convergence over a moving measurement, which is not the same
+thing as idempotence, and calling it idempotent would be a promise
+broken by the first re-mirror.
 
     aegis app new tienda --template base   # contract + skeleton + derive
     aegis app new tienda                   # artisan: the contract is already
@@ -405,6 +430,193 @@ def _template(name):
 PLACEHOLDER = re.compile(r"__[A-Z0-9_]+__")
 
 
+# ── the images a template starts FROM ─────────────────────────────────
+#
+# WHY A PLACEHOLDER AND NOT THE IMAGE WRITTEN OUT. Until 2026-08-29 the
+# `base` template shipped `FROM docker.io/library/golang` and
+# `FROM docker.io/library/alpine`: an image pulled off the internet, by
+# a mutable tag, into the very pipeline that then signs the result. That
+# is the hole mirror-images exists to close (see its header, and the
+# canary that was the last place it hid), reopened one level down — and
+# reopened by the file that teaches every new organization how to build.
+# So every FROM of every template is a placeholder, and the value is
+# asked for at the moment of instantiating.
+#
+# WHY IT IS ASKED OF THE LIVE REGISTRY AND NOT READ OUT OF
+# seed/platform/mirror-images/images.txt, which carries a digest for
+# every mirrored image and is right there in the tree. Because that
+# digest is the UPSTREAM one: crane rebuilds the manifest when it
+# copies, so the same bytes get a different name inside. A FROM
+# assembled from images.txt pins a digest the internal registry has
+# never heard of, and the build dies on the pull with an error that
+# talks about a manifest and not about this decision. Only the live
+# registry knows the answer, and asking it is `aegis image`'s job.
+#
+# WHAT MAY APPEAR IN THIS TABLE, and it is a single rule: a
+# `<name>:<tag>` that `aegis image request` can PRODUCE — a destination
+# of seed/platform/mirror-images/images.txt. `aegis image from` answers
+# for an image that is in the internal registry under that EXACT tag and
+# carries a signature object, and the mirror job is the only one that
+# leaves both. Two families are therefore NOT here, each one a road that
+# used to be written and did not arrive:
+#
+#   · the bases the platform OWNS (aegis-base-nginx, aegis-base-node).
+#     base-images tags them `<alpine minor>-<build number padded to 6>`
+#     and says so in its own comment — «No floating tag, ever». The
+#     build number is born in each instance's registry, so the seed
+#     cannot know it, and the bare minor this table asked for until
+#     2026-08-29 (`aegis-base-nginx:3.22`) is a tag that does not exist
+#     and never will. Worse than the failure was the advice: it sent the
+#     operator to `aegis image request aegis-base-nginx:3.22`, and
+#     `request` mirrors THIRD PARTIES — it cannot produce an image the
+#     platform builds itself.
+#   · what ci-images builds (aegis-ci-node and its siblings). That job
+#     pushes straight out of kaniko and signs nothing, on purpose: its
+#     images are Jenkins agents in jenkins-system, not pods in a tenant.
+#     `aegis image from` refuses an unsigned image, so asking for one
+#     here is a second road that does not arrive, for a different
+#     reason.
+#
+# Whether a row is ALREADY declared in images.txt decides only WHEN the
+# template instantiates, never whether the reference is legitimate: an
+# undeclared one fails with the exact command that declares it, before a
+# single file is written. Check 148 crosses this table against images.txt
+# and against each template's README, so that «not mirrored yet» is a
+# fact the operator reads before instantiating and not after.
+#
+# The table maps the placeholder to WHAT IS ASKED FOR (<name>:<tag>).
+# The ANSWER —the reference with the internal digest— never lives here.
+_FROM_IMAGES = {
+    # Declared in images.txt: these resolve on any instance whose mirror
+    # job has run, which is every instance past phase 80.
+    "__FROM_GOLANG__": "golang:1.26.6-alpine",
+    "__FROM_ALPINE__": "alpine:3.21",
+    "__FROM_PYTHON__": "python:3.12-slim",
+    "__FROM_NODE__": "nodejs-distroless:22",
+    # NOT declared yet, and not an oversight: an image is mirrored when
+    # somebody needs it, not in advance (images.md §2). The version is
+    # not invented either — it is the one ci-images/node/Containerfile
+    # already pins, so the image a tenant builds in and the image the
+    # platform's own CI is built from are the same 22.23 line and the
+    # same libc.
+    "__FROM_NODE_BUILD__": "node:22.23.1-alpine",
+    # A JDK/JRE pair NOBODY has mirrored yet either: no service in this
+    # tree runs on a JVM. The java template exists so that whoever needs
+    # java is told, in one command, exactly what to ask for.
+    "__FROM_JDK__": "eclipse-temurin:21-jdk-alpine",
+    "__FROM_JRE__": "eclipse-temurin:21-jre-alpine",
+}
+
+_FROM_PLACEHOLDER = re.compile(r"__FROM_[A-Z0-9_]+__")
+
+# The CONTRACT of `aegis image from`: one line on stdout and nothing
+# else, the whole FROM, against the internal registry and pinned by
+# digest. It is matched and not merely captured because an answer of
+# another shape is a third outcome —the command ran and said something
+# I do not understand— and collapsing it into "not mirrored" would send
+# the operator to mirror an image that is already there.
+_FROM_ANSWER = re.compile(
+    r"FROM (registry\.registry-system\.svc\.cluster\.local:5000/"
+    r"[^\s@]+@sha256:[0-9a-f]{64})")
+
+
+def _from_reference(ref):
+    """The image reference behind one __FROM_*__, asked of the registry.
+
+    EVERY OUTCOME KEEPS ITS OWN NAME, and that is the whole body of this
+    function. Until 2026-08-29 it had two of them wrong, both in the
+    same direction —inventing a diagnosis it had not measured— and the
+    operator paid for it with a command that could not work:
+
+      · the instrument is missing (`aegis image` absent or not runnable)
+        was told as «I cannot resolve the base image X», which reads as
+        a problem with X. Nothing about X was measured.
+      · rc 1 was told as «X is not in the internal registry». `from`
+        returns 1 for that AND for «it is there and carries no
+        signature», which is a different repair. Its own line is
+        relayed now, exactly as it came.
+    """
+    try:
+        rc, out, err = cli.run("image", "from", ref)
+    except cli.CouldNotEvaluate as e:
+        raise Error(
+            f"{cli.cmd('image')} is not usable here, so no template FROM can be\n"
+            f"  resolved: {e}\n"
+            f"  NOTHING was measured about {ref} — this is «I could not look», not\n"
+            f"  «it is missing». That command ships WITH this one: same libexec/,\n"
+            f"  same version, installed by the same phase. A tree that has one and\n"
+            f"  not the other is a partial checkout or an `aegis` on the PATH whose\n"
+            f"  symlink still points at an older product.")
+    # The command's own last line, whatever the verdict: it is written
+    # to be read by a person and it already carries the repair.
+    diag = ((err or out or "").strip().splitlines() or [""])[-1]
+    if rc == 3:
+        raise Error(
+            f"{cli.cmd('image from')} rejected {ref!r} as an argument"
+            + (f" — {diag}" if diag else "")
+            + f"\n  The value comes from _FROM_IMAGES in this file, so this is a bug\n"
+              f"  HERE and not something you can fix from the outside: that table's\n"
+              f"  values are `<name>:<tag>` as the registry holds them.")
+    if rc == 2:
+        raise Error(
+            f"{cli.cmd('image from')} {ref} COULD NOT EVALUATE"
+            + (f" — {diag}" if diag else "")
+            + f"\n  The registry was never reached, so the base image is neither\n"
+              f"  present nor missing: it is unmeasured. A warning is not an\n"
+              f"  approval — sort out the cause and re-run, nothing was written.")
+    if rc != 0:
+        raise Error(
+            f"{ref} cannot be a FROM in this instance yet"
+            + (f":\n  {diag}" if diag else " (and the command gave no reason)")
+            + f"\n  That line is {cli.cmd('image from')}'s verdict, relayed word for\n"
+              f"  word: it measures TWO things —the image is in the internal registry\n"
+              f"  under that exact tag, and it carries a signature object— and each\n"
+              f"  has a different repair. Rewording it here is how an operator ends\n"
+              f"  up mirroring an image that was already mirrored. Nothing has been\n"
+              f"  written; re-run this same command when the line above is fixed.")
+    line = (out or "").strip()
+    m = _FROM_ANSWER.fullmatch(line)
+    if m is None:
+        raise Error(
+            f"{cli.cmd('image from')} {ref} answered something that is not a FROM\n"
+            f"  line pinned by digest against the internal registry: {line!r}\n"
+            f"  That is not «it is missing»: it is «I could not understand the\n"
+            f"  answer», and writing it into a Containerfile would carry the\n"
+            f"  confusion into the app's repo.")
+    # The keyword stays in the template (`FROM __FROM_X__ AS build`), so
+    # what is substituted is the reference alone. Matching the whole line
+    # first is what proves the answer is the shape that was asked for.
+    return m.group(1)
+
+
+def _from_values(template_dir):
+    """Every __FROM_*__ the template uses, resolved BEFORE anything is written.
+
+    Whole-template and up front on purpose: if one base is missing, the
+    operator finds out with ZERO files on disk. Resolving file by file
+    would leave a contract written and a Containerfile half rendered,
+    and `new` converges by re-running — over a state that is now a lie.
+    """
+    wanted = set()
+    for d, _, files in os.walk(template_dir):
+        for a in sorted(files):
+            try:
+                text = open(os.path.join(d, a), encoding="utf-8").read()
+            except (UnicodeDecodeError, OSError):
+                continue        # a binary in a template is not a FROM
+            wanted |= set(_FROM_PLACEHOLDER.findall(text))
+    values = {}
+    for ph in sorted(wanted):
+        if ph not in _FROM_IMAGES:
+            raise Error(
+                f"the template asks for {ph} and this command does not know which\n"
+                f"  image that is. A new base is TWO lines: its row in _FROM_IMAGES\n"
+                f"  (here, the only owner of the template placeholders) and its line\n"
+                f"  in the platform's mirror list.")
+        values[ph] = _from_reference(_FROM_IMAGES[ph])
+    return values
+
+
 def _values_for(org):
     """The template's placeholders, ALL derivable from the name.
 
@@ -551,7 +763,7 @@ def new(org, template, tot):
                     f"({gen.VALID_NAME.pattern}); the namespace is going to be org-{org} "
                     f"and the contract would reject it anyway, better here and now")
     contract = os.path.join(ORGS_DIR, f"{org}.yaml")
-    print(f"\n{org}  {gray}(new — files only: none of this touches the world){reset}")
+    print(f"\n{org}  {gray}(new — files only: nothing is created outside this machine){reset}")
 
     if template:
         # ── step 1: a live contract is NOT trampled ───────────────
@@ -563,6 +775,11 @@ def new(org, template, tot):
                 f"  WITHOUT --template: `aegis app new {org}`")
         d = _template(template)
         values = _values_for(org)
+        # The base images LAST and before anything is written: this is
+        # the only step that leaves this machine (a read of the internal
+        # registry), and the only one that can honestly say no. Failing
+        # here leaves the disk exactly as it was.
+        values.update(_from_values(d))
         # ── steps 2 and 3: contract + skeletons ───────────────────
         _instantiate_contract(org, d, values, tot)
         _instantiate_skeletons(org, d, values, tot)
@@ -582,7 +799,7 @@ def new(org, template, tot):
 
     # ── step 6: the summary and the pause ─────────────────────────
     staging = os.path.join(STAGING_DIR, org)
-    print(f"\n{green}ready{reset} — it has been written, nothing touched the world:")
+    print(f"\n{green}ready{reset} — it has been written, and nothing was created outside:")
     print(f"  {gray}contract:{reset}  orgs/{org}.yaml")
     if os.path.isdir(staging):
         n = sum(len(fs) for _, _, fs in os.walk(staging))
@@ -754,12 +971,16 @@ def main():
     p = argparse.ArgumentParser(prog=cli.cmd("app"), description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     # Subcommands and not flags: `new` (journeys §3, files only) lives
-    # next to `apply` (the world only), and the house's border is
-    # precisely that line — the order of the help tells it.
+    # next to `apply` (which changes the world), and the house's border
+    # is precisely that line — the order of the help tells it. `new` may
+    # READ the registry (the template FROMs); what it may not do is
+    # leave a mark anywhere but this disk.
     s = sub.add_parser("new",
                        help="writes the WHOLE sign-up into files: contract from a "
-                            "template, skeleton, derivations, secrets. "
-                            "It never touches the world")
+                            "template, skeleton, derivations, secrets. It creates "
+                            "nothing outside this machine (with --template it does "
+                            "READ the internal registry, to pin every base image "
+                            "by digest)")
     s.add_argument("organization", metavar="ORG",
                    help="the name of the new organization")
     s.add_argument("--template", metavar="T", dest="template",
@@ -776,9 +997,11 @@ def main():
     a = p.parse_args()
 
     if a.cmd == "new":
-        # Without a gh check ON PURPOSE: this side of the border talks to
-        # nobody, and demanding a session in order to write files would be
-        # lying about what it does.
+        # Without a gh check ON PURPOSE: this side of the border creates
+        # nothing in GitHub, and demanding a session in order to write
+        # files would be lying about what it does. What `--template` does
+        # need —a live registry— is asked for where it is used, and its
+        # absence is reported as COULD NOT EVALUATE, never as approval.
         tot = {"already": 0, "done": 0, "would": 0, "not_evaluable": 0}
         rc = new(a.organization, a.template, tot)
         if tot["not_evaluable"]:

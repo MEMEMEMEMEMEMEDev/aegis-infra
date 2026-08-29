@@ -9,7 +9,7 @@ metadata:
   labels: {app: __ORG__-app}
 spec:
   replicas: 1
-  # With 1 replica the default rolling update (maxUnavailable 25% → 1)
+  # With 1 replica the default rolling update (maxUnavailable 25% -> 1)
   # leaves ~30s of Bad Gateway on every update. Surge first, kill after
   # = zero window; the transient extra pod fits in the `pequena` quota.
   strategy:
@@ -22,10 +22,10 @@ spec:
     spec:
       # The pull secret comes from the namespace's default SA: the app
       # does NOT declare the registry credential.
-      # PSS: the namespace is enforce=restricted — the workload DECLARES
-      # the whole profile (explicit > magic). The image already runs as
-      # USER 65532 (Containerfile) → runAsNonRoot validates with no
-      # runAsUser here.
+      # PSS: the namespace is enforce=restricted and the workload
+      # DECLARES the whole profile (explicit > magic). The image already
+      # runs as USER 65532 (Containerfile) -> runAsNonRoot validates
+      # with no runAsUser here.
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
@@ -39,19 +39,26 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
-            # A container that cannot write its own image cannot be
-            # persistently modified by whoever gets inside it: the next
-            # restart is the original bytes again. PSS restricted does
-            # not demand it, the platform does — and it is free here
-            # because a static Go binary writes nothing. Whatever needs
-            # to write mounts an emptyDir on /tmp (see the
-            # `service-node` and `service-java` templates, which do).
+            # The image is not writable at runtime, so whoever gets
+            # inside cannot leave anything behind: the next restart is
+            # the original bytes again.
             readOnlyRootFilesystem: true
+          volumeMounts:
+            # The one writable place. node itself needs none of it, but
+            # anything that does —an upload being parsed, a report being
+            # rendered— writes here and nowhere else. Keep it that way:
+            # a second writable mount is a second place state can hide.
+            - {name: tmp, mountPath: /tmp}
           readinessProbe:
             httpGet: {path: /healthz, port: 8080}
+          # A node process with no dependencies idles around 40Mi of
+          # heap plus the runtime. The limit is where the pod dies, so
+          # it is not the average: raise it before you raise the plan.
           resources:
-            requests: {cpu: 50m, memory: 32Mi}
-            limits: {cpu: 200m, memory: 64Mi}
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 192Mi}
+      volumes:
+        - {name: tmp, emptyDir: {}}
 ---
 apiVersion: v1
 kind: Service
@@ -61,6 +68,5 @@ spec:
   selector: {app: __ORG__-app}
   # The platform ALWAYS routes to port 8080 of the Service (convention
   # of the derived IngressRoute): this port is not changed here, it is
-  # changed in the contract… and today the contract does not change it
-  # either.
+  # changed in the contract.
   ports: [{port: 8080, targetPort: 8080}]

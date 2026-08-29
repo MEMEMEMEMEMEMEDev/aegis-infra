@@ -1,0 +1,28 @@
+# __ORG__-app — a Go worker in two stages, built and run on images that
+# came in through the mirror.
+#
+# WHY THE FROMs ARE PLACEHOLDERS. `aegis app new` resolves each one
+# against the INTERNAL registry when it instantiates, and writes the
+# reference pinned by digest. An image pulled off the internet by tag is
+# a mutable pointer inside the pipeline that afterwards signs the
+# result, which is the hole mirror-images exists to close. And the
+# digest cannot be computed here: the mirror rebuilds the manifest as it
+# copies, so upstream's digest is not the one that pulls.
+#
+# NO `EXPOSE`, and that is the only difference from the `base`
+# template's image: this process does not listen. A port declared here
+# would be a promise nothing keeps — there is no Service, no
+# IngressRoute, and the tenant NetworkPolicy admits no ingress to it.
+FROM __FROM_GOLANG__ AS build
+WORKDIR /src
+COPY go.mod main.go ./
+RUN CGO_ENABLED=0 go build -o /app .
+
+FROM __FROM_ALPINE__
+COPY --from=build /app /usr/local/bin/app
+# Non-root ALWAYS, and NUMERIC: the organization's namespace is PSS
+# restricted, so a root container does not even get to start, and a
+# `USER name` fails runAsNonRoot because the kubelet cannot read the
+# image's /etc/passwd to prove the name is not root 0.
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/app"]

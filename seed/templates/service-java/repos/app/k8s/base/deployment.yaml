@@ -9,7 +9,7 @@ metadata:
   labels: {app: __ORG__-app}
 spec:
   replicas: 1
-  # With 1 replica the default rolling update (maxUnavailable 25% → 1)
+  # With 1 replica the default rolling update (maxUnavailable 25% -> 1)
   # leaves ~30s of Bad Gateway on every update. Surge first, kill after
   # = zero window; the transient extra pod fits in the `pequena` quota.
   strategy:
@@ -22,10 +22,10 @@ spec:
     spec:
       # The pull secret comes from the namespace's default SA: the app
       # does NOT declare the registry credential.
-      # PSS: the namespace is enforce=restricted — the workload DECLARES
-      # the whole profile (explicit > magic). The image already runs as
-      # USER 65532 (Containerfile) → runAsNonRoot validates with no
-      # runAsUser here.
+      # PSS: the namespace is enforce=restricted and the workload
+      # DECLARES the whole profile (explicit > magic). The image already
+      # runs as USER 65532 (Containerfile) -> runAsNonRoot validates
+      # with no runAsUser here.
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
@@ -39,19 +39,34 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
-            # A container that cannot write its own image cannot be
-            # persistently modified by whoever gets inside it: the next
-            # restart is the original bytes again. PSS restricted does
-            # not demand it, the platform does — and it is free here
-            # because a static Go binary writes nothing. Whatever needs
-            # to write mounts an emptyDir on /tmp (see the
-            # `service-node` and `service-java` templates, which do).
+            # The image is not writable at runtime, so whoever gets
+            # inside cannot leave anything behind: the next restart is
+            # the original bytes again.
             readOnlyRootFilesystem: true
+          volumeMounts:
+            # The one writable place, and for a JVM it is not optional: the
+            # hsperfdata directory it creates at startup lives under
+            # java.io.tmpdir (set to /tmp in the ENTRYPOINT). Keep it the
+            # only one: a second writable mount is a second hiding place.
+            - {name: tmp, mountPath: /tmp}
           readinessProbe:
             httpGet: {path: /healthz, port: 8080}
+            # A JVM takes seconds to be ready and the probe starts
+            # polling immediately: without this delay the first two or
+            # three attempts fail and the events log a scare that is
+            # not one.
+            initialDelaySeconds: 10
+          # A JVM DOES NOT FIT IN THE OTHER TEMPLATES' NUMBERS. With the
+          # 64Mi limit the Go template runs on, it is OOM-killed while it
+          # reserves the heap: CrashLoopBackOff with no message of its
+          # own. 256Mi is the floor a stdlib-only JVM starts on; the
+          # heap follows the limit through -XX:MaxRAMPercentage=70, so
+          # raising the limit is the only number to touch.
           resources:
-            requests: {cpu: 50m, memory: 32Mi}
-            limits: {cpu: 200m, memory: 64Mi}
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: 1000m, memory: 512Mi}
+      volumes:
+        - {name: tmp, emptyDir: {}}
 ---
 apiVersion: v1
 kind: Service
@@ -61,6 +76,5 @@ spec:
   selector: {app: __ORG__-app}
   # The platform ALWAYS routes to port 8080 of the Service (convention
   # of the derived IngressRoute): this port is not changed here, it is
-  # changed in the contract… and today the contract does not change it
-  # either.
+  # changed in the contract.
   ports: [{port: 8080, targetPort: 8080}]

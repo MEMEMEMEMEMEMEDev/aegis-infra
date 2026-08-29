@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Platform convention: the contract's `app` service is named
+  # `<organizacion>-app`. The generated NetworkPolicy selects by the
+  # label `app: __ORG__-app` — this name is NOT free.
+  name: __ORG__-app
+  labels: {app: __ORG__-app}
+spec:
+  replicas: 1
+  # NO `strategy` override here, unlike every other template. Surge
+  # first, kill after exists to close the Bad Gateway window of a
+  # service being visited; a worker is visited by nobody, and surging
+  # would mean TWO copies of it processing at the same time for a few
+  # seconds — which is a correctness question (is your pass idempotent?)
+  # and not a routing one. The default recreates one at a time, which is
+  # the conservative answer.
+  selector:
+    matchLabels: {app: __ORG__-app}
+  template:
+    metadata:
+      labels: {app: __ORG__-app}
+    spec:
+      # SIGTERM is answered by the process (see main.go) and this is how
+      # long it is given. The default is 30s; a pass that can take
+      # longer needs this number raised, or the kubelet kills it
+      # mid-flight.
+      terminationGracePeriodSeconds: 30
+      # The pull secret comes from the namespace's default SA: the app
+      # does NOT declare the registry credential.
+      # PSS: the namespace is enforce=restricted and the workload
+      # DECLARES the whole profile (explicit > magic). The image already
+      # runs as USER 65532 (Containerfile) -> runAsNonRoot validates
+      # with no runAsUser here.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: app
+          # The IMAGE is governed by the overlay (kustomize images) and
+          # the pipeline writes the DIGEST into it on every build. This
+          # reference is only the base the overlay rewrites.
+          image: registry.registry-system.svc.cluster.local:5000/__ORG__-app
+          # NO `ports`, NO readinessProbe and NO Service below: a worker
+          # does not listen, and the contract rejects `puerto` and
+          # `publico` for its type. Declaring a port here would be a
+          # promise nothing keeps — nothing routes to it, and the
+          # tenant's NetworkPolicy admits no ingress to this pod.
+          # What tells you it is alive is its log (see main.go).
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            # The image is not writable at runtime, so whoever gets
+            # inside cannot leave anything behind: the next restart is
+            # the original bytes again.
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            # The one writable place, for whatever a pass spills to disk
+            # while it works. Keep it the only one: a second writable
+            # mount is a second place state can hide between restarts,
+            # and a worker's state belongs in the database or the
+            # bucket, not in a pod that can vanish.
+            - {name: tmp, mountPath: /tmp}
+          # A ticking Go binary with no dependencies costs almost
+          # nothing at rest. The limit is where the pod DIES, so size it
+          # for the heaviest pass, not for the average.
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+      volumes:
+        - {name: tmp, emptyDir: {}}

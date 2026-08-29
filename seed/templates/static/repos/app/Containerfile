@@ -1,0 +1,61 @@
+# __ORG__-app — a static front: compiled with a node image that carries
+# npm, served by the node runtime that is mirrored, scanned and signed.
+#
+# ── THE ONLY TWO LINES THAT CHANGE BETWEEN FRAMEWORKS ────────────────
+# Astro, React, Vue and Angular differ here and nowhere else in this
+# file. They are ARGs so you can also override them per build without
+# editing:
+#
+#   framework      BUILD_CMD          OUT_DIR
+#   Astro          npm run build      dist
+#   Vite (React)   npm run build      dist
+#   Vite (Vue)     npm run build      dist
+#   Angular        npm run build      dist/<project>/browser
+#
+# Everything below the build stage assumes only that OUT_DIR ends up
+# holding plain files a browser can fetch.
+#
+# WHY THE FROMs ARE PLACEHOLDERS. `aegis app new` resolves each one
+# against the INTERNAL registry when it instantiates, and writes the
+# reference pinned by digest. An image pulled off the internet by tag is
+# a mutable pointer inside the pipeline that afterwards signs the
+# result, which is the hole mirror-images exists to close. And the
+# digest cannot be computed here: the mirror rebuilds the manifest as it
+# copies, so upstream's digest is not the one that pulls.
+#
+# WHY THE RUNTIME IS NODE AND NOT nginx, which is what the platform's
+# own static fronts run on: serve.mjs holds that argument in full, and
+# the one-line move to aegis-base-nginx once this repo has built once.
+FROM __FROM_NODE_BUILD__ AS build
+ARG BUILD_CMD="npm run build"
+ARG OUT_DIR="dist"
+WORKDIR /app
+# The lock first and alone: this layer is only rebuilt when the
+# dependencies change, not on every edit of a component.
+COPY package.json package-lock.json ./
+# `npm ci` and NOT `npm install`: it installs EXACTLY what the lock
+# says. `npm install` may resolve a different tree than the one that was
+# tested, in CI, silently.
+RUN npm ci --no-audit --no-fund
+COPY . .
+# The output is moved to a FIXED path so that the runtime stage does not
+# need to know OUT_DIR: one declaration, one place to edit.
+RUN sh -c "$BUILD_CMD" && test -d "$OUT_DIR" && mv "$OUT_DIR" /out
+
+FROM __FROM_NODE__
+# What this base guarantees, and what this file therefore assumes: uid
+# 65532, node as the ENTRYPOINT (so the CMD below is a path and nothing
+# else), and no shell, no npm and no package manager anywhere in it.
+# There is no RUN in this stage and there cannot be one.
+WORKDIR /app
+# From the build stage and not from the context: what is served is,
+# provably, what was built. serve.mjs travels the same way for the same
+# reason — the file that ran in the build is the file that runs here.
+COPY --from=build --chown=65532:65532 /app/serve.mjs ./serve.mjs
+COPY --from=build --chown=65532:65532 /out/ ./public/
+EXPOSE 8080
+# Numeric and non-root: the namespace is PSS restricted, and a
+# `USER name` fails runAsNonRoot because the kubelet cannot read the
+# image's /etc/passwd to prove the name is not root 0.
+USER 65532:65532
+CMD ["/app/serve.mjs"]

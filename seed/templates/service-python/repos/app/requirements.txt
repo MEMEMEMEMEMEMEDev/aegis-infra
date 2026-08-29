@@ -1,0 +1,7 @@
+# Dependencies of __ORG__-app. It starts EMPTY on purpose: an empty
+# dependency tree cannot rot and has nothing for the scan to argue
+# about, and python's stdlib already serves HTTP.
+#
+# When you add one, pin it and add its hash, and uncomment the pip line
+# in the Containerfile:
+#   flask==3.1.0 --hash=sha256:<the artifact's hash>
