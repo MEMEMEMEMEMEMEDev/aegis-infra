@@ -167,3 +167,84 @@ spec:
   syncPolicy:
     automated: {selfHeal: true}
     syncOptions: [ServerSideApply=true]
+---
+# ── THE AI SUBSYSTEM, in two Applications ──────────────────────────
+# They live HERE and not in a file of their own, and that is worth
+# stating because a directory-shaped reading misses it: the `gpu`
+# Application delivers k8s/base/gpu (RuntimeClass + device plugin) into
+# kube-system, so anyone reasoning at directory granularity will not
+# find it, and removing a directory would not remove it.
+#
+# ORDER MATTERS AND IT IS NOT EXPRESSED HERE. `gpu` must be synced
+# before any GPU pod, and `ai-system` after kyverno-policies — its
+# namespace is born carrying the tenant enforce label, so there must
+# never be a window in which it admits unsigned pods. ArgoCD does not
+# order Applications; phase 87 does, and its gates are what prove it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gpu
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    targetRevision: main
+    path: k8s/base/gpu
+  destination: {server: https://kubernetes.default.svc, namespace: kube-system}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ai-system
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    targetRevision: main
+    path: k8s/base/ai-system
+  destination: {server: https://kubernetes.default.svc, namespace: ai-system}
+  # The engines' spec.replicas is OPERATING STATE, not configuration:
+  # the mode (`aegis ai start` / `stop`) scales them 0<->1 and selfHeal
+  # must not revert it. Note what this rule is NOT for: it does not
+  # protect the mode ConfigMap. That was measured twice, with the engine
+  # open and zero changes in git — a sync returned the map to the
+  # manifest's values in under ten seconds and the controller took the
+  # GPU down behind it, with the app showing Synced the whole time.
+  # ignoreDifferences affects the DIFF, not the APPLY. What protects the
+  # mode is that gateway.yaml no longer declares the ConfigMap's `data`
+  # at all; the reasons are written there.
+  #
+  # This rule is still needed for the DIFF, which is all it ever did:
+  # without it the live ConfigMap would carry four keys the manifest
+  # does not declare and the app would sit permanently OutOfSync. A
+  # permanent warning switches the signal off exactly as an absent one
+  # does.
+  #
+  # `group` is ABSENT and not an empty string. The API server does not
+  # store the `""` and returns the object without the field, so git and
+  # the cluster would disagree forever over a purely serialisation
+  # difference — an eternal OutOfSync on the root app. In an AppProject
+  # blacklist the empty string IS correct; in an Application's
+  # ignoreDifferences it is not.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jqPathExpressions:
+        - .spec.replicas
+    - kind: ConfigMap
+      name: ai-modo
+      jqPathExpressions:
+        - .data
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true

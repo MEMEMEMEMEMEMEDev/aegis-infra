@@ -1,0 +1,249 @@
+# engine-mt — the SECOND vLLM on the same card: the translation lane.
+#
+# WHY TWO ENGINES AND NOT ONE, measured rather than assumed. A general
+# instruct model translating failed in two ways a public site cannot
+# afford: it spelled the same proper noun four different ways at
+# temperature 0.2, and it sometimes RETURNED THE INPUT UNTRANSLATED —
+# reproducible, and sensitive to a comma, so with no readable rule to
+# dodge it. That second failure is the bad one: it leaves through a 200
+# with text inside, so the signal cannot tell "translated" from "did not
+# translate". As a CONVERSATIONALIST the order reverses — a 1.8B
+# specialist babbles where a 4B instruct narrates. One model per task.
+#
+# THE MODEL: a translation specialist (Apache-2.0, 33 languages), served
+# in bf16. The 1.8B and not the 7B, which is ~8B parameters and ~8.7 GiB
+# of weights: on half a shared consumer card that would leave a KV cache
+# of a few thousand tokens. bf16 at 1.8B is ~3.7 GB.
+#
+# NOTHING ROUTES HERE YET, AND THAT IS SAID OUT LOUD. ai/routes.yaml
+# declares the capabilities the gateway can serve TODAY, and a
+# `traduccion` capability is not among them — the same discipline that
+# file states about `embeddings`: declaring a promise before there is
+# something to serve it leaves a lane that blows up only when somebody
+# invokes it, and the first to find out is a visitor. The engine ships
+# so the card's second slice exists and is exercised; turning the
+# capability on is one row in ai/routes.yaml and a regeneration.
+#
+# THE COHABITATION. The device plugin advertises the card as 2 units
+# (time-slicing, k8s/base/gpu). The REAL VRAM split is made by the two
+# vLLM processes: 0.38 + 0.38 of gpu-memory-utilization. The threshold
+# `aegis ai start` enforces is derived from those same two fractions —
+# one decision, and the command does the arithmetic rather than carrying
+# a copy of the answer.
+#
+# The model is NOT downloaded from the pod (no egress): the models-hf
+# volume is seeded from the host with `aegis ai models`.
+#
+# NO `replicas` FIELD, for the same measured reason as engine-llm: with
+# `replicas: 0` written here, every sync took both engines to 0 and the
+# controller raised them seconds later — a full bounce per sync, with
+# ignoreDifferences declared and no effect on the apply.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: engine-mt-profile
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+data:
+  MODEL_ID: "tencent/Hy-MT2-1.8B"
+  SERVED_NAME: "hy-mt2-1.8b"
+  GPU_MEM_UTIL: "0.38"
+  # 4096 and not 12288: a translation request carries ~1200 tokens of
+  # context, and context that nobody asks for is KV cache that nobody
+  # uses. When a `traduccion` capability is declared in ai/routes.yaml,
+  # its `contexto_max` and this number move together — check 159 will
+  # not let them drift.
+  MAX_MODEL_LEN: "4096"
+  # SAME NUMBER as the gateway's AI_EN_VUELO_MT. See gateway.yaml.
+  MAX_NUM_SEQS: "10"
+  DTYPE: "bfloat16"
+  # KV in fp8 is proven on this class of card by the other lane.
+  KV_CACHE_DTYPE: "fp8"
+  ATTENTION_BACKEND: "TRITON_ATTN"
+---
+# ITS OWN compilation cache: two vLLM processes writing JIT kernels into
+# the same volume trip over Triton's locks. The models volume IS shared
+# — it is read-only for both.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: engine-mt-cache
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources: {requests: {storage: 10Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: engine-mt
+  namespace: ai-system
+  labels: {aegis.dev/component: ai, app: engine-mt}
+spec:
+  # Recreate for the same quota reason as engine-llm: a rolling update
+  # would want two GPU units for this Deployment while engine-llm still
+  # holds its own — the third unit the quota rejects on purpose.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: engine-mt}
+  template:
+    metadata:
+      labels: {app: engine-mt, aegis.dev/component: ai}
+    spec:
+      runtimeClassName: nvidia
+      # ─────────────────────────────────────────────────────────────
+      # THE TURN, AND NOT THE LUCK.
+      #
+      # Both GPU engines share the card by time-slicing and each vLLM
+      # computes its KV cache at start-up: it measures the FREE VRAM at
+      # that instant and subtracts its own weights. The controller
+      # raises them TOGETHER — the mode is one and it holds for the
+      # whole fleet — so both measure while the other is still loading.
+      # Both see memory the other is about to take.
+      #
+      # Measured, starting from cold:
+      #     Available KV cache memory: -2.94 GiB   -> CrashLoopBackOff
+      # It resolved ITSELF on the second or third round, when one won
+      # the race and the other measured against a settled number. That
+      # is: it started by luck, took two minutes longer than it should,
+      # and left a crash in the log that was not the model's fault. A
+      # start that works because the scheduler happened to order it well
+      # is not a start that works.
+      #
+      # Here it is fixed with ORDER: mt does not start until
+      # engine-llm SERVES. When /health answers, llm has finished
+      # loading and reserving: its VRAM is a fixed number, and mt
+      # measures against the truth instead of a half-developed
+      # photograph.
+      #
+      # Why llm first: it is the larger one, and the larger one is the
+      # one that cannot afford to measure short.
+      #
+      # Why NOT a `sleep`: a sleep is correct until the day the model
+      # grows or the disk is cold. This waits for the FACT (the engine
+      # serving), not for the clock.
+      #
+      # Why there is a ceiling: if llm is broken, mt still has to
+      # come up — a downed engine cannot take the other one with it. At
+      # ten minutes it carries on and SAYS SO, so whoever reads the log
+      # knows it started without a turn and does not wonder why the KV
+      # cache came out small.
+      #
+      # Why the SAME image: it is the digest already mirrored and
+      # already signed. A new image just to wait thirty seconds would
+      # cost a pipeline, a signature and one more digest to audit.
+      initContainers:
+        - name: wait-for-turn
+          image: registry.registry-system.svc.cluster.local:5000/aegis-ai-vllm
+          command: ["/opt/ai/venv/bin/python", "-c"]
+          args:
+            - |
+              import sys, time, urllib.request
+              URL = "http://engine-llm.ai-system.svc.cluster.local:8000/health"
+              CAP = 600
+              end = time.monotonic() + CAP
+              while time.monotonic() < end:
+                  try:
+                      if urllib.request.urlopen(URL, timeout=5).status == 200:
+                          print("engine-llm serves: its VRAM is a fixed number now, starting", flush=True)
+                          sys.exit(0)
+                  except Exception:
+                      pass
+                  time.sleep(5)
+              print("engine-llm did not answer in %ss: starting WITHOUT a turn "
+                    "(if the KV cache comes out small, this is the cause)" % CAP, flush=True)
+              sys.exit(0)
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          # No nvidia.com/gpu on purpose: waiting needs no card, and
+          # asking for one here would take the third unit the quota
+          # rejects.
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+      containers:
+        - name: vllm
+          image: registry.registry-system.svc.cluster.local:5000/aegis-ai-vllm
+          command: ["/opt/ai/venv/bin/python", "-m", "vllm.entrypoints.openai.api_server"]
+          args:
+            - --model=$(MODEL_ID)
+            - --served-model-name=$(SERVED_NAME)
+            - --host=0.0.0.0
+            - --port=8000
+            - --dtype=$(DTYPE)
+            - --kv-cache-dtype=$(KV_CACHE_DTYPE)
+            - --max-model-len=$(MAX_MODEL_LEN)
+            - --max-num-seqs=$(MAX_NUM_SEQS)
+            - --gpu-memory-utilization=$(GPU_MEM_UTIL)
+            - '--attention-config={"backend": "$(ATTENTION_BACKEND)"}'
+          envFrom:
+            - configMapRef: {name: engine-mt-profile}
+          env:
+            - {name: HF_HOME, value: /models/hf}
+            - {name: HF_HUB_OFFLINE, value: "1"}
+            - {name: TRANSFORMERS_OFFLINE, value: "1"}
+            - {name: CC, value: /usr/bin/gcc-14}
+            - {name: VLLM_USE_FLASHINFER_SAMPLER, value: "0"}
+            - {name: HOME, value: /cache}
+          ports:
+            - {name: http, containerPort: 8000}
+          volumeMounts:
+            - {name: models, mountPath: /models, readOnly: true}
+            - {name: cache, mountPath: /cache}
+            - {name: shm, mountPath: /dev/shm}
+          startupProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 10
+            failureThreshold: 6
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests:
+              cpu: "2"
+              memory: 4Gi
+              nvidia.com/gpu: 1
+            limits:
+              cpu: "6"
+              # Less RAM than engine-llm: int4 weights also weigh less
+              # while loading (they are decompressed on the GPU, not
+              # here).
+              memory: 8Gi
+              nvidia.com/gpu: 1
+      volumes:
+        - name: models
+          persistentVolumeClaim: {claimName: models-hf}
+        - name: cache
+          persistentVolumeClaim: {claimName: engine-mt-cache}
+        - name: shm
+          emptyDir: {medium: Memory, sizeLimit: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: engine-mt
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+spec:
+  selector: {app: engine-mt}
+  ports:
+    - {name: http, port: 8000, targetPort: 8000}

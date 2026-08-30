@@ -1,0 +1,258 @@
+# NetworkPolicies of ai-system.
+#
+# THERE IS NO `allow-intra-namespace` HERE, and its absence is the
+# design. While the namespace held a single workload, a broad "any pod
+# talks to any pod" permitted nothing extra. With the gateway inside it
+# does: it would let a compromised engine talk back to the gateway, and
+# let any future pod of the namespace reach an engine without going
+# through the queues or the budgets. Every rule below names its sender
+# AND its receiver.
+#
+# The gateway's two doors are two distinct PORTS precisely so this can be
+# written: the separation is held by the kernel, not by an `if` in the
+# code.
+#
+# THE PUBLIC DOOR IS NOT PUBLISHED. There is exactly one ingress rule to
+# the gateway — tenants to 8081. The public door (8080) exists in the
+# binary and is not reachable from the edge, and that is a decision with
+# a measured reason: `GET /status` answers without a credential, which
+# tells anyone WHEN the GPU is on (the moment there is something to
+# attack) and which build is running. The use case that would justify
+# publishing it is the browser-capability flow, which ships disabled and
+# answers 501. The day it is switched on, a proof-of-humanity check goes
+# in FRONT of it from the first day, not afterwards.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: ai-system
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# Tenants reach ONLY the internal door.
+#
+# BY LABEL AND NOT BY ENUMERATING NAMES. Listing namespaces one by one
+# is a bug of the same class as a Kyverno scope that enumerates: a new
+# organization is born OUTSIDE the rule and nothing warns. It was
+# measured once — an organization's backend had the right key and the
+# right egress policy, and the gateway simply did not hear it. The
+# symptom was an answer that reads exactly like "the GPU is off".
+#
+# With the label, every future organization is covered at birth. The
+# label is written into each namespace by the contract generator.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-tenants-to-gateway
+  namespace: ai-system
+spec:
+  podSelector:
+    matchLabels: {app: ai-gateway}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {aegis.dev/part-of: aegis-tenants}
+      ports:
+        - {protocol: TCP, port: 8081}
+---
+# An engine accepts traffic from the gateway and from nobody else. That
+# is what makes the queues and the budgets impossible to bypass: there
+# is no other route to the card.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-to-engine-llm
+  namespace: ai-system
+spec:
+  podSelector:
+    matchLabels: {app: engine-llm}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: ai-gateway}
+      ports:
+        - {protocol: TCP, port: 8000}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-to-engine-mt
+  namespace: ai-system
+spec:
+  podSelector:
+    matchLabels: {app: engine-mt}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: ai-gateway}
+      ports:
+        - {protocol: TCP, port: 8000}
+---
+# Same contract for the CPU lane. The rule exists BEFORE the pod does
+# (it selects nothing in the meantime): when the Deployment lands it is
+# born closed instead of open-until-somebody-remembers — the class of
+# bug an enumerated scope produces.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-to-engine-cpu
+  namespace: ai-system
+spec:
+  podSelector:
+    matchLabels: {app: engine-cpu}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: ai-gateway}
+      ports:
+        - {protocol: TCP, port: 8600}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-egress
+  namespace: ai-system
+spec:
+  podSelector:
+    matchLabels: {app: ai-gateway}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app: engine-llm}
+      ports:
+        - {protocol: TCP, port: 8000}
+    - to:
+        - podSelector:
+            matchLabels: {app: engine-mt}
+      ports:
+        - {protocol: TCP, port: 8000}
+    - to:
+        - podSelector:
+            matchLabels: {app: engine-cpu}
+      ports:
+        - {protocol: TCP, port: 8600}
+---
+# The controller is the ONLY pod of ai-system that talks to the
+# apiserver.
+#
+# WHY THE DESTINATION IS THREE PRIVATE RANGES AND NOT ONE /32. The
+# lineage this comes from pinned the node's InternalIP here, and that
+# address appeared exactly once in the whole tree, so nothing could ever
+# flag a mismatch: on a different node the symptom was the controller
+# logging that it could not read the mode while the GPU stayed wherever
+# it was. A product does not know which machine it runs on, so it cannot
+# carry that number — writing one here would be writing one instance's
+# identity into the artifact (check 116).
+#
+# What CAN be said without knowing the machine: the apiserver of a
+# single-node k3s answers on the node's own address, and a node address
+# is an RFC 1918 one on every installation that has a private NIC. So
+# the destination is those three ranges and the port is 6443 — narrow in
+# the dimension that matters (nothing here reaches the internet on any
+# port) and portable in the one that does not.
+#
+# THE UNCOVERED CASE IS NAMED, NOT HIDDEN: a node whose InternalIP is
+# PUBLIC (a VPS with no private NIC) is not matched by these three
+# blocks. That does not fail silently any more — phase 87's
+# `ai-controller-observes-the-mode` gate exercises exactly this path, so
+# the answer arrives during the init and with a diagnosis, instead of
+# arriving weeks later as a GPU that will not turn off. The remedy is
+# one extra ipBlock in this file with that node's address, which is
+# instance configuration and belongs in the instance's tree.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-controller-to-apiserver
+  namespace: ai-system
+spec:
+  podSelector:
+    matchLabels: {app: ai-modo-controller}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: {cidr: 10.0.0.0/8}
+        - ipBlock: {cidr: 172.16.0.0/12}
+        - ipBlock: {cidr: 192.168.0.0/16}
+      ports:
+        - {protocol: TCP, port: 6443}
+---
+# DNS for everyone. NO egress to the internet: the weights are NOT
+# downloaded from the pods, they arrive on a seeded volume or inside a
+# mirrored image. The day an engine needs to go out, it asks for it with
+# an explicit rule and that rule is written here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: ai-system
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+# THE TURN AT STARTUP. These two rules exist for one reason, and it is
+# the same one as engine-mt's `wait-for-turn` initContainer: both GPU
+# engines measured the free VRAM at the same instant and both computed a
+# NEGATIVE KV cache. Now mt waits until llm SERVES before starting,
+# and to be able to ask it, it needs the path.
+#
+# It is the NARROWEST path that solves the problem: one source pod, one
+# destination pod, one port, and only the port that already exists to
+# serve. It opens nothing the gateway did not already have.
+#
+# If the ordering is ever solved by the controller (which would be
+# better: it is the one that decides to raise them), these two rules and
+# the initContainer go together. They are written so they can be deleted
+# in one piece.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-mt-waits-for-llm
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+spec:
+  podSelector:
+    matchLabels: {app: engine-mt}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app: engine-llm}
+      ports:
+        - {protocol: TCP, port: 8000}
+---
+# The other side of the same path. Ingress and egress are declared
+# separately because `default-deny` closes both directions: with only the
+# rule above, mt could speak and llm could not listen, and the
+# symptom would be the worst of all — the initContainer waiting its full
+# ten minutes and then starting "without a turn" with nothing explaining
+# why. They go together or they do not go.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-llm-listens-to-mt
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+spec:
+  podSelector:
+    matchLabels: {app: engine-llm}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: engine-mt}
+      ports:
+        - {protocol: TCP, port: 8000}

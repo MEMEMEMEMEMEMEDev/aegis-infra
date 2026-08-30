@@ -1,0 +1,268 @@
+// engine-gpu — build, scan, push and signature of the GPU engine image.
+//
+// SAME RITE AS EVERY OTHER IMAGE, and that is the whole point of this
+// file existing: the image it produces used to be assembled by hand on
+// the operator's machine. Here the cosign key lives in a Secret of
+// jenkins-system and never leaves it, the scan is the same blocking one
+// every pipeline runs, and the result lands in the same supply-chain
+// log. The operator's machine sees neither the key nor the registry.
+//
+// build -> scan -> push -> sign, the order of Jenkinsfile.app: the scan
+// runs BEFORE the push (an image that does not pass the scan never
+// comes to exist in the registry) and the signature is by DIGEST, never
+// by tag.
+//
+// FIRED BY HAND, like mirror-images. This module changes rarely and a
+// build per push of the platform repo would rebuild ten gigabytes of
+// wheels for every manifest edit that does not touch it.
+//
+// ── TWO THINGS TO KNOW BEFORE FIRING IT ────────────────────────────
+//
+// 1. IT IS BIG AND IT IS SLOW. The wheels this pulls (torch with its
+//    CUDA runtime, vllm with its kernels) are several gigabytes. The
+//    timeout below is generous on purpose; on a domestic uplink the
+//    first build is measured in hours, and a build that dies at 45
+//    minutes teaches nothing.
+// 2. THE BASE MUST BE RESOLVED FIRST. The Containerfile's FROM is a
+//    placeholder until `aegis ai images` writes the internal registry's
+//    digest into it. Kaniko would otherwise fail on a literal
+//    `__FROM_PYTHON__`, which is a clear error but a late one — the
+//    preflight stage below turns it into an immediate one.
+//
+// ── NOT VERIFIED ───────────────────────────────────────────────────
+// This pipeline has never been run: the job that would register it is
+// one item in jenkins/values.yaml's job-dsl and that item does not
+// exist yet. Written from the shape of the pipelines that DO run, and
+// declared unverified rather than assumed to work.
+pipeline {
+  agent {
+    kubernetes {
+      // jenkins-system's ResourceQuota is strict: EVERY container
+      // declares limits, jnlp included — never `yaml ''`.
+      yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  imagePullSecrets:
+  - name: regcred-internal
+  containers:
+  - name: jnlp
+    image: jenkins/inbound-agent:3355.v388858a_47b_33-23
+    resources:
+      requests: { cpu: 500m, memory: 512Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+  # kaniko WITHOUT privileges. The Containerfile's RUN steps happen in
+  # here and need to reach the wheel indexes; the memory is generous
+  # because pip unpacks wheels of hundreds of megabytes and torch is
+  # the largest of them.
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:v1.23.2-debug
+    command: ['sleep', 'infinity']
+    volumeMounts:
+    - name: regcred
+      mountPath: /kaniko/.docker/config.json
+      subPath: .dockerconfigjson
+      readOnly: true
+    - name: ca-trust
+      mountPath: /kaniko/ca.crt
+      subPath: ca.crt
+      readOnly: true
+    resources:
+      requests: { cpu: 1000m, memory: 2Gi }
+      limits:   { cpu: 3000m, memory: 8Gi }
+  # trivy: a THIN client — the server (trivy-system) holds the database.
+  - name: trivy
+    image: ghcr.io/aquasecurity/trivy:0.72.0
+    command: ['sleep', 'infinity']
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits:   { cpu: 1000m, memory: 2Gi }
+  - name: crane
+    image: registry.registry-system.svc.cluster.local:5000/aegis-ci-crane:v0.20.3
+    command: ['sleep', 'infinity']
+    env:
+    - name: DOCKER_CONFIG
+      value: /crane/docker
+    - name: SSL_CERT_FILE
+      value: /crane/ca/ca.crt
+    volumeMounts:
+    - name: regcred
+      mountPath: /crane/docker/config.json
+      subPath: .dockerconfigjson
+      readOnly: true
+    - name: ca-trust
+      mountPath: /crane/ca/ca.crt
+      subPath: ca.crt
+      readOnly: true
+    resources:
+      requests: { cpu: 250m, memory: 256Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+  # cosign: the password arrives by secretKeyRef, NEVER through argv.
+  # No `optional`: a missing key is a real error and must break here —
+  # an unsigned image does not run, and the symptom would otherwise
+  # surface much later, at Kyverno's admission.
+  - name: cosign
+    image: registry.registry-system.svc.cluster.local:5000/aegis-ci-cosign:v2.6.3
+    command: ['sleep', 'infinity']
+    env:
+    - name: COSIGN_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: cosign-signing-key
+          key: cosign.password
+    - name: DOCKER_CONFIG
+      value: /cosign/docker
+    volumeMounts:
+    - name: cosign-key
+      mountPath: /cosign/keys/cosign.key
+      subPath: cosign.key
+      readOnly: true
+    - name: regcred
+      mountPath: /cosign/docker/config.json
+      subPath: .dockerconfigjson
+      readOnly: true
+    - name: ca-trust
+      mountPath: /cosign/ca/ca.crt
+      subPath: ca.crt
+      readOnly: true
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits:   { cpu: 500m, memory: 256Mi }
+  volumes:
+  - name: regcred
+    secret:
+      secretName: regcred-internal
+      items: [{ key: .dockerconfigjson, path: .dockerconfigjson }]
+  - name: ca-trust
+    secret:
+      secretName: aegis-ca-trust
+      items: [{ key: ca.crt, path: ca.crt }]
+  - name: cosign-key
+    secret:
+      secretName: cosign-signing-key
+      items: [{ key: cosign.key, path: cosign.key }]
+'''
+      defaultContainer 'jnlp'
+    }
+  }
+  options {
+    // Hours and not minutes: see «it is big and it is slow» above.
+    timeout(time: 4, unit: 'HOURS')
+  }
+  environment {
+    REGISTRY     = 'registry.registry-system.svc.cluster.local:5000'
+    IMAGE        = 'aegis-ai-vllm'
+    TRIVY_SERVER = 'http://trivy.trivy-system.svc.cluster.local:4954'
+  }
+  stages {
+    stage('preflight') {
+      // Fails EARLY. Without a key there is no signature and without a
+      // signature the image does not run; and with an unresolved FROM
+      // there is nothing to build. Better to know both before hours of
+      // wheels.
+      steps {
+        container('cosign') {
+          sh '''
+            test -f /cosign/keys/cosign.key || {
+              echo "ERROR: the cosign-signing-key Secret is missing from jenkins-system."
+              exit 1
+            }
+          '''
+        }
+        sh '''
+          if grep -q '__FROM_' ai/engine-gpu/Containerfile; then
+            echo "ERROR: the FROM of ai/engine-gpu/Containerfile is still a placeholder."
+            echo "It is resolved against the INTERNAL registry, by digest, before building:"
+            echo "  aegis ai images"
+            echo "A base that did not go through the mirror was neither scanned nor signed,"
+            echo "and a pod built on it is rejected at admission."
+            exit 1
+          fi
+        '''
+      }
+    }
+    stage('compute-tag') {
+      steps {
+        script {
+          // The vLLM version plus the short commit: the tag says which
+          // engine this is, and the manifest still pins by digest.
+          def version = sh(returnStdout: true, script:
+            'sed -n "s/^RUN pip install --no-cache-dir vllm==\\([0-9.]*\\).*/\\1/p" ai/engine-gpu/Containerfile | head -1').trim()
+          def short = sh(returnStdout: true, script: 'git rev-parse --short=7 HEAD').trim()
+          if (!version) { error 'could not read the vllm version out of the Containerfile' }
+          env.TAG = "vllm${version}-${short}"
+          echo "tag: ${env.TAG}"
+        }
+      }
+    }
+    stage('build') {
+      steps {
+        container('kaniko') {
+          sh '''
+            /kaniko/executor \
+              --context=dir://${WORKSPACE}/ai/engine-gpu \
+              --dockerfile=Containerfile \
+              --destination=${REGISTRY}/${IMAGE}:${TAG} \
+              --no-push \
+              --tarPath=${WORKSPACE}/image.tar \
+              --registry-certificate ${REGISTRY}=/kaniko/ca.crt
+          '''
+        }
+      }
+    }
+    stage('scan') {
+      steps {
+        container('trivy') {
+          sh '''
+            trivy image \
+              --server ${TRIVY_SERVER} \
+              --input ${WORKSPACE}/image.tar \
+              --exit-code 1 \
+              --severity CRITICAL,HIGH \
+              --ignore-unfixed \
+              --scanners vuln \
+              --no-progress
+          '''
+        }
+      }
+    }
+    stage('push') {
+      steps {
+        container('crane') {
+          sh '''
+            crane push ${WORKSPACE}/image.tar ${REGISTRY}/${IMAGE}:${TAG}
+            crane digest ${REGISTRY}/${IMAGE}:${TAG} > ${WORKSPACE}/image-digest
+            echo "pushed digest: $(cat ${WORKSPACE}/image-digest)"
+          '''
+        }
+      }
+    }
+    stage('sign') {
+      steps {
+        container('cosign') {
+          sh '''
+            DIGEST=$(cat ${WORKSPACE}/image-digest)
+            cosign sign --yes \
+              --key /cosign/keys/cosign.key \
+              --tlog-upload=false \
+              --registry-cacert /cosign/ca/ca.crt \
+              ${REGISTRY}/${IMAGE}@${DIGEST}
+            echo "signed: ${REGISTRY}/${IMAGE}@${DIGEST}"
+          '''
+        }
+      }
+    }
+    stage('report') {
+      steps {
+        sh '''
+          DIGEST=$(cat ${WORKSPACE}/image-digest 2>/dev/null || echo "")
+          printf '{"event":"supply-chain","image":"%s","tag":"%s","digest":"%s","ts":"%s"}\\n' \
+            "${IMAGE}" "${TAG}" "${DIGEST}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "NEXT STEP (building does not deploy): pin this digest with"
+          echo "  aegis ai images"
+          echo "which writes it into k8s/base/ai-system/kustomization.yaml."
+        '''
+      }
+    }
+  }
+}

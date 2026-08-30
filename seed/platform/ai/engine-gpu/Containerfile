@@ -1,0 +1,167 @@
+# engine-gpu — the vLLM image of the two GPU lanes.
+#
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  DECLARED AS NOT VERIFIED (2026-08-29).                          ║
+# ║                                                                  ║
+# ║  This file has NOT been built and the image it describes has NOT ║
+# ║  been run. It was written on a machine with no GPU and no        ║
+# ║  cluster, from measurements taken against the upstream build     ║
+# ║  definitions (each one cited below, with its URL), and NOT from  ║
+# ║  an execution. Every version pin here is defensible; none of     ║
+# ║  them is confirmed by a running engine.                          ║
+# ║                                                                  ║
+# ║  An image that claims to be tested and is not is worse than one  ║
+# ║  that warns. The first build is the verification, and the        ║
+# ║  protocol (docs/protocols/ai-subsystem.md §3) says what to watch ║
+# ║  while it runs and what to write down afterwards.                ║
+# ╚══════════════════════════════════════════════════════════════════╝
+#
+# ── WHY THIS FILE EXISTS AT ALL ────────────────────────────────────
+#
+# The image it replaces was assembled BY HAND, in a ceremony that was
+# explicitly dismantled and recorded as not reproducible from the
+# internet: a frozen virtualenv packaged as OCI layers. It passed the
+# same rite as any third party — blocking scan before the push,
+# signature by digest, the key never leaving the cluster — but if the
+# internal registry were lost and that virtualenv were lost, both GPU
+# engines would be unrecoverable without redoing the work from scratch.
+# That is a single point of failure with no backup and no build, and it
+# was the last thing in the platform that could not be rebuilt from
+# source. This file is what closes it: the image is BORN from a
+# Containerfile, from a base that went through the mirror, and it goes
+# through the same scan and the same signature as everything else.
+#
+# ── WHY EVERY VERSION IS PINNED, AND WHERE EACH NUMBER COMES FROM ──
+#
+# The target is a Blackwell CONSUMER card: compute capability sm_120
+# (`12.0` in the arch lists below). That is not the same architecture as
+# the datacenter Blackwell (sm_100), and a build that says "Blackwell"
+# is not necessarily a build that carries sm_120 kernels. Each pin below
+# was measured against the upstream build definition rather than taken
+# from a release note's summary.
+#
+#   torch 2.11.0 FROM THE cu128 INDEX. PyTorch's own wheel build script
+#   decides the compiled architectures by CUDA version:
+#
+#       TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0"
+#       12.6) ... (no 12.0)
+#       12.8) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};12.0"  # +Blackwell
+#
+#       measured 2026-08-29 at
+#       raw.githubusercontent.com/pytorch/pytorch/v2.11.0/.ci/manywheel/build_cuda.sh
+#
+#   So the CUDA VARIANT is the load-bearing part, not the torch version:
+#   the cu126 wheel of this very same 2.11.0 has NO sm_120 kernels and
+#   fails at the first matmul with "no kernel image is available". That
+#   is why the index is named explicitly below and why the local version
+#   (`+cu128`) is written into the pin: `pip install torch==2.11.0` off
+#   plain PyPI resolves to whatever CUDA variant is default that month.
+#
+#   vllm 0.25.1, which REQUIRES torch==2.11.0 (measured 2026-08-29 on
+#   pypi.org/pypi/vllm/0.25.1/json) — so the two pins are one decision,
+#   not two. vLLM's own release build compiles for the same list:
+#
+#       ARG torch_cuda_arch_list='7.5 8.0 8.6 8.9 9.0 10.0 11.0 12.0'
+#       measured at github.com/vllm-project/vllm/v0.25.1/docker/Dockerfile
+#
+#   and its CMakeLists accepts 12.0 as a supported arch. This line and
+#   not a newer one because the ENGINE MANIFESTS ARE WRITTEN AGAINST ITS
+#   CLI: `--attention-config` (the flag that replaced the attention
+#   backend environment variable) and `--override-generation-config`.
+#   Moving to a newer vLLM is moving those flags too, and that is a
+#   change with a measurement behind it, not a version bump.
+#
+#   python 3.12, because that is the base the platform already mirrors
+#   and because vllm 0.25.1 declares `>=3.10,<3.15`.
+#
+# ── WHAT IS DELIBERATELY NOT INSTALLED ─────────────────────────────
+#
+# NVCC. This image has a C compiler (for Triton's JIT kernels) and no
+# CUDA compiler, and that is a size decision with a consequence that has
+# to be known rather than discovered: any path that compiles CUDA at
+# runtime dies here. That is exactly what happened to the FP8 route on
+# this card — bmm_fp8 -> fp8_gemm_sm100 -> FlashInfer's sm120 CUTLASS,
+# compiled JIT — with
+#
+#     RuntimeError: Could not find nvcc and default cuda_home=
+#     '/usr/local/cuda' doesn't exist
+#
+# The engines therefore serve bf16 activations and an int4 or bf16
+# weight format, never FP8. Upstream agrees about where the edge is:
+# vLLM's CMakeLists enables its FP8 Marlin kernels for `8.9;12.0f`, and
+# the `12.0f` family target requires CUDA >= 13.0 — on a CUDA 12.8 build
+# it falls back to `12.0a;12.1a`, which is another way of saying the FP8
+# path on this card is the one that is least travelled. Adopting FP8
+# means putting nvcc in this image, which is a decision to take with a
+# measurement, not a line to add quietly.
+#
+# ── THE BASE ───────────────────────────────────────────────────────
+#
+# `__FROM_PYTHON__` is resolved against the INTERNAL registry, by
+# digest, before this file is built: the base has to be one the mirror
+# already pulled, scanned and re-signed, because everything downstream
+# of it runs in a namespace where Kyverno demands our signature. The
+# digest cannot be written here by hand — the mirror rebuilds the
+# manifest as it copies, so the public digest in images.txt is not the
+# one that pulls. `aegis ai images` resolves it (it asks the live
+# registry, the same read `aegis image from` does) and phase 87 refuses
+# to deploy while any AI image is still unresolved.
+FROM __FROM_PYTHON__
+
+# gcc-14 AND NOT `gcc`. Triton compiles its kernels JIT at the engine's
+# first start and dies with no compiler; the engine manifests set
+# CC=/usr/bin/gcc-14 explicitly because the Debian package installs the
+# versioned binary and the bare `gcc` symlink belongs to a different
+# package. Installing it here and naming it there is one decision in two
+# files, and the manifests say so at the CC line.
+#
+# --no-install-recommends, and the lists deleted in the SAME layer: a
+# separate `RUN rm` leaves the 40 MB of apt lists in the layer below,
+# where they still ship and still get scanned.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gcc-14 libgomp1 \
+ && rm -rf /var/lib/apt/lists/*
+
+# THE VIRTUALENV IS AT A FIXED PATH because the manifests name it:
+# `command: ["/opt/ai/venv/bin/python", ...]`. A venv and not a
+# --system install so that the engine's interpreter is unambiguous and
+# so that a future stage could copy the tree wholesale.
+ENV VENV=/opt/ai/venv
+RUN python -m venv "$VENV"
+ENV PATH="/opt/ai/venv/bin:${PATH}"
+
+# TORCH FIRST AND ON ITS OWN, from the cu128 index. Two reasons and both
+# are about determinism: pip would otherwise resolve torch from plain
+# PyPI while satisfying vllm's `torch==2.11.0`, and PyPI's default CUDA
+# variant is whatever upstream shipped as default that month — the one
+# thing that decides whether this image has sm_120 kernels. Installing
+# it first, by exact local version, from the named index, makes the
+# question have one answer.
+#
+# torchvision comes along because vllm asks for it and the cu128 index
+# carries it; torchaudio is resolved by the vllm install below, from
+# PyPI, because the cu128 index does not publish a 2.11.0 of it and it
+# carries nothing that depends on the card.
+RUN pip install --no-cache-dir \
+      --index-url https://download.pytorch.org/whl/cu128 \
+      torch==2.11.0+cu128 \
+      torchvision==0.26.0+cu128
+
+# vLLM, with torch ALREADY satisfied so the resolver cannot replace it.
+RUN pip install --no-cache-dir vllm==0.25.1 \
+ && python -c "import vllm, torch; print('vllm', vllm.__version__, 'torch', torch.__version__)"
+
+# uid numeric, like the rest of the house: the Deployment declares
+# runAsNonRoot + runAsUser 1000 and this is the belt as well as the
+# braces. The user has no passwd entry, which is why the manifests set
+# HOME explicitly — otherwise Triton's cache lands somewhere the
+# read-only root filesystem refuses.
+USER 1000:1000
+
+EXPOSE 8000
+
+# NO ENTRYPOINT AND NO CMD, deliberately. The two engines run the same
+# image with different arguments, and the manifests carry the whole
+# command line — the model, the memory fraction, the attention backend.
+# An entrypoint here would be a second place where those decisions live,
+# and the manifests are the place where they are already explained.

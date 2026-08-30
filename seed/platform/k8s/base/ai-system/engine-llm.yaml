@@ -1,0 +1,241 @@
+# engine-llm — vLLM on the node's GPU, the general text lane.
+#
+# THIS IS THE ENGINE ai/routes.yaml POINTS AT. Both capabilities the
+# seed declares (`chat.rapido` and `chat.largo`) name `engine: llm` and
+# `modelo: qwen3-4b`, so SERVED_NAME below is that string and not a
+# taste: the gateway asks the engine for the model the routing promised,
+# by name. If the two ever disagree the request fails at the engine with
+# a model nobody serves — check 159 crosses them so the disagreement
+# cannot be committed.
+#
+# THE MODEL, and why this precise build: an instruct model quantized to
+# int4 (AWQ W4A16, in compressed-tensors form, which vLLM loads
+# natively). The `-2507` instruct revision has no thinking mode, which
+# is what a site chat wants. int4 and not bf16 because the card is
+# shared with a second lane: ~2.6 GiB of weights instead of ~8 leaves a
+# KV cache worth having on half a consumer card.
+#
+# THE FALLBACK IS WRITTEN DOWN BECAUSE IT MIGHT BE NEEDED: if the W4A16
+# kernels bounce on a Blackwell consumer card the way FP8 did (below),
+# the way out is a smaller bf16 instruct model — change MODEL_ID and
+# DTYPE and nothing else.
+#
+# WHY NOT FP8, measured: the FP8 path died in CrashLoopBackOff with
+# `Could not find nvcc and default cuda_home='/usr/local/cuda' doesn't
+# exist`. The real route is bmm_fp8 -> fp8_gemm_sm100 -> FlashInfer's
+# sm120 CUTLASS, compiled JIT, and the engine image carries a C compiler
+# for Triton's kernels but no nvcc. On a Blackwell consumer card
+# (sm_120) that is exactly the road taken. It is the same reason
+# FlashInfer's sampler is switched off by an environment variable below;
+# the difference is that the FP8 GEMM has no switch. Adopting FP8 would
+# mean putting nvcc in the image — see ai/engine-gpu/Containerfile,
+# which says so where somebody would go to do it.
+#
+# THE VRAM BUDGET, and the one number that must move with company:
+#
+#   `gpu-memory-utilization` is a fraction of the card's TOTAL, not of
+#   what is FREE. Whatever a desktop or another process is already using
+#   is NOT subtracted — it is added on top. That is measured, and it is
+#   how a start that looked safe died with torch.OutOfMemoryError while
+#   capturing the CUDA graphs. vLLM also overshoots its own budget by
+#   ~200 MiB per engine: the reservation does not cover the CUDA context
+#   nor the graph-capture buffers.
+#
+#   With two engines at 0.38 + 0.38, roughly a quarter of the card is
+#   left for everything else. `aegis ai start` refuses to open when more
+#   than that is already taken, and it DERIVES its threshold from these
+#   two fractions rather than carrying a number of its own — the two
+#   halves of one pie, in one decision. Moving a fraction here without
+#   the command's arithmetic following it is either a preflight that
+#   blocks legitimate starts or one that waves through an OOM.
+#
+# NO `replicas` FIELD, and that is the fix. `ai-modo-controller` scales
+# these 0<->1, and git does not declare the field it does not own: with
+# `replicas: 0` written here, EVERY sync of ai-system took the engines
+# to 0 and the controller raised them again seconds later — a full vLLM
+# bounce per sync, with the ignoreDifferences rule declared on the
+# Application and no effect on the apply. The safe default survives
+# where it belongs: a Deployment with no field is born with 1 replica
+# and the controller takes it to 0 on its first loop, because "when in
+# doubt, the GPU goes off" lives in the controller.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: engine-llm-profile
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+data:
+  # The WHOLE profile lives here and not scattered through the
+  # Deployment: one place to compare against, one place to change.
+  MODEL_ID: "cpatonn/Qwen3-4B-Instruct-2507-AWQ-4bit"
+  # THE NAME ai/routes.yaml PROMISES. Not decoration — see the header.
+  SERVED_NAME: "qwen3-4b"
+  # Half the card. Paired with engine-mt's 0.38 and with the threshold
+  # `aegis ai` derives — see the header.
+  GPU_MEM_UTIL: "0.38"
+  # THE CONTEXT ai/routes.yaml PROMISES for chat.rapido and chat.largo.
+  # A routing that offers more context than the engine will accept is a
+  # 400 the caller cannot do anything about; check 159 demands that this
+  # number be at least the largest `contexto_max` routed here.
+  MAX_MODEL_LEN: "12288"
+  # SAME NUMBER as the gateway's AI_EN_VUELO. See gateway.yaml.
+  MAX_NUM_SEQS: "10"
+  # bfloat16 is the ACTIVATIONS: the weights arrive int4 from the
+  # artifact.
+  DTYPE: "bfloat16"
+  KV_CACHE_DTYPE: "fp8"
+  ATTENTION_BACKEND: "TRITON_ATTN"
+  # ANTI-LOOP BRAKE, measured: faced with a question it does not know,
+  # the quantized 4B entered a self-correction loop ("No, no. It was a
+  # painter of the period...", repeated) until it ate the token ceiling
+  # and came out cut off mid-sentence. It is the known failure of the
+  # quantized 4B, and the model card recommends a repetition penalty.
+  # It goes HERE and not in the gateway: vLLM takes its sampling
+  # defaults from the model's generation_config, and this override
+  # adjusts them for THIS lane only. The gateway still sends
+  # temperature/stop/max_tokens per task, and that wins over these
+  # defaults.
+  GEN_OVERRIDES: '{"repetition_penalty": 1.05}'
+---
+# The model weights. They are NOT downloaded from the pod (there is no
+# egress to the internet, on purpose): the volume is seeded from the
+# host with `aegis ai models`, which can also link them from a local
+# copy instead of spending hours on the network.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: models-hf
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources: {requests: {storage: 20Gi}}
+---
+# Compilation cache (Triton JIT + vLLM). On a volume so that the second
+# start is ~30 s instead of ~3 min: a measured trap.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: engine-llm-cache
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources: {requests: {storage: 10Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: engine-llm
+  namespace: ai-system
+  labels: {aegis.dev/component: ai, app: engine-llm}
+spec:
+  # Recreate, not RollingUpdate: with one card the old pod and the new
+  # one cannot coexist — the new one would sit Pending waiting for a
+  # unit the old one has not released.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: engine-llm}
+  template:
+    metadata:
+      labels: {app: engine-llm, aegis.dev/component: ai}
+    spec:
+      runtimeClassName: nvidia
+      containers:
+        - name: vllm
+          # The digest is set by the kustomization's `images:` block.
+          image: registry.registry-system.svc.cluster.local:5000/aegis-ai-vllm
+          command: ["/opt/ai/venv/bin/python", "-m", "vllm.entrypoints.openai.api_server"]
+          args:
+            - --model=$(MODEL_ID)
+            - --served-model-name=$(SERVED_NAME)
+            - --host=0.0.0.0
+            - --port=8000
+            - --dtype=$(DTYPE)
+            - --kv-cache-dtype=$(KV_CACHE_DTYPE)
+            - --max-model-len=$(MAX_MODEL_LEN)
+            - --max-num-seqs=$(MAX_NUM_SEQS)
+            - --gpu-memory-utilization=$(GPU_MEM_UTIL)
+            # In this vLLM the backend is NOT chosen by environment
+            # variable (that one disappeared) but by --attention-config.
+            - '--attention-config={"backend": "$(ATTENTION_BACKEND)"}'
+            - --override-generation-config=$(GEN_OVERRIDES)
+          envFrom:
+            - configMapRef: {name: engine-llm-profile}
+          env:
+            - {name: HF_HOME, value: /models/hf}
+            # Offline EXPLICITLY: if the model were missing from the
+            # volume, the error must be "the model is not there" and not
+            # an eternal hang against a network the NetworkPolicy closes.
+            - {name: HF_HUB_OFFLINE, value: "1"}
+            - {name: TRANSFORMERS_OFFLINE, value: "1"}
+            # Triton JIT needs a C compiler; the image's toolchain layer
+            # ships gcc-14 without a bare `gcc` symlink, so CC is
+            # explicit.
+            - {name: CC, value: /usr/bin/gcc-14}
+            # FlashInfer's sampler off: it compiles with nvcc, which is
+            # not in this image. At ten sequences the difference is
+            # irrelevant.
+            - {name: VLLM_USE_FLASHINFER_SAMPLER, value: "0"}
+            # uid 1000 with no passwd entry: HOME must be explicit so
+            # that ~/.triton and ~/.cache land on the cache volume.
+            - {name: HOME, value: /cache}
+          ports:
+            - {name: http, containerPort: 8000}
+          volumeMounts:
+            - {name: models, mountPath: /models, readOnly: true}
+            - {name: cache, mountPath: /cache}
+            - {name: shm, mountPath: /dev/shm}
+          # A cold start compiles kernels: ~3 min measured (with a warm
+          # cache ~30 s). The startupProbe gives ten minutes of grace;
+          # only afterwards does liveness watch.
+          startupProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 10
+            failureThreshold: 6
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests:
+              cpu: "2"
+              memory: 5Gi
+              nvidia.com/gpu: 1
+            limits:
+              cpu: "6"
+              memory: 10Gi
+              nvidia.com/gpu: 1
+      volumes:
+        - name: models
+          persistentVolumeClaim: {claimName: models-hf}
+        - name: cache
+          persistentVolumeClaim: {claimName: engine-llm-cache}
+        # PyTorch uses /dev/shm for shared tensors; the runtime's 64Mi
+        # default is not enough.
+        - name: shm
+          emptyDir: {medium: Memory, sizeLimit: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: engine-llm
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+spec:
+  selector: {app: engine-llm}
+  ports:
+    - {name: http, port: 8000, targetPort: 8000}

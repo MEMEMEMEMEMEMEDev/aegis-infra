@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # aegis-summary: The operator's control over the AI substrate
 # aegis-group:   operate
-# aegis-subcommands: status start stop open demo max logs engine-logs
+# aegis-subcommands: status start stop open demo max logs engine-logs images models key
 # ai — the operator's control over the AI substrate.
 #
 # ONE SINGLE SOURCE OF TRUTH: this script writes the ai-modo ConfigMap and
@@ -25,52 +25,66 @@
 
 set -euo pipefail
 
+# ── canonical preamble (V-102) ───────────────────────────────────────
+# The PRODUCT is resolved from this file, following symlinks (phase 05
+# installs /usr/local/bin/aegis as a symlink; with a bare dirname
+# AEGIS_ROOT would be /usr/local). The INSTANCE is lib/paths.sh's
+# business and never this file's.
+if [[ -z "${AEGIS_ROOT:-}" ]]; then
+    command -v readlink >/dev/null || { echo "${AEGIS_CMD:-aegis} ai: readlink is missing — I cannot tell where the product lives" >&2; exit 2; }
+    AEGIS_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+fi
+export AEGIS_ROOT
+# shellcheck source=../lib/paths.sh
+source "$AEGIS_ROOT/lib/paths.sh"
+# shellcheck source=../lib/common.sh
+source "$AEGIS_ROOT/lib/common.sh"
+# shellcheck source=../lib/secrets.sh
+source "$AEGIS_ROOT/lib/secrets.sh"
+
 NS=ai-system
 CM=ai-modo
-# The fleet (#97): they all go up and down with the mode, through the
+# The fleet: they all go up and down with the mode, through the
 # controller.
-ENGINES="engine-llm engine-charla"
-# HOW MUCH FOREIGN VRAM IS TOLERATED BEFORE STARTING THE ENGINE.
+ENGINES="engine-llm engine-mt"
+AI_DIR="$PLATFORM_DIR/k8s/base/ai-system"
+KUST="$AI_DIR/kustomization.yaml"
+# The AI Containerfiles the platform owns. A row here that names a
+# directory the seed does not ship is caught by check 158, not left to
+# fail at build time.
+AI_CONTAINERFILES="ai/engine-gpu/Containerfile"
+
+# ── HOW MUCH FOREIGN VRAM IS TOLERATED BEFORE STARTING AN ENGINE ────
 #
-# The number is NOT a matter of taste: it comes out of the profile's
-# GPU_MEM_UTIL (k8s/base/ai-system/engine-llm.yaml). They measure the two
-# halves of the same pie.
+# This number is NOT written down: it is DERIVED, and that is the whole
+# point. It used to be a constant, and the history of that constant is
+# a history of the two halves of one decision drifting apart — the
+# engines' `gpu-memory-utilization` moved five times and the threshold
+# followed it late every time. Once it did not follow at all, and the
+# preflight refused a start that fitted with 430 MiB to spare; another
+# time it followed in the wrong direction and let through an OOM.
 #
-# HISTORY, because every move cost something:
+# The arithmetic, which is the same pie seen from the other side:
 #
-#   900   inherited from the ai-server preflight on metal. It became
-#         INCONSISTENT on 2026-08-07 when GPU_MEM_UTIL dropped from 0.90 to
-#         0.87 (the startup OOM): by reserving less, the desktop could use
-#         more, but the threshold stayed at the old number and went on
-#         blocking startups that already fitted. It showed up with 916
-#         MiB in use — it cut off over SIXTEEN megs while ~430 were to
-#         spare.
-#   1100  with GPU_MEM_UTIL 0.87.
-#   1700  with 0.82 (2026-08-15): the operator's desktop grazed the
-#         ceiling at rest and turning on meant closing windows.
-#   4390  with 0.60 (2026-08-15), on moving from qwen3-4b to Hy-MT2-1.8B.
+#   free_for_everything_else = total - sum(GPU_MEM_UTIL) * total
+#   tolerated                = that, minus what vLLM overshoots its own
+#                              budget by (~200 MiB per engine: the
+#                              reservation covers neither the CUDA
+#                              context nor the graph-capture buffers),
+#                              minus a margin
 #
-# The profile's comment already said "if one day the preflight's threshold
-# moves, this number moves with it". That holds in both directions, and
-# the first time it was needed it was the other way round.
+# `gpu-memory-utilization` is a fraction of the card's TOTAL and not of
+# what is FREE — what somebody else is already using is not subtracted,
+# it is added on top. That is the measured fact this whole preflight
+# exists for.
 #
-# The two numbers are ONE single decision spread across two files, and
-# moving them separately is exactly the OOM of 2026-08-07 or a preflight
-# that lies.
-#
-# The arithmetic of today's number (#97, two engines coexisting):
-#
-#   total 12227 MiB - (0.38 + 0.38) * 12227 = 2934 free
-#   minus ~400 that the TWO vLLMs go over their budget by (~200 each)
-#   minus ~300 of margin
-#   = 2200 MiB of desktop tolerated
-#
-#   (history: 4390 with a single engine at 0.60, 2026-08-15→08-17)
-#
-# The desktop gives up cushion in exchange for the second model: Chrome
-# with video fits by a hair, and if one day it gets tight, the way out is
-# the 4090 — not going back to a single lane.
-VRAM_LIMIT_MIB=2200
+# The fractions come from the ENGINE PROFILES in the platform repo, so
+# editing a manifest moves this number in the same commit. If they
+# cannot be read, the command says so and does not invent a threshold:
+# an unmeasured preflight that waves everything through is worse than
+# no preflight, because it looks like one.
+VLLM_OVERSHOOT_MIB=200      # per engine, measured
+VRAM_MARGIN_MIB=300
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -90,7 +104,26 @@ aegis ai — control of the AI substrate
                                  (default 60 min; it closes itself)
   aegis ai max [--until HH:MM]   wide budgets without a TTL
   aegis ai logs [-f]             the gateway's logs
-  aegis ai engine-logs [-f]      the engine's logs
+  aegis ai engine-logs [<engine>] the fleet's logs (one lane, or all)
+
+  aegis ai images                what the AI images are pinned to, and
+                                 whether the internal registry serves it.
+                                 It also resolves the base of the AI
+                                 Containerfiles against that registry.
+  aegis ai images <name>:<tag>   measures the digest that tag has in the
+                                 INTERNAL registry today and writes it into
+                                 the row of k8s/base/ai-system/. Building
+                                 does not deploy: this is the second act.
+  aegis ai models [--from <dir>] brings the weights to the host cache and
+                                 seeds them into the volumes. --from links
+                                 them from a local copy instead of spending
+                                 hours on the network.
+  aegis ai key issue <org>       issues a tenant key: the public half (a
+                                 SHA-256) into the shared roster, the
+                                 cleartext into the organization's Secret.
+                                 The material never passes through argv.
+  aegis ai key list              which organizations hold a key, and under
+                                 which kid. Never the material.
 
 `start` and not `init`: `init` is already the name of the command that
 installs the whole platform, and two things with the same name doing
@@ -105,6 +138,49 @@ Options:
 The mode lives in the ai-modo ConfigMap of ai-system. This script is the
 only thing that writes it by hand; the controller applies it.
 EOF
+}
+
+vram_total_mib() {
+  command -v nvidia-smi >/dev/null 2>&1 || { echo -1; return; }
+  nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' '
+}
+
+# The sum of the engines' memory fractions, read from THE MANIFESTS.
+# Not a copy of the number: the number itself, from the file that
+# decides it.
+vram_fraction_sum() {
+  python3 - "$AI_DIR" <<'EOF'
+import glob, os, sys, yaml
+total = 0.0
+seen = 0
+for f in sorted(glob.glob(os.path.join(sys.argv[1], "engine-*.yaml"))):
+    for d in yaml.safe_load_all(open(f, encoding="utf-8")):
+        if not isinstance(d, dict) or d.get("kind") != "ConfigMap":
+            continue
+        v = (d.get("data") or {}).get("GPU_MEM_UTIL")
+        if v is None:
+            continue
+        total += float(v)
+        seen += 1
+if not seen:
+    sys.exit(1)
+print(f"{total:.4f}")
+EOF
+}
+
+# The threshold, derived. Prints -1 when it cannot be measured, and the
+# caller says so out loud instead of substituting a number.
+vram_limit_mib() {
+  local total frac
+  total=$(vram_total_mib)
+  [ "$total" = "-1" ] && { echo -1; return; }
+  frac=$(vram_fraction_sum) || { echo -1; return; }
+  local engines; engines=$(echo $ENGINES | wc -w)
+  python3 -c "
+import sys
+total, frac, n, over, margin = float('$total'), float('$frac'), int('$engines'), int('$VLLM_OVERSHOOT_MIB'), int('$VRAM_MARGIN_MIB')
+print(int(total * (1.0 - frac)) - n * over - margin)
+"
 }
 
 vram_used_mib() {
@@ -150,11 +226,23 @@ vram_preflight() {
     gray "  (no nvidia-smi: the VRAM could not be checked)"
     return 0
   fi
-  if [ "$used" -le "$VRAM_LIMIT_MIB" ]; then
-    green "  VRAM free: ${used} MiB in use (limit ${VRAM_LIMIT_MIB})"
+  local limit; limit=$(vram_limit_mib)
+  if [ "$limit" = "-1" ] || [ "${limit:-0}" -le 0 ] 2>/dev/null; then
+    # NOT a green. The instrument did not reach its subject, and saying
+    # so is the third outcome: the engines' fractions could not be read
+    # from the manifests, or there is no card to ask. Inventing a
+    # threshold here would give the operator a preflight that measures
+    # nothing while looking exactly like one that does.
+    red "  the VRAM threshold COULD NOT BE DERIVED (the engines' GPU_MEM_UTIL is not readable in $AI_DIR, or the card did not answer)"
+    echo "  It is not that the VRAM is fine: it is that nobody measured it."
+    echo "  To start anyway, deliberately:  ${AEGIS_CMD:-aegis} ai open --force"
+    return 1
+  fi
+  if [ "$used" -le "$limit" ]; then
+    green "  VRAM free: ${used} MiB in use (derived limit ${limit})"
     return 0
   fi
-  red "  DIRTY VRAM: ${used} MiB in use, above ${VRAM_LIMIT_MIB}."
+  red "  DIRTY VRAM: ${used} MiB in use, above the derived limit of ${limit}."
   echo
   echo "  Starting like this cuts the engine's KV cache permanently"
   echo "  (until the next restart) and halves the real concurrency."
@@ -238,6 +326,402 @@ cmd_status() {
   fi
 }
 
+# ══ THE IMAGES ══════════════════════════════════════════════════════
+#
+# WHY THIS LIVES HERE AND NOT IN `aegis image`. That command asks the
+# platform for a THIRD-PARTY base: it declares it in the mirror list,
+# fires the job and gives back a FROM. These are the platform's OWN AI
+# images — two built by this instance and one mirrored in from another
+# repository — and what they need is the other end of the same wire:
+# reading the digest the internal registry serves TODAY and writing it
+# into the manifest that deploys it.
+#
+# THEY ARE PINNED IN ONE PLACE, and that is not tidiness. The vLLM
+# digest is referenced by three containers (the two GPU engines and the
+# second lane's init container) and the gateway's by two (gateway and
+# controller). Bumping two of three would leave an init container
+# waiting on a server built from a different commit — a failure that
+# looks like a slow start.
+#
+# AND IT NEVER DEPLOYS BY ITSELF. Mirroring or building an image and
+# putting it into production are two decisions; this command only ever
+# takes the second, and only when a person types it.
+
+_kust_rows() {   # prints: <name> <digest>
+  python3 - "$KUST" <<'EOF'
+import sys, yaml
+k = yaml.safe_load(open(sys.argv[1], encoding="utf-8")) or {}
+for i in (k.get("images") or []):
+    print(i.get("name", "?"), i.get("digest", ""))
+EOF
+}
+
+_zeros="sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+# The placeholder -> image table is READ from `aegis app`, never copied.
+# Two tables would be two answers the day somebody adds a base, and the
+# one nobody looks at would win. Check 148 already crosses that table
+# against the mirror list, so reading it here inherits that guarantee.
+_from_image_for() {   # <__FROM_X__> -> <name>:<tag>
+  python3 - "$AEGIS_ROOT/libexec/aegis-app" "$1" <<'EOF'
+import ast, sys
+src, want = sys.argv[1], sys.argv[2]
+for node in ast.parse(open(src, encoding="utf-8").read()).body:
+    if not (isinstance(node, ast.Assign)
+            and any(getattr(t, "id", None) == "_FROM_IMAGES" for t in node.targets)):
+        continue
+    for k, v in zip(node.value.keys, node.value.values):
+        if isinstance(k, ast.Constant) and k.value == want and isinstance(v, ast.Constant):
+            print(v.value)
+            sys.exit(0)
+sys.exit(1)
+EOF
+}
+
+# Resolves every __FROM_X__ of the AI Containerfiles against the LIVE
+# registry, through `aegis image from` — which is the only party that
+# knows the internal digest (the mirror rewrites the manifest as it
+# copies, so the public digest in images.txt pulls nothing here) and
+# which refuses an image that is present but unsigned.
+cmd_images_resolve_bases() {
+  local rc=0 rel f ph ref line
+  for rel in $AI_CONTAINERFILES; do
+    f="$PLATFORM_DIR/$rel"
+    if [ ! -f "$f" ]; then
+      gray "  $rel: not in this tree (nothing to resolve)"
+      continue
+    fi
+    # Only NON-comment lines: the header of that file explains the
+    # placeholder at length, and rewriting the explanation into a digest
+    # would destroy the reason while fixing the line.
+    ph=$(grep -vE '^[[:space:]]*#' "$f" | grep -oE '__FROM_[A-Z0-9_]+__' | sort -u | head -1 || true)
+    if [ -z "$ph" ]; then
+      green "  $rel: base already resolved"
+      continue
+    fi
+    ref=$(_from_image_for "$ph") || {
+      red "  $rel: $ph is in no table — nothing in the product's placeholder table names it"
+      rc=1; continue
+    }
+    line=$("$AEGIS_ROOT/libexec/aegis-image" from "$ref") || {
+      red "  $rel: the registry does not serve $ref mirrored AND signed yet"
+      echo "     ask for it with:  ${AEGIS_CMD:-aegis} image request $ref"
+      rc=1; continue
+    }
+    [ -n "$line" ] || { red "  $rel: nothing came back for $ref"; rc=1; continue; }
+    # The whole FROM line, replacing only the placeholder occurrence
+    # that is NOT in a comment. python and not sed: the reference
+    # carries slashes and colons, and an sed delimiter chosen badly is
+    # how a manifest gets a half-written digest.
+    python3 - "$f" "$ph" "${line#FROM }" <<'EOF'
+import sys
+path, ph, ref = sys.argv[1], sys.argv[2], sys.argv[3]
+out, done = [], 0
+for l in open(path, encoding="utf-8").read().splitlines(True):
+    if ph in l and not l.lstrip().startswith("#"):
+        l = l.replace(ph, ref); done += 1
+    out.append(l)
+if done != 1:
+    sys.exit(f"{path}: {ph} has {done} non-comment occurrences (exactly 1 is required)")
+open(path, "w", encoding="utf-8").write("".join(out))
+EOF
+    green "  $rel: base resolved to the internal registry by digest"
+  done
+  return $rc
+}
+
+cmd_images_status() {
+  [ -f "$KUST" ] || { red "there is no $KUST: this instance has no AI subsystem in its tree"; exit 2; }
+  echo "AI images, as k8s/base/ai-system/kustomization.yaml pins them:"
+  echo
+  local name digest short
+  while read -r name digest; do
+    [ -n "$name" ] || continue
+    if [ "$digest" = "$_zeros" ]; then
+      red   "  $name"
+      gray  "      still on the sixty-four-zero marker: no image of this exists on this"
+      gray  "      instance yet. Phase 87 refuses to deploy while a row reads like this."
+    else
+      short="${digest#sha256:}"
+      green "  $name"
+      gray  "      @sha256:${short:0:12}…"
+    fi
+  done < <(_kust_rows)
+  echo
+  echo "Bases of the AI Containerfiles:"
+  cmd_images_resolve_bases || true
+  echo
+  gray "To pin one:  ${AEGIS_CMD:-aegis} ai images <name>:<tag>"
+  gray "The tag has to exist in the INTERNAL registry — building or mirroring is the"
+  gray "first act, and it is a different one."
+}
+
+cmd_images_pin() {   # <name>:<tag>
+  local ref="$1"
+  case "$ref" in
+    *:*) ;;
+    *) red "«$ref» is not <name>:<tag> — the tag is what gets measured"; exit 3 ;;
+  esac
+  local name="${ref%:*}" tag="${ref##*:}"
+  [ -f "$KUST" ] || { red "there is no $KUST"; exit 2; }
+  local full="$REGISTRY_HOST_INTERNAL/$name"
+  grep -q "name: $full\$" "$KUST" || {
+    red "$full is not one of the AI images pinned in $KUST"
+    echo "  the rows are:"; _kust_rows | awk '{print "    " $1}'
+    exit 3
+  }
+  # THE READ IS DEMANDED. `aegis image from` measures the internal
+  # registry and refuses an image that is there but unsigned — the two
+  # facts are different and only one of them is what Kyverno checks.
+  # A read that did not happen is NOT «not mirrored»: it is unmeasured,
+  # and it leaves with the third outcome rather than a verdict.
+  local line
+  line=$("$AEGIS_ROOT/libexec/aegis-image" from "$name:$tag")
+  local rc=$?
+  if [ $rc -eq 2 ]; then
+    red "the internal registry was never reached: $name:$tag is neither present nor missing, it is UNMEASURED"
+    echo "  nothing was written. Sort out the cause and run it again."
+    exit 2
+  fi
+  [ $rc -eq 0 ] && [ -n "$line" ] || {
+    red "$name:$tag is not in the internal registry mirrored AND signed"
+    echo "  for the images this platform builds, that means the job has not run or its"
+    echo "  scan came out red; for a mirrored one, ${AEGIS_CMD:-aegis} image request $name:$tag"
+    exit 1
+  }
+  local digest="sha256:${line##*@sha256:}"
+  case "$digest" in
+    sha256:[0-9a-f]*) ;;
+    *) red "what came back does not carry a digest: $line"; exit 1 ;;
+  esac
+  python3 - "$KUST" "$full" "$digest" <<'EOF'
+import sys, re
+path, name, digest = sys.argv[1], sys.argv[2], sys.argv[3]
+text = open(path, encoding="utf-8").read()
+lines = text.splitlines(True)
+hit = None
+for i, l in enumerate(lines):
+    if l.strip() == f"- name: {name}":
+        hit = i
+        break
+if hit is None:
+    sys.exit(f"{path}: no row `- name: {name}`")
+for j in range(hit + 1, min(hit + 4, len(lines))):
+    if lines[j].strip().startswith("digest:"):
+        indent = lines[j][: len(lines[j]) - len(lines[j].lstrip())]
+        lines[j] = f"{indent}digest: {digest}\n"
+        break
+else:
+    sys.exit(f"{path}: the row of {name} has no `digest:` line under it")
+open(path, "w", encoding="utf-8").write("".join(lines))
+EOF
+  green "$full pinned to ${digest:0:19}…"
+  gray "  the edit is in the platform repo and NOT deployed: commit, push and let ArgoCD"
+  gray "  sync it. Pinning an image and putting it into production are two decisions."
+}
+
+# ══ THE WEIGHTS ═════════════════════════════════════════════════════
+#
+# ~15 GB that live in NO repository and in NO backup, and the pods have
+# no internet egress by design (HF_HUB_OFFLINE=1), so nothing downloads
+# itself: if a model is missing the engine says «it is not there»
+# instead of hanging against a closed network. Seeding them was a
+# hand-typed step, which is another way of saying it was a step nobody
+# could verify had happened.
+#
+# --from IS THE POINT ON A SLOW LINE. A local copy —another instance's
+# cache, an external disk, the machine that already downloaded them— is
+# linked instead of fetched, and hours become seconds. Hard links and
+# not copies where the filesystem allows it: the same bytes, no second
+# disk.
+AI_MODELS_DEFAULT="${XDG_CACHE_HOME:-$HOME/.cache}/aegis/models"
+
+cmd_models() {
+  local from="" cache="${AEGIS_AI_MODELS:-$AI_MODELS_DEFAULT}"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --from) from="${2:-}"; shift 2 ;;
+      --from=*) from="${1#--from=}"; shift ;;
+      *) red "unknown argument: $1"; exit 3 ;;
+    esac
+  done
+  mkdir -p "$cache"
+
+  if [ -n "$from" ]; then
+    [ -d "$from" ] || { red "--from $from is not a directory"; exit 3; }
+    echo "Linking the weights from $from …"
+    # -l first (hard links: same bytes, no extra disk), and a plain copy
+    # as the fallback when the two paths are on different filesystems.
+    # `cp -al` fails whole on a cross-device link, so the fallback is
+    # not a nicety: without it, --from over an external disk does
+    # nothing and says it worked.
+    if cp -aln "$from/." "$cache/" 2>/dev/null; then
+      green "  linked (hard links: no extra disk)"
+    else
+      gray  "  another filesystem: copying instead of linking"
+      cp -an "$from/." "$cache/" || { red "  the copy failed"; exit 1; }
+      green "  copied"
+    fi
+  else
+    echo "The weights are NOT downloaded by this command yet."
+    echo
+    echo "  What is missing is one fetcher per model, and inventing URLs here would be"
+    echo "  worse than saying so: a wrong URL leaves a truncated file that the runtime"
+    echo "  opens as if it were complete. The models each engine expects are named in"
+    echo "  their profiles (MODEL_ID in k8s/base/ai-system/engine-*.yaml)."
+    echo
+    echo "  What DOES work today is the half that matters on a slow line:"
+    echo "    ${AEGIS_CMD:-aegis} ai models --from <directory with a local copy>"
+    echo
+    gray "  cache: $cache"
+    exit 1
+  fi
+
+  # THE VERIFICATION IS A SIZE AND NOT AN «ok». A directory that exists
+  # and holds four bytes is the exact shape of an interrupted download,
+  # and it is the shape that costs an afternoon: the engine starts,
+  # loads, and dies on a truncated tensor.
+  local n bytes
+  n=$(find "$cache" -type f | wc -l)
+  bytes=$(du -sb "$cache" 2>/dev/null | cut -f1)
+  echo
+  green "cache: $n files, $(( bytes / 1024 / 1024 )) MiB in $cache"
+  if [ "${bytes:-0}" -lt 1073741824 ]; then
+    red "  under a gibibyte: the text models alone are several. This looks INCOMPLETE."
+    exit 1
+  fi
+  gray "Seeding them into the volumes is the next step and it is not this one: the"
+  gray "volumes live in the cluster and the engines mount them read-only."
+}
+
+# ══ THE TENANT KEYS ═════════════════════════════════════════════════
+#
+# A ceremony of thirteen shell lines became a subcommand, and the
+# reason is not typing: it is that the ceremony had a step whose
+# omission fails SILENTLY. A key is not enough — the organization also
+# needs its entry in the task registry (missing it gives a loud 403)
+# and an egress rule towards the internal door (missing that gives a
+# timeout, which looks exactly like «the GPU is off»). They travel
+# together or the key is a trap.
+#
+# THE KEY IS SPLIT IN TWO, on purpose:
+#   the SHA-256 hash   -> ai-system/ai-keys, because the gateway only
+#                         ever needs to verify
+#   the cleartext      -> org-<name>/ai-gateway-key, because rotating it
+#                         is the ORGANIZATION's act and not the
+#                         platform's
+# The gateway never has the cleartext stored anywhere: it arrives in a
+# header and is compared against the hash. Losing the organization's
+# Secret means issuing a new key, never recovering the old one.
+#
+# THE MATERIAL NEVER PASSES THROUGH argv (/proc/PID/cmdline is public):
+# it is generated into tmpfs, read from a file by everything that
+# touches it, and shredded on exit.
+#
+# THE SHARED ROSTER IS EDITED ENTRY BY ENTRY AND NEVER REWRITTEN. It
+# holds every organization's hash, so a rewrite would revoke everybody
+# else — which is why no tool did this automatically before.
+
+cmd_key_list() {
+  local f="$AI_DIR/secret-ai-keys.enc.yaml"
+  [ -f "$f" ] || { red "there is no roster yet ($f) — phase 87 creates it empty"; exit 2; }
+  sops_env
+  # Only the FIELDS, never the material. A hash is not a secret you can
+  # come back from, but printing it teaches the habit of printing what
+  # comes out of a Secret, and that habit is the one that leaks the next
+  # thing.
+  sops -d "$f" | python3 -c "
+import base64, json, sys, yaml
+d = yaml.safe_load(sys.stdin)
+raw = (d.get('data') or {}).get('keys.json')
+body = json.loads(base64.b64decode(raw).decode() if raw else (d.get('stringData') or {}).get('keys.json', '{}'))
+rows = body.get('claves') or []
+if not rows:
+    print('  (no organization holds a key)')
+for r in rows:
+    print(f\"  {r.get('tenant','?'):<24} kid={r.get('kid','?')}\")
+print(f'  {len(rows)} key(s)')
+"
+}
+
+cmd_key_issue() {   # <org> [--kid <kid>]
+  local org="" kid=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --kid) kid="${2:-}"; shift 2 ;;
+      --kid=*) kid="${1#--kid=}"; shift ;;
+      -*) red "unknown flag: $1"; exit 3 ;;
+      *) [ -z "$org" ] || { red "one organization at a time"; exit 3; }; org="$1"; shift ;;
+    esac
+  done
+  [ -n "$org" ] || { red "which organization? (${AEGIS_CMD:-aegis} ai key issue <org>)"; exit 3; }
+  case "$org" in org-*) ;; *) org="org-$org" ;; esac
+  local orgdir="$PLATFORM_DIR/k8s/organizations/$org"
+  [ -d "$orgdir" ] || { red "$org has no namespace in this tree ($orgdir) — its contract has to exist first"; exit 1; }
+  local roster="$AI_DIR/secret-ai-keys.enc.yaml"
+  [ -f "$roster" ] || { red "there is no shared roster ($roster) — phase 87 creates it"; exit 2; }
+  [ -n "$kid" ] || kid="${org#org-}-1"
+
+  secrets_workdir           # tmpfs, 700, shredded on EXIT and on INT/TERM
+  # The `aegisk_<org>_` prefix is DELIBERATE: it makes a leaked key
+  # greppable by a secret scanner. Hiding the format protects nobody who
+  # already holds the key, and it does stop the leak from being found.
+  head -c 24 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n' \
+      > "$SECRETS_TMP/suffix"
+  printf 'aegisk_%s_%s' "${org#org-}" "$(cat "$SECRETS_TMP/suffix")" > "$SECRETS_TMP/clave"
+  # sha256sum reads the FILE: the material does not become an argument
+  # and does not go through a pipe that another process could be in.
+  sha256sum "$SECRETS_TMP/clave" | cut -d' ' -f1 > "$SECRETS_TMP/hash"
+
+  # ── the shared roster, entry by entry ───────────────────────────
+  sops_env
+  sops -d "$roster" > "$SECRETS_TMP/roster.yaml"
+  python3 - "$SECRETS_TMP/roster.yaml" "$SECRETS_TMP/hash" "$org" "$kid" \
+           "$SECRETS_TMP/keys.json" <<'EOF'
+import base64, json, sys
+src, hashfile, tenant, kid, out = sys.argv[1:6]
+import yaml
+d = yaml.safe_load(open(src, encoding="utf-8")) or {}
+raw = (d.get("data") or {}).get("keys.json")
+if raw is not None:
+    body = json.loads(base64.b64decode(raw).decode())
+else:
+    body = json.loads((d.get("stringData") or {}).get("keys.json", '{"claves":[]}'))
+rows = body.setdefault("claves", [])
+if any(r.get("kid") == kid for r in rows):
+    sys.exit(f"the kid {kid!r} is already in the roster: a second key with the same kid "
+             f"makes the gateway's log unable to say which one was used, which is the "
+             f"one thing kid exists for. Choose another with --kid.")
+rows.append({"tenant": tenant, "kid": kid,
+             "sha256": open(hashfile, encoding="utf-8").read().strip()})
+# EVERY OTHER ROW IS PRESERVED. Rewriting this file is revoking
+# everybody, and that is why no tool used to touch it.
+open(out, "w", encoding="utf-8").write(json.dumps(body, indent=2, sort_keys=True) + "\n")
+EOF
+  make_enc_secret ai-keys "$NS" "$roster" "keys.json=$SECRETS_TMP/keys.json"
+
+  # ── the organization's half ─────────────────────────────────────
+  make_enc_secret ai-gateway-key "$org" \
+      "$orgdir/secret-ai-gateway-key.enc.yaml" \
+      "clave=$SECRETS_TMP/clave"
+
+  green "key issued for $org (kid $kid) — the material was never printed and never in argv"
+  echo
+  echo "A KEY ON ITS OWN IS NOT ENOUGH. Two more things, and each one fails differently:"
+  echo "  1. the organization has to appear in the tenants of every task it invokes"
+  echo "     (k8s/base/ai-system/registro.yaml, regenerated by ${AEGIS_CMD:-aegis} org apply from"
+  echo "     the contract's ai.tareas). Missing it: a loud 403."
+  echo "  2. its namespace needs an egress rule towards the internal door. Missing it:"
+  echo "     a silent timeout that reads exactly like «the GPU is off»."
+  echo
+  echo "  Add secret-ai-gateway-key.enc.yaml to $org's secret-generator.yaml (an explicit"
+  echo "  list, no globs), commit and sync."
+  gray "Rotating: issue another with a different --kid and leave the old one in the roster"
+  gray "until the gateway's log stops naming it. Removing it from the roster is the"
+  gray "revocation, and it is a separate act."
+}
+
+
 main() {
   local cmd="${1:-status}"; shift || true
   local force=0 until_hhmm="" args=()
@@ -317,7 +801,49 @@ main() {
     # empty array is an error in bash, and `ai log` with no arguments is
     # the normal case.
     logs)        kubectl logs -n "$NS" deploy/ai-gateway ${args[@]+"${args[@]}"} ;;
-    engine-logs) kubectl logs -n "$NS" deploy/"$ENGINE" ${args[@]+"${args[@]}"} ;;
+    # THE FLEET IS A LIST AND THIS COMMAND USED TO THINK IT WAS ONE
+    # ENGINE: it read a `$ENGINE` that no line of this file ever set, so
+    # under `set -u` it died on its own variable name. The first
+    # argument names the lane; with none, every lane's logs come out,
+    # each under its own heading, which is what somebody diagnosing a
+    # start that did not happen actually wants.
+    engine-logs)
+      local want="${args[0]:-}" rest=()
+      [ ${#args[@]} -gt 1 ] && rest=("${args[@]:1}")
+      if [ -n "$want" ]; then
+        case " $ENGINES " in
+          *" $want "*) ;;
+          *) red "unknown engine: $want (the fleet is: $ENGINES)"; exit 1 ;;
+        esac
+        # ${rest[@]+...}: with `set -u` an empty array expansion is an
+        # error in bash, and no extra flags is the normal case.
+        kubectl logs -n "$NS" deploy/"$want" ${rest[@]+"${rest[@]}"}
+      else
+        local e
+        for e in $ENGINES; do
+          gray "── $e ──"
+          kubectl logs -n "$NS" deploy/"$e" --tail=50 2>&1 | sed 's/^/  /'
+        done
+      fi
+      ;;
+
+    images)
+      if [ ${#args[@]} -eq 0 ]; then cmd_images_status
+      else cmd_images_pin "${args[0]}"; fi
+      ;;
+    models) cmd_models ${args[@]+"${args[@]}"} ;;
+    key)
+      case "${args[0]:-}" in
+        list)  cmd_key_list ;;
+        issue)
+          # ${keyargs[@]+...}: with `set -u` expanding an empty array is
+          # an error, and `key issue` with no flags is the normal case.
+          local keyargs=(); [ ${#args[@]} -gt 1 ] && keyargs=("${args[@]:1}")
+          cmd_key_issue ${keyargs[@]+"${keyargs[@]}"} ;;
+        "")    red "which one? (issue | list)"; exit 3 ;;
+        *)     red "unknown subcommand of key: ${args[0]} (issue | list)"; exit 3 ;;
+      esac
+      ;;
 
     -h|--help|help) usage ;;
     *) red "unknown command: $cmd"; echo; usage; exit 1 ;;

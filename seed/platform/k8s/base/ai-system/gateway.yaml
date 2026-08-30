@@ -1,0 +1,238 @@
+# ai-gateway — the only door between a client and the GPU.
+#
+# Design: docs/architecture/ai-gateway.md. THE CODE IS NOT IN THIS
+# ARTIFACT: the gateway and the mode controller are two binaries built
+# from their own repository, mirrored into the internal registry and
+# pinned here by digest through the kustomization's `images:` block.
+# That is why this directory ships manifests and no source, and why the
+# digest starts life as the sixty-four-zero marker: until somebody
+# mirrors that image on this instance, no such image exists.
+#
+# THE MOST IMPORTANT THING IN THIS FILE IS WHAT IT DOES NOT HAVE: this
+# pod's ServiceAccount holds not one permission on the Kubernetes API,
+# and its token is not even mounted. It is the only thing in ai-system
+# reachable from another namespace; handing it the lever that scales
+# Deployments would be handing that lever to an eventual RCE. The one
+# that scales is the controller (controller.yaml), which listens on no
+# port at all.
+#
+# It reads the mode from a mounted volume: the kubelet refreshes mounted
+# ConfigMaps by itself, with no `get` needed.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ai-gateway
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+automountServiceAccountToken: false
+imagePullSecrets:
+  - name: regcred-internal
+---
+# THE SINGLE SOURCE OF TRUTH for the operating state.
+#
+# WITH NO `data` BLOCK, AND THAT IS THE FIX — not an omission.
+#
+# This ConfigMap used to declare `modo: cerrado` and the Application
+# protected it with ignoreDifferences + RespectIgnoreDifferences. It did
+# nothing. Measured twice, with the engine open and ZERO changes in git:
+# a sync returned the map to these values in under ten seconds and the
+# controller took the GPU down behind it. Writing the path with
+# jsonPointers or with jqPathExpressions made no difference; both were
+# tried.
+#
+# The reason is documented by ArgoCD itself: ignoreDifferences affects
+# the DIFF, not the APPLY. The app showed Synced — the rule WAS honoured
+# when comparing — and the sync overwrote the field anyway. A protection
+# visible in the panel that did not happen in the cluster: the green
+# light could not tell "the mode is protected" from "the mode is
+# overwritten on every sync".
+#
+# The only thing that stops it is git NO LONGER DECLARING the field,
+# which is ArgoCD's own recommendation for what it must not own.
+#
+# And the safe default this block was supposed to guarantee? It was
+# already implemented where it belongs. The controller validates the
+# mode it reads and treats anything it does not recognise — the absent
+# value included — as `cerrado`: "when in doubt, the GPU goes off". A
+# cluster recovered from scratch comes back with the AI off because the
+# controller decides so, not because git wrote it.
+#
+# The ConfigMap DOES have to exist (the controller reads it by name and
+# complains on every loop without it), so it is declared empty: git
+# creates the container, the operator writes the content, and nobody
+# overwrites them.
+#
+# The four keys the `aegis ai` command writes, so they are known without
+# opening a binary:
+#   modo         cerrado | abierto | demo | max
+#   vence        RFC3339 in UTC (the demo's TTL and the scheduled close).
+#                In UTC so as not to depend on tzdata, which an image
+#                built FROM scratch does not have.
+#   motivo       free text, for the human reading `aegis ai status`
+#   actualizado  RFC3339 in UTC
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-modo
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-gateway
+  namespace: ai-system
+  labels: {aegis.dev/component: ai, app: ai-gateway}
+spec:
+  # ONE replica, and it is not a limitation: it is the truth of the
+  # hardware. There is ONE card behind this. Two replicas would not buy
+  # availability, they would buy two budget counters that do not talk to
+  # each other and two conversation histories that contradict each other.
+  replicas: 1
+  # Recreate and not RollingUpdate: during a rollout there must not be
+  # two gateways splitting the counters. The gap is seconds and the site
+  # degrades to "asleep", which is the intended degradation.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: ai-gateway}
+  template:
+    metadata:
+      labels: {app: ai-gateway, aegis.dev/component: ai}
+    spec:
+      serviceAccountName: ai-gateway
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: gateway
+          # The digest is set by the kustomization's `images:` block.
+          image: registry.registry-system.svc.cluster.local:5000/ai-gateway
+          command: ["/gateway"]
+          ports:
+            - {name: publica, containerPort: 8080}
+            - {name: interna, containerPort: 8081}
+          env:
+            # TWO text lanes on one card. `llm` is the general lane
+            # ai/routes.yaml points at; `mt` is the translation
+            # specialist, which no capability routes to yet (see
+            # engine-mt.yaml). Adding a third lane is one entry here and
+            # one row in ai/routes.yaml — no new code.
+            - {name: AI_ENGINES, value: "llm,mt"}
+            - {name: AI_ENGINE_LLM, value: "http://engine-llm:8000"}
+            # THE NAME THE ROUTING PROMISES, and the same string the
+            # engine serves. Check 159 crosses the three.
+            - {name: AI_MODELO_LLM, value: "qwen3-4b"}
+            - {name: AI_ENGINE_MT, value: "http://engine-mt:8000"}
+            - {name: AI_MODELO_MT, value: "hy-mt2-1.8b"}
+            # THE IN-FLIGHT LIMIT AND THE ENGINE'S SEQUENCE LIMIT SAY
+            # THE SAME NUMBER, and that is the invariant to preserve.
+            # With the gateway at 10 and an engine at 8, two requests
+            # would wait INSIDE the engine instead of in the queue:
+            # nothing breaks, but the number stops meaning what it says
+            # and the queue stops being the only place where anyone
+            # waits. Both lanes are 10 here and MAX_NUM_SEQS is 10 in
+            # both engine profiles. Check 159 keeps them equal.
+            - {name: AI_EN_VUELO, value: "10"}
+            - {name: AI_BATCH_EN_VUELO, value: "1"}
+            - {name: AI_COLA, value: "100"}
+            - {name: AI_EN_VUELO_MT, value: "10"}
+            - {name: AI_COLA_MT, value: "100"}
+            # The CPU lane: its own engine and its OWN queue — the GPU's
+            # line and the CPU's do not mix.
+            - {name: AI_ENGINE_CPU, value: "http://engine-cpu:8600"}
+            - {name: AI_EN_VUELO_CPU, value: "4"}
+            - {name: AI_COLA_CPU, value: "16"}
+            - {name: AI_ESPERA_COLA, value: "20s"}
+            - {name: AI_TIEMPO_GEN, value: "30s"}
+            - {name: AI_TTL_SESION, value: "30m"}
+            # EMPTY IN THE SEED, and that is not an oversight. This is
+            # the browser-origin allowlist, and a freshly born instance
+            # has no browser client: the internal door is reached by
+            # backends over cluster DNS, which is not a CORS
+            # conversation. An origin written here would be one
+            # instance's site name inside the artifact.
+            - {name: AI_ORIGENES, value: ""}
+            # Browser tickets require proof of humanity. Switching this
+            # on without that proof in front means handing out
+            # capabilities to whoever asks, which is giving the quota
+            # away.
+            - {name: AI_TICKET, value: "0"}
+          volumeMounts:
+            - {name: modo, mountPath: /etc/ai-modo, readOnly: true}
+            - {name: registro, mountPath: /etc/ai-registro, readOnly: true}
+            - {name: prompts, mountPath: /etc/ai-prompts, readOnly: true}
+            - {name: ruteo, mountPath: /etc/ai-ruteo, readOnly: true}
+            - {name: claves, mountPath: /etc/ai-keys, readOnly: true}
+          # /healthz answers whenever the process is alive, EVEN with the
+          # engines off: a healthy gateway with the GPU asleep is the
+          # normal state most of the day. Tying this probe to engine
+          # health would restart the pod in a loop every time the
+          # operator closes.
+          startupProbe:
+            httpGet: {path: /healthz, port: 8081}
+            periodSeconds: 2
+            failureThreshold: 15
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8081}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8081}
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            # The process writes not one byte to disk: configuration
+            # comes in on read-only volumes and the log goes to stdout.
+            readOnlyRootFilesystem: true
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: "1", memory: 256Mi}
+      volumes:
+        - name: modo
+          configMap: {name: ai-modo}
+        - name: registro
+          configMap: {name: ai-registro}
+        - name: prompts
+          configMap: {name: ai-prompts}
+        # Capabilities, plans and the organization->plan map. GENERATED
+        # by `aegis org apply` from ai/routes.yaml + plans.yaml + the
+        # contracts.
+        - name: ruteo
+          configMap: {name: ai-ruteo}
+        - name: claves
+          secret: {secretName: ai-keys}
+---
+# The PUBLIC door. Not published by the edge — see netpol.yaml.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-gateway
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+spec:
+  selector: {app: ai-gateway}
+  ports:
+    - {name: publica, port: 8080, targetPort: 8080}
+---
+# The INTERNAL door. Only the tenant namespaces named by the
+# NetworkPolicy reach it, and it demands an API key.
+#
+# They are two Services on two distinct PORTS, not two routes of the
+# same one: that way the separation is imposed by the kernel and not by
+# an `if` in the code. Without that, a compromised tenant pod could send
+# a forged client-IP header and pass itself off as public traffic.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-gateway-interna
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+spec:
+  selector: {app: ai-gateway}
+  ports:
+    - {name: interna, port: 8081, targetPort: 8081}
