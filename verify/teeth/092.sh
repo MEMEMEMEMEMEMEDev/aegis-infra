@@ -97,3 +97,20 @@ assert t.count(old) == 1
 open(p, "w").write(t.replace(old, "cron('H 5 * * *')", 1))
 PY
 }
+
+# The FOURTH producer class, added on 2026-08-29: a systemd timer on the
+# HOST. Take away the line that pipes, and the three backup alerts are
+# reading series nobody publishes — which is what this check exists to
+# say, and what it did say when the rules were written before the push.
+red_5() { sed -i '/api\/v1\/import\/prometheus/d' "$AEGIS_ROOT/share/systemd/aegis-backup.service"; }
+
+# and the cadence taken away: a producer with no readable period leaves
+# no minimum window to demand of whoever reads it, and a rule with a
+# window shorter than the push interval returns empty, not false.
+red_6() { sed -i '/^OnUnitActiveSec=/d' "$AEGIS_ROOT/share/systemd/aegis-backup.timer"; }
+
+# control: a comment in the unit is not a command. This is the mistake
+# the check itself made on the day it learned this class — it read the
+# unit's prose and believed the timer published another command's
+# metrics — so it is nailed down here.
+control_2() { printf '\n# NOTE: read the same way `aegis check` reads it.\n' >> "$AEGIS_ROOT/share/systemd/aegis-backup.service"; }

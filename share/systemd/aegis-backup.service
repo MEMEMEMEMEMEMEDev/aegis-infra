@@ -35,6 +35,25 @@ EnvironmentFile=%h/.config/aegis/backup.env
 # start, which is the good way to find out.
 ExecStart=/usr/local/bin/aegis data backup
 
+# The measurement, right after the capture, and it is what makes an
+# alert on the off-site copy possible at all: `remote status` writes
+# the ages to stdout and nobody was reading them, so the series only
+# existed while an operator ran the command by hand. A dashboard fed
+# by a metric nobody publishes is a dashboard that stays green.
+#
+# `-` because it MUST NOT fail the unit: the capture already happened
+# and is already off-site. Losing the measurement of a backup is not
+# the same as losing the backup, and treating them alike would turn
+# every network hiccup into a failed backup in the journal.
+#
+# The address is ASKED FOR, not written down. This unit runs on the
+# HOST, and the cluster's DNS names do not resolve there — a
+# `vmsingle.observability.svc.cluster.local` here would have failed
+# every single time, silently, behind the `-` that keeps the unit
+# green. The node does route to a ClusterIP, so the IP is read from
+# the Service the same way `aegis check` reads it.
+ExecStartPost=-/bin/sh -c 'ip=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.clusterIP}") && pt=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.ports[0].port}") && /usr/local/bin/aegis data remote status 2>/dev/null | curl -sS --max-time 20 --data-binary @- "http://$ip:$pt/api/v1/import/prometheus"'
+
 # The capture is not urgent and it is not alone on this machine: it
 # shares the disk with k3s and the CPU with every tenant. Being polite
 # about it is the difference between a backup that runs unnoticed and

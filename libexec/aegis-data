@@ -2182,6 +2182,16 @@ def remote_status():
         else:
             stale.append(org)
     lines.append(f"aegis_backup_remote_measured_timestamp_seconds {now}")
+    # The clock, exported beside the ages it has to be read against.
+    # Without it an alert on staleness has to hard-code a threshold,
+    # and the day somebody sets the cadence to 6h the alert keeps
+    # judging against a number nobody agreed to. It is read from the
+    # machine, never assumed: `cadence_current` looks at the drop-in
+    # and falls back to what the unit ships.
+    cad_text, _cad_src = cadence_current()
+    cad_s = parse_duration(cad_text)
+    if cad_s:
+        lines.append(f"aegis_backup_remote_cadence_seconds {cad_s}")
     for org in sorted(bundles):
         epochs = [e for e in (remote_epoch(o["modificado"]) for o in bundles[org]) if e]
         age = (now - max(epochs)) / 3600.0 if epochs else None

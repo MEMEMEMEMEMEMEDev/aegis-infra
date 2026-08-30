@@ -43,7 +43,7 @@ check() {
 #      lock and with RollingUpdate the rollout enters CrashLoop forever.
 D92=""
 python3 - "$P" "$AEGIS_ROOT/lib/aegis/org.py" <<'PY' || D92="$D92 (see the detail above);"
-import json, re, sys, pathlib, yaml
+import json, os, re, sys, pathlib, yaml
 
 P = pathlib.Path(sys.argv[1])
 OBS = P / "k8s/base/observability"
@@ -197,6 +197,84 @@ for jf in sorted(P.glob("*/Jenkinsfile")):
         jenkinsfile_producer(jf, rel, "every build", BUILD_FLOOR)
     else:
         jenkinsfile_producer(jf, rel, f"cron every {per}s ({sched!r} in the job-dsl)", 2 * per)
+
+# The FOURTH class, since 2026-08-29: a producer that does not live in
+# the cluster at all. The backups run from a systemd timer ON THE HOST,
+# and after every capture the unit pipes `aegis data remote status`
+# into the same import endpoint. It was found the way these things are
+# supposed to be found — the rules for the off-site copy were written,
+# and this check said nobody in the tree produced what they read.
+#
+# The metric names are not in the unit: the unit runs an `aegis <verb>`
+# and the names live in that command, so the chain is followed instead
+# of being restated here. The cadence is the timer's own, and the
+# minimum window is taken against the SHIPPED value even though the
+# operator can lower it: the shipped one is also the CEILING the
+# command allows, so it is the slowest this producer can legitimately
+# be, and a window sized for anything faster would go empty on a
+# correctly configured instance.
+SYSTEMD = pathlib.Path(os.environ["AEGIS_ROOT"]) / "share" / "systemd"
+# Not JF_METRIC: these commands are python, and a series is emitted
+# from an f-string, so the name is followed by `{{` (a literal brace),
+# by the quote that closes the fragment, or by a space and a `{`
+# placeholder. JF_METRIC recognises none of those three, and the first
+# version of this block used it — it found nothing and reported that
+# nobody produced what the rules read.
+PY_METRIC = re.compile(r"\b(aegis_[a-z0-9_]+)(?=\{|['\"]|\s+[-+0-9$%{\"'(])")
+for svc in sorted(SYSTEMD.glob("*.service")):
+    txt = svc.read_text()
+    if "/api/v1/import/prometheus" not in txt:
+        continue
+    timer = svc.with_suffix(".timer")
+    m = re.search(r"^OnUnitActiveSec=(\d+)\s*(s|m|h)\s*$", timer.read_text(), re.M) \
+        if timer.is_file() else None
+    if not m:
+        bad.append(f"{svc.name} pushes metrics and its timer declares no readable "
+                   "OnUnitActiveSec: with no period there is no minimum window to "
+                   "demand of whoever reads what it publishes")
+        continue
+    per = int(m.group(1)) * {"s": 1, "m": 60, "h": 3600}[m.group(2)]
+    # Only the ExecStart* lines, and the whole verb chain. Reading the
+    # unit's PROSE cost one iteration of this very check: a comment
+    # that mentioned `aegis check` made it believe the timer published
+    # that command's metrics too.
+    for line in txt.splitlines():
+        # The line that PIPES is the producer, not every line that runs
+        # something. `ExecStart=aegis data backup` makes the bundle and
+        # publishes nothing; attributing the command's whole catalogue
+        # of series to it said four metrics were published every 24h
+        # that in truth appear when an operator asks for them by hand.
+        if not line.startswith("ExecStart") or "/api/v1/import/prometheus" not in line:
+            continue
+        for chain in re.findall(r"\baegis\s+((?:[a-z][a-z-]*\s+)*[a-z][a-z-]*)", line):
+            parts = chain.split()
+            cmd = pathlib.Path(os.environ["AEGIS_ROOT"]) / "libexec" / f"aegis-{parts[0]}"
+            if not cmd.is_file():
+                continue
+            src = cmd.read_text()
+            # The metrics of the VERB, not of the whole command. A file
+            # like libexec/aegis-data emits series under several verbs
+            # and this unit runs two of them: attributing the rest to
+            # this timer would claim a metric is published every 24h
+            # when in truth it appears when an operator asks for it by
+            # hand. The verb chain names the function by the house's
+            # own convention (`remote status` -> `remote_status`); when
+            # nothing matches, the whole file is used and SAID so,
+            # because a silent fallback would quietly restore the
+            # over-attribution this comment exists to prevent.
+            body, where = None, None
+            for name in ("_".join(parts[1:]), parts[-1]):
+                m = re.search(r"^def %s\(.*?(?=^def |\Z)" % re.escape(name),
+                              src, re.S | re.M) if name else None
+                if m:
+                    body, where = m.group(0), f"{name}()"
+                    break
+            if body is None:
+                body, where = src, "the whole command (no function matched the verb)"
+            for met in set(PY_METRIC.findall(body)):
+                producers.setdefault(met, (f"share/systemd/{svc.name} -> "
+                                           f"libexec/aegis-{parts[0]} {where}",
+                                           f"timer every {per}s", 2 * per))
 
 # ── 3. the rules ────────────────────────────────────────────────────
 cm = yaml.safe_load((OBS / "rules/vmalert-rules.yaml").read_text())

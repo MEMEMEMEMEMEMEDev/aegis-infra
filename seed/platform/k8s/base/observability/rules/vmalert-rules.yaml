@@ -370,3 +370,60 @@ data:
             annotations:
               summary: "image-watch did not leave its daily heartbeat"
               description: "The daily job did not push in the last two days: the cron is gone from job-dsl, the job is broken, or vmsingle rejected the POST. Without it ImageWithFixableVulns, UpstreamFixAvailable and ImageWatchCouldNotEvaluate are mute, not green — and what is running has not been re-scanned since the last heartbeat. Phase 85 fires it once at birth: silent means stopped, not «not yet»."
+  backups.yaml: |
+    groups:
+      # ── the off-site copy ─────────────────────────────────────────
+      # These read what the backup timer publishes right after every
+      # capture. The three of them are one instrument split in three
+      # because the three failures are different and want different
+      # answers: the copy got old, the MEASUREMENT stopped, and there
+      # is no copy at all. A single rule for all three would send the
+      # operator looking for a backup when the problem is a network,
+      # or the other way round.
+      - name: backups
+        rules:
+          # Every read is wrapped in last_over_time[2d], and that is
+          # not style: this producer publishes ONCE PER CADENCE, up to
+          # 24h apart, and an instant query's default window is far
+          # shorter. Written bare, these three alerts fall between two
+          # pushes and return empty — and empty does not fire. The
+          # first version of this group was written bare, and check 092
+          # said so before it ever reached an instance.
+          #
+          # Staleness measured against the CLOCK THAT WAS SET, not
+          # against a number written here. `remote status` exports the
+          # cadence it read from the machine, so an operator who moves
+          # the timer to 6h moves this threshold with it. Twice the
+          # cadence, because exactly one missed run is a hiccup and two
+          # is a pattern.
+          - alert: BackupStale
+            expr: (time() - last_over_time(aegis_backup_remote_timestamp_seconds[2d])) > on() group_left() (2 * last_over_time(aegis_backup_remote_cadence_seconds[2d]))
+            for: 1h
+            labels: {severity: critical}
+            annotations:
+              summary: "org-{{ $labels.org }}: the newest off-site copy is older than two runs of the clock"
+              description: "The timer either did not run or could not reach the destination for at least two cadences. Read `journalctl --user -u aegis-backup` on the host, then `aegis data remote list`. The data is NOT lost — but the copy that was meant to survive this machine is as old as this alert says."
+          # A gauge nobody writes any more keeps its last value for
+          # ever, so the ages above would stay young while nothing was
+          # being measured. This is the rule that stops that green from
+          # being a lie, and it is why the timer publishes a measured
+          # timestamp separate from the copies' own.
+          - alert: BackupMeasurementStopped
+            expr: absent(last_over_time(aegis_backup_remote_measured_timestamp_seconds[7d])) or absent(last_over_time(aegis_backup_remote_timestamp_seconds[7d])) or absent(last_over_time(aegis_backup_remote_cadence_seconds[7d])) or (time() - last_over_time(aegis_backup_remote_measured_timestamp_seconds[2d])) > 172800
+            for: 1h
+            labels: {severity: warning}
+            annotations:
+              summary: "nobody has measured the off-site copy in two days"
+              description: "NOT the same as a stale backup: the measurement itself stopped, so BackupStale is mute rather than green. Either the timer is not running (`systemctl --user status aegis-backup.timer`), or its ExecStartPost cannot reach vmsingle. Until this clears, the age of every copy on the dashboard is the last one anybody saw, not the one there is."
+          # The destination answered and there was NOTHING in it. It is
+          # separated from staleness because an empty destination has
+          # no age to be old: with only the rule above, an instance that
+          # never managed to push a single bundle would show no series
+          # and no alert at all.
+          - alert: BackupNeverArrived
+            expr: sum(last_over_time(aegis_backup_remote_bundles[7d])) == 0 and on() (last_over_time(aegis_backup_remote_measured_timestamp_seconds[2d]) > 0)
+            for: 1h
+            labels: {severity: critical}
+            annotations:
+              summary: "the off-site destination is reachable and EMPTY"
+              description: "The measurement ran, the destination answered, and there is not one bundle in it. This is an instance whose data lives in exactly one place. Run `aegis data backup` by hand and read what it says: the usual causes are a credential that opens nothing (`aegis data remote adopt`) and a bucket that was created under another name than the one derived."

@@ -1130,10 +1130,54 @@ PYEOF
             || notice "$(basename "$d")/ has backups and no contract declares it — a decommissioned organization?"
     done
 
-    # A bundle that never leaves this machine does not survive losing
-    # it, which is exactly the scenario it is made for.
-    [[ -z "${AEGIS_BACKUP_SINK:-}" ]] \
-        && notice "no AEGIS_BACKUP_SINK: the bundles live on the SAME machine that is meant to be survived"
+    # (e) THE COPY THAT IS NOT IN THIS HOUSE. Everything above measures
+    #     a disk that burns with the machine, and until 2026-08-29 the
+    #     only thing said about the other half was a notice on an
+    #     environment variable — a check on whether a MECHANISM was
+    #     configured, which is the same mistake §8 opens by describing:
+    #     that `aegis state backup` existed and had never been run.
+    #
+    #     So it is asked, not assumed. `remote status` reaches the
+    #     destination and reports ages; its rc 2 is a destination that
+    #     could NOT be reached, which is not a destination with no
+    #     backup — reporting the two alike sends the operator looking
+    #     for a bundle that is probably there, behind a network that
+    #     is down.
+    #
+    #     And the threshold is the CADENCE THAT WAS SET, exported by
+    #     the same command, not the 48h this section uses for the local
+    #     disk: an instance whose clock says 6h is late long before one
+    #     whose clock says 24h.
+    remote_out="$(aegis_exec data remote status 2>/dev/null)"; rc=$?
+    if (( rc == 2 )); then
+        notice "COULD NOT EVALUATE the off-site copy: the destination did not answer, or the command is not there. It is NOT that there is none — \`${AEGIS_CMD:-aegis} data remote list\` says which of the two"
+    elif (( rc != 0 )); then
+        bad "the off-site destination has no credential in the store: every bundle above lives ONLY on this machine (\`${AEGIS_CMD:-aegis} data remote adopt\`)"
+    else
+        while IFS= read -r l; do
+            case "$l" in
+                B*) bad "${l#B}" ;;
+                *)  ok  "${l#O}" ;;
+            esac
+        done < <(REMOTE_OUT="$remote_out" python3 - <<'PYCHK'
+import os, re, time
+txt = os.environ["REMOTE_OUT"]
+now = time.time()
+m = re.search(r"^aegis_backup_remote_cadence_seconds (\d+)", txt, re.M)
+cad = int(m.group(1)) if m else 86400
+ages = re.findall(r'^aegis_backup_remote_timestamp_seconds\{org="([^"]*)"\} (\d+)', txt, re.M)
+if not ages:
+    print("Bthe destination answered and carries NOT ONE copy: the data of this "
+          "instance lives in exactly one place")
+for org, ts in sorted(ages):
+    h = (now - int(ts)) / 3600.0
+    if (now - int(ts)) > 2 * cad:
+        print("Borg-%s off-site: %.1fh old, past two runs of a %.0fh clock" % (org, h, cad / 3600.0))
+    else:
+        print("Oorg-%s off-site: %.1fh (clock %.0fh)" % (org, h, cad / 3600.0))
+PYCHK
+        )
+    fi
 fi
 
 # ── 9. observability watches itself ───────────────────────────────
