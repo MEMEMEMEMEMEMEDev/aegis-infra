@@ -4,7 +4,25 @@
 # the guard off the stage and leave it as it was on 2026-08-24, when
 # `aegis org apply` died with FileNotFoundError after having written
 # six manifests.
+#
+# RE-AIMED on 2026-08-29. Until that day the absence was free: the seed
+# shipped no AI subsystem, so taking the guard off a stage was enough
+# to make it write blind. The subsystem came INTO the seed, the folder
+# started existing, and a stage with no guard stopped being a defect —
+# these two reds went on applying and the check went on being right,
+# which reads exactly like a tooth that bites and is not. The full run
+# said «1/3 bite» in both profiles.
+#
+# So the absence is now MADE, and that is truer to what the check
+# measures: it asks whether the directory exists in the SEED, and the
+# regression is a stage that writes into one that does not. The guard
+# itself is not vestigial — it reads the INSTANCE's tree, where the
+# folder can still be missing, and its second outcome (a contract
+# promising `ai:` where there is no AI) is the reason it exists.
+_no_ai_subsystem_in_seed() { rm -rf "$AEGIS_ROOT/seed/platform/k8s/base/ai-system"; }
+
 red_1() {
+    _no_ai_subsystem_in_seed
     python3 - "$AEGIS_ROOT/lib/aegis/org.py" <<'PY'
 import sys
 p = sys.argv[1]
@@ -20,6 +38,7 @@ PY
 
 # the other stage, because there are two and the check has to see both
 red_2() {
+    _no_ai_subsystem_in_seed
     python3 - "$AEGIS_ROOT/lib/aegis/org.py" <<'PY'
 import sys
 p = sys.argv[1]
