@@ -114,3 +114,92 @@ control_4() {
     printf '\nprintf "%%s\\n" "$prefix" \\\\  # a literal backslash argument, not a continuation\n' \
         >> "$AEGIS_ROOT/lib/common.sh"
 }
+
+# ── the shell that lives inside a YAML block scalar ──────────────────
+# The half the check was blind to until 2026-08-29: `ansible.builtin.shell`
+# with `args: {executable: /bin/bash}`, which already carries two live
+# continuations. The marker goes on the pipe of the k3s installer — the
+# exact spelling of the founding regression, in the exact place a patch
+# would put it. Measured with pyyaml before writing this: the literal
+# block scalar hands `| \` and the newline to bash byte for byte, so
+# what dies here is a real install, not a lexical curiosity.
+red_6() {
+    python3 - "$AEGIS_ROOT/seed/platform/ansible/playbooks/install-k3s.yml" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+anchor = "        curl -sfL https://get.k3s.io | \\\n"
+assert t.count(anchor) == 1
+open(p, "w").write(t.replace(anchor, "        curl -sfL https://get.k3s.io | \\  # gitleaks:allow\n", 1))
+PY
+}
+
+# The other spelling of the same half, and the other way in: not a
+# module that NAMES a shell but a container that declares one —
+# `command: ["/bin/sh", "-c"]` with the program in `args:`. Trailing
+# blanks and no comment at all, on the `cat` that builds the trust
+# bundle: the probe would come up with half a bundle and blame the site.
+# If the `/bin/sh -c` recogniser is ever keyed to the module names
+# alone, this red is what says so.
+red_7() {
+    python3 - "$AEGIS_ROOT/seed/platform/k8s/base/observability/blackbox.yaml" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+anchor = "              cat /etc/ssl/certs/ca-certificates.crt /etc/blackbox/ca/ca.crt \\\n"
+assert t.count(anchor) == 1
+open(p, "w").write(t.replace(anchor, anchor.rstrip("\n") + "   \n", 1))
+PY
+}
+
+# The comfortable way to switch the YAML half off, and the twin of
+# red_5. Nothing in the clean tree is red, so a recogniser that stops
+# recognising block scalars would leave the check GREEN and no red could
+# ever catch it — only the guard can. It fires on the count of YAML
+# files, which is the one number that cannot be zero in a GitOps product
+# and does not depend on any playbook still having a shell task in it.
+red_8() {
+    python3 - "$AEGIS_ROOT/verify/checks/152-no-continuation-is-cancelled-by-what-follows-it.sh" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+anchor = '    elif f.suffix in (".yml", ".yaml"):\n'
+assert t.count(anchor) == 1
+open(p, "w").write(t.replace(anchor, '    elif False:\n', 1))
+PY
+}
+
+# ── the false positive that cost the first review ───────────────────
+# A quoted string of ONE line carrying the grapheme. bash loses nothing
+# here — measured: the whole string prints, hash and backslash included,
+# and the next line runs — but the lexer that did not track quotes
+# painted it red, and the header explained the mistake with a structural
+# claim that was simply false. Every note about this bug written inside
+# an `echo`, a `msg` or the text of a `fail` has this shape, so a check
+# that bites it bites its own documentation.
+control_5() {
+    printf '\nmsg "the patch wrote: curl -sS \\  # gitleaks:allow — and bash read the backslash as a space"\n' \
+        >> "$AEGIS_ROOT/lib/common.sh"
+}
+
+# The legitimate continuation INSIDE a block scalar. The YAML half must
+# arrive with the same rule as the scripts and not with a blunter one: a
+# playbook whose every continued line turned red would be reverted the
+# same day, and the half would be lost with it.
+control_6() {
+    python3 - "$AEGIS_ROOT/seed/platform/ansible/playbooks/registry-host-trust.yml" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+anchor = "        set -o pipefail\n"
+assert t.count(anchor) >= 1
+open(p, "w").write(t.replace(anchor, "        set -o pipefail\n        kubectl version --client \\\n          --output=json >/dev/null\n", 1))
+PY
+}
+
+# The trailing-blank twin of control_5: a backslash and three blanks
+# ending a line INSIDE a double-quoted string that closes on the line
+# below. Measured in bash — the backslash, the blanks and the newline
+# all come out in the string and the next line runs — so this must stay
+# green. Without it, the correction of the comment half could be undone
+# on the trailing-blank half and no tooth would notice.
+control_7() {
+    printf '\nmsg "the age key is IRREPLACEABLE \\   \nand nothing below this line is lost"\n' \
+        >> "$AEGIS_ROOT/lib/common.sh"
+}
