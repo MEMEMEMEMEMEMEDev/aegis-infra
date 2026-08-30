@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # aegis-summary: Captures and restores the tenants' DATA
 # aegis-group:   backup
-# aegis-subcommands: backup list restore size
+# aegis-subcommands: backup list restore size remote
 """aegis-data — captures and restores the tenants' DATA.
 
 It is the other half of `aegis state backup`. That one backs up the
@@ -128,10 +128,13 @@ whoever calls it.
 import argparse
 import base64
 import datetime
+import getpass
 import hashlib
 import hmac
 import json
 import os
+import re
+import secrets as onetime
 import shutil
 import socket
 import subprocess
@@ -352,7 +355,25 @@ def _sign(key, msg):
     return hmac.new(key, msg.encode(), hashlib.sha256).digest()
 
 
-def s3(method, host, path, query, ak, sk, region="garage", body=b""):
+def s3(method, host, path, query, ak, sk, region="garage", body=b"",
+       scheme="http", timeout=30):
+    """One SigV4 signer for the two S3 that this platform speaks.
+
+    Garage lives inside the cluster and is reached over plaintext HTTP
+    through a port-forward that never leaves the node; R2 lives on the
+    internet and is reached over TLS. That is the WHOLE difference, and
+    it is two parameters — the scheme and how long a body may take to
+    travel — because the signature is the same protocol on both sides.
+    Writing a second signer for the far one would mean two places where
+    a canonical request can be got subtly wrong, and the symptom of
+    getting it wrong is a 403 that says nothing about which of the two
+    is at fault.
+
+    `region` is not decoration either: it goes INTO the credential
+    scope of the signature. Garage was configured with `garage` and R2
+    demands `auto` — the same key signing with the wrong region gets a
+    SignatureDoesNotMatch, which reads exactly like a wrong password.
+    """
     t = datetime.datetime.now(datetime.timezone.utc)
     amz = t.strftime("%Y%m%dT%H%M%SZ")
     day = t.strftime("%Y%m%d")
@@ -373,7 +394,7 @@ def s3(method, host, path, query, ak, sk, region="garage", body=b""):
                           f"Signature={signature}"),
         "x-amz-content-sha256": hpay, "x-amz-date": amz, "Host": host,
     }
-    url = f"http://{host}{urllib.parse.quote(path)}" + (f"?{qs}" if qs else "")
+    url = f"{scheme}://{host}{urllib.parse.quote(path)}" + (f"?{qs}" if qs else "")
     req = urllib.request.Request(url, data=body or None, headers=headers, method=method)
     # The response's headers travel AS THEY COME and are never flattened
     # into a plain dict. HTTP header names are case-insensitive; the
@@ -388,7 +409,7 @@ def s3(method, host, path, query, ak, sk, region="garage", body=b""):
     # failure. Same door as libexec/aegis-check, which reads `.headers`
     # off the response for the same reason.
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, r.read(), r.headers
     except urllib.error.HTTPError as e:
         return e.code, e.read(), e.headers
@@ -410,8 +431,8 @@ def s3_credential(ns):
     return ak.decode().strip(), sk.decode().strip()
 
 
-def bucket_listing(host, bucket, ak, sk):
-    """Every object in a bucket: its key and its size, paging included.
+def bucket_listing(host, bucket, ak, sk, scheme="http", region="garage"):
+    """Every object in a bucket: its key, its size and its date, paging included.
 
     ONE lister for the three that need it —capture, restore and the
     measurement—, because the paging of ListObjectsV2 is exactly the kind
@@ -428,7 +449,8 @@ def bucket_listing(host, bucket, ak, sk):
         q = {"list-type": "2"}
         if token:
             q["continuation-token"] = token
-        st, body, _ = s3("GET", host, f"/{bucket}", q, ak, sk)
+        st, body, _ = s3("GET", host, f"/{bucket}", q, ak, sk,
+                         region=region, scheme=scheme)
         if st != 200:
             die(f"listing {bucket} gave HTTP {st}: {body[:200]!r}")
         root = ET.fromstring(body)
@@ -439,8 +461,17 @@ def bucket_listing(host, bucket, ak, sk):
 
         for c in (root.findall("s3:Contents", nsx) if nsx else root.findall("Contents")):
             size = h(c, "Size")
+            # LastModified travels because the off-site destination is
+            # judged by AGE and by nothing else: «is there a copy?» is
+            # answered by any listing, «is the copy from before or after
+            # the disaster?» only by its date. It comes out of the
+            # listing, which already brings it, and not out of a HEAD per
+            # object — that would be one request per bundle to learn what
+            # one request per thousand already said.
+            when = h(c, "LastModified")
             objects.append({"clave": h(c, "Key").text,
-                            "bytes": int(size.text) if size is not None else -1})
+                            "bytes": int(size.text) if size is not None else -1,
+                            "modificado": when.text if when is not None else None})
         tr = h(root, "IsTruncated")
         go_on = tr is not None and tr.text == "true"
         nt = h(root, "NextContinuationToken")
@@ -639,7 +670,355 @@ def bundle_age(p):
     return (time.time() - os.path.getmtime(p)) / 3600.0
 
 
-def capture(root):
+# ═══════════════════════════════════════════════════════════════════
+#  THE OFF-SITE DESTINATION — the bundle leaves the machine
+# ═══════════════════════════════════════════════════════════════════
+#
+# Everything above this line produces a bundle and leaves it on a disk
+# of the same house. The command has been saying so out loud at the end
+# of every run —«the bundle stays on the SAME machine you want to
+# survive»— and saying it is not fixing it: measured on 2026-08-29, the
+# newest bundle of the live instance was three days old and had been
+# made by hand.
+#
+# WHAT TRAVELS. The `.age` file AS IT IS, with a small sidecar. Never
+# plaintext, and the guard for that is not a habit: `remote_push`
+# refuses anything whose first bytes are not age's header, so the day
+# somebody wires this to a `.tgz` the upload does not happen.
+#
+# WHAT THE SIDECAR CARRIES, and above all what it does NOT. It carries
+# the sha256 and the size of the CIPHERTEXT, the organization and the
+# capture stamp: exactly enough for the restore to know, before
+# decrypting, that what came down is what went up. It carries nothing
+# from INSIDE the bundle — the internal manifest knows table names and
+# row counts, and that is the tenants' metadata. Uploading it beside the
+# ciphertext would put in the clear, next to the safe, the list of what
+# is in the safe.
+#
+# WHY R2 AND NOT A SECOND DISK. A second disk in the same house burns
+# with the house. R2 is the operator's decision (its free tier does not
+# charge for DOWNLOADING, and the download is the whole of a recovery),
+# it speaks the same S3 the platform already signs for, and it lives in
+# the account that already holds the zone and the tunnel — with the
+# consequence §6 of the protocol states and this code cannot fix: if
+# that account falls, the three fall together. Tolerable because the
+# bundle is ciphertext; not invisible, because it has to be known.
+REMOTE_ID_NAME = "r2_access_key_id"
+REMOTE_KEY_NAME = "r2_secret_access_key"
+# R2 ignores the region and the SIGNATURE does not: it goes into the
+# credential scope, and `auto` is the value R2 documents. Signing with
+# Garage's `garage` here gives SignatureDoesNotMatch, which reads
+# exactly like a wrong key.
+REMOTE_REGION = "auto"
+# age's binary header. `age -o file` (no --armor, which is what capture
+# does) always starts the file with this line.
+AGE_MAGIC = b"age-encryption.org/v1"
+
+
+# ── the encrypted store, from this side ─────────────────────────────
+def store_path(name):
+    return paths.secrets_dir() / f"{name}.enc"
+
+
+def store_read(name):
+    """One entry of the encrypted store, in bytes. None if it is NOT there.
+
+    The three states of lib/secrets.sh's `restore_secret` are kept, and
+    the third is the one that matters: an entry that EXISTS and does not
+    decrypt is not the same as an absent one. Collapsing them is how a
+    caller ends up regenerating material that is already synchronised
+    with a third party — the bug that made that function grow an exit
+    code of its own. Here the consequence would be adopting a second R2
+    credential while the first one is still the one written into the
+    bucket's token.
+    """
+    p = store_path(name)
+    if not p.is_file():
+        return None
+    r = subprocess.run(["sops", "--decrypt", "--input-type", "binary",
+                        "--output-type", "binary", str(p)], capture_output=True)
+    if r.returncode != 0 or not r.stdout:
+        die(f"{p.name} EXISTS in the store and does not decrypt. It is not "
+            f"treated as absent, and nothing is regenerated: check that "
+            f"SOPS_AGE_KEY_FILE points at this instance's age key.\n"
+            f"      sops: {(r.stderr or b'').decode(errors='replace')[:200]}")
+    return r.stdout
+
+
+def age_recipient():
+    """The public half of the instance's age pair.
+
+    Same order as lib/secrets.sh: the exported variable, the file the
+    init leaves in the instance, and only then derived from the private
+    key. A store entry encrypted to the WRONG recipient is unreadable by
+    the very machine that wrote it, and it does not say so until the day
+    it is read back.
+    """
+    pub = (os.environ.get("AGE_PUBLIC") or "").strip()
+    if pub:
+        return pub
+    marked = paths.aegis_home() / ".age-public"
+    if marked.is_file() and marked.read_text().strip():
+        return marked.read_text().strip()
+    key = os.environ.get("SOPS_AGE_KEY_FILE",
+                         os.path.expanduser("~/.config/sops/age/aegis.key"))
+    if os.path.exists(key):
+        r = subprocess.run(["age-keygen", "-y", key], capture_output=True, text=True)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    die("no age recipient: neither AGE_PUBLIC, nor the instance's "
+        ".age-public, nor a private key to derive it from. Without it "
+        "nothing can be written to the store")
+
+
+def store_write(name, data):
+    """Writes one entry to the encrypted store, with the same discipline.
+
+    Three properties copied from `persist_secret`, and each one has a
+    corpse behind it: the redirection goes to a `.tmp` (a failure
+    halfway used to leave the previous ciphertext at 0 bytes, losing
+    material already registered with a third party), the ROUNDTRIP is
+    verified over that `.tmp` before it counts, and only then does an
+    atomic `mv` replace what was there.
+    """
+    d = paths.secrets_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    os.chmod(d, 0o700)
+    dest = store_path(name)
+    tmp = dest.with_suffix(".enc.tmp")
+    plain = os.path.join(tempfile.mkdtemp(prefix="aegis-store-", dir="/dev/shm"
+                                          if os.path.isdir("/dev/shm") else None),
+                         name)
+    try:
+        with open(os.open(plain, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as f:
+            f.write(data)
+        r = subprocess.run(["sops", "--encrypt", "--age", age_recipient(),
+                            "--input-type", "binary", "--output-type", "binary",
+                            plain], capture_output=True)
+        if r.returncode != 0 or not r.stdout:
+            die(f"the store could not encrypt {name} — what was already there "
+                f"is left INTACT: {(r.stderr or b'').decode(errors='replace')[:200]}")
+        tmp.write_bytes(r.stdout)
+        os.chmod(tmp, 0o600)
+        back = subprocess.run(["sops", "--decrypt", "--input-type", "binary",
+                               "--output-type", "binary", str(tmp)],
+                              capture_output=True)
+        if back.returncode != 0 or back.stdout != data:
+            tmp.unlink(missing_ok=True)
+            die(f"the store's roundtrip FAILED for {name}: what was written "
+                f"does not read back as what was handed in. Nothing was replaced")
+        tmp.replace(dest)
+        os.chmod(dest, 0o600)
+    finally:
+        if os.path.exists(plain):
+            subprocess.run(["shred", "-u", plain], capture_output=True)
+        shutil.rmtree(os.path.dirname(plain), ignore_errors=True)
+
+
+# ── where the destination is, derived and never written twice ───────
+def remote_bucket_name(root_domain):
+    """The destination bucket, derived from the instance's root domain.
+
+    ONE derivation, in ONE place, because this name is written in three:
+    the tofu that creates the bucket, the access policy of the token
+    that may write into it, and the PUT this command makes. Two of the
+    three agreeing and the third not is a backup that reports success
+    against a bucket nobody made — R2 answers 404 and the run says the
+    sink failed, which is the good case; the bad one is a name that
+    exists and belongs to something else.
+
+    R2 accepts lowercase, digits and hyphens, 3 to 63 characters. A
+    domain is already almost that: the dots become hyphens.
+    """
+    slug = re.sub(r"[^a-z0-9-]+", "-", (root_domain or "").strip().lower()).strip("-")
+    if not slug:
+        die("the instance's aegis.conf declares no ROOT_DOMAIN, so the "
+            "destination bucket cannot be derived. On an instance with no "
+            "domain there is no Cloudflare account either, and the off-site "
+            "copy has no subject")
+    return f"aegis-backups-{slug}"[:63].rstrip("-")
+
+
+def remote_config():
+    """Account, bucket and endpoint — out of the instance's own config.
+
+    Nothing new is asked of the operator: the account is the one the
+    wizard already captured (`CF_ACCOUNT_ID`) and the bucket comes out
+    of the root domain. The endpoint's shape
+    (`<account>.r2.cloudflarestorage.com`, path-style, region `auto`)
+    was verified on 2026-08-29 against developers.cloudflare.com/r2.
+    """
+    conf = paths.read_conf()
+    account = (conf.get("CF_ACCOUNT_ID") or "").strip()
+    if not account:
+        die("the instance's aegis.conf names no Cloudflare account: there "
+            "is no R2 to send the bundle to. With a local edge that is the "
+            "correct state, and the protocol says what it costs")
+    return {"account": account,
+            "bucket": remote_bucket_name(conf.get("ROOT_DOMAIN")),
+            "host": f"{account}.r2.cloudflarestorage.com"}
+
+
+def remote_credential():
+    """The destination's S3 pair, out of the encrypted store.
+
+    It is NOT read from the environment and NOT taken on the command
+    line: a key in argv is world-readable in /proc, and a key in the
+    environment survives into every child process. The store is the same
+    one the rest of the instance's material lives in, opened with the
+    same age key.
+    """
+    ak = store_read(REMOTE_ID_NAME)
+    sk = store_read(REMOTE_KEY_NAME)
+    if ak is None or sk is None:
+        raise cli.CouldNotEvaluate(
+            f"this instance has adopted no off-site destination: "
+            f"{REMOTE_ID_NAME}/{REMOTE_KEY_NAME} are not in the encrypted "
+            f"store. Adopt one with `{cli.cmd('data')} remote adopt`")
+    return ak.decode().strip(), sk.decode().strip()
+
+
+def remote_s3(method, key, query=None, body=b"", timeout=30, cfg=None, pair=None):
+    """One request against the off-site destination, through the ONE signer."""
+    cfg = cfg or remote_config()
+    ak, sk = pair or remote_credential()
+    path = f"/{cfg['bucket']}" + (f"/{key}" if key else "")
+    return s3(method, cfg["host"], path, query or {}, ak, sk,
+              region=REMOTE_REGION, body=body, scheme="https", timeout=timeout)
+
+
+# ── what goes up ────────────────────────────────────────────────────
+def remote_sidecar(bundle, org):
+    """The fingerprint of the CIPHERTEXT, and nothing else.
+
+    What the restore needs before touching anything is one question:
+    is what came down byte for byte what went up? The sha256 of the
+    `.age` answers it and costs nothing to carry.
+
+    What is deliberately NOT here is everything the bundle's internal
+    manifest knows — database names, table names, row counts. That is
+    the tenants' metadata, and putting it in the clear beside the
+    ciphertext would publish the index of the safe next to the safe.
+    """
+    data = open(bundle, "rb").read()
+    return {
+        "version": 1,
+        "archivo": os.path.basename(bundle),
+        "organizacion": org,
+        "bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "subido": datetime.datetime.now(datetime.timezone.utc)
+                  .strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+
+def remote_key(org, bundle):
+    return f"org-{org}/{os.path.basename(bundle)}"
+
+
+def remote_push(bundle, org):
+    """Uploads one bundle and its sidecar, and READS BACK what it wrote.
+
+    THE GUARD FIRST, and it is not ceremony. This function is the one
+    door out of the machine, and the day somebody wires it to a
+    directory of `.tgz` —or to the staging file the capture builds
+    before encrypting— the tenants' data would leave in the clear over
+    somebody else's wire, and nothing would say so: the upload would
+    succeed. So the check is on the CONTENT and not on the name: age's
+    own header, read from the first bytes of the file.
+
+    And what was written is read back with a HEAD, because an S3 PUT
+    that returns 200 is a promise and the listing is the measurement —
+    the same rule the restore of the bucket follows a few hundred lines
+    above.
+    """
+    with open(bundle, "rb") as f:
+        head = f.read(len(AGE_MAGIC))
+    if head != AGE_MAGIC:
+        die(f"{os.path.basename(bundle)} is NOT an age-encrypted file (its "
+            f"first bytes are not age's header) and NOTHING was uploaded. "
+            f"Only ciphertext leaves this machine: what goes to a third "
+            f"party's disk is protected by the instance's key or it does "
+            f"not go")
+    cfg = remote_config()
+    pair = remote_credential()
+    data = open(bundle, "rb").read()
+    key = remote_key(org, bundle)
+    st, body, _ = remote_s3("PUT", key, body=data, timeout=600, cfg=cfg, pair=pair)
+    if st not in (200, 201):
+        die(f"the bundle did NOT leave the machine: PUT {key} gave HTTP {st} "
+            f"({body[:160]!r}). The copy is on this disk and only on this disk")
+    st, _, headers = remote_s3("HEAD", key, cfg=cfg, pair=pair)
+    got = int(headers.get("Content-Length", -1)) if st == 200 else -1
+    if got != len(data):
+        die(f"{key}: uploaded, and the destination returns {got} bytes where "
+            f"{len(data)} were expected — it is not called good")
+    side = json.dumps(remote_sidecar(bundle, org), indent=2,
+                      ensure_ascii=False).encode()
+    st, body, _ = remote_s3("PUT", key + ".manifiesto.json", body=side,
+                            cfg=cfg, pair=pair)
+    if st not in (200, 201):
+        die(f"the bundle went up and its manifest did NOT ({st}): a copy "
+            f"whose integrity cannot be checked before restoring is a copy "
+            f"nobody can trust on the day it is needed")
+    ok(f"off-site: {cfg['bucket']}/{key} ({len(data)} bytes) and its manifest")
+    return key
+
+
+# ── what comes down ─────────────────────────────────────────────────
+def remote_listing(cfg=None, pair=None):
+    """Every object at the destination, through the ONE lister.
+
+    `bucket_listing` already knows how to page ListObjectsV2, which is
+    the detail that is written well once and badly the other two times.
+    R2 answers the same protocol, so it is the same function.
+    """
+    cfg = cfg or remote_config()
+    ak, sk = pair or remote_credential()
+    return bucket_listing(cfg["host"], cfg["bucket"], ak, sk,
+                          scheme="https", region=REMOTE_REGION)
+
+
+def remote_fetch(key, target):
+    """Brings one bundle down and CHECKS IT before anything else exists.
+
+    The order is the whole point, and it is the same one the restore of
+    a bucket follows: the sidecar comes first, the object second, and
+    the sha256 is compared BEFORE the file is handed to anybody. A
+    truncated download is not a rare event over a home connection, and a
+    truncated `.age` does not fail loudly — `age -d` says the file is
+    corrupt, which reads like «the key is wrong» on the worst possible
+    day.
+    """
+    cfg = remote_config()
+    pair = remote_credential()
+    st, side, _ = remote_s3("GET", key + ".manifiesto.json", cfg=cfg, pair=pair)
+    if st != 200:
+        die(f"{key} has no manifest at the destination (HTTP {st}): what came "
+            f"down cannot be checked against anything, and a bundle that "
+            f"cannot be checked is not restored")
+    try:
+        man = json.loads(side)
+    except ValueError:
+        die(f"the manifest of {key} is not readable JSON: nothing is restored")
+    st, data, headers = remote_s3("GET", key, timeout=600, cfg=cfg, pair=pair)
+    if st != 200:
+        die(f"downloading {key} gave HTTP {st}")
+    got = hashlib.sha256(data).hexdigest()
+    if len(data) != man.get("bytes") or got != man.get("sha256"):
+        die(f"{key} does NOT reproduce its manifest ({len(data)} bytes, "
+            f"sha256 {got[:16]}…; {man.get('bytes')} and "
+            f"{(man.get('sha256') or '?')[:16]}… were expected). NOTHING was "
+            f"written: the transfer was cut, or the object at the destination "
+            f"is not the one that was uploaded")
+    with open(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as f:
+        f.write(data)
+    ok(f"{key} downloaded and VERIFIED against its manifest "
+       f"({len(data)} bytes, sha256 {got[:16]}…)")
+    return man
+
+
+def capture(root, remote=True):
     """One bundle per organization, each one in its folder.
 
     The walk comes out of `sources()`, which already crosses the contracts
@@ -679,7 +1058,7 @@ def capture(root):
         # backup: it is not translated.
         out = os.path.join(folder, f"aegis-datos-org-{org}-{stamp}.age")
         print(f"\n{gray}── organization {org}{reset}")
-        r = capture_org(org, ob, obk, out)
+        r = capture_org(org, ob, obk, out, remote=remote)
         rc |= r
         if r == 0:
             done_orgs.append(org)
@@ -811,7 +1190,7 @@ def write_readme(root, expected, done_orgs, stamp):
     ok(f"LEER.md up to date in {root} ({len(expected)} organization(s) according to the contracts)")
 
 
-def capture_org(org, databases, buckets, out):
+def capture_org(org, databases, buckets, out, remote=True):
     stage = tempfile.mkdtemp(prefix="aegis-resp-")
     pay = os.path.join(stage, "payload"); os.makedirs(pay)
     try:
@@ -904,15 +1283,38 @@ def capture_org(org, databases, buckets, out):
     finally:
         shutil.rmtree(stage, ignore_errors=True)
 
+    # ── AND NOW IT LEAVES THE HOUSE ─────────────────────────────
+    #
+    # Here, and not before: what goes out is a bundle that has already
+    # been decrypted and compared byte by byte against what was
+    # captured. Uploading an unverified bundle would be filling a third
+    # party's disk with something nobody has proved is a backup.
+    #
+    # The order between the two exits is not arbitrary either. The
+    # off-site destination is the one that answers the question this
+    # whole section exists for, so it goes first and its failure is
+    # fatal: a run that reports success having left the copy on the
+    # machine it has to survive is the lie the local disk already told
+    # for months. `AEGIS_BACKUP_SINK` stays as it was, for whoever wired
+    # their own transport before this existed.
+    left = []
+    if remote:
+        try:
+            remote_push(out, org)
+            left.append("off-site")
+        except cli.CouldNotEvaluate as e:
+            print(f"  {yellow}!{reset} {e}")
     sink = os.environ.get("AEGIS_BACKUP_SINK")
     if sink:
         r = subprocess.run(["bash", "-c", sink, "aegis-sink", out])
         if r.returncode != 0:
             die(f"the sink FAILED — the bundle is at {out} but it did not leave here")
         ok("sink OK — the bundle left the machine")
-    else:
-        print(f"  {yellow}!{reset} without AEGIS_BACKUP_SINK: the bundle stays on the SAME "
-              f"machine you want to survive")
+        left.append("sink")
+    if not left:
+        print(f"  {yellow}!{reset} the bundle did NOT leave the machine: no adopted "
+              f"off-site destination and no AEGIS_BACKUP_SINK. It stays on the "
+              f"SAME machine you want to survive")
     return 0
 
 
@@ -1550,6 +1952,564 @@ def measure(only_org):
     return 0
 
 
+# ═══════════════════════════════════════════════════════════════════
+#  THE OFF-SITE DESTINATION, from the operator's side
+# ═══════════════════════════════════════════════════════════════════
+def remote_adopt(credentials_file):
+    """Takes the destination's S3 pair into the encrypted store.
+
+    THE PAIR NEVER COMES THROUGH argv. `/proc/PID/cmdline` is
+    world-readable, so a key handed on the command line is a key handed
+    to every process on the machine; it arrives in a file (in tmpfs
+    when the init is the one calling) with two lines: the access key id
+    and the secret.
+
+    AND IT IS TESTED BEFORE IT IS STORED, against the real destination
+    and not against its shape. That test tells apart the three states
+    that a shape check collapses into one:
+
+      · it lists          — the credential works and the bucket is there.
+      · NoSuchBucket      — the credential works and the tofu of the
+                            bucket has not been applied. It IS stored,
+                            with the missing step named: a token minted
+                            in phase 15 for a bucket created afterwards
+                            is the normal order of things.
+      · 401/403           — it is not stored. A credential that does not
+                            open the destination, sitting in the store,
+                            is an off-site copy that exists on paper and
+                            fails on the day of the catastrophe.
+    """
+    if not os.path.isfile(credentials_file):
+        die(f"{credentials_file} does not exist: the pair is read from a "
+            f"file and never from the command line, because argv is "
+            f"world-readable in /proc")
+    lines = [l.strip() for l in open(credentials_file, encoding="utf-8").read()
+             .splitlines() if l.strip()]
+    if len(lines) != 2:
+        die(f"{credentials_file} does not carry exactly two lines (access key "
+            f"id, then secret access key): {len(lines)} were read")
+    key_id, key_secret = lines
+    # The SHAPE, measured on 2026-08-29 against
+    # developers.cloudflare.com/r2/api/tokens: R2 derives the pair from
+    # an API token, where the access key id is the token's `id` (32 hex)
+    # and the secret is the sha256 of the token's value (64 hex). It is a
+    # WARNING and not a refusal, because the format belongs to a third
+    # party and may change — the verdict is given by the request below,
+    # which is the only thing that measures what matters.
+    if not (re.fullmatch(r"[0-9a-f]{32}", key_id)
+            and re.fullmatch(r"[0-9a-f]{64}", key_secret)):
+        print(f"  {yellow}!{reset} the pair does not have R2's measured shape "
+              f"(32 hex id, 64 hex secret). It goes on to the real test all "
+              f"the same: the format belongs to a third party, the answer of "
+              f"the destination does not", file=sys.stderr)
+    cfg = remote_config()
+    st, body, _ = remote_s3("GET", "", query={"list-type": "2", "max-keys": "1"},
+                            cfg=cfg, pair=(key_id, key_secret))
+    if st in (401, 403):
+        die(f"the destination REJECTED that pair (HTTP {st}) and nothing was "
+            f"stored: {body[:160]!r}.\n"
+            f"      A credential that does not open {cfg['bucket']}, sitting "
+            f"in the store, is an off-site copy that exists on paper and "
+            f"fails on the day it is needed")
+    if st == 404:
+        print(f"  {yellow}!{reset} the credential is accepted and the bucket "
+              f"{cfg['bucket']} does NOT exist yet at the destination. The "
+              f"pair IS stored — that is the normal order: the token is "
+              f"minted with the master credential and the bucket is created "
+              f"afterwards with tofu (envs/data-r2). Until that apply, every "
+              f"backup will report that it did not leave the machine",
+              file=sys.stderr)
+    elif st != 200:
+        die(f"the destination answered HTTP {st} to a listing "
+            f"({body[:160]!r}) and nothing was stored: what could not be "
+            f"measured is not adopted")
+    store_write(REMOTE_ID_NAME, key_id.encode())
+    store_write(REMOTE_KEY_NAME, key_secret.encode())
+    ok(f"off-site destination adopted: {cfg['bucket']} at {cfg['host']} "
+       f"(the pair went into the encrypted store, never into argv)")
+    # The gap this command opens and cannot close by itself, said out
+    # loud rather than left for somebody to find: `aegis rotate` builds
+    # its menu from a table of recipes, and there is none for these two
+    # names yet. Its inventory will list them under «material with NO
+    # RECIPE», which is correct and must not be silenced.
+    print(f"  {gray}·{reset} {cli.cmd('rotate')} does not know how to rotate "
+          f"{REMOTE_ID_NAME}/{REMOTE_KEY_NAME} yet and will say so: the "
+          f"rotation of this pair is section 7 of the backups protocol, by "
+          f"hand, until a recipe exists", file=sys.stderr)
+    return 0
+
+
+def remote_push_bundle(bundle, prefix):
+    """Sends out a bundle this command did not make.
+
+    It exists for the OTHER half. `aegis state backup` writes the
+    platform's bundle —the store's secrets, the init's trail, the edge's
+    tfstate— into the same tree, and it does not know how to send it
+    anywhere: with the data and without the state you have a dump nobody
+    knows where to put. Until that command learns the road, this verb is
+    the road, and the protocol says to use it.
+
+    The prefix is asked for and not guessed: what this receives is a
+    file, and a file does not say which organization it belongs to. The
+    same guard as every other exit applies — age's header or nothing.
+    """
+    with open(bundle, "rb") as f:
+        if f.read(len(AGE_MAGIC)) != AGE_MAGIC:
+            die(f"{os.path.basename(bundle)} is NOT an age-encrypted file and "
+                f"NOTHING was uploaded: only ciphertext leaves this machine")
+    cfg = remote_config()
+    pair = remote_credential()
+    data = open(bundle, "rb").read()
+    key = f"{prefix}/{os.path.basename(bundle)}"
+    st, body, _ = remote_s3("PUT", key, body=data, timeout=600, cfg=cfg, pair=pair)
+    if st not in (200, 201):
+        die(f"{key} did NOT leave the machine: HTTP {st} ({body[:160]!r})")
+    st, _, headers = remote_s3("HEAD", key, cfg=cfg, pair=pair)
+    got = int(headers.get("Content-Length", -1)) if st == 200 else -1
+    if got != len(data):
+        die(f"{key}: uploaded, and the destination returns {got} bytes where "
+            f"{len(data)} were expected — it is not called good")
+    side = remote_sidecar(bundle, prefix)
+    st, body, _ = remote_s3("PUT", key + ".manifiesto.json",
+                            body=json.dumps(side, indent=2,
+                                            ensure_ascii=False).encode(),
+                            cfg=cfg, pair=pair)
+    if st not in (200, 201):
+        die(f"{key} went up and its manifest did NOT ({st})")
+    ok(f"off-site: {cfg['bucket']}/{key} ({len(data)} bytes) and its manifest")
+    return 0
+
+
+def remote_inventory():
+    """What is at the destination, grouped by organization.
+
+    An object with no `.manifiesto.json` beside it is NAMED and not
+    counted: it is a bundle that cannot be checked before restoring,
+    which is the state the whole upload path exists to avoid, and
+    hiding it in a total would make an unusable copy look like a copy.
+    """
+    cfg = remote_config()
+    objects = remote_listing(cfg=cfg)
+    bundles, sidecars = {}, set()
+    for o in objects:
+        if o["clave"].endswith(".manifiesto.json"):
+            sidecars.add(o["clave"][: -len(".manifiesto.json")])
+            continue
+        org = o["clave"].split("/", 1)[0]
+        org = org[4:] if org.startswith("org-") else org
+        bundles.setdefault(org, []).append(o)
+    orphans = [o["clave"] for v in bundles.values() for o in v
+               if o["clave"] not in sidecars]
+    return cfg, bundles, orphans
+
+
+def remote_epoch(stamp):
+    """The date of an S3 listing, as an epoch. None if it is unreadable.
+
+    S3 answers ISO 8601 in UTC with a `Z` and, depending on the
+    implementation, with or without fractions of a second. It is parsed
+    and NOT assumed: an unreadable date has to come out as None so that
+    whoever measures the freshness reports COULD NOT EVALUATE instead of
+    a zero, which would read as «1970» and page for a healthy
+    destination.
+    """
+    if not stamp:
+        return None
+    s = stamp.strip().replace("Z", "+00:00")
+    try:
+        return datetime.datetime.fromisoformat(s).timestamp()
+    except ValueError:
+        return None
+
+
+def remote_list():
+    cfg, bundles, orphans = remote_inventory()
+    print(f"{gray}destination:{reset} {cfg['bucket']}  {gray}at{reset} {cfg['host']}\n",
+          file=sys.stderr)
+    if not bundles:
+        print(f"  {yellow}!{reset} the destination is EMPTY: this instance has "
+              f"never sent a bundle out", file=sys.stderr)
+    now = time.time()
+    for org in sorted(bundles):
+        items = sorted(bundles[org], key=lambda o: o["clave"])
+        newest = max((remote_epoch(o["modificado"]) or 0) for o in items)
+        age = (now - newest) / 3600.0 if newest else -1
+        total = sum(o["bytes"] for o in items if o["bytes"] >= 0)
+        print(f"  {gray}·{reset} org-{org}: {len(items)} bundle(s), {total} bytes, "
+              f"the newest {age:.1f} h ago" if age >= 0 else
+              f"  {gray}·{reset} org-{org}: {len(items)} bundle(s), {total} bytes, "
+              f"date UNREADABLE", file=sys.stderr)
+        for o in items[-3:]:
+            print(f"      {gray}{o['clave']}  {o['bytes']} B{reset}", file=sys.stderr)
+    for c in orphans:
+        print(f"  {red}✗{reset} {c} has NO manifest at the destination: it "
+              f"cannot be checked before restoring, so it does not count as a "
+              f"copy", file=sys.stderr)
+    return 1 if orphans else 0
+
+
+def remote_status():
+    """The freshness of the destination, as series on stdout.
+
+    Same convention as `size`: stdout carries ONLY the metrics, the
+    prose goes to stderr, and the timestamp travels beside the figures
+    so that whoever watches can tell a measurement that STOPPED from
+    one that is healthy — a gauge that is no longer written keeps its
+    last value for ever.
+
+    The verdict follows share/exit-codes.txt, and the 2 is the one that
+    matters: a destination that cannot be reached is NOT a destination
+    with no backup. Reporting it as 1 would send somebody to look for a
+    backup that is probably right there, behind a network that is down.
+    """
+    try:
+        cfg, bundles, orphans = remote_inventory()
+    except cli.CouldNotEvaluate as e:
+        print(f"  {yellow}!{reset} {e}", file=sys.stderr)
+        return 2
+    now = int(time.time())
+    lines, stale = [], []
+    for org in sorted(bundles):
+        items = bundles[org]
+        epochs = [e for e in (remote_epoch(o["modificado"]) for o in items) if e]
+        total = sum(o["bytes"] for o in items if o["bytes"] >= 0)
+        lines.append(f'aegis_backup_remote_bundles{{org="{label_value(org)}"}} '
+                     f'{len(items)}')
+        lines.append(f'aegis_backup_remote_bytes{{org="{label_value(org)}"}} {total}')
+        if epochs:
+            lines.append(f'aegis_backup_remote_timestamp_seconds'
+                         f'{{org="{label_value(org)}"}} {int(max(epochs))}')
+        else:
+            stale.append(org)
+    lines.append(f"aegis_backup_remote_measured_timestamp_seconds {now}")
+    for org in sorted(bundles):
+        epochs = [e for e in (remote_epoch(o["modificado"]) for o in bundles[org]) if e]
+        age = (now - max(epochs)) / 3600.0 if epochs else None
+        print(f"  {gray}·{reset} org-{org}: newest copy "
+              f"{'%.1f h ago' % age if age is not None else 'of an UNREADABLE date'}",
+              file=sys.stderr)
+    for org in stale:
+        print(f"  {yellow}!{reset} org-{org}: no readable date at the "
+              f"destination — its freshness is NOT measured, which is not the "
+              f"same as being fresh", file=sys.stderr)
+    for c in orphans:
+        print(f"  {red}✗{reset} {c} has no manifest: it does not count as a copy",
+              file=sys.stderr)
+    for line in lines:
+        print(line)
+    if not bundles:
+        print(f"  {yellow}!{reset} the destination is empty: nothing has ever "
+              f"left this machine", file=sys.stderr)
+        return 1
+    return 1 if (stale or orphans) else 0
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  THE CLOCK, and the door that a terminal alone cannot open
+# ═══════════════════════════════════════════════════════════════════
+#
+# A backup with no clock is a backup somebody remembers. Measured on
+# 2026-08-29 on the live instance: the newest bundle was three days old
+# and had been made by hand. The timer that closes that lives in
+# share/systemd/; what lives HERE is the only thing a unit file cannot
+# hold — the reason a cadence is or is not acceptable.
+#
+# THE FLOOR IS ONE HOUR, and it is not about the disk. Every run of the
+# capture opens a port-forward per bucket, runs a pg_dumpall and a
+# pg_dump per database against the live server, downloads every object,
+# and pushes the whole bundle to a third party. Under an hour that stops
+# being a backup and becomes a load: on the postgres of every tenant, on
+# the household connection, and on a free tier that is counted in
+# operations as well as in bytes.
+#
+# So below an hour the command asks for a SECOND CHANNEL, and the shape
+# of that is deliberate. A confirmation typed into the terminal is a
+# confirmation anything holding the terminal can give — an agent, a
+# script, a paste. A code that arrives on the operator's phone and has
+# to be typed back cannot be produced by whoever is at the keyboard: it
+# has to be READ somewhere else. That is the whole property, and it is
+# why the code is never printed, never logged and never written to a
+# file on this machine.
+#
+# And if the second channel is not configured, the answer is NO. It does
+# not fall back to «type y to confirm»: a brake that yields when its
+# mechanism is missing was never a brake.
+CADENCE_FLOOR_S = 3600
+CADENCE_CEILING_S = 24 * 3600
+CADENCE_DEFAULT = "24h"
+CADENCE_UNIT = "aegis-backup.timer"
+NTFY_TOPIC = "aegis-alertas"
+NTFY_USER = "puente"
+
+
+def cadence_dropin_path():
+    """Where the cadence override lives, and why it is a USER unit.
+
+    The capture runs as the operator and not as root, for the reason
+    this file's opening argues at length: it needs the age key, the
+    kubeconfig and a `kubectl exec` into every tenant. So the timer is a
+    user unit, its drop-in lives under the operator's own configuration,
+    and changing the cadence needs no privilege at all — which is what
+    lets this command write it instead of printing a recipe for somebody
+    to paste wrong.
+    """
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, "systemd", "user", f"{CADENCE_UNIT}.d",
+                        "aegis-cadence.conf")
+
+
+def parse_duration(text):
+    """A systemd-shaped duration into seconds. None if it is not one.
+
+    Only the three units a backup cadence can sensibly use are accepted.
+    Being liberal here would mean accepting something systemd reads
+    DIFFERENTLY —`1` is one second for systemd and would look like one
+    hour to a person— and the drop-in would then say something other
+    than what was confirmed.
+    """
+    m = re.fullmatch(r"(\d+)\s*(s|m|h)", (text or "").strip())
+    if not m:
+        return None
+    return int(m.group(1)) * {"s": 1, "m": 60, "h": 3600}[m.group(2)]
+
+
+def cadence_dropin(text):
+    """The systemd drop-in that changes the cadence.
+
+    The EMPTY assignment before the value is not decoration: in systemd
+    a drop-in ADDS to a list-valued setting, so an `OnUnitActiveSec=6h`
+    on its own leaves the shipped 24h in place and the timer fires on
+    BOTH. Resetting the list first is the only way to replace it, and
+    forgetting it produces a timer that looks configured and runs twice.
+    """
+    return (f"# written by `{cli.cmd('data')} remote cadence --set {text}`.\n"
+            f"# The empty assignment RESETS the list: without it this value is\n"
+            f"# added to the unit's own and the timer fires on both.\n"
+            f"[Timer]\n"
+            f"OnUnitActiveSec=\n"
+            f"OnUnitActiveSec={text}\n")
+
+
+def cadence_current():
+    """What the machine has installed, read and not assumed."""
+    path = cadence_dropin_path()
+    if os.path.isfile(path):
+        for line in open(path, encoding="utf-8"):
+            if line.startswith("OnUnitActiveSec=") and line.split("=", 1)[1].strip():
+                return line.split("=", 1)[1].strip(), path
+    return CADENCE_DEFAULT, f"the shipped {CADENCE_UNIT} (no drop-in)"
+
+
+def cadence_cost(seconds):
+    """What a cadence costs, in the units the far side actually counts.
+
+    It is an ESTIMATE and it says so: the size comes from what is at the
+    destination today, and an organization that grows changes the answer.
+    What it is NOT is a guess — the figures come from a listing.
+    """
+    runs = 86400.0 / seconds
+    try:
+        _, bundles, _ = remote_inventory()
+    except cli.CouldNotEvaluate:
+        bundles = {}
+    orgs = max(len(bundles), 1)
+    sizes = [o["bytes"] for v in bundles.values() for o in v if o["bytes"] >= 0]
+    typical = max(sizes) if sizes else 0
+    # 2 writes per organization per run: the bundle and its manifest.
+    return {"runs": runs, "orgs": orgs, "bundle_bytes": typical,
+            "writes_month": runs * orgs * 2 * 30,
+            "bytes_month": runs * orgs * typical * 30}
+
+
+def ntfy_publish(title, message):
+    """One message to the operator's phone, over the platform's own channel.
+
+    ntfy is self-hosted for the reason design.md gives — the «the
+    platform is broken» channel cannot depend on a free service with
+    guessable topics — and it is deny-all: the `puente` user is the one
+    with write on this topic, and its credential lives in the store.
+
+    The port-forward is the same road the capture takes to Garage and
+    for the same reason: the Service is ClusterIP and the operator is
+    not a namespace of the cluster, but the traffic is born on the node.
+    The credential travels in a header, never in argv.
+    """
+    token = store_read("ntfy_bridge_token")
+    if token is None:
+        raise cli.CouldNotEvaluate(
+            "there is no ntfy credential in this instance's store: the "
+            "second channel does not exist here")
+    pair = NTFY_USER.encode() + b":" + token.strip()
+    with Tunnel("observability", "ntfy", 80) as t:
+        req = urllib.request.Request(
+            f"http://{t.host}/{NTFY_TOPIC}", data=message.encode(),
+            headers={"Title": title, "Priority": "high",
+                     "Authorization": "Basic " + base64.b64encode(pair).decode()},
+            method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                if r.status not in (200, 201):
+                    raise cli.CouldNotEvaluate(f"ntfy answered HTTP {r.status}")
+        except urllib.error.HTTPError as e:
+            raise cli.CouldNotEvaluate(
+                f"ntfy rejected the publication (HTTP {e.code}): the second "
+                f"channel is not usable")
+        except OSError as e:
+            raise cli.CouldNotEvaluate(f"ntfy is not reachable: {e}")
+
+
+def cadence_record(text, seconds, channel):
+    """Who confirmed, when, and through what. Never the code.
+
+    It goes beside the init's trail because that is where this instance
+    keeps what it did to itself, and it is append-only for the same
+    reason gates.jsonl is: a decision that can be edited afterwards is
+    not a record.
+    """
+    d = paths.state_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "cuando": datetime.datetime.now(datetime.timezone.utc)
+                  .strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "quien": os.environ.get("SUDO_USER") or getpass.getuser(),
+        "cadencia": text,
+        "segundos": seconds,
+        "canal": channel,
+    }
+    with open(d / "backup-cadence.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return entry
+
+
+def cadence_gate(text, seconds):
+    """The door below one hour. It opens with a code that is not on this machine.
+
+    Three refusals, in this order, and none of them degrades into the
+    next:
+
+      1. NO OPERATOR. With AEGIS_NONINTERACTIVE, or with stdin not a
+         terminal, there is nobody to read a phone. Answering «assume
+         yes» here would make the whole gate a comment.
+      2. NO SECOND CHANNEL. If ntfy is not configured, the code has
+         nowhere to go, and asking for a confirmation typed at the same
+         keyboard would be theatre.
+      3. THE CODE. Six digits, generated with the random source meant
+         for secrets, sent to the phone and never shown here. It is
+         typed back beside the word `entendido` — the word is not
+         decoration: it is what stops a code pasted by reflex from being
+         a confirmation of something that was not read.
+    """
+    if os.environ.get("AEGIS_NONINTERACTIVE") or not sys.stdin.isatty():
+        die(f"a cadence under {CADENCE_FLOOR_S // 60} minutes needs a "
+            f"confirmation the operator gives on their PHONE, and there is no "
+            f"operator here (non-interactive). The cadence is NOT changed. "
+            f"This is the answer on purpose: a brake that yields when nobody "
+            f"is watching is not a brake")
+    cost = cadence_cost(seconds)
+    print(f"\n  {yellow}a cadence of {text} means, per month and at today's "
+          f"size:{reset}", file=sys.stderr)
+    print(f"    {cost['runs']:.1f} runs a day over {cost['orgs']} "
+          f"organization(s)", file=sys.stderr)
+    print(f"    ~{cost['writes_month']:.0f} writes at the destination "
+          f"(the free tier counts operations, not only bytes)", file=sys.stderr)
+    print(f"    ~{cost['bytes_month'] / 1e9:.2f} GB uploaded, over a household "
+          f"connection, against a 10 GB shelf", file=sys.stderr)
+    print(f"    and one pg_dump per database, per run, against the live "
+          f"server of every tenant", file=sys.stderr)
+    print(f"  {gray}an estimate from the bundles that are at the destination "
+          f"today; an organization that grows changes it{reset}\n",
+          file=sys.stderr)
+    code = f"{onetime.randbelow(1000000):06d}"
+    try:
+        ntfy_publish(
+            "aegis: backup cadence below one hour",
+            f"Somebody at the keyboard of this instance is asking to back up "
+            f"every {text}. If it was you, type this code beside the word "
+            f"entendido: {code}")
+    except cli.CouldNotEvaluate as e:
+        die(f"a cadence under {CADENCE_FLOOR_S // 60} minutes needs a second "
+            f"channel and this instance does not have one: {e}.\n"
+            f"      It does NOT fall back to a confirmation typed here: the "
+            f"whole point is that the answer cannot be produced by whoever "
+            f"holds this terminal. The cadence is not changed")
+    print(f"  a code went to the phone on the {NTFY_TOPIC} topic. It is not "
+          f"shown here and it is not written to any file on this machine.",
+          file=sys.stderr)
+    try:
+        typed = input("  type: entendido <code>  ")
+    except (EOFError, KeyboardInterrupt):
+        die("no answer: the cadence is not changed")
+    parts = typed.strip().split()
+    if len(parts) != 2 or parts[0].lower() != "entendido" or parts[1] != code:
+        die("that is not the code, or the word is missing. The cadence is "
+            "NOT changed, and the code just used is dead: ask again")
+    return cadence_record(text, seconds, f"ntfy/{NTFY_TOPIC}")
+
+
+def remote_cadence(set_to):
+    """Shows the clock, or changes it — with the floor in the way.
+
+    It PRINTS the drop-in instead of installing it, and that is not
+    timidity: writing under /etc/systemd/system needs root, and a
+    command that asks for root in order to change a number would be a
+    command that runs as root every time it is used. What cannot be
+    obtained without passing through here is the TEXT for a cadence
+    under an hour.
+    """
+    current, where = cadence_current()
+    if set_to is None:
+        print(f"  {gray}·{reset} cadence: {current}  {gray}({where}){reset}",
+              file=sys.stderr)
+        print(f"  {gray}·{reset} floor {CADENCE_FLOOR_S // 3600}h, ceiling "
+              f"{CADENCE_CEILING_S // 3600}h; under the floor a confirmation "
+              f"on the phone is required", file=sys.stderr)
+        return 0
+    seconds = parse_duration(set_to)
+    if seconds is None:
+        die(f"{set_to!r} is not a duration this command accepts (`30m`, `6h`, "
+            f"`3600s`). It is deliberately narrow: systemd reads a bare number "
+            f"as SECONDS, and a drop-in that says something other than what "
+            f"was confirmed is worse than no drop-in")
+    if seconds > CADENCE_CEILING_S:
+        die(f"{set_to} is over the ceiling of {CADENCE_CEILING_S // 3600}h. A "
+            f"day is already the most this instance may lose, and a cadence "
+            f"that does not fit in a day is a backup you find out about later "
+            f"than the disaster")
+    if seconds < CADENCE_FLOOR_S:
+        entry = cadence_gate(set_to, seconds)
+        ok(f"confirmed on the second channel by {entry['quien']} at "
+           f"{entry['cuando']} — recorded in the instance's trail")
+    else:
+        cadence_record(set_to, seconds, "terminal")
+    path = cadence_dropin_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(cadence_dropin(set_to))
+    ok(f"cadence {current} -> {set_to}  ({path})")
+    print(f"  {gray}·{reset} it takes effect on the next reload:", file=sys.stderr)
+    print(f"  {gray}    systemctl --user daemon-reload && systemctl --user "
+          f"restart {CADENCE_UNIT}{reset}", file=sys.stderr)
+    return 0
+
+
+def remote_main(a):
+    if a.remote_verb == "bucket":
+        # stdout carries the NAME and nothing else: this is what the
+        # protocol pipes into TF_VAR_backups_bucket, and a line of prose
+        # in there would create a bucket with a decorated name.
+        print(remote_config()["bucket"])
+        return 0
+    if a.remote_verb == "adopt":
+        return remote_adopt(a.credentials_file)
+    if a.remote_verb == "push":
+        return remote_push_bundle(a.bundle, a.prefix)
+    if a.remote_verb == "list":
+        return remote_list()
+    if a.remote_verb == "status":
+        return remote_status()
+    return remote_cadence(a.cadence)
+
+
 def main():
     # Rule 1: verbs, not flags. And the same pair of names as
     # `aegis state`, because they are the same operation over another
@@ -1558,10 +2518,19 @@ def main():
     sub = ap.add_subparsers(dest="verb", required=True)
     s = sub.add_parser("backup", help=f"one bundle per organization (default: {DEFAULT_DEST})")
     s.add_argument("directory", nargs="?", default="", metavar="DIRECTORY")
+    s.add_argument("--no-remote", action="store_true",
+                   help="do not send it out. For a capture taken to look at, "
+                        "not to survive with")
     s = sub.add_parser("list", help="what is inside a bundle, without restoring")
     s.add_argument("bundle", metavar="BUNDLE.age")
     s = sub.add_parser("restore", help="restores the data of ONE organization")
-    s.add_argument("bundle", metavar="BUNDLE.age")
+    s.add_argument("bundle", metavar="BUNDLE.age",
+                   help="a local path, or the key at the destination with "
+                        "--from-remote")
+    s.add_argument("--from-remote", action="store_true",
+                   help="the bundle is brought down from the off-site "
+                        "destination and checked against its manifest before "
+                        "anything is touched")
     s.add_argument("--org", required=True,
                    help="restoring EVERYTHING in one go is not an operation worth making easy")
     s.add_argument("--force", action="store_true",
@@ -1572,12 +2541,41 @@ def main():
     s = sub.add_parser("size", help="what the data weighs, as metrics on stdout")
     s.add_argument("--org", default=None, metavar="ORG",
                    help="only this organization (default: all of them)")
+    # `remote` and not a flag: the off-site destination is a subject of
+    # its own —it is adopted, listed, measured and given a clock— and
+    # every one of those verbs answers a different question than
+    # «capture». A flag would have made them options of an operation
+    # they are not part of.
+    s = sub.add_parser("remote", help="the OFF-SITE destination: where the bundle goes")
+    rsub = s.add_subparsers(dest="remote_verb", required=True)
+    rsub.add_parser("bucket", help="the destination's name, derived (stdout)")
+    r = rsub.add_parser("adopt", help="takes the destination's S3 pair into the store")
+    r.add_argument("--credentials-file", required=True, metavar="FILE",
+                   help="two lines: access key id and secret access key. A "
+                        "file and never argv, which is world-readable in /proc")
+    r = rsub.add_parser("push", help="sends out a bundle this command did not make")
+    r.add_argument("bundle", metavar="BUNDLE.age")
+    r.add_argument("--prefix", default="platform", metavar="PREFIX",
+                   help="the folder at the destination (default: platform, "
+                        "which is where the STATE bundle belongs)")
+    rsub.add_parser("list", help="what is at the destination, and how old")
+    rsub.add_parser("status", help="the freshness of the destination, as metrics")
+    r = rsub.add_parser("cadence", help="the clock: how often the backup runs")
+    r.add_argument("--set", dest="cadence", metavar="DURATION", default=None,
+                   help=f"{CADENCE_FLOOR_S // 3600}h..{CADENCE_CEILING_S // 3600}h "
+                        f"freely; under the floor it needs a confirmation on "
+                        f"the operator's phone")
     a = ap.parse_args()
+    if a.verb == "remote":
+        return remote_main(a)
     a.capture_dir   = a.directory if a.verb == "backup" else None
     a.list_bundle   = a.bundle if a.verb == "list" else None
     a.restore_bundle = a.bundle if a.verb == "restore" else None
     if a.verb != "restore":
         a.force = False
+        a.from_remote = False
+    if a.verb != "backup":
+        a.no_remote = False
     if a.verb not in ("restore", "size"):
         a.org = None
 
@@ -1586,9 +2584,23 @@ def main():
     if a.list_bundle:
         return list_bundle(a.list_bundle)
     if a.restore_bundle:
-        return restore(a.restore_bundle, a.org, a.force)
+        if not a.from_remote:
+            return restore(a.restore_bundle, a.org, a.force)
+        # The bundle comes down FIRST and is checked against its
+        # manifest before `restore` is even called: what the rest of
+        # this file does with the pieces inside a bundle, this does with
+        # the bundle itself. And it lands in a directory of ours that is
+        # removed no matter how this ends — a downloaded copy left lying
+        # around is a plaintext-adjacent artefact nobody remembers.
+        down = tempfile.mkdtemp(prefix="aegis-remoto-")
+        try:
+            local = os.path.join(down, os.path.basename(a.restore_bundle))
+            remote_fetch(a.restore_bundle, local)
+            return restore(local, a.org, a.force)
+        finally:
+            shutil.rmtree(down, ignore_errors=True)
 
-    return capture(a.capture_dir or DEFAULT_DEST)
+    return capture(a.capture_dir or DEFAULT_DEST, remote=not a.no_remote)
 
 
 if __name__ == "__main__":

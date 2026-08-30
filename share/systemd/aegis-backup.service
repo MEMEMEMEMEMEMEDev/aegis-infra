@@ -1,0 +1,57 @@
+[Unit]
+Description=aegis: capture the tenants' data and send the bundle off-site
+Documentation=file:///usr/local/share/aegis/systemd/README.md
+# A capture opens a port-forward per bucket and runs a pg_dump per
+# database against the live server. With no cluster there is nothing to
+# capture, and starting anyway would fill the journal with a failure a
+# minute after every boot — which is how a real failure stops being read.
+ConditionPathExists=%h/.kube/config
+
+[Service]
+Type=oneshot
+# A USER unit, and that is the whole identity story. The capture needs
+# the operator's age key (~/.config/sops/age/aegis.key), their
+# kubeconfig, and a `kubectl exec` into every tenant. Running it as root
+# would mean giving root the key that opens every bundle this platform
+# has ever written — the one irreducible — to save writing `--user`.
+#
+# The consequence, and it is the failure mode of this unit: a user timer
+# only runs while the user has a session, unless lingering is enabled.
+#   loginctl enable-linger $USER
+# Without that line the backup stops the day the operator logs out and
+# says nothing. The protocol repeats it for that reason.
+
+# Where the product and the instance are. It is read from a file and not
+# baked in here so that moving the instance is editing one line, not
+# reinstalling the unit — the same rule as the edge bridge's
+# /etc/aegis/edge.env.
+EnvironmentFile=%h/.config/aegis/backup.env
+# The ABSOLUTE path, which is the one thing in this tree that names a
+# command by its road instead of letting PATH resolve it. systemd gives
+# no choice: ExecStart demands an absolute path and does not read the
+# session's PATH. The road is not invented — it is phase 05's contract,
+# which symlinks the product there and gates it (check 143). If that
+# ever moves, this line moves with it and the unit fails loudly at
+# start, which is the good way to find out.
+ExecStart=/usr/local/bin/aegis data backup
+
+# The capture is not urgent and it is not alone on this machine: it
+# shares the disk with k3s and the CPU with every tenant. Being polite
+# about it is the difference between a backup that runs unnoticed and
+# one somebody switches off.
+Nice=10
+IOSchedulingClass=idle
+CPUSchedulingPolicy=idle
+
+# It writes a bundle, so it cannot be sandboxed away from the disk — but
+# nothing here needs new privileges or another user's home.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+
+# A run that hangs is worse than one that fails: the next one never
+# starts and the destination silently stops getting copies. Three hours
+# is generous for a household connection and finite.
+TimeoutStartSec=3h
