@@ -21,6 +21,7 @@ _v_reponame(){ [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]]; }
 _v_hex32()   { [[ "$1" =~ ^[0-9a-f]{32}$ ]]; }
 _v_nonempty(){ [[ -n "$1" ]]; }
 _v_edge()    { [[ "$1" == cloudflare || "$1" == local ]]; }
+_v_ai()      { [[ "$1" == no || "$1" == cpu || "$1" == gpu ]]; }
 _v_ip()      { [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && python3 -c "
 import ipaddress, sys
 try: ipaddress.ip_address('$1'); sys.exit(0)
@@ -157,6 +158,22 @@ config_wizard() {
       "The operator's workspace (for direnv's .envrc after the init)." \
       "On a validation VM the default is fine."
 
+    # ── the AI subsystem ────────────────────────────────────────────
+    # Asked LAST because it is the only answer that costs hardware. It
+    # is written even when it is `no`: phase 87 defaults to `no` when
+    # the variable is missing, and a default that nobody was asked for
+    # is indistinguishable from a question the operator answered. The
+    # conf has to say which one it was.
+    ask AI "no" _v_ai \
+      "Whether this instance carries the AI subsystem:" \
+      "  no   — it does not. Phase 87 skips with its reason written," \
+      "         and its gates stay without a subject." \
+      "  cpu  — gateway, controller and the small engine, no card." \
+      "         Slow, and it costs nothing but memory." \
+      "  gpu  — the whole subsystem. Needs an NVIDIA card, its driver" \
+      "         and the container toolkit ON THIS HOST: phase 87" \
+      "         measures them and stops if they are not there."
+
     if [[ "$EDGE" == local ]]; then
         # Asked for and left empty ON PURPOSE, not omitted: the conf has
         # ONE shape, and a variable that exists empty says "this profile
@@ -181,7 +198,7 @@ config_wizard() {
     local v
     for v in EDGE EDGE_BIND_IP GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN ACME_EMAIL \
              KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP AEGIS_WORKSPACE \
-             CF_ACCOUNT_ID CF_ZONE_ID; do
+             CF_ACCOUNT_ID CF_ZONE_ID AI; do
         printf '  %-22s = %s\n' "$v" "${!v}"
     done
     local ok
@@ -197,7 +214,7 @@ config_wizard() {
         echo "# regenerate with: aegis init --configure"
         for v in EDGE EDGE_BIND_IP GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN \
                  ACME_EMAIL KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP \
-                 CF_ACCOUNT_ID CF_ZONE_ID; do
+                 CF_ACCOUNT_ID CF_ZONE_ID AI; do
             # ${!v:-}: under EDGE=local the two Cloudflare ids and, under
             # cloudflare, EDGE_BIND_IP are deliberately EMPTY. They are
             # still WRITTEN, so the conf has one shape and no consumer has
@@ -234,6 +251,13 @@ config_validate() {
     # which is the only thing it could have been.
     EDGE="${EDGE:-cloudflare}"
     _v_edge "$EDGE" || { log_warn "EDGE must be cloudflare or local (it says '$EDGE')"; return 1; }
+    # Same reasoning as EDGE, and the same date: a conf written before
+    # phase 87 existed carries no AI, and the only thing it could have
+    # meant is `no`. An UNRECOGNISED value is a different matter and is
+    # not smoothed over here — phase 87 dies on it rather than guess
+    # which of the three it meant, and so does this.
+    AI="${AI:-no}"
+    _v_ai "$AI" || { log_warn "AI must be no, cpu or gpu (it says '$AI')"; return 1; }
     for v in GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN ACME_EMAIL \
              KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP; do
         [[ -n "${!v:-}" ]] || missing+=("$v")

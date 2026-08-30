@@ -34,3 +34,13 @@ AEGIS_WORKSPACE="$HOME/aegis"
 # With EDGE=local both stay EMPTY, and the validation demands it:
 CF_ACCOUNT_ID=""
 CF_ZONE_ID=""
+# Whether this instance carries the AI subsystem (phase 87).
+#   no   the instance does not carry it: the phase skips with its
+#        reason written and its gates stay without a subject.
+#   cpu  gateway, controller and the small engine. No card needed.
+#   gpu  the whole subsystem. It needs an NVIDIA card, its driver and
+#        the container toolkit ON THIS HOST; phase 87 measures all
+#        three and stops if they are not there.
+# A value outside these three is NOT read as "no": the phase dies
+# rather than guess which one was meant.
+AI="no"
