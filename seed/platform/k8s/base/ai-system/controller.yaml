@@ -1,0 +1,117 @@
+# ai-modo-controller — reconciles the ai-modo ConfigMap with the
+# engines' replicas.
+#
+# IT IS SEPARATE FROM THE GATEWAY FOR ONE REASON, AND IT IS A GOOD ONE:
+# this is where the only permission over the Kubernetes API in all of
+# ai-system lives, and this process LISTENS ON NO PORT. There is no way
+# to reach it over the network. The gateway, which is reachable from
+# other namespaces, holds not one permission — the RBAC lives on the
+# ServiceAccount, not in the binary, which is why both can share an
+# image (and therefore one pipeline, one signature, one digest to
+# audit).
+#
+# THE AUTOMATION ONLY CLOSES. There is no auto-open, no
+# scale-from-zero-per-request, no schedule that turns anything on. The
+# only automatic act is closing on expiry. Opening is always the
+# operator's (`aegis ai start`), and that command checks the VRAM first.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ai-modo-controller
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+imagePullSecrets:
+  - name: regcred-internal
+---
+# A NAMESPACED Role with resourceNames: it cannot touch any other
+# ConfigMap nor any other Deployment.
+#
+# `deployments/scale` and NOT `deployments`: the subresource permits
+# EXACTLY changing the replica count. With permission over the whole
+# Deployment, this controller could change the image — which is
+# precisely what Kyverno and the signature exist to prevent.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ai-modo-controller
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+rules:
+  # get, to read the mode through the API and not from the mounted
+  # volume: the kubelet refreshes mounts every ~60 s, and `aegis ai stop`
+  # cannot take a minute to turn the GPU off.
+  # patch, to write modo=cerrado once `vence` has passed.
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [ai-modo]
+    verbs: [get, patch]
+  - apiGroups: [apps]
+    resources: [deployments/scale]
+    # The whole fleet: the mode raises and lowers them together, because
+    # they share the card and the reason for turning it off.
+    resourceNames: [engine-llm, engine-mt]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ai-modo-controller
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ai-modo-controller
+subjects:
+  - kind: ServiceAccount
+    name: ai-modo-controller
+    namespace: ai-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-modo-controller
+  namespace: ai-system
+  labels: {aegis.dev/component: ai, app: ai-modo-controller}
+spec:
+  replicas: 1
+  # Recreate: two controllers reconciling the same Deployment would
+  # fight, writing replicas over each other on every cycle.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: ai-modo-controller}
+  template:
+    metadata:
+      labels: {app: ai-modo-controller, aegis.dev/component: ai}
+    spec:
+      serviceAccountName: ai-modo-controller
+      # HERE the token IS mounted: it is what this process needs to talk
+      # to the apiserver. It is the only account in ai-system carrying
+      # one.
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: controller
+          # ONE image, TWO binaries, deliberately: the same digest the
+          # gateway carries, set by the kustomization's `images:` block.
+          # Bumping one and not the other would run a controller from a
+          # different build than the gateway it coordinates with.
+          image: registry.registry-system.svc.cluster.local:5000/ai-gateway
+          command: ["/controller"]
+          env:
+            - {name: AI_CONFIGMAP_MODO, value: "ai-modo"}
+            # A list, not a single engine: the whole fleet.
+            - {name: AI_DEPLOY_LLM, value: "engine-llm,engine-mt"}
+            - {name: AI_INTERVALO, value: "3s"}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: true
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 200m, memory: 64Mi}

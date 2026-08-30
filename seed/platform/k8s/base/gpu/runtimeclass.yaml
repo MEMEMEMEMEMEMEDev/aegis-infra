@@ -1,0 +1,28 @@
+# RuntimeClass nvidia — the bridge between a Pod and NVIDIA's container
+# runtime.
+#
+# HOW THE 'nvidia' HANDLER COMES TO EXIST
+# This manifest does not create it. k3s, at boot, LOOKS for the
+# nvidia-container-runtime binary on the host's PATH; if it finds one it
+# adds a runtime called 'nvidia' to its containerd config, which it
+# regenerates from a template on every start. So the order is:
+#
+#   1. install nvidia-container-toolkit on the HOST
+#   2. restart k3s        <- without this the handler does not exist
+#   3. this RuntimeClass
+#
+# Applied without steps 1 and 2, the symptom is a Pod stuck in
+# ContainerCreating with `no runtime for "nvidia" is configured`. It is
+# visible and not silent, which is what you want from a coupling like
+# this one.
+#
+# DECLARED COUPLING: the handler's name is fixed by k3s, not by us. If
+# k3s ever changes how it names that runtime, this breaks loudly.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+  labels:
+    aegis.dev/part-of: aegis-platform
+    aegis.dev/component: gpu
+handler: nvidia

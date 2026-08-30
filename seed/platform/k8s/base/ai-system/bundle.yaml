@@ -1,0 +1,96 @@
+# ai-system — the platform's multi-organization AI substrate.
+#
+# WHAT IT IS. The namespace where the node's GPU lives AS A SERVICE:
+# a gateway (queues, modes, budgets), two GPU engines that share the card
+# by time-slicing, and one CPU engine. Organizations do NOT run AI in
+# their own namespaces: they talk to the gateway over HTTP with an API
+# key. The reason is physical, not organizational — a card holds one
+# resident model per lane, and a second copy of a model in another
+# namespace would not fit.
+#
+# ── A NOTE ON THE NAMES IN THIS DIRECTORY ─────────────────────────
+# The prose here is English like the rest of the product. The KEYS are
+# not, and that is deliberate: `ai-modo`, `modo`/`vence`/`motivo`,
+# `ai-ruteo` and `ai-registro` are the wire contract
+# with the gateway binary, which is built from its own repository and
+# is not part of this artifact. Renaming a field here would rename it
+# only on one side. The glossary lists `ruteo -> routes` as being
+# retired (§3b); it graduates the day the gateway does, not before.
+#
+# WHY IT CARRIES THE aegis-tenants LABEL WHILE BEING A PLATFORM PIECE.
+# The label marks Kyverno's ENFORCE ZONE (fail-closed webhook +
+# mandatory signature), not ownership. Platform namespaces are excluded
+# from that zone so that a hard Kyverno crash cannot block the cluster's
+# RECOVERY (argocd, kyverno, registry, jenkins, cert-manager). Nothing in
+# ai-system is needed to recover the cluster, and it IS reachable from
+# tenant workloads: here fail-closed is not a risk, it is the
+# requirement. If Kyverno dies hard, the AI stops admitting pods — and
+# that is correct. Ownership is stated by `aegis.dev/component: ai` and
+# by the Application (aegis-platform).
+#
+# Pattern A: the platform provides HOW to pull (default SA + regcred);
+# the workloads declare no credentials of their own.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-system
+  labels:
+    aegis.dev/part-of: aegis-tenants   # enforce zone — see the header
+    aegis.dev/component: ai
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ai-system-quota
+  namespace: ai-system
+spec:
+  hard:
+    # CPU and RAM are capped ON PURPOSE. CPU inference (transcription,
+    # embeddings, vision) will take every thread the machine has if
+    # nothing stops it, and a single-node platform is also running the
+    # control plane, the registry and everybody's builds. This ceiling
+    # is what keeps the node usable with the CPU lane at full tilt.
+    #
+    # The arithmetic, so the numbers can be checked rather than
+    # believed:
+    #   limits:   llm 6 + mt 6 + cpu 6 + gateway 1 + controller 0.2 = 19.2
+    #   requests: llm 2 + mt 2 + cpu 1 + gateway 0.5 + controller  = 5.7
+    # Leaving 20 as the limit ceiling means the sum of the limits fits
+    # with room to spare, and no pod can RESERVE more than 8 threads in
+    # total.
+    requests.cpu: "8"
+    requests.memory: 14Gi
+    limits.cpu: "20"
+    limits.memory: 24Gi
+    # THE GPU AS A BUDGET, NOT ONLY AS A RESOURCE. The ceiling is the
+    # number of UNITS the device plugin advertises, and it advertises 2
+    # by time-slicing (k8s/base/gpu). A THIRD pod asking for a GPU is
+    # REJECTED at admission ("exceeded quota") instead of hanging
+    # Pending forever — the device plugin's known silent failure turned
+    # into an immediate, loud one.
+    #
+    # COUPLED DECISION: this number and the device plugin's `replicas`
+    # are one decision written in two files. Raise either alone and you
+    # get silent Pending.
+    requests.nvidia.com/gpu: "2"
+    limits.nvidia.com/gpu: "2"
+    pods: "20"
+    persistentvolumeclaims: "5"
+    # DECLARED size, not used size (local-path enforces no disk quota).
+    # Dimensioned for weights: two text models plus the CPU lane's four.
+    requests.storage: 60Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: ai-system
+# The workloads do not use the Kubernetes API, so their token is not
+# mounted. The single exception is the mode controller, which has its
+# own ServiceAccount and its own minimal Role (controller.yaml); the
+# default account stays blind to the API.
+automountServiceAccountToken: false
+imagePullSecrets:
+  - name: regcred-internal

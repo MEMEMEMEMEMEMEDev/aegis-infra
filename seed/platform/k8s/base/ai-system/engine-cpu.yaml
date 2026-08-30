@@ -1,0 +1,137 @@
+# engine-cpu — the AI lane that does not touch the GPU.
+#
+# Speech synthesis, transcription, embeddings and object detection, all
+# on CPU. It is independent of the GPU pair: an instance with no card
+# can run this lane alone (see the protocol's §0).
+#
+# ITS SOURCE IS IN THIS ARTIFACT (ai/engine-cpu/) and its image is built
+# by the platform, unlike the gateway's. The Containerfile there starts
+# from a mirrored base, the pipeline scans and signs, and the digest is
+# set by the kustomization's `images:` block.
+#
+# THE WEIGHTS DO NOT TRAVEL IN THE IMAGE. They land on the modelos-cpu
+# volume, seeded with `aegis ai models`. That keeps the image around a
+# gigabyte instead of two and — more importantly — changing a model does
+# not force a re-signature: two different life cycles.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: modelos-cpu
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  # ~1 GiB of weights today (a voice model, an embedding model, a
+  # detector and a small transcriber). 4Gi leaves room for a larger
+  # transcriber without re-declaring.
+  resources: {requests: {storage: 4Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: engine-cpu
+  namespace: ai-system
+  labels: {aegis.dev/component: ai, app: engine-cpu}
+spec:
+  # ALWAYS 1 replica, with no mode controller: unlike the GPU engines
+  # there is no VRAM to give back — off it gives nobody anything, and on
+  # it costs ~1.5 GiB of RAM and no CPU at rest.
+  replicas: 1
+  # Recreate, not RollingUpdate, and here the reason is the QUOTA and
+  # not the card: a rolling update wants the old pod and the new one at
+  # once, which is 12 CPUs of limits in a namespace whose ceiling is 20
+  # shared with both GPU engines and the gateway — the first rollout of
+  # the previous lineage stuck in FailedCreate on exceeded quota. With
+  # one node and ~15 s of start-up, the Recreate gap is cheaper than
+  # reserving quota for a second pod that only exists during deploys.
+  #
+  # AND IT MUST BE BORN THIS WAY. Converting a live Deployment from
+  # RollingUpdate to Recreate fails forever with "Forbidden: may not be
+  # specified": a strategic merge does not drop the `rollingUpdate`
+  # block the live object keeps, and the `rollingUpdate: null` that
+  # would drop it does not travel — kustomize prunes null fields while
+  # building. Born fresh it is fine.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: engine-cpu}
+  template:
+    metadata:
+      labels: {app: engine-cpu, aegis.dev/component: ai}
+    spec:
+      containers:
+        - name: engine
+          # The digest is set by the kustomization's `images:` block.
+          image: registry.registry-system.svc.cluster.local:5000/aegis-engine-cpu
+          env:
+            - {name: AEGIS_IN_CLUSTER, value: "1"}
+            - {name: AEGIS_CPU_MODELS, value: /models}
+            # A PATH and not an alias: there is no internet egress here
+            # (netpol), and an alias would make the transcriber try to
+            # download it. `aegis ai models` seeds the directory.
+            - {name: AEGIS_WHISPER, value: /models/whisper-small}
+            # Offline explicitly, same argument as the GPU engines: if a
+            # model is missing the error must be "it is not there", not
+            # a hang against a closed network.
+            - {name: HF_HUB_OFFLINE, value: "1"}
+          ports:
+            - {name: http, containerPort: 8600}
+          volumeMounts:
+            - {name: models, mountPath: /models, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+          # The four models load in ~10 s measured; 60 s of grace covers
+          # a cold node with the volume on a slow disk.
+          startupProbe:
+            httpGet: {path: /healthz, port: 8600}
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8600}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8600}
+            periodSeconds: 10
+            failureThreshold: 6
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            # Measured RSS with the four models loaded: ~1.5 GiB. The
+            # request covers that; the limit leaves air for the workers'
+            # buffers under load.
+            #
+            # CPU: the per-engine ceilings (threads x workers) are caps
+            # that do not all happen at once; 6 CPUs of limit is the
+            # measured real ceiling with three of them saturated,
+            # without letting a burst take half the node.
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "6"
+              memory: 3Gi
+      volumes:
+        - name: models
+          persistentVolumeClaim: {claimName: modelos-cpu}
+        # readOnlyRootFilesystem demands a writable /tmp of its own: the
+        # media and inference runtimes materialise small temporaries
+        # there.
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: engine-cpu
+  namespace: ai-system
+  labels: {aegis.dev/component: ai}
+spec:
+  selector: {app: engine-cpu}
+  ports:
+    - {name: http, port: 8600, targetPort: 8600}

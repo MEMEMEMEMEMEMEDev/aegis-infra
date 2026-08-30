@@ -1,0 +1,127 @@
+# nvidia-device-plugin — what makes the node ADVERTISE nvidia.com/gpu as
+# an allocatable resource.
+#
+# WHY IT IS NEEDED
+# Kubernetes does not know what a GPU is. Without this DaemonSet the node
+# publishes no nvidia.com/gpu, and a Pod that asks for one stays Pending
+# forever with "Insufficient nvidia.com/gpu" — even with the card
+# present, the driver loaded and the runtime configured. The plugin is
+# what translates "there is a card in this box" into "there is 1 unit of
+# nvidia.com/gpu".
+#
+# WHY IT NEEDS NO SIGNATURE
+# require-aegis-signature matches TENANT namespaces only. kube-system is
+# outside that zone, so NVIDIA's official image goes in directly. It is
+# still pinned BY DIGEST: a tag is a mutable pointer and this runs on the
+# control plane with access to the host's devices. TO VERIFY (2026-08-29):
+# whether this image should enter mirror-images/images.txt like every
+# other third party. It is not there today, so nothing scans it — an
+# honest gap, written down rather than left implied.
+#
+# GRANULARITY: time-slicing x2. The card is advertised as TWO units of
+# nvidia.com/gpu so that two engines can live on it. The announced cost
+# is still true: time-slicing does NOT isolate memory between processes
+# — the real VRAM split is made by the engines themselves with
+# gpu-memory-utilization (0.38 + 0.38, see ai-system/engine-llm.yaml),
+# and ai-system's quota sets the ceiling at 2 so a THIRD GPU pod is
+# rejected at admission instead of hanging Pending.
+#
+# THE TWO IS THE PROPERTY, AND IT IS WHAT THE PHASE MEASURES. A node
+# advertising 1 means the plugin registered and the slicing ConfigMap did
+# not land — everything the panel inspects says yes, which is the worst
+# failure shape there is. Phase 87's `gpu-units-advertised` gate demands
+# 2, not "greater than 0".
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nvidia-device-plugin-config
+  namespace: kube-system
+  labels:
+    aegis.dev/part-of: aegis-platform
+    aegis.dev/component: gpu
+data:
+  config.yaml: |
+    version: v1
+    sharing:
+      timeSlicing:
+        resources:
+          - name: nvidia.com/gpu
+            replicas: 2
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin-daemonset
+  namespace: kube-system
+  labels:
+    aegis.dev/part-of: aegis-platform
+    aegis.dev/component: gpu
+spec:
+  selector:
+    matchLabels:
+      name: nvidia-device-plugin-ds
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        name: nvidia-device-plugin-ds
+        aegis.dev/component: gpu
+    spec:
+      # If the plugin dies, no GPU Pod can be scheduled. It carries the
+      # same priority as the rest of the node addons so that it is not
+      # the first thing evicted under resource pressure.
+      priorityClassName: system-node-critical
+      # The plugin itself needs NVIDIA's runtime to see the devices:
+      # without this it starts and finds no GPU at all.
+      runtimeClassName: nvidia
+      tolerations:
+        - key: CriticalAddonsOnly
+          operator: Exists
+        # Lets it run on nodes tainted for GPU. There is no taint today,
+        # but it is the right thing if a node is ever dedicated to this.
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: nvidia-device-plugin-ctr
+          image: nvcr.io/nvidia/k8s-device-plugin:v0.19.3@sha256:25cc340fe6fd53c101e16fc452f503e7a92c219c64a80ed5381784b522dbbf77
+          args:
+            # The time-slicing lives in the ConfigMap above; without the
+            # file the plugin falls back to 1 GPU = 1 unit. The path is
+            # OURS and not /etc/nvidia: the NVIDIA runtime's
+            # createContainer hook writes into /etc/nvidia inside the
+            # container, and mounting a read-only ConfigMap there breaks
+            # it (RunContainerError, measured on the first deploy).
+            - --config-file=/etc/nvidia-device-plugin/config.yaml
+          env:
+            # With one card and one node, a loud failure at startup is
+            # what we want: if it cannot see the GPU we would rather
+            # learn it from a CrashLoop than from Pods that sit Pending
+            # with no explanation.
+            - name: FAIL_ON_INIT_ERROR
+              value: "true"
+          securityContext:
+            # NOT privileged. The plugin needs to read the host's
+            # devices, and those reach it through NVIDIA's runtime, not
+            # through broad privileges.
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits:   {cpu: 200m, memory: 128Mi}
+          volumeMounts:
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: config
+              mountPath: /etc/nvidia-device-plugin
+              readOnly: true
+      volumes:
+        # The socket the plugin registers with the kubelet through.
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+        - name: config
+          configMap:
+            name: nvidia-device-plugin-config

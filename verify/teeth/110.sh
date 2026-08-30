@@ -1,9 +1,14 @@
 # teeth for check 110 (every absent subsystem is declared)
 #
 # The real risk is not that AI is missing: it is that TOMORROW somebody
-# takes out another subsystem and writes nothing. The main red simulates
-# exactly that — delete the protocol and leave the absence mute.
-red_1() { rm -f "$AEGIS_ROOT/seed/platform/docs/protocols/attach-ai-subsystem.md"; }
+# takes out a subsystem and writes nothing. Until 2026-08-29 this red
+# deleted the protocol that declared the ONE absence the seed had. The
+# AI subsystem then came INTO the seed, the absence stopped existing,
+# and this mutation started editing a file that was no longer there:
+# it left the tree unchanged and the harness said so. Re-aimed at what
+# the sentence always meant — take a subsystem OUT and stay quiet —
+# which no longer needs an absence to pre-exist in order to be tested.
+red_1() { rm -rf "$AEGIS_ROOT/seed/platform/k8s/base/ai-system"; }
 
 # emptying the whole protocols folder: the same absence by another
 # route, so the check does not depend on a file name.
@@ -22,7 +27,7 @@ PY
 # control: writing MORE documentation cannot turn it red.
 control_1() {
     printf '\n\n## Added note\n\nSomething more about k8s/base/ai-system/ and how it comes back.\n' \
-        >> "$AEGIS_ROOT/seed/platform/docs/protocols/attach-ai-subsystem.md"
+        >> "$AEGIS_ROOT/seed/platform/docs/protocols/ai-subsystem.md"
 }
 
 # The other direction, which is the one that ages without anybody
@@ -32,5 +37,5 @@ control_1() {
 # the truth is looked up is worse than having nothing written at all.
 red_4() {
     printf '\n<!-- aegis-absent: k8s/base/garage-system -->\n' \
-        >> "$AEGIS_ROOT/seed/platform/docs/protocols/attach-ai-subsystem.md"
+        >> "$AEGIS_ROOT/seed/platform/docs/protocols/ai-subsystem.md"
 }
