@@ -101,11 +101,16 @@ STAGING_DIR = os.path.join(PLATFORM_ROOT, ".aegis-app")
 
 CONTRACT_VERSION = 1
 VALID_NAME = re.compile(r"^[a-z][a-z0-9-]{2,29}$")
-TYPES = {"estatico", "http", "postgres", "worker"}
+# `redis` and `mongodb` joined on 2026-08-29, and the gap they close is
+# not a nicety: an ecommerce that needs a cache and an application that
+# stores documents had NO WAY OF ASKING. The validator rejected the word
+# and the way out was to smuggle the workload into the tenant's own repo
+# as an `http` service — outside the quota's sight, outside the backup's
+# sight, and with a credential the platform never generated.
+TYPES = {"estatico", "http", "postgres", "worker", "redis", "mongodb"}
 # The ones that come out of an image somebody COMPILES AND SIGNS. The
-# rest are provided by the platform (postgres comes from services.yaml),
-# and that difference is what decides whether the contract needs a
-# `repo`.
+# rest are PROVIDED by the platform out of services.yaml, and that
+# difference is what decides whether the contract needs a `repo`.
 TYPES_WITH_IMAGE = {"estatico", "http", "worker"}
 # `internet` came in on 2026-08-21 with org-shop: its API talks to
 # Webpay (Transbank) and it was the FIRST tenant app that needs to reach
@@ -114,7 +119,14 @@ TYPES_WITH_IMAGE = {"estatico", "http", "worker"}
 # It does not demand a block at the organization level (unlike
 # bucket/ai/postgres): it is a capability of the service, not a resource
 # the platform provides.
-USES = {"ai", "bucket", "postgres", "internet"}
+#
+# The provided types are in here TOO, and derived from the same table
+# that renders them (PLATFORM_RESOURCES below): a type the platform can
+# deploy but that nothing may declare `usa:` on would be reachable only
+# by the blanket `allow-intra-namespace` rule — the one this project
+# means to close — and the day it closes, the dependency nobody wrote
+# down is the one that stops working.
+USES = {"ai", "bucket", "internet"}
 
 # The port on which the platform EXPECTS each type that does not declare
 # one. It is not a convenient default: it is part of the contract. A
@@ -162,7 +174,33 @@ QUOTA_KEYS = SIZE_KEYS + ("pods", "persistentvolumeclaims", "requests.storage")
 PLATFORM_RESOURCES = {
     "postgres": {"requests.cpu": "100m", "requests.memory": "256Mi",
                  "limits.cpu": "1", "limits.memory": "1Gi"},
+    # A cache is cheap to reserve and must be capped: what it holds is a
+    # copy, so it may be evicted, and `maxmemory` (rendered from
+    # `limits.memory` below) is what makes redis evict instead of grow.
+    # Without the cap the only ceiling is the kernel's, and the kernel
+    # does not evict: it kills, and the pod comes back cold every few
+    # hours with nothing in the events that says why.
+    "redis": {"requests.cpu": "50m", "requests.memory": "64Mi",
+              "limits.cpu": "500m", "limits.memory": "512Mi"},
+    # mongodb asks for more MEMORY than postgres and the reason is
+    # measured, not habitual: MongoDB's own FAQ says WiredTiger «may not
+    # account for the memory limits of the specific container», and
+    # recommends sizing the cache below the container's RAM by hand
+    # (read 2026-08-29). So the render passes
+    # `--wiredTigerCacheSizeGB` derived from this limit, and the limit
+    # has to leave room for the cache PLUS the connections, the index
+    # working set and the allocator. Under about 1Gi the cache floor
+    # (256MB) plus the server's own footprint leaves nothing to work in.
+    "mongodb": {"requests.cpu": "100m", "requests.memory": "512Mi",
+                "limits.cpu": "1", "limits.memory": "2Gi"},
 }
+
+# The types the PLATFORM provides. Derived from the table above and not
+# written twice: `declared_sizes` already keys off it to decide who asks
+# with a `tamano` word and who asks with services.yaml, and a second
+# list would be a second answer to the same question.
+PROVIDED = frozenset(PLATFORM_RESOURCES)
+USES |= PROVIDED
 
 
 def _q(v):
@@ -305,6 +343,142 @@ def platform_resources(cat, kind):
     return {k: _quantity(where, k, declared[k]) for k in SIZE_KEYS}
 
 
+# ── the catalogue entry of a provided type ───────────────────────────
+#
+# ONE reader for services.yaml's `tipos.<kind>`, and it VALIDATES before
+# it answers. The argument is `platform_resources`': a field that is
+# ignored is worse than one that is rejected, because whoever wrote it
+# believes they declared something. Here the stakes are higher than a
+# resource figure — the fields below decide whether a volume is created,
+# whether anything ever captures it, and which UID may write to it.
+
+CATALOG_KEYS = {"imagen", "digest", "tag_origen", "pending", "puerto",
+                "disco", "uid", "gid", "component", "backup", "recursos"}
+BACKUP_METHODS = ("dump", "none")
+
+
+def provided_type(cat, kind):
+    """services.yaml's block for `kind`, once it holds together.
+
+    It raises Invalid —never a KeyError— because this file is copied by
+    hand onto older instances (the same adoption path `tamano` has), and
+    a traceback names neither the file nor what is missing from it.
+    """
+    where = f"services.yaml, tipos.{kind}"
+    block = (cat.get("tipos") or {}).get(kind)
+    if not isinstance(block, dict):
+        raise Invalid(
+            f"{where} is missing, or is not a mapping.\n"
+            f"  `{kind}` is a type the PLATFORM provides: its image, its port, its\n"
+            f"  disk and its backup are decided by that file and by nothing else.")
+    unknown = sorted(set(block) - CATALOG_KEYS)
+    if unknown:
+        raise Invalid(f"{where}: {', '.join(repr(k) for k in unknown)} is not a "
+                      f"field of a provided type ({', '.join(sorted(CATALOG_KEYS))})")
+    for field in ("imagen", "puerto", "uid", "gid", "component"):
+        if block.get(field) is None:
+            raise Invalid(f"{where} declares no `{field}`")
+
+    # ── the image: a digest, or the commands that produce one ───────
+    #
+    # A tag is not accepted as a fallback and never will be. Kyverno
+    # rewrites `imagen:tag` into `imagen:tag@sha256:...` on admission,
+    # so with a tag in git desired != live FOREVER and the obvious way
+    # out —ignoreDifferences on the image— switches auto-sync off. That
+    # is finding #36, and it is the reason this file pins.
+    digest, pending = block.get("digest"), block.get("pending")
+    if digest and pending:
+        raise Invalid(
+            f"{where} carries a `digest:` AND a `pending:`.\n"
+            f"  One of the two is a lie: either the image was measured or it is\n"
+            f"  still waiting to be. A block that says both leaves the reader\n"
+            f"  deciding which half to believe.")
+    if digest is not None and not re.fullmatch(r"sha256:[0-9a-f]{64}", str(digest)):
+        raise Invalid(f"{where}, digest: {digest!r} is not a sha256:<64 hex>")
+    if digest is None:
+        cmds = ((pending or {}).get("commands")
+                if isinstance(pending, dict) else None)
+        if not cmds or not (pending or {}).get("reason"):
+            raise Invalid(
+                f"{where} has neither a `digest:` nor a `pending:` with its\n"
+                f"  `commands:` and its `reason:`.\n"
+                f"  A type whose image was never measured is not an error — a type\n"
+                f"  that does not say WHICH COMMAND measures it is, because the\n"
+                f"  next person has to go and find out what this file already knew.")
+
+    # ── the backup: HOW, or WHY NOT, and never silence ──────────────
+    backup = block.get("backup")
+    if not isinstance(backup, dict):
+        raise Invalid(
+            f"{where} declares no `backup:`.\n"
+            f"  A type with state that does not know how to be backed up is a false\n"
+            f"  promise. Two answers are accepted and there is no third:\n"
+            f"    backup: {{method: dump, dump: <how>, restore: <how>}}\n"
+            f"    backup: {{method: none, reason: <why not>}}")
+    method = backup.get("method")
+    if method not in BACKUP_METHODS:
+        raise Invalid(f"{where}, backup.method: {method!r} is not one of "
+                      f"{' | '.join(BACKUP_METHODS)}")
+    if method == "dump":
+        for field in ("dump", "restore"):
+            if not str(backup.get(field) or "").strip():
+                raise Invalid(
+                    f"{where} says it is backed up by a dump and does not declare "
+                    f"`backup.{field}`.\n"
+                    f"  «It is dumped» is not a method: the command is the contract\n"
+                    f"  `aegis data` implements, and a contract nobody wrote down is\n"
+                    f"  reconstructed differently by whoever needs it next.")
+        if block.get("disco") is None:
+            raise Invalid(
+                f"{where} is dumped and has no `disco:`.\n"
+                f"  Nothing that is not kept can be captured: what would be dumped\n"
+                f"  lives in a volume, and without one the type restarts empty and\n"
+                f"  the backup captures that emptiness on a schedule.")
+    else:
+        if not str(backup.get("reason") or "").strip():
+            raise Invalid(
+                f"{where} declares `backup: {{method: none}}` and no `reason`.\n"
+                f"  Saying a thing is not backed up is legitimate; saying it without\n"
+                f"  saying why is how an oversight passes for a decision.")
+        if block.get("disco") is not None:
+            raise Invalid(
+                f"{where} is NOT backed up and declares `disco: {block['disco']}`.\n"
+                f"  A volume nobody captures is the false promise itself: it looks\n"
+                f"  like durable storage, it survives a restart, and the day the node\n"
+                f"  goes there is nothing to put back. Either it is dumped, or it\n"
+                f"  keeps nothing.")
+    return block
+
+
+def image_of(cat, kind):
+    """The image reference of a provided type, or a refusal that says what to run.
+
+    The refusal is the point. Rendering a StatefulSet from a tag —or
+    worse, from the digest images.txt pins, which is the ORIGIN's and not
+    the internal registry's (measured 2026-08-04: 742f40ea... outside,
+    fe30b547... inside)— produces a manifest that reads correctly and an
+    ImagePullBackOff that reads like a cluster problem.
+    """
+    block = provided_type(cat, kind)
+    if block.get("digest"):
+        return f"{cat['registro']}/{block['imagen']}@{block['digest']}"
+    pending = block["pending"]
+    steps = "\n".join(f"    $ {c}" for c in pending["commands"])
+    raise Invalid(
+        f"the type `{kind}` has no measured image yet, so nothing is written.\n\n"
+        f"  The digest that goes in services.yaml is the INTERNAL registry's, and\n"
+        f"  it can only be read off a live one. On the instance, in this order:\n\n"
+        f"{steps}\n\n"
+        f"  and the digest of the FROM that last command prints goes into\n"
+        f"  `tipos.{kind}.digest` of services.yaml, replacing its `pending:` block.\n\n"
+        # The reason is REPRINTED here, indented, and not summarised: it
+        # is the paragraph somebody already wrote in the catalogue, and
+        # collapsing it into one line —which this did until it was read
+        # out loud— turns three arguments into a wall.
+        + "\n".join(f"  {l}" if l.strip() else "" for l in
+                    str(pending["reason"]).rstrip().splitlines()))
+
+
 def _type_coherence(n, kind, s):
     """A `tipo` that restricts nothing is not a type, it is a label.
 
@@ -356,30 +530,34 @@ def _type_coherence(n, kind, s):
                     f"  A worker does not listen: it processes. If it needs to serve\n"
                     f"  requests, the type is `http`.")
 
-    elif kind == "postgres":
+    elif kind in PROVIDED:
         # It is provided by the PLATFORM: signed image, disk, credential
         # and policies come out of services.yaml, not out of a tenant's
-        # repo.
+        # repo. ONE branch for the three of them, and not three copies of
+        # it: the rules are the same rules, and a copy is where the day
+        # somebody relaxes one of them the other two silently keep it.
+        # The type NAMES itself in every message so the reader is not
+        # told about «a provided service» when they wrote `redis`.
         if has("repo"):
             raise Invalid(
-                f"service {n!r} is postgres and declares `repo`.\n"
+                f"service {n!r} is {kind} and declares `repo`.\n"
                 f"  Databases are provided by the platform (services.yaml): signed\n"
                 f"  image, disk and credential. A repo here means something else was\n"
                 f"  intended.")
         for field in ("puerto", "publico"):
             if has(field):
                 raise Invalid(
-                    f"service {n!r} is postgres and declares `{field}`.\n"
+                    f"service {n!r} is {kind} and declares `{field}`.\n"
                     f"  The port is fixed by the platform and a database is NEVER\n"
                     f"  published: it is reached from inside the namespace and from\n"
                     f"  nowhere else.")
         if s.get("usa"):
             raise Invalid(
-                f"service {n!r} is postgres and declares usa: {s['usa']}.\n"
+                f"service {n!r} is {kind} and declares usa: {s['usa']}.\n"
                 f"  A database does not consume services: it lends them.")
         if has("tamano"):
             raise Invalid(
-                f"service {n!r} is postgres and declares `tamano`.\n"
+                f"service {n!r} is {kind} and declares `tamano`.\n"
                 f"  What a provided service asks for is decided by services.yaml,\n"
                 f"  together with its image, its port and its disk. A `tamano` here\n"
                 f"  would be ignored, and a field that is ignored is worse than one\n"
@@ -665,7 +843,11 @@ def validate(c, plans):
     if not services:
         raise Invalid("contract: 'servicios' empty — an organization with no services is nothing")
     seen = set()
-    has_postgres = any(s.get("tipo") == "postgres" for s in services)
+    # Which PROVIDED types this organization actually declared. A `usa:`
+    # that names one it did not declare is a NetworkPolicy pointing at a
+    # pod that does not exist — the app starts, connects to nothing, and
+    # the error arrives as a timeout in the tenant's own logs.
+    declared_types = {s.get("tipo") for s in services} & PROVIDED
     for s in services:
         # NO `version`. It was allowed and nobody consumed it: a
         # contract could declare `version: "17"` on its database and the
@@ -704,9 +886,9 @@ def validate(c, plans):
             if u == "ai" and ai is None:
                 raise Invalid(f"service {n!r} declares usa:[ai] but the organization "
                               f"has no ai section")
-            if u == "postgres" and not has_postgres:
-                raise Invalid(f"service {n!r} declares usa:[postgres] but the organization "
-                              f"did not declare any service of type postgres")
+            if u in PROVIDED and u not in declared_types:
+                raise Invalid(f"service {n!r} declares usa:[{u}] but the organization "
+                              f"did not declare any service of type {u}")
 
     # ── repo: only if some service IS BUILT ───────────────────────
     #
@@ -728,8 +910,9 @@ def validate(c, plans):
             f"'repo' is required —at the organization level or in the service— because "
             f"these services are BUILT: {which}.\n"
             f"  The types {', '.join(sorted(TYPES_WITH_IMAGE))} come out of an image somebody\n"
-            f"  has to compile and sign. `postgres` does not: it is provided by the\n"
-            f"  platform from services.yaml, and for that no repo is needed.")
+            f"  has to compile and sign. {', '.join(sorted(PROVIDED))} do not: they are\n"
+            f"  provided by the platform from services.yaml, and for those no repo is\n"
+            f"  needed.")
 
     # ── dominio: only if something is PUBLIC ──────────────────────
     public = [s["nombre"] for s in services if s.get("publico")]
@@ -762,6 +945,20 @@ def validate(c, plans):
                 f"  traefik keeps one and the other never receives traffic. There is\n"
                 f"  no error to give it away — the app starts up healthy and stays mute.")
         claimed[s["publico"]] = s["nombre"]
+
+    # ── the catalogue answers for the types that were named ────────
+    #
+    # LAST of the per-service passes and BEFORE the arithmetic, because
+    # this is the only one that reads a file the contract does not
+    # control. It is done for every provided type the contract declares
+    # —not lazily inside the render— so that a services.yaml with a hole
+    # in it, or a type whose image was never measured, is a refusal that
+    # names the file and the command, and not half a directory of
+    # manifests followed by a traceback.
+    if declared_types:
+        cat = yaml.safe_load(open(SERVICES, encoding="utf-8"))
+        for kind in sorted(declared_types):
+            image_of(cat, kind)
 
     # ── and it all has to FIT ──────────────────────────────────────
     # Last, because it needs every service already validated: a sum over
@@ -984,41 +1181,16 @@ spec:
     return "\n".join(lines)
 
 
-def render_data(c, h):
-    """The services the PLATFORM provides, not a tenant's repo.
+def _headless(kind, cat, n, ns, app):
+    """The Service in front of a provided type's StatefulSet.
 
-    Today only postgres. It comes out of services.yaml, which is the
-    table of "what each type is fulfilled with" — the same role
-    ai/routes.yaml plays for the AI capabilities.
+    ONE writer for the three types. It renders byte for byte what the
+    postgres-only version wrote, and that is not decoration: the
+    equivalence harness compares this file's output against v2's, so a
+    refactor that «only tidies» is a refactor that has to prove it.
     """
-    dbs = [s for s in c["servicios"] if s["tipo"] == "postgres"]
-    if not dbs:
-        return None
-
-    org = c["organizacion"]
-    ns = f"org-{org}"
-    cat = yaml.safe_load(open(SERVICES, encoding="utf-8"))
-    t = cat["tipos"]["postgres"]
-    pgres = platform_resources(cat, "postgres")
-    image = f"{cat['registro']}/{t['imagen']}@{t['digest']}"
-
-    parts = [HEADER.format(org=org, hash=h), f"""\
-#
-# The databases of this organization.
-#
-# ONE DATABASE PER ORGANIZATION, never shared. A `DROP` on one cannot
-# touch its neighbour, and the RAM cost of an idle postgres is
-# negligible next to that guarantee.
-#
-# The image goes BY DIGEST (services.yaml). With a tag, Kyverno would
-# append the digest on admission and desired != live forever; the
-# obvious way out —ignoreDifferences on the image— TURNS OFF auto-sync.
-# With the digest in git the mutation is a no-op. That is finding #36."""]
-
-    for s in sorted(dbs, key=lambda x: x["nombre"]):
-        n = s["nombre"]
-        app = f"{org}-{n}"
-        parts.append(f"""\
+    t = provided_type(cat, kind)
+    return f"""\
 ---
 # Headless: every replica gets DNS of its own. With a single replica
 # it makes no difference, but a plain Service in front of a StatefulSet
@@ -1028,12 +1200,57 @@ kind: Service
 metadata:
   name: {n}
   namespace: {ns}
-  labels: {{app: {app}, aegis.dev/component: datos}}
+  labels: {{app: {app}, aegis.dev/component: {t['component']}}}
 spec:
   clusterIP: None
   selector: {{app: {app}}}
   ports:
-    - {{name: postgres, port: {t['puerto']}, targetPort: {t['puerto']}}}
+    - {{name: {kind}, port: {t['puerto']}, targetPort: {t['puerto']}}}"""
+
+
+def render_data(c, h):
+    """The services the PLATFORM provides, not a tenant's repo.
+
+    They come out of services.yaml, which is the table of "what each
+    type is fulfilled with" — the same role ai/routes.yaml plays for the
+    AI capabilities. Three of them since 2026-08-29: `postgres` for the
+    relational data, `mongodb` for the documents, `redis` for the cache
+    in front of either. Which one gets a volume, and which one gets
+    captured by `aegis data`, is decided THERE and not here.
+    """
+    provided = [s for s in sorted(c["servicios"], key=lambda x: x["nombre"])
+                if s["tipo"] in PROVIDED]
+    if not provided:
+        return None
+
+    org = c["organizacion"]
+    ns = f"org-{org}"
+    cat = yaml.safe_load(open(SERVICES, encoding="utf-8"))
+
+    parts = [HEADER.format(org=org, hash=h), f"""\
+#
+# The stateful services of this organization.
+#
+# ONE PER ORGANIZATION, never shared. A `DROP` on one cannot touch its
+# neighbour, and the RAM cost of an idle database is negligible next to
+# that guarantee.
+#
+# The image goes BY DIGEST (services.yaml). With a tag, Kyverno would
+# append the digest on admission and desired != live forever; the
+# obvious way out —ignoreDifferences on the image— TURNS OFF auto-sync.
+# With the digest in git the mutation is a no-op. That is finding #36."""]
+
+    for s in provided:
+        parts.append(RENDER_PROVIDED[s["tipo"]](cat, org, ns, s["nombre"]))
+    return "\n".join(parts) + "\n"
+
+
+def _render_postgres(cat, org, ns, n):
+    t = provided_type(cat, "postgres")
+    pgres = platform_resources(cat, "postgres")
+    image = image_of(cat, "postgres")
+    app = f"{org}-{n}"
+    return "\n".join([_headless("postgres", cat, n, ns, app), f"""\
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -1138,8 +1355,293 @@ spec:
         accessModes: [ReadWriteOnce]
         volumeMode: Filesystem
         resources:
-          requests: {{storage: {t['disco']}}}""")
-    return "\n".join(parts) + "\n"
+          requests: {{storage: {t['disco']}}}"""])
+
+
+def _render_redis(cat, org, ns, n):
+    """The organization's cache. No volume, and that is the type's decision.
+
+    Written where the reason lives, services.yaml: a cache with a disk
+    survives a restart WITH STALE CONTENT, which is worse than surviving
+    empty, and it also looks backed up while being the one thing here
+    nobody captures. `disco` is absent there, so no PVC is rendered here.
+
+    THE PASSWORD NEVER REACHES argv. `redis-server --requirepass <x>`
+    publishes it in /proc/<pid>/cmdline, readable by anything in this
+    pod; the rule is secrets.md's and it has cost this project real
+    incidents. redis-server reads a CONFIG FILE, so the file is composed
+    at start-up on a tmpfs from the value the Secret injected into the
+    environment, through a here-document: the shell writes it to a
+    descriptor and it is an argument of nothing.
+    """
+    t = provided_type(cat, "redis")
+    res = platform_resources(cat, "redis")
+    image = image_of(cat, "redis")
+    app = f"{org}-{n}"
+    # maxmemory at three quarters of the limit, and it is the difference
+    # between a cache and a memory leak with an API. The limit is a
+    # ceiling the KERNEL enforces, and the kernel does not evict: it
+    # kills. redis evicts, but only if it knows where the edge is. The
+    # remaining quarter is the client buffers and the allocator's
+    # fragmentation, which live outside the accounting maxmemory does.
+    maxmemory = _mem(res["limits.memory"]) * 3 // 4
+    return "\n".join([_headless("redis", cat, n, ns, app), f"""\
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {n}
+  namespace: {ns}
+  labels: {{app: {app}, aegis.dev/component: {t['component']}}}
+spec:
+  serviceName: {n}
+  # ONE replica. Two would be two different caches behind one name,
+  # answering different things to the same key.
+  replicas: 1
+  selector:
+    matchLabels: {{app: {app}}}
+  template:
+    metadata:
+      labels: {{app: {app}, aegis.dev/component: {t['component']}}}
+    spec:
+      # The tenant does not talk to the Kubernetes API.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {t['uid']}
+        runAsGroup: {t['gid']}
+        # The gid is NOT the uid here (999:1000, measured in the image's
+        # own config) and fsGroup is what makes the emptyDirs writable
+        # by the process. Guessing it from the uid is a start-up that
+        # dies on «permission denied» over a path nobody named.
+        fsGroup: {t['gid']}
+        seccompProfile: {{type: RuntimeDefault}}
+      containers:
+        - name: redis
+          image: {image}
+          ports:
+            - {{name: redis, containerPort: {t['puerto']}}}
+          env:
+            # The name is the BINARY's, not ours: redis-cli reads the
+            # password from REDISCLI_AUTH and from nowhere else, which is
+            # what lets the readiness probe authenticate without putting
+            # the credential on a command line. The server below reads
+            # the same value out of the environment.
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef: {{name: {n}-credenciales, key: password}}
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              umask 077
+              cat > /run/aegis/redis.conf <<EOF
+              requirepass $REDISCLI_AUTH
+              port {t['puerto']}
+              dir /data
+              save ""
+              appendonly no
+              maxmemory {maxmemory}
+              maxmemory-policy allkeys-lru
+              EOF
+              exec redis-server /run/aegis/redis.conf
+          volumeMounts:
+            # tmpfs, because this is the one file in the pod that holds
+            # the credential in the clear. Same criterion the init uses
+            # for the age key itself (lib/secrets.sh).
+            - {{name: conf, mountPath: /run/aegis}}
+            # /data exists because it is the image's WORKDIR, and it is
+            # an emptyDir because `save ""` and `appendonly no` mean
+            # nothing is ever written into it.
+            - {{name: datos, mountPath: /data}}
+          # readiness with the credential, liveness with the socket, and
+          # the split is deliberate: a liveness probe that needs a
+          # credential turns a wrong credential into a restart loop, and
+          # restarting does not fix a credential. `redis-cli ping` is a
+          # C binary and costs nothing to run every few seconds.
+          readinessProbe:
+            exec: {{command: ["redis-cli", "ping"]}}
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {{port: {t['puerto']}}}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {{drop: [ALL]}}
+            readOnlyRootFilesystem: true
+          resources:
+            requests: {{cpu: {_q(res["requests.cpu"])}, memory: {_q(res["requests.memory"])}}}
+            limits: {{cpu: {_q(res["limits.cpu"])}, memory: {_q(res["limits.memory"])}}}
+      volumes:
+        - name: conf
+          emptyDir: {{medium: Memory}}
+        - name: datos
+          emptyDir: {{}}"""])
+
+
+def _render_mongodb(cat, org, ns, n):
+    """The organization's document database.
+
+    THE CREDENTIAL TRAVELS AS A FILE, not as an environment variable:
+    the image's entrypoint supports `MONGO_INITDB_ROOT_*_FILE` (read in
+    docker-library/mongo's docker-entrypoint.sh, 2026-08-29), and the
+    same mount is what lets `mongodump --config` take the password from
+    a file instead of from argv. One projection of the Secret, two
+    consumers, no command line.
+
+    Setting both of those is ALSO what turns authentication on: the
+    entrypoint adds `--auth` itself when it sees them. Passing `--auth`
+    here as well would be a second authority over the same fact.
+    """
+    t = provided_type(cat, "mongodb")
+    res = platform_resources(cat, "mongodb")
+    image = image_of(cat, "mongodb")
+    app = f"{org}-{n}"
+    # The cache is sized HERE and not left to WiredTiger, because
+    # MongoDB's own FAQ says WiredTiger «may not account for the memory
+    # limits of the specific container» and tells you to set it below the
+    # container's RAM (read 2026-08-29). Left alone in a container it can
+    # size itself from the NODE's memory and get OOM killed by a limit it
+    # never saw. The formula is upstream's own —half of what is left over
+    # 1Gi, with their 256MB floor— fed with the limit instead of with the
+    # host's RAM.
+    gib = 2 ** 30
+    cache = max(0.25, round((_mem(res["limits.memory"]) - gib) / 2 / gib, 2))
+    return "\n".join([_headless("mongodb", cat, n, ns, app), f"""\
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {n}
+  namespace: {ns}
+  labels: {{app: {app}, aegis.dev/component: {t['component']}}}
+spec:
+  serviceName: {n}
+  # ONE replica. A replica set is another decision and another
+  # operator; `replicas: 2` here would be two mongods fighting over one
+  # disk, which is not high availability, it is corruption.
+  replicas: 1
+  selector:
+    matchLabels: {{app: {app}}}
+  template:
+    metadata:
+      labels: {{app: {app}, aegis.dev/component: {t['component']}}}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {t['uid']}
+        runAsGroup: {t['gid']}
+        # fsGroup so the PVC is born writable by that UID: without it
+        # mongod dies on the dbPath and the message looks nothing like
+        # the cause.
+        fsGroup: {t['gid']}
+        seccompProfile: {{type: RuntimeDefault}}
+      containers:
+        - name: mongodb
+          image: {image}
+          ports:
+            - {{name: mongodb, containerPort: {t['puerto']}}}
+          # The image's ENTRYPOINT stays: it is what creates the root
+          # user on the first start and what adds `--auth`. Only the
+          # command it wraps is replaced, and it has to begin with
+          # `mongod` or the entrypoint takes another branch entirely.
+          args:
+            - mongod
+            - --bind_ip_all
+            - --wiredTigerCacheSizeGB
+            - "{cache:g}"
+          env:
+            # _FILE and not the plain variable: this way the credential
+            # is never in the process environment, and the same mount is
+            # what `mongodump --config` reads when the backup runs.
+            - {{name: MONGO_INITDB_ROOT_USERNAME_FILE, value: /etc/aegis/credential/usuario}}
+            - {{name: MONGO_INITDB_ROOT_PASSWORD_FILE, value: /etc/aegis/credential/password}}
+          volumeMounts:
+            - {{name: datos, mountPath: /data/db}}
+            # configdb is declared a volume by the image and mongod
+            # touches it on start-up; the root filesystem is read-only.
+            - {{name: configdb, mountPath: /data/configdb}}
+            # /tmp is not a nicety: the entrypoint writes its temporary
+            # pidfile there ($TMPDIR, defaulted to /tmp) and mongod puts
+            # its unix socket there.
+            - {{name: tmp, mountPath: /tmp}}
+            - {{name: credential, mountPath: /etc/aegis/credential, readOnly: true}}
+          # Same split as the cache and for the same reason: readiness
+          # proves the credential OPENS the server —which is what the
+          # backup will need— and liveness only asks whether the process
+          # is there, so a credential that stopped working is a service
+          # out of rotation and not a pod in a restart loop.
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  U=$(cat /etc/aegis/credential/usuario)
+                  P=$(cat /etc/aegis/credential/password)
+                  mongosh --quiet <<EOF
+                  db.getSiblingDB("admin").auth("$U", "$P")
+                  EOF
+            # mongosh is a heavy shell to start. The period is generous
+            # on purpose: a probe that costs more than what it measures
+            # is a probe that changes what it measures.
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 10
+          livenessProbe:
+            tcpSocket: {{port: {t['puerto']}}}
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {{drop: [ALL]}}
+            readOnlyRootFilesystem: true
+          resources:
+            requests: {{cpu: {_q(res["requests.cpu"])}, memory: {_q(res["requests.memory"])}}}
+            limits: {{cpu: {_q(res["limits.cpu"])}, memory: {_q(res["limits.memory"])}}}
+      volumes:
+        - name: configdb
+          emptyDir: {{}}
+        - name: tmp
+          emptyDir: {{}}
+        - name: credential
+          secret:
+            secretName: {n}-credenciales
+            # 0440 and not 0400: kubelet writes a Secret volume owned by
+            # root and applies `fsGroup` to the GROUP, so with owner-only
+            # bits the process that has to read it —uid {t['uid']}— is
+            # exactly the one that cannot. The narrowest mode that works
+            # is the one that lets the group in.
+            defaultMode: 0440
+  volumeClaimTemplates:
+    # apiVersion, kind and volumeMode DECLARED, for the reason written
+    # at length over the postgres one: without them desired != live on
+    # every refresh and the StatefulSet stays OutOfSync forever.
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: datos
+      spec:
+        accessModes: [ReadWriteOnce]
+        volumeMode: Filesystem
+        resources:
+          requests: {{storage: {t['disco']}}}"""])
+
+
+# One renderer per provided type, and the dispatch is a TABLE and not a
+# chain of `if`s: adding a type is adding a row here and a block in
+# services.yaml, and a type in one of the two and not the other fails
+# loudly with a KeyError naming the type instead of rendering nothing.
+RENDER_PROVIDED = {
+    "postgres": _render_postgres,
+    "redis": _render_redis,
+    "mongodb": _render_mongodb,
+}
 
 
 def repos_of(c):
@@ -1239,6 +1741,12 @@ spec:
 def render_netpol(c, h):
     org = c["organizacion"]
     ns = f"org-{org}"
+    # Read ONCE, and only if some service asks for a provided type: an
+    # organization of four static fronts has no reason to depend on
+    # services.yaml being readable.
+    cat = (yaml.safe_load(open(SERVICES, encoding="utf-8"))
+           if any(set(s.get("usa") or []) & PROVIDED for s in c["servicios"])
+           else None)
     parts = [HEADER.format(org=org, hash=h), f"""\
 #
 # Network isolation. EVERYTHING denied except what the contract
@@ -1339,20 +1847,30 @@ spec:
             matchLabels: {{app: ai-gateway}}
       ports:
         - {{protocol: TCP, port: 8081}}""")
-            elif u == "postgres":
+            elif u in PROVIDED:
                 # Explicit egress even though `allow-intra-namespace`
                 # would already allow it: this policy does not ADD
                 # permission, it DOCUMENTS the dependency. The day
                 # intra-namespace gets closed —which is where it should
                 # be heading— what the contract declares is what will go
                 # on working.
+                #
+                # The label and the port come out of the CATALOGUE, not
+                # out of a constant here. `redis` carries
+                # `component: cache` and `postgres` carries `datos`, and
+                # that word is also what decides who `aegis data` backs
+                # up: two places writing it is two places to get it
+                # wrong, and the disagreement would show up as a cache
+                # in the backup bundle or a database that never got
+                # into one.
+                pt = provided_type(cat, u)
                 parts.append(f"""\
 ---
-# {s['nombre']} -> the organization's database.
+# {s['nombre']} -> the organization's {u}.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-{s['nombre']}-a-postgres
+  name: allow-{s['nombre']}-a-{u}
   namespace: {ns}
 spec:
   podSelector:
@@ -1361,9 +1879,9 @@ spec:
   egress:
     - to:
         - podSelector:
-            matchLabels: {{aegis.dev/component: datos}}
+            matchLabels: {{aegis.dev/component: {pt['component']}}}
       ports:
-        - {{protocol: TCP, port: 5432}}""")
+        - {{protocol: TCP, port: {pt['puerto']}}}""")
             elif u == "bucket":
                 parts.append(f"""\
 ---
@@ -1619,7 +2137,7 @@ resources:
     # the contract.
     if any(s.get("repo") for s in c["servicios"]) or c.get("repo"):
         parts.append("  - apps.yaml")
-    if any(s["tipo"] == "postgres" for s in c["servicios"]):
+    if any(s["tipo"] in PROVIDED for s in c["servicios"]):
         parts.append("  - datos.yaml")
     if c.get("dominio") and any(s.get("publico") for s in c["servicios"]):
         parts.append("  - routes.yaml")
@@ -1654,9 +2172,13 @@ def secrets_of(c):
         s.append("secret-ai-gateway-key.enc.yaml")
     if (c.get("almacenamiento") or {}).get("bucket"):
         s.append("secret-garage.enc.yaml")
-    # One per database and not one per organization: two databases with
-    # the same credential are one database with two names.
-    for b in sorted(x["nombre"] for x in c["servicios"] if x["tipo"] == "postgres"):
+    # One per PROVIDED service and not one per organization: two
+    # databases with the same credential are one database with two
+    # names. The cache is in here too — a cache with no password inside
+    # a namespace is not a problem today and is one the day the
+    # namespace holds two tenants' worth of sessions, and by then it is
+    # a migration instead of a line.
+    for b in sorted(x["nombre"] for x in c["servicios"] if x["tipo"] in PROVIDED):
         s.append(f"secret-{b}-credenciales.enc.yaml")
     return s
 

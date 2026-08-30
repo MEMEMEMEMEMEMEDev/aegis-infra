@@ -153,6 +153,8 @@ ones that do not:
 | `http` | the tenant's repo | **mandatory** | optional | optional |
 | `worker` | the tenant's repo | ✗ | ✗ | optional |
 | `postgres` | **the platform** | ✗ (5432) | ✗ never | ✗ |
+| `mongodb` | **the platform** | ✗ (27017) | ✗ never | ✗ |
+| `redis` | **the platform** | ✗ (6379) | ✗ never | ✗ |
 
 Of them all, the only one that is about **security** and not about
 coherence is `estatico` without `usa:`. A static front end has no server
@@ -162,15 +164,121 @@ the bucket goes behind an `http` — which is exactly the BFF's role, and
 what the portfolio's and the blog's contracts already say in a comment.
 Now the generator says it too.
 
-`postgres` is the first type **provided by the platform**: it carries no
-repo, and its image (signed, by digest), its disk and its credential
-come out of `services.yaml`. One database per organization, never
-shared — a `DROP` in one cannot touch its neighbour.
+`postgres`, `mongodb` and `redis` are the types **provided by the
+platform**: they carry no repo, and their image (signed, by digest),
+their disk and their credential come out of `services.yaml`. One per
+organization, never shared — a `DROP` in one cannot touch its
+neighbour. The next section is about what that costs them.
 
 `aegis dev test-types` walks every rule with its counter-example and
 demands that the generator reject it **naming the right reason**: a
 rejection for the wrong reason would come out green all the same, and
 that is a mistake already made four times this week.
+
+### What the platform provides, and what each type owes
+
+Three types come out of `services.yaml` instead of out of a tenant's
+repo, and they were three from 2026-08-29: before that an organization
+that needed a cache, or one that stored documents, **had no way of
+asking**. The validator rejected the word, and the only way out was to
+smuggle the workload into the tenant's own repo as an `http` service —
+outside the quota's sight, outside the backup's sight, and with a
+credential the platform never generated.
+
+| tipo | what it holds | volume | backup | label | port |
+|---|---|---|---|---|---|
+| `postgres` | the relational data | 2Gi | dump per database + globals | `datos` | 5432 |
+| `mongodb` | the documents | 2Gi | dump per database | `datos` | 27017 |
+| `redis` | a **copy** of what is in the other two | none | **none, and it says why** | `cache` | 6379 |
+
+**A type with state owes its backup.** That is the rule, and it has
+exactly two legitimate answers: the type says HOW it is captured, with
+the commands `aegis data` runs, or it says WHY NOT, with a reason
+somebody can read. Silence is not a third answer: a type that declares
+nothing and a type that declares «none» look identical from outside, and
+the first is how something ends up unprotected without anybody having
+decided it. The two halves also have to agree — with a volume it has to
+be dumped, and without a dump it may not have one, because a volume
+nobody captures is the false promise itself. Check 156 measures all of
+it, including the label: what backs these up finds them by
+`aegis.dev/component=datos`, so a dumped type that is not labelled that
+way promises a backup nothing will come looking for.
+
+**`redis` has no volume, and that is the type's whole decision.** A
+cache with a disk survives a restart WITH STALE CONTENT, which is worse
+than surviving empty: an empty cache is refilled from the source of
+truth on the next request, while a full one answers with rows that were
+deleted while it was down. It also turns the cache into something that
+looks backed up and is not. If what is wanted is data that survives,
+what is wanted is not a cache — it is one of the other two. So: no
+`PersistentVolumeClaim`, `save ""`, `appendonly no`, and a `maxmemory`
+at three quarters of the memory limit with `allkeys-lru`. That last one
+is the difference between a cache and a memory leak with an API: the
+limit is a ceiling the kernel enforces, and the kernel does not evict,
+it kills.
+
+**A limit of the cache, said before somebody discovers it.**
+`aegis data restore` scales the namespace's consumers down and back up,
+and the cache is not a consumer — it carries `aegis.dev/component`,
+which is exactly what that selector excludes. So it keeps running across
+a restore, holding entries computed before the database went back in
+time. Until the restore learns to restart it inside its own window, a
+restore of an organization that uses a cache is followed by deleting the
+cache pod by hand.
+
+**`mongodb` cannot be deployed yet, and the reason is worth reading.**
+Its image has never been mirrored, scanned or signed by this platform,
+so `services.yaml` carries no digest for it — and none may be invented
+there, because the digest that file pins is the one the INTERNAL
+registry serves, not the one the public one does (`crane copy` of a
+multi-architecture index does not preserve it: measured for postgres on
+2026-08-04, `742f40ea…` outside and `fe30b547…` inside). A type in that
+state carries a `pending:` block with the exact commands instead, and
+the generator **refuses** any contract that declares it, printing them:
+
+```
+aegis image request mongo:8.0.24     # mirror, scan, sign
+aegis image from    mongo:8.0.24     # the FROM, whose digest goes in services.yaml
+```
+
+Then the digest of that line replaces the `pending:` block in
+`tipos.mongodb.digest`, and from that moment contracts may declare it.
+`redis` is one step further along — its image is already declared in
+`mirror-images/images.txt` — so for it the first command is
+`aegis image check`, which says whether it is mirrored and signed and
+prints what fixes it if it is not.
+
+**And a second precondition, which the mirror does not cover:**
+`aegis data` has to learn the type before an organization depends on it.
+The `backup.dump:` and `backup.restore:` of `services.yaml` are the
+contract it has to implement, verbatim, and until it does,
+`aegis data backup` finds a `StatefulSet` labelled `datos` that comes
+out of no contract it understands and **stops** — which is the right
+behaviour, it refuses to back up blind, and is also a broken backup for
+every other organization on the instance.
+
+**How the credential gets in, in each of the three.** Never through
+`argv`: `/proc/<pid>/cmdline` is readable by anything in the pod, and
+each mechanism was picked by reading the binary rather than by habit.
+
+- `postgres` needs none inside the pod: over the unix socket it is its
+  own superuser, which is why `pg_isready` can probe it with no secret
+  at all.
+- `redis` reads a config file, so the file is composed at start-up on a
+  tmpfs from the value the Secret put in the environment, through a
+  here-document — the shell writes it to a descriptor and it is an
+  argument of nothing. `redis-cli` reads `REDISCLI_AUTH` from the
+  environment, which is what lets the readiness probe authenticate.
+- `mongodb` gets it as a FILE: the image's entrypoint supports
+  `MONGO_INITDB_ROOT_*_FILE`, and that same mount is what
+  `mongodump --config` reads when the backup runs. One projection of the
+  Secret, two consumers, no command line.
+
+**Readiness uses the credential, liveness only the socket**, in both new
+types. A liveness probe that needs a credential turns a credential that
+stopped working into a restart loop, and restarting does not fix a
+credential: what it should produce is a service out of rotation, which
+is what readiness is for.
 
 ### What a service asks for: `tamano`
 
@@ -682,6 +790,13 @@ Each organization needs, depending on what it asks for:
 | `regcred-internal` | always | read credential for the internal registry |
 | `ai-gateway-key` | if there is an `ai:` | `aegisk_…` key issued by the gateway |
 | `garage-<org>` | if there is a `bucket:` | the S3 key pair of its own bucket |
+| `<service>-credenciales` | one per `postgres`, `mongodb` or `redis` | user and password generated by aegis |
+
+One per **service** and not one per organization: two databases sharing
+a credential are one database with two names. The cache gets one too —
+a cache with no password inside a namespace is not a problem today and
+is one the day that namespace holds two tenants' worth of sessions, and
+by then it is a migration instead of a line.
 
 ```
 aegis secret create orgs/veterinaria.yaml   # creates the ones that are missing

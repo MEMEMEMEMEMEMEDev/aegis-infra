@@ -137,6 +137,42 @@ while chunk and chunk[-1].lstrip().startswith("#"):
 with open(dst, "a", encoding="utf-8") as f:
     f.write("\n" + "\n".join(chunk) + "\n")
 SIZES
+
+    # And the catalogue's per-type fields, which are NOT a rename either:
+    # `gid`, `component` and `backup` are what a provided type gained on
+    # 2026-08-29, when `redis` and `mongodb` joined `postgres` and the
+    # question «who backs this up, and with what group does it write»
+    # stopped having one obvious answer. v3's generator DEMANDS them of
+    # every type a contract names —an unbacked-up type with state is the
+    # false promise this whole change exists to forbid— so without this
+    # the subject dies on every contract that declares a database and
+    # the harness reports the absence of three keys as a difference in
+    # the render.
+    #
+    # ONLY THE KEYS THAT ARE MISSING, and only for the types the
+    # reference already carries. Copying the seed's block whole would
+    # bring the seed's DIGEST, and then the two sides would be rendering
+    # two different images and calling the difference a regression.
+    python3 - "$d/services.yaml" "$AEGIS_ROOT/seed/platform/services.yaml" <<'CATALOG'
+import sys, yaml
+dst, src = sys.argv[1], sys.argv[2]
+d = yaml.safe_load(open(dst, encoding="utf-8")) or {}
+s = yaml.safe_load(open(src, encoding="utf-8")) or {}
+types = d.get("tipos") or {}
+seed = s.get("tipos") or {}
+missing = False
+for kind, block in types.items():
+    for key in ("gid", "component", "backup"):
+        if key not in (block or {}) and key in (seed.get(kind) or {}):
+            block[key] = seed[kind][key]
+            missing = True
+if missing:
+    # Rewritten as STRUCTURE and not spliced as text: this is a scratch
+    # copy nobody reads for its comments, and a sed over YAML is the
+    # repo's Disease A.
+    yaml.safe_dump(d, open(dst, "w", encoding="utf-8"), sort_keys=False,
+                   allow_unicode=True)
+CATALOG
 }
 
 build_copy "$TMP/v2" v2 ; cp -a "$TMP/v2" "$TMP/v2-base"
