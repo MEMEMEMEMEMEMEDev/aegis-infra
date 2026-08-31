@@ -120,11 +120,19 @@ fi
 # stops guarding is worse than one that guards too much.
 _ENV_FOR_GUARD=""
 for _a in "$@"; do case "$_a" in -chdir=*) _ENV_FOR_GUARD="${_a#-chdir=}" ;; esac; done
+# ABSOLUTE OR RELATIVE, and this file already warned about it fifty
+# lines below: an absolute -chdir turns "$HERE/$ENV" into a garbage
+# path. The first version of this guard concatenated blindly, could
+# not find variables.tf, and fell back to the historical list — which
+# is exactly the failure it was written to fix. It was caught in one
+# reading only because the fallback SAYS it is falling back.
+_ENV_DIR="$_ENV_FOR_GUARD"
+case "$_ENV_DIR" in /*) : ;; *) _ENV_DIR="$HERE/$_ENV_DIR" ;; esac
 INJECTED=()
-if [[ -n "$_ENV_FOR_GUARD" && -f "$HERE/$_ENV_FOR_GUARD/variables.tf" ]]; then
+if [[ -n "$_ENV_FOR_GUARD" && -f "$_ENV_DIR/variables.tf" ]]; then
     while read -r _v; do
         [[ -n "$_v" ]] && INJECTED+=("TF_VAR_$_v")
-    done < <(python3 - "$HERE/$_ENV_FOR_GUARD/variables.tf" <<'PY'
+    done < <(python3 - "$_ENV_DIR/variables.tf" <<'PY'
 import re, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 for m in re.finditer(r'variable\s+"([a-z0-9_]+)"\s*\{(.*?)\n\}', src, re.S):
