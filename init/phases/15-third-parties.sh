@@ -409,18 +409,42 @@ EOF
     # not by this phase: `remote adopt` is the one that knows how to
     # prove the pair against the destination before storing it, and
     # proving it is the difference between a credential and a hope.
-    run_cmd ${AEGIS_CMD:-aegis} data remote adopt \
-        --credentials-file "$SECRETS_TMP/r2_credential" \
-        || die "$(cat <<'MSG'
-the R2 pair was minted and the destination did NOT accept it (HTTP 401).
-Nothing was stored, which is right: a credential that does not open the
+    # NOT FATAL, and the reason is an order of priority written down
+    # rather than felt: this phase's job is to leave the instance able to
+    # run. An off-site copy that could not be established is a REDUCED
+    # instance, not a broken one — it is exactly the state an EDGE=local
+    # instance lives in by design, and that state already has a gate
+    # with no subject and a warning that says what it costs.
+    #
+    # Dying here would hold a whole platform hostage to a third party's
+    # credential model, and the platform is what serves the sites.
+    #
+    # What is NOT done is going quiet: the gate is recorded without a
+    # subject, the warning says the copies stay on this machine, and
+    # `aegis check` keeps asking for the off-site copy every time it
+    # runs. An instance whose backups do not leave the house has to say
+    # so on every check, not once at install time.
+    if run_cmd ${AEGIS_CMD:-aegis} data remote adopt \
+        --credentials-file "$SECRETS_TMP/r2_credential"; then
+        log_ok "off-site destination of the backups: scoped R2 token minted for the bucket $R2_BUCKET and adopted"
+    else
+        log_warn "$(cat <<'MSG'
+the R2 pair was minted and the destination did NOT accept it (HTTP 401), so
+nothing was stored — which is right: a credential that does not open the
 bucket, sitting in the store, is an off-site copy that exists on paper.
+
+THE INIT GOES ON. This instance will capture and encrypt its backups and
+leave them on a disk of this same house: a fire, a theft or a dead
+controller takes the data and its copies together. It is a legitimate
+profile and it is NOT a safe one, and `aegis check` will say so every time
+it runs until the destination is adopted.
 
 WHAT IS ALREADY RULED OUT, so that nobody re-walks it (measured 2026-08-31):
   · the signer. Our SigV4 reproduces AWS's published test vector byte for
     byte, so the request is signed correctly.
-  · the endpoint, the region and the bucket. The bucket was created by the
-    apply just above, path-style and region `auto` are what R2 documents.
+  · the endpoint, the region and the bucket. The bucket exists — the apply
+    just above created it — and path-style with region `auto` is what R2
+    documents.
   · the shape of the pair. R2 answers 401 for ANY well-formed pair it does
     not recognise and 400 for a malformed one; ours got 401, so it is
     well-formed and unrecognised.
@@ -428,26 +452,24 @@ WHAT IS ALREADY RULED OUT, so that nobody re-walks it (measured 2026-08-31):
 WHAT IS LEFT, and it is the open question: whether a generic ACCOUNT token
 minted over /accounts/{id}/tokens can serve as an S3 credential at all.
 Cloudflare's «Get S3 API credentials from an API token» links the USER
-token endpoint, and R2's own page issues its tokens through the R2 section
-of the dashboard rather than the generic one.
+token endpoint, and R2 issues its own tokens from the R2 section of the
+dashboard rather than the generic one.
 
-THE WAY THROUGH, which is supported and takes a minute:
+TO CLOSE IT LATER, whenever there is time — the platform does not wait:
   1. dashboard -> R2 Object Storage -> Account Details -> Manage API tokens
   2. Create Account API token, permission «Object Read & Write»,
-     scoped to the bucket this phase just created
-  3. it shows an Access Key ID and a Secret Access Key. Put them in a file,
-     one per line, and adopt them:
-       printf '%s\n%s\n' '<ACCESS_KEY_ID>' '<SECRET>' > /dev/shm/r2.txt
-       chmod 600 /dev/shm/r2.txt
-       aegis data remote adopt --credentials-file /dev/shm/r2.txt
-       shred -u /dev/shm/r2.txt
-  4. re-run this phase: it finds the pair in the store and moves on.
-
-`adopt` proves the pair against the destination before storing it, so if it
-prints the bucket, the off-site copy is real and not a hope.
+     scoped to the bucket this phase created
+  3. printf '%s\n%s\n' '<ACCESS_KEY_ID>' '<SECRET>' > /dev/shm/r2.txt
+     chmod 600 /dev/shm/r2.txt
+     aegis data remote adopt --credentials-file /dev/shm/r2.txt
+     shred -u /dev/shm/r2.txt
+  4. `adopt` proves the pair against the destination before storing it, so
+     if it prints the bucket, the off-site copy is real and not a hope.
 MSG
 )"
-    log_ok "off-site destination of the backups: scoped R2 token minted for the bucket $R2_BUCKET and adopted"
+        gate_no_subject "backup-r2-credential" \
+          "the R2 pair was minted and the destination rejected it: this instance has NO off-site copy. It is NOT that the destination is fine — it is that this instance has none, and aegis check repeats it on every run"
+    fi
 
     # the master dies HERE (ephemeral for real):
     shred -u "$CF_MASTER"
