@@ -339,7 +339,7 @@ EOF
       export TF_VAR_backups_bucket="$R2_BUCKET"
       run_cmd "$TOFU_R2" -chdir="$R2_ENV" init -input=false \
         && run_cmd "$TOFU_R2" -chdir="$R2_ENV" apply -auto-approve ) \
-      || die "the backups bucket could not be created — without it, a token scoped to it opens nothing and the off-site copy exists only on paper"
+      || log_warn "the backups bucket could not be created or adopted into state. The most common cause on a RE-INSTALL is that it already exists on the account from a previous instance: `aegis destroy` does not delete it, on purpose — a bucket holds backups and deleting it on a teardown would destroy the copies the teardown exists to survive. The phase goes on: the token below is scoped BY NAME, so an existing bucket is scoped correctly all the same, and `data remote adopt` gives the real verdict by asking the destination"
 
     # THE BOOTSTRAP TOKEN DIES HERE. It can create and delete buckets
     # across the whole account, and the instance never needs that again:
