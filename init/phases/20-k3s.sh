@@ -65,11 +65,23 @@ run_cmd retry_net 2 ansible/.venv/bin/ansible-playbook \
 # instance that was already installed and later switched to AI=gpu,
 # this comes out RED and its diagnosis says to restart k3s — red and
 # noisy is exactly what that case deserves.
+# EVERY read of that path goes through sudo, the existence test
+# included. Measured on the first live run, 2026-08-31: the directory
+# is root-only (drwx------), so an unprivileged `[[ -f ]]` answers NO
+# about a file that is right there. The grep below already used sudo
+# and would have found the handler; the test in front of it did not,
+# so the gate never reached its subject and reported a failure about a
+# host that was correctly configured.
+#
+# It is the same class as the export that copied nothing in August: a
+# privileged path probed from an unprivileged shell. There the shell
+# said success and did nothing; here it said failure and measured
+# nothing. Both are an instrument that never touched what it judged.
 _k3s_containerd_conf() {
     local f
     for f in /var/lib/rancher/k3s/agent/etc/containerd/config.toml \
              /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml; do
-        [[ -f "$f" ]] && { printf '%s' "$f"; return 0; }
+        sudo -n test -f "$f" && { printf '%s' "$f"; return 0; }
     done
     return 1
 }
