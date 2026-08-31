@@ -643,10 +643,32 @@ spec:
               git commit -m "deploy: ${TAG} by digest (build ${BUILD_NUMBER})"
 
               # Retry: another build may have pushed in the meantime.
+              #
+              # AND THE ABORT IS THE WHOLE POINT, learned on 2026-08-31.
+              # Two builds raced, both wrote the same line of
+              # k8s/overlays/dev/kustomization.yaml, and the rebase
+              # stopped on a conflict. The loop then retried `git pull
+              # --rebase` over a tree with unmerged files, which can
+              # never succeed: the three attempts failed with the same
+              # message, and «retry three times» had become «fail three
+              # times slowly».
+              #
+              # A retry that does not undo the failed attempt is not a
+              # retry. So the rebase is aborted, and the digest line is
+              # re-applied on top of whatever the other build left —
+              # which is the correct resolution every time: the file
+              # holds ONE digest, the newest build's is the one that
+              # must survive, and there is nothing to merge.
               for i in 1 2 3; do
                 if git pull --rebase origin ${BRANCH_NAME} && git push origin ${BRANCH_NAME}; then
                   exit 0
                 fi
+                git rebase --abort 2>/dev/null || true
+                git fetch origin ${BRANCH_NAME}
+                git reset --hard origin/${BRANCH_NAME}
+                node ci/write-digest.mjs "${REGISTRY}/${IMAGE}=${DIGEST}"
+                git add k8s/overlays/dev/kustomization.yaml
+                git commit -m "deploy: ${TAG} by digest (build ${BUILD_NUMBER})" || true
                 sleep 5
               done
               echo "could not push the digest after 3 attempts" >&2
