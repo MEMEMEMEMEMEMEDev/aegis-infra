@@ -253,6 +253,80 @@ else
     # backup writing to another would both look correct.
     R2_BUCKET="$(${AEGIS_CMD:-aegis} data remote bucket)" \
         || die "the destination bucket could not be derived: without it the R2 token would be scoped to a name nobody writes to"
+
+    # ── THE BUCKET IS CREATED HERE, AND IT USED NOT TO BE ────────────
+    # Measured on the first live run, 2026-08-31: this phase minted the
+    # scoped token, `remote adopt` proved it against the destination,
+    # and the destination answered 401. The credential was not wrong —
+    # THE BUCKET DID NOT EXIST. `tofu/envs/data-r2` shipped in the seed
+    # and no phase applied it: the env was designed as a manual step of
+    # the protocol, and this phase depended on that step without ever
+    # checking whether it had been taken. The symptom therefore read as
+    # a credential problem, which is the most expensive way to be
+    # wrong: it sends the operator to look at the token.
+    #
+    # A token scoped to a bucket that does not exist opens nothing, so
+    # the order is not a preference: the bucket first, then the token
+    # that is scoped to it.
+    #
+    # TWO DIFFERENT PERMISSIONS, and mixing them up is what makes this
+    # look confusing: creating a bucket is `Workers R2 Storage Write`
+    # over the ACCOUNT; writing objects into one bucket is `Workers R2
+    # Storage Bucket Item Write` over THAT bucket. The first one lives
+    # only as long as this apply; the second is what the instance keeps.
+    python3 - "$SECRETS_TMP/cf_pgroups.json" "$CF_ACCOUNT_ID" \
+        > "$SECRETS_TMP/r2_admin_mint.json" <<'EOF' || die "the R2 admin permission group did not match — check the names the API returned above"
+import json, sys
+groups = json.load(open(sys.argv[1]))["result"]
+account = sys.argv[2]
+WANT = "Workers R2 Storage Write"
+ids = [g["id"] for g in groups if g.get("name") == WANT]
+if not ids:
+    print(f"no permission group named {WANT!r}. Available: "
+          f"{sorted(g.get('name', '') for g in groups)[:40]}", file=sys.stderr)
+    sys.exit(1)
+print(json.dumps({
+    "name": "aegis-r2-bucket-bootstrap",
+    "policies": [{
+        "effect": "allow",
+        "resources": {f"com.cloudflare.api.account.{account}": "*"},
+        "permission_groups": [{"id": ids[0]}],
+    }],
+}))
+EOF
+    _cf_call POST "/accounts/$CF_ACCOUNT_ID/tokens" "$SECRETS_TMP/r2_admin_mint.json" \
+        > "$SECRETS_TMP/r2_admin_res.json"
+    gate "cf-r2-admin-token-minted" bash -c \
+      "jq -e '.success == true' '$SECRETS_TMP/r2_admin_res.json' >/dev/null"
+    ( umask 077; jq -r '.result.value' "$SECRETS_TMP/r2_admin_res.json" | tr -d '\n' \
+        > "$SECRETS_TMP/r2_admin_token" )
+    R2_ADMIN_TOKEN_ID="$(jq -r '.result.id' "$SECRETS_TMP/r2_admin_res.json")"
+    shred -u "$SECRETS_TMP/r2_admin_res.json"
+
+    # The env's own variables, exported and not passed in argv (/proc is
+    # world-readable). The bucket name comes from the SAME derivation
+    # the token and the backup use — a second source here is how a
+    # token scoped to one name and a backup writing to another both end
+    # up looking correct.
+    TOFU_R2="$PLATFORM_DIR/tofu/tofu-apply.sh"
+    R2_ENV="$PLATFORM_DIR/tofu/envs/data-r2"
+    log_info "creating the backups bucket $R2_BUCKET (tofu envs/data-r2)"
+    ( export TF_VAR_cloudflare_api_token="$(cat "$SECRETS_TMP/r2_admin_token")"
+      export TF_VAR_cloudflare_account_id="$CF_ACCOUNT_ID"
+      export TF_VAR_backups_bucket="$R2_BUCKET"
+      run_cmd "$TOFU_R2" -chdir="$R2_ENV" init -input=false \
+        && run_cmd "$TOFU_R2" -chdir="$R2_ENV" apply -auto-approve ) \
+      || die "the backups bucket could not be created — without it, a token scoped to it opens nothing and the off-site copy exists only on paper"
+
+    # THE BOOTSTRAP TOKEN DIES HERE. It can create and delete buckets
+    # across the whole account, and the instance never needs that again:
+    # what it keeps is the one scoped to a single bucket, minted below.
+    # A credential that outlives its job is a credential nobody
+    # remembers to revoke.
+    shred -u "$SECRETS_TMP/r2_admin_token"
+    _cf_call DELETE "/accounts/$CF_ACCOUNT_ID/tokens/$R2_ADMIN_TOKEN_ID" >/dev/null 2>&1 \
+      || log_warn "the R2 bootstrap token could not be revoked over the API — revoke aegis-r2-bucket-bootstrap by hand in the panel"
+    unset R2_ADMIN_TOKEN_ID
     python3 - "$SECRETS_TMP/cf_pgroups.json" "$CF_ACCOUNT_ID" "$R2_BUCKET" \
         > "$SECRETS_TMP/r2_mint.json" <<'EOF' || die "the R2 permission group did not match — check the names the API returned above"
 import json, sys
