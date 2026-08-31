@@ -79,7 +79,26 @@ for var, default, val in asks:
         bad.append("%s is asked for and NOBODY reads it: the operator answers a "
                    "question that changes nothing" % var)
         continue
-    joined = "\n".join(f.read_text(errors="replace") for f in consumers)
+    # NEAR THE VARIABLE, and this was corrected on 2026-08-31 because
+    # the full teeth run caught it: searching the whole file for the
+    # value made `cpu: 500m` in a resource limit, and the English word
+    # `no` in any sentence, count as «somebody serves this value». The
+    # check was reading prose and calling it consumption, and its own
+    # red_1 stopped biting the day another phase happened to contain
+    # those letters.
+    #
+    # Three lines either side of a line that names the VARIABLE. It is
+    # a proximity rule and not a parse, and that is deliberate: a
+    # `case` arm, an `[[ == ]]`, a `${VAR:-default}` and the `if` that
+    # follows one all fall inside it, and a resource limit twenty lines
+    # away does not.
+    lines = []
+    for f in consumers:
+        text = f.read_text(errors="replace").splitlines()
+        hits = [i for i, l in enumerate(text) if word.search(l)]
+        for i in hits:
+            lines += text[max(0, i - 3):i + 4]
+    joined = "\n".join(lines)
     for v in enums[val]:
         if not re.search(r'(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])' % re.escape(v), joined):
             bad.append("%s=%s is offered by the wizard and NAMED BY NO CONSUMER of %s: "
