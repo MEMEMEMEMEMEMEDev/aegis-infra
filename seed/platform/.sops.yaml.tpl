@@ -13,3 +13,19 @@ creation_rules:
   - path_regex: tofu/secrets/.*\.enc\.yaml$
     unencrypted_suffix: _unencrypted
     age: __AGE_PUBLIC__
+  # tofu's STATE. It was NOT here until 2026-08-31, and the hole was
+  # quiet in the worst way: the wrapper encrypts the state after every
+  # apply, sops answered «no creation rules», and the apply had already
+  # created the resources. So the state — which carries the tunnel
+  # token and the Access service token's secret, because a state holds
+  # what the API answered — stayed in PLAINTEXT on disk while the
+  # encrypted copy beside it aged. On the previous lineage's machine
+  # that encrypted copy was TEN DAYS STALE and nobody knew.
+  #
+  # No `encrypted_regex` here, unlike the k8s rule: in a Secret only
+  # data/stringData is sensitive and the rest is what makes a diff
+  # readable. A tofu state has no such split — the token is in an
+  # attribute, the id is in another, and which attributes are sensitive
+  # changes with the provider. Everything, then.
+  - path_regex: tofu/envs/.*/terraform\.tfstate\.enc\.json$
+    age: __AGE_PUBLIC__
