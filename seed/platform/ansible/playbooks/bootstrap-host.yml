@@ -127,3 +127,46 @@
           # managed by aegis-init (bootstrap-host) — bug B, run #7
           resolv-conf: /run/systemd/resolve/resolv.conf
       when: resolved_real.stat.exists
+
+    # ── the NVIDIA container runtime, and WHY IT LIVES HERE ─────────
+    # Until 2026-08-31 nothing in this artifact installed it and
+    # nothing measured it. The manifest that needs it says so in a
+    # comment (k8s/base/gpu/runtimeclass.yaml) and a comment installs
+    # nothing: its absence surfaced far from its cause, as a 300 s
+    # timeout of the `gpu-units-advertised` gate about forty minutes
+    # into an install, with a diagnosis listing four possible causes.
+    #
+    # It goes in THIS playbook and not in phase 87, and that placement
+    # is the whole trick: bootstrap-host runs BEFORE k3s exists. With
+    # the runtime already on the PATH, k3s writes its containerd
+    # config for the first time with the `nvidia` handler in it. No
+    # ordering problem, no restart, no window where the RuntimeClass
+    # names something containerd has never heard of.
+    #
+    # And what is deliberately NOT done: `nvidia-ctk runtime configure`
+    # against k3s's containerd. k3s REGENERATES that file from its
+    # template on every start, so an edit by hand is erased on the next
+    # boot — the class of drift this artifact refuses. Letting k3s
+    # detect the runtime itself is the only version that survives.
+    - name: NVIDIA container toolkit — apt keyring (AI=gpu only)
+      ansible.builtin.get_url:
+        url: https://nvidia.github.io/libnvidia-container/gpgkey
+        dest: /etc/apt/keyrings/nvidia-container-toolkit.asc
+        mode: "0644"
+      when: aegis_ai | default('no') == 'gpu'
+
+    - name: NVIDIA container toolkit — apt source (AI=gpu only)
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/nvidia-container-toolkit.list
+        mode: "0644"
+        content: |
+          # managed by aegis-init (bootstrap-host) — AI=gpu
+          deb [signed-by=/etc/apt/keyrings/nvidia-container-toolkit.asc] https://nvidia.github.io/libnvidia-container/stable/deb/$(ARCH) /
+      when: aegis_ai | default('no') == 'gpu'
+
+    - name: NVIDIA container toolkit installed (AI=gpu only)
+      ansible.builtin.apt:
+        name: nvidia-container-toolkit
+        state: present
+        update_cache: true
+      when: aegis_ai | default('no') == 'gpu'

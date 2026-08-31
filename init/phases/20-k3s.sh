@@ -35,8 +35,15 @@ ansible_become_setup
 # idempotent BY CONTRACT (A13): re-running the whole playbook is safe
 # and it resumes where the state was left:
 log_info "bootstrap-host.yml (sysctl, kernel modules, apt, /etc/rancher)"
+# AI is read HERE and not assumed: with AI=gpu this playbook also puts
+# the NVIDIA container runtime on the host, and it does it BEFORE k3s
+# exists so that k3s writes its containerd config with the handler
+# already present. Both edges of the branch are declared, which is what
+# check 115 demands of every phase that forks.
+AI="${AI:-no}"
 run_cmd retry_net 2 ansible/.venv/bin/ansible-playbook \
     -i ansible/inventory/hosts.ini \
+    -e "aegis_ai=$AI" \
     ansible/playbooks/bootstrap-host.yml "${ANSIBLE_BECOME_ARGS[@]}"
 
 # ── pinned K3s ─────────────────────────────────────────────────────
@@ -44,6 +51,46 @@ log_info "install-k3s.yml (pin in group_vars, --disable traefik/servicelb)"
 run_cmd retry_net 2 ansible/.venv/bin/ansible-playbook \
     -i ansible/inventory/hosts.ini \
     ansible/playbooks/install-k3s.yml "${ANSIBLE_BECOME_ARGS[@]}"
+
+# ── the GPU runtime, measured where it becomes true ────────────────
+# The toolkit was installed above, before k3s existed, precisely so
+# that k3s would write its containerd config with the `nvidia` handler
+# in it. That is a CONSEQUENCE, so it is measured here and not assumed
+# there: an apt package that installed fine and a containerd that never
+# saw it look identical from the playbook's side.
+#
+# Reading the generated config and not `nvidia-ctk --version`: the
+# question is not whether the binary exists, it is whether the runtime
+# k3s will hand to a Pod with `runtimeClassName: nvidia` exists. On an
+# instance that was already installed and later switched to AI=gpu,
+# this comes out RED and its diagnosis says to restart k3s — red and
+# noisy is exactly what that case deserves.
+_k3s_containerd_conf() {
+    local f
+    for f in /var/lib/rancher/k3s/agent/etc/containerd/config.toml \
+             /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml; do
+        [[ -f "$f" ]] && { printf '%s' "$f"; return 0; }
+    done
+    return 1
+}
+if [[ "$AI" == "gpu" ]]; then
+    _nvidia_runtime_present() {
+        local f; f="$(_k3s_containerd_conf)" || return 1
+        sudo -n grep -qE 'runtimes\.nvidia|nvidia-container-runtime' "$f"
+    }
+    gate_diag "nvidia-runtime-in-containerd" \
+      'echo "  k3s writes its containerd config at start-up, DETECTING the runtimes";
+       echo "  it finds on the PATH. If this is red, one of two things happened:";
+       echo "    - nvidia-container-toolkit did not install (read the playbook output), or";
+       echo "    - this host already had k3s and it has not restarted since:";
+       echo "      sudo systemctl restart k3s, then aegis init --from 20";
+       echo "  Nothing here edits that file by hand: k3s regenerates it on every";
+       echo "  boot, so an edit would be erased and the drift would be silent."' \
+      _nvidia_runtime_present
+else
+    gate_no_subject "nvidia-runtime-in-containerd" \
+      "AI=$AI: this instance deploys no GPU engines, so no container runtime for the card is installed and there is nothing to measure. It is NOT that the runtime is fine — it is that this lane does not use one"
+fi
 
 # ── kubeconfig: copy AND verify the target (A11) ───────────────────
 run_cmd mkdir -p "$HOME/.kube"
