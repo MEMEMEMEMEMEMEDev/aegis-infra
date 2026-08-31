@@ -66,20 +66,36 @@ def find(exact, pattern, scope_hint):
     a fallback nobody hears is how a rename becomes tomorrow's silent
     403.
     """
+    # THE SCOPE DISAMBIGUATES, because THE NAME IS NOT UNIQUE. Measured
+    # against the live account on 2026-08-31, after a 403 that took most
+    # of a day:
+    #
+    #   Access: Apps and Policies Write  scopes=[com.cloudflare.api.account.zone]
+    #   Access: Apps and Policies Write  scopes=[com.cloudflare.api.account]
+    #
+    # Two different permission groups, same name, different ids. Taking
+    # the first match returned the ZONE one, while the policy below
+    # grants an ACCOUNT resource: a zone permission over an account
+    # resource grants nothing, the token mints clean, and every Access
+    # call fails later with 403 auth.forbidden.
+    #
+    # And the old scope test was no defence: it asked whether "account"
+    # was CONTAINED in the scope, and `com.cloudflare.api.account.zone`
+    # contains it too. A substring where an identity was needed.
+    wanted_scope = f"com.cloudflare.api.{scope_hint}"
     for g in groups:
-        if g["name"] == exact:
+        if g["name"] == exact and wanted_scope in (g.get("scopes") or []):
             return {"id": g["id"], "name": g["name"]}
     rx = re.compile(pattern, re.I)
     for g in groups:
-        if rx.search(g["name"]) and any(scope_hint in s for s in
-                                        g.get("scopes", []) or [scope_hint]):
+        if rx.search(g["name"]) and wanted_scope in (g.get("scopes") or []):
             print(f"WARNING: no permission group is named {exact!r} any more; "
                   f"falling back to {g['name']!r} by pattern. If Access calls "
                   f"start failing with 403, this line is where to look.",
                   file=sys.stderr)
             return {"id": g["id"], "name": g["name"]}
-    print(f"NO MATCH for {exact!r} nor /{pattern}/ (scope ~{scope_hint}). Available:",
-          file=sys.stderr)
+    print(f"NO MATCH for {exact!r} nor /{pattern}/ with scope "
+          f"{wanted_scope!r}. Available:", file=sys.stderr)
     for g in groups:
         print(f"  - {g['name']}  scopes={g.get('scopes')}", file=sys.stderr)
     sys.exit(1)
