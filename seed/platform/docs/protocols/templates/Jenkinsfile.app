@@ -381,6 +381,37 @@ spec:
                 'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \
             || echo 'NOTICE: the from-guard event could not be recorded in vlogs-events (the guard does NOT change its verdict over this)'
 
+          # BOOTSTRAP: the same marker the signature half already uses.
+          # Measured on 2026-08-31, on the first run that reached this
+          # stage: phase 60 builds the canary to prove webhook -> build
+          # -> deploy END TO END, and it runs BEFORE phase 80, which is
+          # what mirrors anything at all. So at that moment the canary's
+          # base CANNOT be in the internal registry — there is no
+          # registry content yet — and this guard was stopping a build
+          # for not having what nothing had yet produced.
+          #
+          # The signature half already knew this and degraded to «could
+          # not be measured». The existence half did not, and the
+          # asymmetry is what broke the install: half the guard was
+          # bootstrap-aware and half of it was not.
+          #
+          # It is NOT silenced. The build goes on and says, in the same
+          # words the phase's log will carry, that its base was not
+          # verified and why. And the moment phase 80 exists — the
+          # cosign key is its marker — this guard is hard again,
+          # forever, for every build that follows.
+          if [ "$STATE" = "not-evaluable" ] && [ "$BAD" -gt 0 ]; then
+            echo "============= from-guard: NOT MEASURED (bootstrap) ============="
+            if [ -f from-msg ]; then cat from-msg; fi
+            echo "This build runs BEFORE the supply chain exists (no cosign key yet:"
+            echo "phase 80 has not run). Its base is NOT mirrored and NOT signed, and"
+            echo "that is the expected shape of the canary that proves the webhook"
+            echo "path at phase 60. From the first build after phase 80, this guard"
+            echo "stops instead of warning."
+            echo "==============================================================="
+            BAD=0
+          fi
+
           if [ "$BAD" -gt 0 ] || [ "$UNSIGNED" -gt 0 ]; then
             echo "=================== from-guard: STOP ==================="
             if [ -f from-msg ]; then cat from-msg; fi
