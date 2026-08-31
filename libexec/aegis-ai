@@ -704,14 +704,34 @@ _AI_CLAIM_FOR() {
 }
 
 cmd_seed() {
-  local lane="${1:-}" cache="${AEGIS_AI_MODELS:-$AI_MODELS_DEFAULT}" claim
+  local lane="${1:-}" src="" claim
+  shift 2>/dev/null || true
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --from) src="${2:-}"; shift 2 ;;
+      --from=*) src="${1#--from=}"; shift ;;
+      *) red "unknown argument: $1"; exit 3 ;;
+    esac
+  done
   claim="$(_AI_CLAIM_FOR "$lane")" || {
     red "which lane: cpu or gpu"
     echo "  ${AEGIS_CMD:-aegis} ai seed cpu   -> the modelos-cpu volume"
     echo "  ${AEGIS_CMD:-aegis} ai seed gpu   -> the models-hf volume"
+    echo
+    echo "  --from <dir> takes THAT directory instead of the local cache. It is not"
+    echo "  a convenience: the two lanes hold different models, and the cache is one"
+    echo "  directory. Seeding gpu from a cache that also holds the CPU lane's files"
+    echo "  would put them on the GPU volume too."
     exit 3
   }
-  [ -d "$cache" ] || { red "there is no cache at $cache — run \`${AEGIS_CMD:-aegis} ai models\` first"; exit 1; }
+  # THE SOURCE IS PER LANE, and the first version of this command got
+  # that wrong: it copied the WHOLE cache into whichever volume was
+  # named, so seeding one lane carried the other lane's files with it.
+  # The default stays the cache because that is where `ai models`
+  # leaves what it fetched — which today is the CPU lane only.
+  [ -n "$src" ] || src="${AEGIS_AI_MODELS:-$AI_MODELS_DEFAULT}"
+  local cache="$src"
+  [ -d "$cache" ] || { red "there is nothing at $cache — run \`${AEGIS_CMD:-aegis} ai models\` first, or pass --from <dir>"; exit 1; }
   command -v kubectl >/dev/null || { red "kubectl is not on the PATH"; exit 1; }
   kubectl get pvc -n "$NS" "$claim" >/dev/null 2>&1 \
     || { red "the $claim volume does not exist in $NS: the subsystem is not deployed"; exit 1; }
