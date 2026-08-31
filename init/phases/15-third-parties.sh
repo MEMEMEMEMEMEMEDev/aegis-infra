@@ -170,6 +170,21 @@ else
         printf '    "Account API Tokens: Edit".\n' >&2
         CF_MASTER="$(prompt_secret_manual 'CF master credential' 30 cf_master)"
     fi
+    # THE OTHER SECRET, refused by shape and by name. Twice on
+    # 2026-08-31 an age private key was handed to this prompt instead of
+    # the Cloudflare credential — once typed into it, once written into
+    # the file this phase reads. It is an easy mistake to make and an
+    # expensive one to discover: the API answers «Invalid access token»,
+    # which sends the operator to check the token that was never the
+    # problem, while a private key sits somewhere it should not.
+    #
+    # An age secret key is unmistakable — it starts with a fixed prefix
+    # — so there is no reason to let it through and every reason to say
+    # what happened. The value is NOT printed: only what it is.
+    if [[ "$(head -c 15 "$CF_MASTER")" == "AGE-SECRET-KEY-" ]]; then
+        shred -u "$CF_MASTER" 2>/dev/null || rm -f "$CF_MASTER"
+        die "that is an AGE PRIVATE KEY, not a Cloudflare credential — it has been shredded, and it is the key that decrypts this instance's whole store. What this phase asks for is a Cloudflare API token (mixed case, about 40 characters) or a Global API Key (37 hex). The age key was already asked for in phase 10 and is not asked for again anywhere in this init: if something asks you for a secret from here on, it belongs to Cloudflare"
+    fi
     if [[ "$(cat "$CF_MASTER")" =~ ^[0-9a-f]{37}$ ]]; then
         CF_AUTH_MODE=key
         if ni_mode; then
