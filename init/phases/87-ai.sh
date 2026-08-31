@@ -87,12 +87,14 @@ log_info "AI=$AI — deploying the AI subsystem"
 # false: sixty-four zeros, the same convention the app templates'
 # overlays ship with.
 _ai_images_pinned() {
-    python3 - "$AI_DIR/kustomization.yaml" <<'EOF'
-import sys, yaml
+    AI_IMAGES_NEEDED="$AI_IMAGES_NEEDED" python3 - "$AI_DIR/kustomization.yaml" <<'EOF'
+import os, sys, yaml
 k = yaml.safe_load(open(sys.argv[1], encoding="utf-8")) or {}
 zeros = "sha256:" + "0" * 64
+needed = set((os.environ.get("AI_IMAGES_NEEDED") or "").split())
 bad = [i.get("name", "?") for i in (k.get("images") or [])
-       if i.get("digest", zeros) == zeros]
+       if i.get("digest", zeros) == zeros
+       and i.get("name", "").rsplit("/", 1)[-1] in needed]
 if not (k.get("images") or []):
     print("the kustomization declares no `images:` block at all: nothing pins "
           "the AI images and every manifest would deploy a bare name", file=sys.stderr)
@@ -102,10 +104,78 @@ if bad:
     sys.exit(1)
 EOF
 }
+
+# WHICH ROWS THIS LANE ACTUALLY NEEDS, and this is a real distinction
+# and not a shortcut. Under AI=cpu the GPU engines are synced with zero
+# replicas: nothing ever pulls their image. Demanding a digest for them
+# would make a cpu-only instance pay the GPU engine's build — measured
+# in hours on a domestic uplink — for an image no pod will open. And
+# the marker left in that row is not a lie there: it says «this image
+# was never built here», which under AI=cpu is exactly true. A digest
+# invented to satisfy a gate would be the lie.
+if [[ "$AI" == "gpu" ]]; then
+    AI_IMAGES_NEEDED="ai-gateway aegis-ai-vllm aegis-engine-cpu"
+else
+    AI_IMAGES_NEEDED="ai-gateway aegis-engine-cpu"
+fi
+
+# ── 87.1a the images are BUILT, not demanded ───────────────────────
+# Until 2026-08-31 this phase opened by DEMANDING the images already
+# pinned, and on a fresh instance that could never be true: nobody had
+# built anything, so `AI=gpu` was an answer the wizard offered and the
+# init could not serve. The phase now produces what it needs and then
+# verifies it, which is the same shape phases 50 and 80 already have
+# (`jenkins_build_retry ci-images`, `mirror-images`, `base-images`).
+#
+# IDEMPOTENT BY MEASUREMENT, not by a flag: whatever is already pinned
+# is not rebuilt. A re-run of this phase over a working instance fires
+# nothing.
+#
+# The timeouts are not decoration either. The CPU lane resolves and
+# unpacks wheels of hundreds of MB; the GPU engine downloads a CUDA
+# 12.8 torch and its own Jenkinsfile declares four hours, because on a
+# domestic uplink the first build is measured in hours and a timeout
+# that cuts it would turn a slow success into a red that says nothing.
+_ai_row_pinned() {
+    python3 - "$AI_DIR/kustomization.yaml" "$1" <<'EOF'
+import sys, yaml
+k = yaml.safe_load(open(sys.argv[1], encoding="utf-8")) or {}
+zeros = "sha256:" + "0" * 64
+for i in (k.get("images") or []):
+    if i.get("name", "").rsplit("/", 1)[-1] == sys.argv[2]:
+        sys.exit(0 if i.get("digest", zeros) != zeros else 1)
+sys.exit(1)
+EOF
+}
+
+for _img in $AI_IMAGES_NEEDED; do
+    if _ai_row_pinned "$_img"; then
+        log_info "$_img: already pinned, not rebuilt"
+        continue
+    fi
+    case "$_img" in
+        aegis-engine-cpu) _job=engine-cpu   ; _to=3600  ;;
+        aegis-ai-vllm)    _job=engine-gpu   ; _to=14400 ;;
+        # The gateway is a multibranch: its buildable item is the
+        # branch, not the folder. Firing the folder does nothing and
+        # would look like a success.
+        ai-gateway)       _job="ai-gateway-mb/main" ; _to=1800 ;;
+    esac
+    log_info "$_img: not pinned — firing $_job (up to $((_to / 60)) min)"
+    gate "ai-image-built-$_img" jenkins_build_retry "$_job" "$_to" 2
+    gate "ai-image-pinned-$_img" \
+        run_cmd "$AEGIS_ROOT/libexec/aegis-ai" images "$_img"
+done
+unset _img _job _to
+
 gate_diag "ai-images-pinned" \
-  'echo "  the AI images are pinned in k8s/base/ai-system/kustomization.yaml, one row each.";
-   echo "  aegis-engine-cpu and aegis-ai-vllm are built by this instance from ai/engine-cpu/";
-   echo "  and ai/engine-gpu/; ai-gateway is mirrored in from its own repository.";
+  'echo "  the AI images this lane needs are pinned in";
+   echo "  k8s/base/ai-system/kustomization.yaml, one row each.";
+   echo "  aegis-engine-cpu and aegis-ai-vllm are built by this instance from";
+   echo "  ai/engine-cpu/ and ai/engine-gpu/; ai-gateway comes from its own";
+   echo "  repository (AI_GATEWAY_REPO), through the multibranch the platform seeds.";
+   echo "  Under AI=cpu the GPU row stays on the marker ON PURPOSE: those";
+   echo "  engines land at zero replicas and nothing pulls them.";
    echo "  See docs/protocols/ai-subsystem.md §3, and read ai/engine-gpu/Containerfile";
    echo "  before building that one: it ships DECLARED AS NOT VERIFIED."' \
   _ai_images_pinned

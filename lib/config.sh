@@ -174,6 +174,23 @@ config_wizard() {
       "         and the container toolkit ON THIS HOST: phase 87" \
       "         measures them and stops if they are not there."
 
+    # Only when there IS an AI subsystem. The gateway is not part of
+    # the artifact and is not mirrored either: it is a repository of its
+    # own, and this is where the instance says where it lives. With
+    # AI=no it is written EMPTY, and empty is what makes the job-dsl
+    # skip seeding its job.
+    if [[ "$AI" != no ]]; then
+        ask AI_GATEWAY_REPO "ai-gateway" _v_reponame \
+          "Repository that builds the AI gateway, under $GH_OWNER." \
+          "It is NOT created by the init and it is NOT one of the two" \
+          "above: it is a repo of yours that already exists, with its" \
+          "own Containerfile and Jenkinsfile. The platform seeds a" \
+          "multibranch job against it; that pipeline builds, scans," \
+          "signs and pushes, and phase 87 pins the digest."
+    else
+        AI_GATEWAY_REPO=""
+    fi
+
     if [[ "$EDGE" == local ]]; then
         # Asked for and left empty ON PURPOSE, not omitted: the conf has
         # ONE shape, and a variable that exists empty says "this profile
@@ -198,7 +215,7 @@ config_wizard() {
     local v
     for v in EDGE EDGE_BIND_IP GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN ACME_EMAIL \
              KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP AEGIS_WORKSPACE \
-             CF_ACCOUNT_ID CF_ZONE_ID AI; do
+             CF_ACCOUNT_ID CF_ZONE_ID AI AI_GATEWAY_REPO; do
         printf '  %-22s = %s\n' "$v" "${!v}"
     done
     local ok
@@ -214,7 +231,7 @@ config_wizard() {
         echo "# regenerate with: aegis init --configure"
         for v in EDGE EDGE_BIND_IP GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN \
                  ACME_EMAIL KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP \
-                 CF_ACCOUNT_ID CF_ZONE_ID AI; do
+                 CF_ACCOUNT_ID CF_ZONE_ID AI AI_GATEWAY_REPO; do
             # ${!v:-}: under EDGE=local the two Cloudflare ids and, under
             # cloudflare, EDGE_BIND_IP are deliberately EMPTY. They are
             # still WRITTEN, so the conf has one shape and no consumer has
@@ -258,6 +275,17 @@ config_validate() {
     # which of the three it meant, and so does this.
     AI="${AI:-no}"
     _v_ai "$AI" || { log_warn "AI must be no, cpu or gpu (it says '$AI')"; return 1; }
+    # The same shape as the two Cloudflare ids: REQUIRED when there is a
+    # subsystem, and EMPTY when there is not. A leftover repository name
+    # in a conf with AI=no is a job seeded against something nobody
+    # asked for.
+    AI_GATEWAY_REPO="${AI_GATEWAY_REPO:-}"
+    if [[ "$AI" != no ]]; then
+        [[ -n "$AI_GATEWAY_REPO" ]] || missing+=(AI_GATEWAY_REPO)
+    elif [[ -n "$AI_GATEWAY_REPO" ]]; then
+        log_warn "AI=no but AI_GATEWAY_REPO carries a value — with no subsystem there is no gateway to build"
+        return 1
+    fi
     for v in GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN ACME_EMAIL \
              KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP; do
         [[ -n "${!v:-}" ]] || missing+=("$v")

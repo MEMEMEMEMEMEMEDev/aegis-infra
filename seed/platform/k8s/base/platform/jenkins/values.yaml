@@ -210,6 +210,95 @@ controller:
                   }
                 }
               }
+          # The three AI images. Until 2026-08-31 their build
+          # definitions existed and NOTHING fired them, which from the
+          # instance's side is the same as having no source at all: the
+          # rows in the ai-system kustomization stayed on the
+          # sixty-four-zero marker and phase 87 could not open.
+          #
+          # Fired BY HAND like mirror-images, and for the same reason:
+          # they change rarely, and a build per push of the platform
+          # repo would rebuild them on every manifest change that does
+          # not touch them. Phase 87 fires them when it needs them.
+          - script: >
+              pipelineJob('engine-cpu') {
+                displayName('engine-cpu (AI: the lane with no card)')
+                description('Builds the image of the CPU lane from ai/engine-cpu/Containerfile with unprivileged kaniko, scans it (blocking), pushes it and signs it by digest. The weights do NOT travel in it: they live on the modelos-cpu volume, so changing a model does not force a re-signing. Pin the result with `aegis ai images`.')
+                definition {
+                  cpsScm {
+                    scm {
+                      git {
+                        remote {
+                          url('git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git')
+                          credentials('ops-stack-repo-ro')
+                        }
+                        branch('main')
+                      }
+                    }
+                    scriptPath('ai/engine-cpu/Jenkinsfile')
+                  }
+                }
+              }
+          - script: >
+              pipelineJob('engine-gpu') {
+                displayName('engine-gpu (AI: the vLLM engine — the first build IS the verification)')
+                description('Builds the image that serves the GPU lanes from ai/engine-gpu/Containerfile. That Containerfile was written from upstream build definitions and NEVER built: its pins are defensible and none of them is confirmed by a running engine. This job is what turns that into a measurement. It is slow by nature — on a domestic uplink the first build is measured in hours — and it fails early if the base FROM is still a placeholder.')
+                definition {
+                  cpsScm {
+                    scm {
+                      git {
+                        remote {
+                          url('git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git')
+                          credentials('ops-stack-repo-ro')
+                        }
+                        branch('main')
+                      }
+                    }
+                    scriptPath('ai/engine-gpu/Jenkinsfile')
+                  }
+                }
+              }
+          # The gateway is NOT part of this artifact and is not mirrored
+          # either: it is a repository of its own, and the instance says
+          # where it lives. Vendoring its source here would make this
+          # product the place where somebody else's gateway is
+          # maintained; declaring a mirror row with an origin no public
+          # registry serves would be a lie the job discovers at runtime.
+          #
+          # The `if` is not decoration. With AI=no the operator is never
+          # asked for the repository and the value renders EMPTY, and an
+          # empty string is falsy in the groovy this job-dsl already is:
+          # the job simply is not seeded. A multibranch pointing at an
+          # empty repository would be a broken job on every instance
+          # that wanted no AI at all.
+          - script: >
+              if ('__AI_GATEWAY_REPO__') {
+                multibranchPipelineJob('ai-gateway-mb') {
+                  displayName('ai-gateway (multibranch: the door and its controller, one image, two binaries)')
+                  branchSources {
+                    github {
+                      id('ai-gateway-gh')
+                      repoOwner('__GH_OWNER__')
+                      repository('__AI_GATEWAY_REPO__')
+                      scanCredentialsId('github-token')
+                    }
+                  }
+                  orphanedItemStrategy {
+                    discardOldItems { numToKeep(10) }
+                  }
+                  triggers {
+                    periodicFolderTrigger {
+                      interval('2m')
+                    }
+                  }
+                  configure { node ->
+                    def traits = node / sources / data / 'jenkins.branch.BranchSource' / source / traits
+                    traits << 'org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait' {
+                      strategyId(1)
+                    }
+                  }
+                }
+              }
           # --- DERIVED by aegis-org (tenant jobs): do not edit by hand ---
           # One multibranch job per repo declared in a contract in
           # orgs/. The job's name is its Application's: one repo, one

@@ -436,7 +436,7 @@ gate_red() {
 # dummy values from it too. Until 2026-08-26 the same names were written
 # out by hand in three files, which is three chances for the fourth
 # person to add a placeholder in two of them.
-_CONFIG_PLACEHOLDERS='__\(GH_OWNER\|PLATFORM_REPO\|APP_REPO\|ROOT_DOMAIN\|REGISTRY_CLUSTER_IP\|ACME_EMAIL\|AEGIS_PROFILE\|OBS_RETENCION_METRICAS\|OBS_RETENCION_LOGS\|OBS_CF_CAIDO_FOR\|OBS_DEADMAN_REPEAT\|OBS_SCRAPE_JOBS_MIN\)__'
+_CONFIG_PLACEHOLDERS='__\(GH_OWNER\|PLATFORM_REPO\|APP_REPO\|AI_GATEWAY_REPO\|ROOT_DOMAIN\|REGISTRY_CLUSTER_IP\|ACME_EMAIL\|AEGIS_PROFILE\|OBS_RETENCION_METRICAS\|OBS_RETENCION_LOGS\|OBS_CF_CAIDO_FOR\|OBS_DEADMAN_REPEAT\|OBS_SCRAPE_JOBS_MIN\)__'
 # The floor of JobDeScrapeDesaparecido per edge (see the table above).
 # Declared, and verified by check 092 against vmagent's job list.
 _obs_scrape_jobs_min() {
@@ -463,6 +463,7 @@ render_platform_placeholders() {
             -e "s|__GH_OWNER__|$GH_OWNER|g" \
             -e "s|__PLATFORM_REPO__|$PLATFORM_REPO|g" \
             -e "s|__APP_REPO__|$APP_REPO|g" \
+            -e "s|__AI_GATEWAY_REPO__|${AI_GATEWAY_REPO:-}|g" \
             -e "s|__ROOT_DOMAIN__|$ROOT_DOMAIN|g" \
             -e "s|__REGISTRY_CLUSTER_IP__|$REGISTRY_CLUSTER_IP|g" \
             -e "s|__ACME_EMAIL__|$ACME_EMAIL|g" \

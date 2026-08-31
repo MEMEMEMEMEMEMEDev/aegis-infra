@@ -44,3 +44,11 @@ CF_ZONE_ID=""
 # A value outside these three is NOT read as "no": the phase dies
 # rather than guess which one was meant.
 AI="no"
+# Repository that builds the AI gateway, under GH_OWNER. The gateway is
+# NOT part of this artifact and is not mirrored: it is a repo of your
+# own, with its own Containerfile and Jenkinsfile, and this is where the
+# instance says where it lives. The platform seeds a multibranch job
+# against it.
+# With AI=no it stays EMPTY, and the validation demands it: empty is
+# also what makes the job-dsl skip seeding that job.
+AI_GATEWAY_REPO=""
