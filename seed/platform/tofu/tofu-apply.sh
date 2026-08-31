@@ -74,7 +74,19 @@ fi
 #    captured. Source: the workspace's aegis-init.conf (or an explicit
 #    AEGIS_INIT_CONF); a TF_VAR_* already exported by the caller takes
 #    precedence. ──────────────────────────────────────────────
-AEGIS_CONF="${AEGIS_INIT_CONF:-$HERE/../../init/aegis-init.conf}"
+# THE PATH IS THE INSTANCE'S, and it was the previous lineage's until
+# 2026-08-31. This wrapper looked for `init/aegis-init.conf`, which is
+# where the config lived when the product and the instance were one
+# directory. In this artifact they are two: the config is
+# `$AEGIS_HOME/aegis.conf`, and `$HERE/../..` from platform/tofu IS
+# $AEGIS_HOME.
+#
+# Nobody had noticed because the rehearsal that exercised this wrapper
+# ran with EDGE=local, where there is no tunnel env to apply. The
+# first cloudflare run found it on its first `tofu init`, with a
+# message that named the file it could not find — which is the one
+# thing that made it a five-minute diagnosis instead of an afternoon.
+AEGIS_CONF="${AEGIS_INIT_CONF:-$HERE/../../aegis.conf}"
 if [[ -f "$AEGIS_CONF" ]]; then
     # shellcheck source=/dev/null
     source "$AEGIS_CONF"
