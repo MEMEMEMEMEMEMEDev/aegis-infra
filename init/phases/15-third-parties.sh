@@ -133,7 +133,16 @@ if [[ "${EDGE:-cloudflare}" == local ]]; then
     log_warn "EDGE=local: the R2 credential is NOT minted — there is no Cloudflare account. The backups WILL be captured and encrypted, and they will stay on this machine: with this profile there is no off-site copy unless the operator wires their own transport (AEGIS_BACKUP_SINK, or an R2 account adopted by hand)"
     gate_no_subject "backup-r2-credential" \
       "EDGE=local: there is no account to mint an R2 token against, so nothing was measured about the off-site destination. It is NOT that the destination is fine — it is that this instance has none"
-elif [[ -f "$CF_API_FILE" && -f "$CF_DNS_FILE" && -f "$CF_ACCESS_FILE" ]]; then
+elif [[ -f "$CF_API_FILE" && -f "$CF_DNS_FILE" && -f "$CF_ACCESS_FILE" \
+      && -f "$STATE_SECRETS/r2_access_key_id.enc" \
+      && -f "$STATE_SECRETS/r2_secret_access_key.enc" ]]; then
+    # ALL FOUR, and BOTH HALVES of the fourth. The R2 pair was missing
+    # from this condition entirely, and naming only its id would leave
+    # the state this lane fears most: half a pair stored, which opens
+    # nothing and looks configured. With only three named here, an instance whose R2 pair
+    # failed to mint would re-run, take this branch, and come out green
+    # with no off-site destination at all — the phase saying complete
+    # about work it had just skipped.
     log_info "scoped CF tokens already in the store — not asking for the master (re-run)"
     CF_API="$(restore_secret cf_api_token)"
     CF_DNS="$(restore_secret cf_dns_token)"
@@ -187,6 +196,20 @@ else
         "jq -e '.success == true' '$SECRETS_TMP/cf_pgroups.json' >/dev/null"
     mint_cf_token() {   # <store-name> <token-name> <python-policy-builder>
         local store="$1" tok_name="$2" builder="$3"
+        # IDEMPOTENT PER TOKEN, and it did not use to be. Until
+        # 2026-08-31 the whole block was governed by ONE condition —
+        # «are the other three in the store?» — so a re-run where only
+        # the R2 pair was missing skipped it entirely and reported the
+        # phase complete. The off-site copy was absent and the phase was
+        # green: the re-run «fixed» the failure by not doing the work.
+        # Each secret answers for itself now, which is what this file's
+        # own header claimed all along.
+        if [[ -f "$STATE_SECRETS/$store.enc" ]]; then
+            restore_secret "$store" > "$SECRETS_TMP/$store"
+            log_info "$tok_name already in the store — not minted again"
+            printf '%s' "$SECRETS_TMP/$store"
+            return 0
+        fi
         python3 "$builder" "$SECRETS_TMP/cf_pgroups.json" "$tok_name" \
             "$CF_ACCOUNT_ID" "$CF_ZONE_ID" > "$SECRETS_TMP/mint.json" || \
             die "the permission groups did not match — check the names above"

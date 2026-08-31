@@ -156,6 +156,8 @@ RECIPES_EXTRA=$(cat <<'TABLA'
 tunnel_token|tofu|25-edge-tofu|-|check_tunnel|Cloudflare|ALL the public hostnames go down
 access_st_id|tofu|25-edge-tofu|-|check_access_st|Cloudflare|automation stops crossing Access (it is rotated together with the secret)
 access_st_secret|tofu|25-edge-tofu|-|check_access_st|Cloudflare|automation stops crossing Access (it is rotated together with the id)
+r2_access_key_id|manual|15-third-parties|-|check_r2_pair|Cloudflare|the backups stop leaving the machine (rotated together with the secret)
+r2_secret_access_key|manual|15-third-parties|-|check_r2_pair|Cloudflare|the backups stop leaving the machine (rotated together with the id)
 argocd_admin_pass|manual|-|-|check_argocd_admin|-|nobody gets into ArgoCD through the UI
 argocd_server_secretkey|manual|-|-|-|-|ALL ArgoCD sessions are closed
 TABLA
@@ -603,6 +605,33 @@ check_argocd_admin() {
     return 1
 }
 
+check_r2_pair() {
+    # The pair that carries the backups off this machine. It is checked
+    # by ASKING THE DESTINATION, not by looking at the store: a pair
+    # that is present and no longer opens the bucket is exactly the
+    # failure this whole lane exists to prevent — an off-site copy that
+    # exists on paper and fails on the day it is needed.
+    #
+    # `remote status` reaches R2 and reports the ages. Its rc 2 is a
+    # destination that could NOT be reached, which is NOT a destination
+    # with a dead credential: reporting them alike sends the operator to
+    # mint a token when the problem is a network.
+    local rc=0
+    "${AEGIS_CMD:-aegis}" data remote status >/dev/null 2>&1 || rc=$?
+    case "$rc" in
+        0) return 0 ;;
+        2) log_warn "the R2 destination did not answer: the pair is NOT proved dead, it is unproved"; return 3 ;;
+        *) log_error "the stored pair no longer opens the backups bucket"; return 1 ;;
+    esac
+}
+
+# WHY `manual` AND NOT `normal`: rotating this pair is not generating a
+# new value here. The secret half is the sha256 of a Cloudflare token's
+# VALUE, and Cloudflare shows that value once, at creation. So a
+# rotation means minting a new scoped token with the master credential
+# — which the instance deliberately does not keep — and adopting the
+# derived pair. `aegis init --from 15-third-parties` is that procedure,
+# and it already refuses to store a pair the destination rejects.
 check_cf_access() {
     # The consumer of the Access token is tofu. That the env's `plan`
     # runs clean proves that the token can still READ the 4
