@@ -1,0 +1,36 @@
+[project]
+name = "engine-cpu"
+version = "0.1.0"
+description = "Carril CPU de AI: voz, oido y vision. NO toca la GPU."
+# 3.12 y no la ultima: onnxruntime y ctranslate2 publican ruedas hasta
+# 3.13. Con 3.14 uv compilaria desde fuente o fallaria, y el error no se
+# parece en nada a "esa version es muy nueva".
+requires-python = ">=3.12,<3.13"
+
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.32",
+  "python-multipart>=0.0.18",  # los subidos de oido.exe llegan multipart
+  "numpy>=1.26,<3",
+
+  # voz.exe — Kokoro 82M por ONNX. Este paquete NO arrastra torch: esa
+  # es la razon de elegirlo. Trae onnxruntime y su propio espeak.
+  "kokoro-onnx>=0.4",
+
+  # oido.exe — faster-whisper corre sobre CTranslate2, tampoco torch.
+  # Arrastra `av`, que es quien sabe abrir el webm/opus del navegador.
+  "faster-whisper>=1.1",
+
+  # vision.exe — RT-DETRv2 crudo sobre onnxruntime. Sin transformers:
+  # el pre y el post proceso son treinta lineas y `transformers` pesa
+  # mas que los tres modelos juntos.
+  "onnxruntime>=1.20",
+  "pillow>=11",
+
+  # embeddings — multilingual-e5-small por ONNX. `tokenizers` es la
+  # libreria de Rust de HF: sabe leer el tokenizer.json del modelo sin
+  # arrastrar transformers ni torch, que es la regla de todo este venv.
+  "tokenizers>=0.20",
+
+  "huggingface-hub>=0.26",
+]

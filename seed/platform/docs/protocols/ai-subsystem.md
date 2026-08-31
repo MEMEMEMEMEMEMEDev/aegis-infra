@@ -125,7 +125,7 @@ init container waiting on a server built from another commit.
 | Image | Where it comes from |
 |---|---|
 | `aegis-ai-vllm` | built here, from `ai/engine-gpu/Containerfile` |
-| `aegis-engine-cpu` | built here — **the source has not been brought into this artifact yet**; see §6 |
+| `aegis-engine-cpu` | built here from `ai/engine-cpu/`, by the `engine-cpu` job |
 | `ai-gateway` | mirrored into the internal registry from its own repository (gateway and controller are two binaries in one image, deliberately) |
 
 They ship pinned to the **sixty-four-zero marker**, deliberately and
@@ -208,14 +208,13 @@ separate act** — issuing a new key revokes nothing.
 
 ## 6. What is not there yet, said plainly
 
-- **The CPU lane's server module.** Its manifests, its volume and its
-  netpol are here; the source that would build `aegis-engine-cpu` is
-  not, so that image row stays on the marker and the lane does not come
-  up. The lane's design is intact and its image is the only missing
-  piece.
 - **The job that builds the GPU image.** `ai/engine-gpu/Jenkinsfile`
   exists and nothing fires it: registering it is one item in
-  `jenkins/values.yaml`'s job-dsl, beside the five that are there.
+  `jenkins/values.yaml`'s job-dsl, beside the ones that are there. The
+  same is true of `ai/engine-cpu/Jenkinsfile`, whose source arrived on
+  2026-08-31: an image with a build definition nobody can trigger is,
+  from the instance's point of view, the same as an image with no
+  source at all.
 - **The weight fetchers** (§4).
 - **The consumer test.** Every gate in phase 87 measures the platform
   side. The defining test is a tenant backend reaching the internal door

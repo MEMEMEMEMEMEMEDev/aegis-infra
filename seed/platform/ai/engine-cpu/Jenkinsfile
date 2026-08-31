@@ -1,0 +1,244 @@
+// engine-cpu — build, scan, push and signature of the CPU lane's image.
+//
+// A job in the JCasC job-dsl, scriptPath ai/engine-cpu/Jenkinsfile. It
+// is fired BY HAND, like mirror-images: this module changes little, and
+// a build per push of the platform repo would rebuild the image on every
+// manifest change that does not touch it.
+//
+// WHY A JOB AND NOT A MANUAL CEREMONY ON THE OPERATOR'S MACHINE (which
+// is how the GPU engine's image was assembled once, and why that image
+// is not reproducible): the operator's machine has no buildah, no trivy
+// and no crane, and above all it has NO business seeing the cosign key.
+// Here the key lives in a Secret of jenkins-system and never leaves it,
+// the scan is the same blocking one every pipeline runs, and the result
+// lands in the same supply-chain log.
+//
+// build -> scan -> push -> sign, the order of Jenkinsfile.app: it is
+// scanned BEFORE pushing (an image that fails the scan never gets to
+// exist in the registry) and signed by DIGEST, never by tag.
+//
+// UNLIKE the gateway, this image DOES have an operating system
+// (python:3.12-slim plus native wheels), so the scan looks at
+// everything: debian packages and python dependencies. The base comes
+// MIRRORED from the internal registry (mirror-images scanned and signed
+// it first) — if pulling the base fails with NotFound, mirror-images has
+// not been run.
+pipeline {
+  agent {
+    kubernetes {
+      // Strict ResourceQuota in jenkins-system: EVERY container
+      // declares limits (jnlp included — never `yaml ''`).
+      yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  imagePullSecrets:
+  - name: regcred-internal
+  containers:
+  - name: jnlp
+    image: jenkins/inbound-agent:3355.v388858a_47b_33-23
+    resources:
+      requests: { cpu: 500m, memory: 512Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+  # kaniko WITHOUT privileges. The Containerfile's RUN (pip install)
+  # happens in here and needs to reach PyPI — the same egress any
+  # application build already uses. Generous memory: uv resolves and
+  # unpacks wheels of hundreds of MB (onnxruntime, ctranslate2, av).
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:v1.23.2-debug
+    command: ['sleep', 'infinity']
+    volumeMounts:
+    - name: regcred
+      mountPath: /kaniko/.docker/config.json
+      subPath: .dockerconfigjson
+      readOnly: true
+    - name: ca-trust
+      mountPath: /kaniko/ca.crt
+      subPath: ca.crt
+      readOnly: true
+    resources:
+      requests: { cpu: 1000m, memory: 1Gi }
+      limits:   { cpu: 2500m, memory: 3Gi }
+  # trivy: THIN client — the server (trivy-system) holds the DB.
+  - name: trivy
+    image: ghcr.io/aquasecurity/trivy:0.72.0
+    command: ['sleep', 'infinity']
+    resources:
+      requests: { cpu: 250m, memory: 256Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+  - name: crane
+    image: registry.registry-system.svc.cluster.local:5000/aegis-ci-crane:v0.20.3
+    command: ['sleep', 'infinity']
+    env:
+    - name: DOCKER_CONFIG
+      value: /crane/docker
+    - name: SSL_CERT_FILE
+      value: /crane/ca/ca.crt
+    volumeMounts:
+    - name: regcred
+      mountPath: /crane/docker/config.json
+      subPath: .dockerconfigjson
+      readOnly: true
+    - name: ca-trust
+      mountPath: /crane/ca/ca.crt
+      subPath: ca.crt
+      readOnly: true
+    resources:
+      requests: { cpu: 250m, memory: 256Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+  # cosign: password by secretKeyRef, NEVER argv. No `optional`: a
+  # missing key is a real error and has to break, not be skipped — an
+  # unsigned image does not run, and the symptom would only surface at
+  # Kyverno's admission.
+  - name: cosign
+    image: registry.registry-system.svc.cluster.local:5000/aegis-ci-cosign:v2.6.3
+    command: ['sleep', 'infinity']
+    env:
+    - name: COSIGN_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: cosign-signing-key
+          key: cosign.password
+    - name: DOCKER_CONFIG
+      value: /cosign/docker
+    volumeMounts:
+    - name: cosign-key
+      mountPath: /cosign/keys/cosign.key
+      subPath: cosign.key
+      readOnly: true
+    - name: regcred
+      mountPath: /cosign/docker/config.json
+      subPath: .dockerconfigjson
+      readOnly: true
+    - name: ca-trust
+      mountPath: /cosign/ca/ca.crt
+      subPath: ca.crt
+      readOnly: true
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits:   { cpu: 500m, memory: 256Mi }
+  volumes:
+  - name: regcred
+    secret:
+      secretName: regcred-internal
+      items: [{ key: .dockerconfigjson, path: .dockerconfigjson }]
+  - name: ca-trust
+    secret:
+      secretName: aegis-ca-trust
+      items: [{ key: ca.crt, path: ca.crt }]
+  - name: cosign-key
+    secret:
+      secretName: cosign-signing-key
+      items: [{ key: cosign.key, path: cosign.key }]
+'''
+      defaultContainer 'jnlp'
+    }
+  }
+  options {
+    timeout(time: 45, unit: 'MINUTES')
+  }
+  environment {
+    REGISTRY     = 'registry.registry-system.svc.cluster.local:5000'
+    IMAGE        = 'aegis-engine-cpu'
+    TRIVY_SERVER = 'http://trivy.trivy-system.svc.cluster.local:4954'
+  }
+  stages {
+    stage('preflight') {
+      // Fails EARLY: with no key there is no signature, and with no
+      // signature the image does not run. Better to know that before
+      // twenty minutes of pip install.
+      steps {
+        container('cosign') {
+          sh '''
+            test -f /cosign/keys/cosign.key || {
+              echo "ERROR: the cosign-signing-key Secret is missing in jenkins-system."
+              exit 1
+            }
+          '''
+        }
+      }
+    }
+    stage('compute-tag') {
+      steps {
+        script {
+          // The pyproject version plus the short commit: the tag says
+          // which code this is, and the manifest pins by digest anyway.
+          def version = sh(returnStdout: true, script:
+            'sed -n "s/^version = \\"\\(.*\\)\\"/\\1/p" ai/engine-cpu/pyproject.toml').trim()
+          def corto = sh(returnStdout: true, script:
+            'git rev-parse --short=7 HEAD').trim()
+          env.TAG = "${version}-${corto}"
+          echo "tag: ${env.TAG}"
+        }
+      }
+    }
+    stage('build') {
+      steps {
+        container('kaniko') {
+          sh '''
+            /kaniko/executor \
+              --context=dir://${WORKSPACE}/ai/engine-cpu \
+              --dockerfile=Containerfile \
+              --destination=${REGISTRY}/${IMAGE}:${TAG} \
+              --no-push \
+              --tarPath=${WORKSPACE}/image.tar \
+              --registry-certificate ${REGISTRY}=/kaniko/ca.crt
+          '''
+        }
+      }
+    }
+    stage('scan') {
+      steps {
+        container('trivy') {
+          sh '''
+            trivy image \
+              --server ${TRIVY_SERVER} \
+              --input ${WORKSPACE}/image.tar \
+              --exit-code 1 \
+              --severity CRITICAL,HIGH \
+              --ignore-unfixed \
+              --scanners vuln \
+              --no-progress
+          '''
+        }
+      }
+    }
+    stage('push') {
+      steps {
+        container('crane') {
+          sh '''
+            crane push ${WORKSPACE}/image.tar ${REGISTRY}/${IMAGE}:${TAG}
+            crane digest ${REGISTRY}/${IMAGE}:${TAG} > ${WORKSPACE}/image-digest
+            echo "pushed digest: $(cat ${WORKSPACE}/image-digest)"
+          '''
+        }
+      }
+    }
+    stage('sign') {
+      steps {
+        container('cosign') {
+          sh '''
+            DIGEST=$(cat ${WORKSPACE}/image-digest)
+            cosign sign --yes \
+              --key /cosign/keys/cosign.key \
+              --tlog-upload=false \
+              --registry-cacert /cosign/ca/ca.crt \
+              ${REGISTRY}/${IMAGE}@${DIGEST}
+            echo "signed: ${REGISTRY}/${IMAGE}@${DIGEST}"
+          '''
+        }
+      }
+    }
+    stage('report') {
+      steps {
+        sh '''
+          DIGEST=$(cat ${WORKSPACE}/image-digest 2>/dev/null || echo "")
+          printf '{"event":"supply-chain","image":"%s","tag":"%s","digest":"%s","ts":"%s"}\\n' \
+            "${IMAGE}" "${TAG}" "${DIGEST}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "NEXT STEP (building does not deploy): pin the digest with"
+          echo "  aegis ai images ${IMAGE}:${TAG}"
+        '''
+      }
+    }
+  }
+}

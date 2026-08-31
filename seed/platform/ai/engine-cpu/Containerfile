@@ -1,0 +1,52 @@
+# engine-cpu — the image of the lane that does NOT touch the GPU.
+#
+# UNLIKE the gateway (FROM scratch, static ELFs), there is no way to
+# dodge a userland here: Python 3.12 plus native wheels (onnxruntime,
+# ctranslate2, av with its embedded ffmpeg, kokoro's espeak). The
+# surface is bounded another way: the official slim base MIRRORED by
+# mirror-images (scanned and re-signed with this instance's own key), a
+# venv with no pip cache, and a process that runs without root on a
+# read-only root filesystem — the last one imposed by the Deployment,
+# not by this file.
+#
+# THIS IMAGE IS BUILT BY THE `engine-cpu` JOB (the Jenkinsfile beside
+# this file, registered by JCasC): unprivileged kaniko -> blocking
+# trivy -> push -> cosign. The signing key lives in a Secret of
+# jenkins-system and never leaves it: the operator's machine sees
+# neither the key nor the registry.
+#
+# THE WEIGHTS DO NOT TRAVEL IN THE IMAGE. They go to the modelos-cpu
+# PVC. The image stays around 1 GB of runtime instead of 2 and, more
+# importantly, changing a model does not force a re-signing of the
+# image — they are two different life cycles.
+#
+# `__FROM_PYTHON__` is resolved against the INTERNAL registry, by
+# digest, by `aegis ai images`. It is a placeholder and not a literal
+# for the same reason the GPU engine's is: the public digest of
+# images.txt does not serve, because the mirror rewrites the manifest
+# when it copies, and a base written by TAG is a mutable pointer while
+# what Kyverno verifies is a digest. Check 147 refuses both a public
+# FROM and a FROM by tag; check 148 walks the same ground for the
+# templates.
+FROM __FROM_PYTHON__
+
+WORKDIR /app
+
+COPY pyproject.toml motor.py ./
+
+# uv resolves the dependencies FROM pyproject.toml: one single source of
+# truth for the local venv and for the image. --no-cache so the wheel
+# cache is not baked into a layer.
+RUN pip install --no-cache-dir uv \
+ && uv pip install --system --no-cache -r pyproject.toml \
+ && pip uninstall -y uv
+
+# Numeric uid, like the rest of the house: the Deployment declares
+# runAsNonRoot + runAsUser and this is the belt on top of the braces.
+USER 1000:1000
+
+EXPOSE 8600
+
+# 0.0.0.0 and not 127.0.0.1: here the border is drawn by the
+# NetworkPolicy (only the gateway reaches 8600), not by the interface.
+ENTRYPOINT ["python", "-m", "uvicorn", "motor:app", "--host", "0.0.0.0", "--port", "8600"]

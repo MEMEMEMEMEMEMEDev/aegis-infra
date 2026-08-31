@@ -52,7 +52,7 @@ KUST="$AI_DIR/kustomization.yaml"
 # The AI Containerfiles the platform owns. A row here that names a
 # directory the seed does not ship is caught by check 158, not left to
 # fail at build time.
-AI_CONTAINERFILES="ai/engine-gpu/Containerfile"
+AI_CONTAINERFILES="ai/engine-gpu/Containerfile ai/engine-cpu/Containerfile"
 
 # ── HOW MUCH FOREIGN VRAM IS TOLERATED BEFORE STARTING AN ENGINE ────
 #
