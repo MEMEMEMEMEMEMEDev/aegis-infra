@@ -102,10 +102,43 @@ fi
 # guard: EVERY injectable var present and with no placeholder — a
 # missing TF_VAR = an interactive tofu prompt = D11 broken (better to
 # abort with evidence than to hang waiting for someone to type):
-INJECTED=(TF_VAR_cloudflare_api_token TF_VAR_cloudflare_access_token \
-          TF_VAR_cloudflare_account_id \
-          TF_VAR_cloudflare_zone_id TF_VAR_root_domain \
-          TF_VAR_operador_email)
+# WHICH VARIABLES, DERIVED FROM THE ENV BEING APPLIED. This list used
+# to be fixed — six names demanded of every env — and on 2026-08-31 the
+# first apply of `envs/data-r2` died on `TF_VAR_cloudflare_access_token
+# empty`: a variable that belongs to the TUNNEL env and that the bucket
+# env does not declare. The wrapper was refusing to apply an env
+# because of a value that env has no use for.
+#
+# The subject is each env's own `variables.tf`, and variables WITH a
+# default are skipped: a default is the declaration that the value is
+# optional, and demanding it would contradict the file that declares
+# it.
+#
+# The -chdir is parsed here and not only further down, because the
+# guard needs to know which env it is guarding. If it cannot be
+# derived, the historical list is kept and SAID: a guard that silently
+# stops guarding is worse than one that guards too much.
+_ENV_FOR_GUARD=""
+for _a in "$@"; do case "$_a" in -chdir=*) _ENV_FOR_GUARD="${_a#-chdir=}" ;; esac; done
+INJECTED=()
+if [[ -n "$_ENV_FOR_GUARD" && -f "$HERE/$_ENV_FOR_GUARD/variables.tf" ]]; then
+    while read -r _v; do
+        [[ -n "$_v" ]] && INJECTED+=("TF_VAR_$_v")
+    done < <(python3 - "$HERE/$_ENV_FOR_GUARD/variables.tf" <<'PY'
+import re, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+for m in re.finditer(r'variable\s+"([a-z0-9_]+)"\s*\{(.*?)\n\}', src, re.S):
+    if not re.search(r'^\s*default\s*=', m.group(2), re.M):
+        print(m.group(1))
+PY
+    )
+else
+    log "could not derive the variables of ${_ENV_FOR_GUARD:-<no -chdir>}: keeping the historical list"
+    INJECTED=(TF_VAR_cloudflare_api_token TF_VAR_cloudflare_access_token \
+              TF_VAR_cloudflare_account_id \
+              TF_VAR_cloudflare_zone_id TF_VAR_root_domain \
+              TF_VAR_operador_email)
+fi
 for v in "${INJECTED[@]}"; do
     [[ "${!v:-}" == PLACEHOLDER_* ]] && die "$v is still a placeholder"
     [[ -z "${!v:-}" ]] && die "$v empty — is $AEGIS_CONF missing, or the key in the config? (export it as $v to override)"
