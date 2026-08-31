@@ -182,7 +182,61 @@ argo_secrets_gate jenkins-secrets 300 \
 gate "cosign-secret-vivo" poll 180 5 bash -c \
   "kubectl -n jenkins-system get secret cosign-signing-key >/dev/null 2>&1"
 
-# ── 80.3 FIRST SIGNED IMAGE (the phase's hinge gate) ───────────────
+# ── THE SUPPLY CHAIN IS BUILT FROM THE BOTTOM UP ──────────────────
+#
+# These two blocks used to sit at the END of this phase, after the
+# canary's first signed build. The order was impossible and the first
+# cloudflare run proved it on 2026-08-31: the moment the cosign key
+# exists (80.2 above), the app pipeline's from-guard turns hard and
+# demands MIRRORED bases — from a mirror that this phase would not
+# populate until forty lines later. The canary could never be signed,
+# and `mirror-images` had never run on any instance, ever.
+#
+# Neither block needs anything from the signed build: the mirror needs
+# the trivy server (80.1) and the cosign key (80.2), and the bases need
+# the mirror. So they come first, and the phase now reads the way the
+# thing actually works — third parties in, our own bases on top of
+# them, and only then an application signed against bases that were
+# scanned.
+
+# ── 80.3 the third parties come in through the same door ──────────
+# mirror-images needs everything this phase just proved: the trivy
+# server (80.1) and the cosign key (80.2). Until 2026-08-27 nobody
+# fired it: the job did not even exist in the seed's job-dsl, so a
+# fresh instance whose first tenant declared a postgres was born with
+# services.yaml pointing at an internal image that nobody had ever
+# pushed — ImagePullBackOff, and `aegis data restore` with nowhere to
+# restore to (R-21 in the record). It is a GATE and not a courtesy: a
+# third-party image that does not pass the scan does not get in, and
+# an init that ends green over an empty registry would be the silence
+# this tree exists to make impossible. The job keeps going past a
+# broken image and lists them all at the end, so one red here names
+# every image that needs a newer tag — not just the first.
+# When it is red, say what the operator does next — the job's last line
+# names the images, not the way out. On the first clean instance
+# (2026-08-27) five of seven failed on ONE CVE upstream had not fixed,
+# and the protocol already had the two answers; the gate did not point
+# at them.
+gate_diag "mirror-images-build-verde" \
+  'log_warn "a third-party image that fails the scan of TODAY does not get in — and the seed pins age between release and install.";
+   log_warn "For each image the job lists: (a) upstream rebuilt it → measure the new digest and bump mirror-images/images.txt (docs/protocols/images.md §2);";
+   log_warn "(b) upstream did not → a DATED exception with explicit paths in mirror-images/trivyignore.yaml, or wait (§6). Then: aegis init --from 80-supply-chain"' \
+  jenkins_build_retry mirror-images 2700 2
+
+# ── 80.4 the bases aegis owns, built here so nothing stands on a sample ──
+# base-images builds every member (nginx for the static fronts, node for
+# the backends AND for the platform's own bucket-provisioner Job) and,
+# through its propagate stage, rewrites services.yaml's
+# `bucket.aprovisionador` tag+digest in the platform repo — the seed
+# only carries a sample there, because a digest that is born in this
+# registry cannot be known before this line runs. It takes the public
+# alpine by digest and needs the cosign key: hence after 80.2 and after
+# the mirror (80.3). A gate for the same reason as the mirror's: a base that
+# fails its scan does not exist, and an init that went on would leave
+# the provisioner on a reference nobody built.
+gate "base-images-build-verde" jenkins_build_retry base-images 2700 2
+
+# ── 80.5 FIRST SIGNED IMAGE (the phase's hinge gate) ───────────────
 REG_HOST="$REGISTRY_HOST_INTERNAL"   # single source (P3 audit)
 registry_creds "$REG_HOST" "$REGISTRY_CLUSTER_IP"
 # P1.8 in-VM report #14: every RESUME of this phase re-fired a signed
@@ -223,12 +277,62 @@ if [[ -n "$DIGEST" ]] && DOCKER_CONFIG="$SECRETS_TMP/docker" cosign verify \
      "$REGISTRY_CLUSTER_IP:5000/hello-aegis@$DIGEST" >/dev/null 2>&1; then
     log_ok "a VALID signed image is already in the registry ($LAST_TAG) — build skipped (resume idempotence, P1.8)"
 else
+    # THE CANARY'S BASES MOVE TO THE MIRROR, HERE AND NOT BEFORE.
+    #
+    # The canary is seeded (phase 12) with PUBLIC bases, and it has to
+    # be: it builds at phase 60 to prove the webhook path end to end,
+    # and at that moment nothing is mirrored yet — there is no mirror.
+    # From this phase on the opposite is true: the supply chain exists,
+    # the from-guard is hard, and a public FROM is refused. Correctly:
+    # a base nobody scanned and nobody signed is not a base.
+    #
+    # So this is where the canary graduates, and the rewrite is the
+    # same one the guard's own message tells a human to do — `aegis
+    # image from` prints the line, and it is pasted. What was missing
+    # was nobody doing it. Check 147 carries `canary/Containerfile` in
+    # its EXEMPT_TODO with the note that the fix is one line: this is
+    # the other half of that note, the half that makes the first line
+    # true.
+    log_info "moving the canary's bases to the mirror before the signed build"
+    CANARY_TMP="$(mktemp -d)"
+    run_cmd retry_net 3 git clone --depth 1 \
+        "https://github.com/$GH_OWNER/$APP_REPO.git" "$CANARY_TMP/app"
+    # THE TAG IS DERIVED FROM images.txt, never written here. The
+    # canary asks for `golang:1.26-alpine` and the mirror declares
+    # `golang:1.26.6-alpine`: a floating tag against a pinned one. Two
+    # places naming the same base with two tags is how a rewrite
+    # silently matches nothing and the guard refuses a build for a
+    # reason nobody can see. The declaration wins, and if it stops
+    # declaring one of them, this says so instead of rewriting half.
+    _canary_from() {   # <image name> -> the mirrored FROM line, or empty
+        local dest
+        dest="$(awk -v n="$1" '$0 !~ /^[[:space:]]*#/ && NF >= 2 {
+                    split($2, d, ":"); if (d[1] == n) { print $2; exit }
+                }' "$PLATFORM_DIR/mirror-images/images.txt")" || return 1
+        [[ -n "$dest" ]] || return 1
+        "$AEGIS_ROOT/libexec/aegis-image" from "$dest" 2>/dev/null | sed 's/^FROM //'
+    }
+    _GOLANG="$(_canary_from golang)"
+    _ALPINE="$(_canary_from alpine)"
+    if [[ -n "$_GOLANG" && -n "$_ALPINE" ]]; then
+        run_cmd sed -i -E \
+            -e "s|^FROM docker\\.io/library/golang:[^ ]*|FROM $_GOLANG|" \
+            -e "s|^FROM docker\\.io/library/alpine:[^ ]*|FROM $_ALPINE|" \
+            "$CANARY_TMP/app/Containerfile"
+        log_ok "canary's Containerfile repointed at the internal registry, by digest"
+    else
+        log_warn "the mirror does not serve golang/alpine yet: the canary keeps its public bases and the from-guard will refuse the signed build. Run \`${AEGIS_CMD:-aegis} image list\` to see what the mirror holds"
+    fi
+
     log_info "re-firing the canary's build to produce the first SIGNED image"
     NEXT_SIGN="$(jenkins_next_build hello-aegis-mb/job/main)"  # BEFORE the push (lastBuild race #9)
-    run_cmd retry_net 3 bash -c "cd \$(mktemp -d) && \
-      git clone --depth 1 https://github.com/$GH_OWNER/$APP_REPO.git app && \
-      cd app && git commit --allow-empty -m 'ci: first signed build' && \
+    run_cmd bash -c "cd '$CANARY_TMP/app' && \
+      git add Containerfile && \
+      git -c user.name='aegis init' -c user.email='aegis@localhost' \
+          commit -m 'ci: bases from the internal mirror, first signed build' \
+          --allow-empty && \
       git push"
+    rm -rf "$CANARY_TMP"
     gate "build-firmado-verde" jenkins_wait_build hello-aegis-mb/job/main 1800 "$NEXT_SIGN"
     # P3 audit 2026-07-18: the digest is re-read from the registry's
     # MANIFEST (the same source as the idempotent path) — scraping
@@ -251,7 +355,7 @@ gate "firma-verificada-real" bash -c \
      --insecure-ignore-tlog=true \
      '$REGISTRY_CLUSTER_IP:5000/hello-aegis@$DIGEST' >/dev/null"
 
-# ── 80.4 Kyverno: install → implicit Audit → Enforce at the end ────
+# ── 80.6 Kyverno: install → implicit Audit → Enforce at the end ────
 argo_sync kyverno-base
 argo_sync kyverno 600
 # P1.1 audit 2026-07-18 (CONFIRMED LIVE): the CA is mounted by subPath
@@ -304,7 +408,7 @@ gate "webhooks-scopeados" poll 180 5 bash -c \
 # (A44: the webhook's namespaceSelector IS the blast radius of the
 #  failurePolicy Fail — verify the generated object, not the policy)
 
-# ── 80.5 the supply-chain's final gate (3.E.3's, codified) ─────────
+# ── 80.7 the supply-chain's final gate (3.E.3's, codified) ─────────
 # CR-2-poll run #14: after policy-ready the Deployment still
 # references the LAST PRE-signature tag (the IU has not yet bumped to
 # 80.3's signed build) — an immediate restart produces legitimately
@@ -553,43 +657,6 @@ else
             "AEGIS_VALIDATE_FAILCLOSED is not set: the fail-closed property is NOT measured (EV-03). Run the validation with AEGIS_VALIDATE_FAILCLOSED=1 to exercise it"
     done
 fi
-
-# ── 80.6 the third parties come in through the same door ──────────
-# mirror-images needs everything this phase just proved: the trivy
-# server (80.1) and the cosign key (80.2). Until 2026-08-27 nobody
-# fired it: the job did not even exist in the seed's job-dsl, so a
-# fresh instance whose first tenant declared a postgres was born with
-# services.yaml pointing at an internal image that nobody had ever
-# pushed — ImagePullBackOff, and `aegis data restore` with nowhere to
-# restore to (R-21 in the record). It is a GATE and not a courtesy: a
-# third-party image that does not pass the scan does not get in, and
-# an init that ends green over an empty registry would be the silence
-# this tree exists to make impossible. The job keeps going past a
-# broken image and lists them all at the end, so one red here names
-# every image that needs a newer tag — not just the first.
-# When it is red, say what the operator does next — the job's last line
-# names the images, not the way out. On the first clean instance
-# (2026-08-27) five of seven failed on ONE CVE upstream had not fixed,
-# and the protocol already had the two answers; the gate did not point
-# at them.
-gate_diag "mirror-images-build-verde" \
-  'log_warn "a third-party image that fails the scan of TODAY does not get in — and the seed pins age between release and install.";
-   log_warn "For each image the job lists: (a) upstream rebuilt it → measure the new digest and bump mirror-images/images.txt (docs/protocols/images.md §2);";
-   log_warn "(b) upstream did not → a DATED exception with explicit paths in mirror-images/trivyignore.yaml, or wait (§6). Then: aegis init --from 80-supply-chain"' \
-  jenkins_build_retry mirror-images 2700 2
-
-# ── 80.7 the bases aegis owns, built here so nothing stands on a sample ──
-# base-images builds every member (nginx for the static fronts, node for
-# the backends AND for the platform's own bucket-provisioner Job) and,
-# through its propagate stage, rewrites services.yaml's
-# `bucket.aprovisionador` tag+digest in the platform repo — the seed
-# only carries a sample there, because a digest that is born in this
-# registry cannot be known before this line runs. It takes the public
-# alpine by digest and needs the cosign key: hence after 80.2 and after
-# the mirror. A gate for the same reason as the mirror's: a base that
-# fails its scan does not exist, and an init that went on would leave
-# the provisioner on a reference nobody built.
-gate "base-images-build-verde" jenkins_build_retry base-images 2700 2
 
 # ── Garage, now that its image is mirrored ──────────────────────────
 # Its secrets exist since phase 40; its image since 80.6; the bucket
