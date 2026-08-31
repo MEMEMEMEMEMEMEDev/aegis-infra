@@ -220,9 +220,20 @@ else
         # Each secret answers for itself now, which is what this file's
         # own header claimed all along.
         if [[ -f "$STATE_SECRETS/$store.enc" ]]; then
-            restore_secret "$store" > "$SECRETS_TMP/$store"
+            # `restore_secret` writes the VALUE into the tmpfs and
+            # prints THE PATH. Redirecting its stdout into that same
+            # path — which is what the first version of this branch did
+            # on 2026-08-31 — overwrites the value with the path, and
+            # what travelled onward was a 53-character filename with
+            # slashes and dots in it. Cloudflare answered
+            # «Authentication failed» and tofu's provider refused the
+            # alphabet, both of them correctly, about a token nobody
+            # had actually restored.
+            #
+            # Its stdout IS the return value of this function, so it is
+            # neither redirected nor captured: it flows straight out.
             log_info "$tok_name already in the store — not minted again"
-            printf '%s' "$SECRETS_TMP/$store"
+            restore_secret "$store" || die "the store holds $store and it did NOT decrypt — see sops' error above; it is NOT regenerated on purpose"
             return 0
         fi
         python3 "$builder" "$SECRETS_TMP/cf_pgroups.json" "$tok_name" \
