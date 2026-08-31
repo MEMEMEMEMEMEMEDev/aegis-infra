@@ -563,18 +563,7 @@ cmd_models() {
       green "  copied"
     fi
   else
-    echo "The weights are NOT downloaded by this command yet."
-    echo
-    echo "  What is missing is one fetcher per model, and inventing URLs here would be"
-    echo "  worse than saying so: a wrong URL leaves a truncated file that the runtime"
-    echo "  opens as if it were complete. The models each engine expects are named in"
-    echo "  their profiles (MODEL_ID in k8s/base/ai-system/engine-*.yaml)."
-    echo
-    echo "  What DOES work today is the half that matters on a slow line:"
-    echo "    ${AEGIS_CMD:-aegis} ai models --from <directory with a local copy>"
-    echo
-    gray "  cache: $cache"
-    exit 1
+    _fetch_cpu_weights "$cache" || exit 1
   fi
 
   # THE VERIFICATION IS A SIZE AND NOT AN «ok». A directory that exists
@@ -586,12 +575,100 @@ cmd_models() {
   bytes=$(du -sb "$cache" 2>/dev/null | cut -f1)
   echo
   green "cache: $n files, $(( bytes / 1024 / 1024 )) MiB in $cache"
-  if [ "${bytes:-0}" -lt 1073741824 ]; then
-    red "  under a gibibyte: the text models alone are several. This looks INCOMPLETE."
+  # THE FLOOR DEPENDS ON WHAT WAS ASKED FOR, and that is not a
+  # loophole. `--from` brings a copy that should carry the GPU lane's
+  # weights too — several gibibytes — so a gibibyte is the right floor
+  # for it. A fetch run brings only the CPU lane, which is measured in
+  # hundreds of megabytes: demanding a gibibyte there would call a
+  # complete download incomplete, and a check that cries wolf gets
+  # switched off.
+  local floor=1073741824
+  [ -z "$from" ] && floor=$((300 * 1024 * 1024))
+  if [ "${bytes:-0}" -lt "$floor" ]; then
+    red "  only $(( bytes / 1024 / 1024 )) MiB: this looks INCOMPLETE (an interrupted"
+    red "  download leaves a directory that exists and a tensor that is truncated)."
     exit 1
   fi
   gray "Seeding them into the volumes is the next step and it is not this one: the"
   gray "volumes live in the cluster and the engines mount them read-only."
+}
+
+# ── THE WEIGHTS THIS COMMAND CAN FETCH, AND THE ONES IT CANNOT ──────
+#
+# Until 2026-08-31 this command refused to download anything, and its
+# reason was right: «inventing URLs here would be worse than saying
+# so». But the URLs of the CPU lane did not have to be invented — they
+# were MEASURED, in the fetcher the CPU engine's source carried, with
+# their licences written down. Those become product here.
+#
+# The GPU lane is a different matter and stays refused: its weights are
+# named by MODEL_ID in the engine profiles, they are gibibytes, and no
+# URL for them has been measured. Saying that out loud is the honest
+# half; guessing would leave a truncated file that the runtime opens as
+# if it were complete.
+#
+# The licences, so they live somewhere that is not a commit message:
+#   Kokoro-82M v1.0          apache-2.0
+#   RT-DETRv2 R18            apache-2.0
+#   multilingual-e5-small    MIT
+# None of them is AGPL, and that is a choice: the YOLO family is
+# AGPL-3.0, which reaches a service that only serves it over a network.
+_KOKORO_URL=https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0
+_RTDETR_URL=https://huggingface.co/onnx-community/rtdetr_v2_r18vd-ONNX/resolve/main
+_E5_URL=https://huggingface.co/Xenova/multilingual-e5-small/resolve/main
+
+# _fetch_one <url> <destination>
+# `curl -C -` resumes, and the download lands on `.partial` and is
+# RENAMED at the end. Neither is a nicety: a cut in the middle must not
+# leave a file the runtime would open as complete. That is the failure
+# that costs an afternoon, because the engine starts, loads, and dies
+# on a truncated tensor far from here.
+_fetch_one() {
+  local url="$1" dest="$2"
+  if [ -s "$dest" ]; then gray "  already there: $(basename "$dest")"; return 0; fi
+  echo "  fetching $(basename "$dest") …"
+  curl -fL --retry 3 -C - --progress-bar -o "$dest.partial" "$url" || {
+    red "  could not fetch $url"; rm -f "$dest.partial"; return 1; }
+  mv "$dest.partial" "$dest"
+}
+
+_fetch_cpu_weights() {
+  local cache="$1"
+  command -v curl >/dev/null || { red "curl is not on the PATH"; return 1; }
+  mkdir -p "$cache/kokoro" "$cache/rtdetr" "$cache/e5"
+  echo "Fetching the CPU lane's weights into $cache …"
+
+  # Speech: fp32 and not int8 even though int8 weighs a third. On CPU
+  # Kokoro's fp32 already runs above real time, so quantising would buy
+  # speed nobody needs while paying the only thing that matters here,
+  # which is how it sounds.
+  _fetch_one "$_KOKORO_URL/kokoro-v1.0.onnx" "$cache/kokoro/kokoro-v1.0.onnx" || return 1
+  _fetch_one "$_KOKORO_URL/voices-v1.0.bin"  "$cache/kokoro/voices-v1.0.bin"  || return 1
+
+  # Detection: the two .json are NOT optional. `config.json` carries the
+  # id2label with COCO's 80 classes, and without it the boxes come out
+  # numbered — a detection that says nothing.
+  _fetch_one "$_RTDETR_URL/onnx/model.onnx"          "$cache/rtdetr/model.onnx"          || return 1
+  _fetch_one "$_RTDETR_URL/config.json"              "$cache/rtdetr/config.json"         || return 1
+  _fetch_one "$_RTDETR_URL/preprocessor_config.json" "$cache/rtdetr/preprocessor_config.json" || return 1
+
+  # Embeddings: multilingual and not a smaller English one, and the
+  # int8 export (118 MB against 449). The quantisation is VERIFIED when
+  # the engine loads, with a pair of known similarities — a damaged
+  # int8 model does not raise, it gives the wrong neighbours.
+  _fetch_one "$_E5_URL/onnx/model_quantized.onnx" "$cache/e5/model_quantized.onnx" || return 1
+  _fetch_one "$_E5_URL/tokenizer.json"            "$cache/e5/tokenizer.json"       || return 1
+
+  echo
+  gray "NOT fetched here, and each for its own reason:"
+  gray "  · transcription — faster-whisper resolves its weights BY NAME through its"
+  gray "    own library cache. No URL for them has been measured, so this command"
+  gray "    does not guess one; bring them with --from, or let the engine fetch"
+  gray "    them on its first load where it has egress."
+  gray "  · the GPU lane — gibibytes, named by MODEL_ID in the engine profiles, and"
+  gray "    no measured URL either. --from is the answer there, and it is the half"
+  gray "    that matters on a slow line."
+  return 0
 }
 
 # ══ THE TENANT KEYS ═════════════════════════════════════════════════
