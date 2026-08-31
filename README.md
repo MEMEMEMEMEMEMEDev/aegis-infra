@@ -37,7 +37,7 @@ git clone https://github.com/MEMEMEMEMEMEMEDev/aegis-infra && cd aegis-infra
 ./bin/aegis preflight      # deja la máquina lista, o dice qué falta
 gh auth login              # tu cuenta de GitHub: el init crea los repos por ti
 tmux new -s aegis          # la corrida es larga; que un ssh caído no la mate
-./bin/aegis init           # el asistente pregunta lo que no puede inferir, y luego quince fases
+./bin/aegis init           # el asistente pregunta lo que no puede inferir, y luego dieciséis fases
 ```
 
 Antes de sentarte, decide dónde vas a guardar la clave age (la fase
@@ -53,7 +53,7 @@ en [Qué tener listo](#qué-tener-listo); cada paso, en
 | **Qué es** | Un instalador por fases (`aegis init`) que levanta k3s, ArgoCD, Jenkins, un registro de imágenes con su propia PKI, Kyverno, cosign, Trivy, Traefik y observabilidad, y los deja hablándose entre sí. |
 | **Para quién** | Un equipo y sus proyectos, en su propio hardware o en un VPS. No sirve para una flota de clústeres, y todavía pide leer configuración. |
 | **Qué obtienes** | Cadena de suministro completa (build sin privilegios, escaneo, firma, admisión obligatoria), aplicaciones dadas de alta desde un contrato YAML, observabilidad con alertas al teléfono, respaldos y rotación de credenciales ya ensayados, y `aegis destroy` para deshacerlo todo. |
-| **Cómo sabes que funciona** | Cada paso del instalador registra una puerta: una comprobación con resultado guardado. 142 checks estáticos verifican el repositorio sin necesidad de clúster, y cada uno tiene un diente, una mutación que demuestra que el check falla cuando debe. `aegis check` hace lo mismo contra el clúster vivo. Nada que no se haya podido medir cuenta como éxito. |
+| **Cómo sabes que funciona** | Cada paso del instalador registra una puerta: una comprobación con resultado guardado. 147 checks estáticos verifican el repositorio sin necesidad de clúster, y cada uno tiene un diente, una mutación que demuestra que el check falla cuando debe. `aegis check` hace lo mismo contra el clúster vivo. Nada que no se haya podido medir cuenta como éxito. |
 
 ## Requisitos
 
@@ -237,7 +237,7 @@ rechazan.
 
 ## Cómo funciona
 
-### Las quince fases, en cuatro etapas
+### Las dieciséis fases, en cuatro etapas
 
 ```mermaid
 flowchart LR
@@ -268,7 +268,7 @@ firmada que admitir, la observabilidad va al final porque mide lo que
 ya existe, y los secretos entran antes que los charts que los usan.
 
 <details>
-<summary><b>Las quince fases, una por una</b></summary>
+<summary><b>Las dieciséis fases, una por una</b></summary>
 
 | fase | qué hace |
 |---|---|
@@ -287,6 +287,7 @@ ya existe, y los secretos entran antes que los charts que los usan.
 | `70-deploy-auto` | Despliegue automático del canario: el pipeline escribe el digest en el overlay y ArgoCD despliega. Antes de escribir nada prueba el anti-bucle: un commit que solo toca k8s no dispara un build. |
 | `80-supply-chain` | Servidor Trivy, clave cosign y política Kyverno en modo Enforce, activada al final, cuando ya existe la primera imagen firmada. |
 | `85-observability` | Sobre todo lo anterior: VictoriaMetrics, vmalert, Grafana, sondas y bitácora de eventos, con un latido que llega al topic de ntfy. |
+| `87-ai` | El subsistema de AI, si se pidió. `AI=no` la salta dejando escrito el motivo y sus puertas sin sujeto; `AI=cpu` levanta pasarela, controlador y el motor pequeño, sin tarjeta; `AI=gpu` mide el driver y el runtime del host antes de tocar nada. Los motores nacen apagados. Un valor que no reconoce no lo trata como «no»: se detiene, porque adivinar cuál quiso decir es como un subsistema queda desplegado a medias. |
 
 </details>
 
@@ -297,8 +298,8 @@ flowchart LR
     subgraph P["el producto: este repositorio, solo lectura durante una corrida"]
         direction TB
         p1["bin/ libexec/ lib/<br/>los comandos"]
-        p2["init/<br/>las quince fases"]
-        p3["verify/<br/>142 checks y sus dientes"]
+        p2["init/<br/>las dieciséis fases"]
+        p3["verify/<br/>147 checks y sus dientes"]
         p4["seed/<br/>lo que se distribuye"]
     end
     subgraph I["la instancia: ~/aegis, estado vivo"]
@@ -380,7 +381,7 @@ un `FROM` a mano.
   fuera direcciones e identidades, para que lo que se instala aquí se
   instale en cualquier parte.
 
-![Salidas reales: aegis init --list con las quince fases pasadas y aegis verify con 142 checks en verde en los dos perfiles](docs/assets/terminal.svg)
+![Salidas reales: aegis init --list con las dieciséis fases pasadas y aegis verify con 147 checks en verde en los dos perfiles](docs/assets/terminal.svg)
 
 ## Los comandos
 
@@ -458,6 +459,11 @@ máquina. Todo lo de abajo ocurrió ahí el 2026-08-27, y la tabla
 completa, puerta por puerta, está en
 `docs/journeys/foreign-instance.md`.
 
+Las cifras de abajo son de esa corrida y se dejan como salieron. Dicen
+15 de 15 fases porque entonces eran quince: la fase 87, la del
+subsistema de AI, llegó el 2026-08-29. Corregirlas para que cuadren con
+el producto de hoy sería inventar una medición que nadie tomó.
+
 - **Instalación desde cero:** 15 de 15 fases, 174 puertas pasadas, 20
   registradas como no evaluables (necesitan un borde público).
 - **Dos aplicaciones dadas de alta desde su contrato**, con sus datos
@@ -491,7 +497,7 @@ evaluables.
 bin/          el despachador (aegis <comando>)
 libexec/      un archivo por comando
 lib/          los helpers compartidos, bash y python
-init/         el orquestador y sus quince fases
+init/         el orquestador y sus dieciséis fases
 verify/       los checks, sus dientes, los arneses
 seed/         lo que se distribuye: el repo de plataforma, el canario, las plantillas
 share/        los códigos de salida y las unidades de systemd
