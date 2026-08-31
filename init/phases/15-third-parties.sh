@@ -358,10 +358,22 @@ account, bucket = sys.argv[2], sys.argv[3]
 # BY NAME against the live API, never an id from memory: the same rule
 # as the other three tokens, and for the same reason (two documented
 # cases of «the pin invented from memory did not exist»).
-WANT = "Workers R2 Storage Bucket Item Write"
-ids = [g["id"] for g in groups if g.get("name") == WANT]
-if not ids:
-    print(f"no permission group named {WANT!r}. Available: "
+# BOTH HALVES, and the first live run is what showed why. Until
+# 2026-08-31 this asked only for Write, the bucket was created, and
+# `remote adopt` got 401 on the ListObjectsV2 it uses to prove the
+# pair. The token could put objects in and could not list them.
+#
+# That is not a start-up inconvenience: it is a backup lane that can
+# WRITE and can never READ BACK. `data restore --from-remote` lists the
+# destination and downloads a bundle; with a write-only token every
+# restore would have failed, on the day it was needed, with the copies
+# sitting right there. A backup you cannot read is not a backup.
+WANT = ["Workers R2 Storage Bucket Item Write",
+        "Workers R2 Storage Bucket Item Read"]
+ids = [g["id"] for g in groups if g.get("name") in WANT]
+if len(ids) != len(WANT):
+    missing = [w for w in WANT if not any(g.get("name") == w for g in groups)]
+    print(f"permission groups not found: {missing}. Available: "
           f"{sorted(g.get('name', '') for g in groups)[:40]}", file=sys.stderr)
     sys.exit(1)
 # The resource string, from the same page of the documentation:
@@ -373,7 +385,7 @@ print(json.dumps({
     "policies": [{
         "effect": "allow",
         "resources": {f"com.cloudflare.edge.r2.bucket.{account}_default_{bucket}": "*"},
-        "permission_groups": [{"id": ids[0]}],
+        "permission_groups": [{"id": i} for i in ids],
     }],
 }))
 EOF
