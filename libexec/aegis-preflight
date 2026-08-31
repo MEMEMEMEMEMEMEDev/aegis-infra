@@ -190,9 +190,27 @@ g_mail="$(git config --global user.email 2>/dev/null || true)"
 # step of this command that needs a human and a browser.
 command -v gh >/dev/null || sudo apt-get install -y -qq gh >/dev/null 2>&1
 if command -v gh >/dev/null; then
-  gh auth status >/dev/null 2>&1 \
-    && ok "gh authenticated as $(gh api user --jq .login 2>/dev/null || echo '?')" \
-    || bad "gh WITHOUT auth -> run 'gh auth login' (scopes: repo, delete_repo) and re-run this command"
+  # THE SCOPE IS MEASURED, not advised. Until 2026-08-31 this only
+  # asked whether `gh auth status` succeeded, and named `repo,
+  # delete_repo` in the FAILURE message — advice nobody reads on a
+  # green run. A session with `repo` and nothing else therefore passed
+  # here and discovered the missing scope much later, inside a phase.
+  #
+  # And `delete_repo` came OUT of the advice in the same change, for a
+  # measured reason: nothing in this artifact deletes a repository.
+  # `aegis destroy` says so explicitly. Asking for a scope no code path
+  # uses is asking an operator to hand over more than the job needs,
+  # and least privilege is not a rule this house applies only to
+  # Cloudflare.
+  if gh auth status >/dev/null 2>&1; then
+    if gh auth status 2>&1 | grep -qE "Token scopes:.*'repo'"; then
+      ok "gh authenticated as $(gh api user --jq .login 2>/dev/null || echo '?') with the repo scope"
+    else
+      bad "gh is authenticated but WITHOUT the 'repo' scope: phase 12 creates and seeds two repositories and would fail there -> gh auth refresh -h github.com -s repo"
+    fi
+  else
+    bad "gh WITHOUT auth -> run 'gh auth login' (scope: repo) and re-run this command"
+  fi
 else
   bad "gh not installed and apt could not install it (the init assumes it at phase 00)"
 fi
