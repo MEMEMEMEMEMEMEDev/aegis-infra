@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # aegis-summary: The operator's control over the AI substrate
 # aegis-group:   operate
-# aegis-subcommands: status start stop open demo max logs engine-logs images models key
+# aegis-subcommands: status start stop open demo max logs engine-logs images models seed key
 # ai — the operator's control over the AI substrate.
 #
 # ONE SINGLE SOURCE OF TRUTH: this script writes the ai-modo ConfigMap and
@@ -89,6 +89,7 @@ VRAM_MARGIN_MIB=300
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 gray()  { printf '\033[90m%s\033[0m\n' "$*"; }
+yellow(){ printf '\033[33m%s\033[0m\n' "$*"; }
 
 usage() {
   cat <<'EOF'
@@ -671,6 +672,124 @@ _fetch_cpu_weights() {
   return 0
 }
 
+# ── SEEDING THE WEIGHTS INTO THE VOLUMES ────────────────────────────
+#
+# DECLARED AS NOT VERIFIED (2026-08-31): this path has never been run
+# against a cluster. It is written from the manifests it reads, and the
+# first run IS its verification.
+#
+# The engines mount their volumes READ-ONLY, so nothing that runs
+# inside them can seed anything: a Pod of its own has to mount the
+# claim read-write. That Pod is ephemeral and does nothing but hold the
+# mount open while a tar goes in through `kubectl exec`.
+#
+# The two claims are NOT symmetric, and this is the detail that makes
+# the difference between a command that works and one that hangs:
+#
+#   · `models-hf` is mounted by the GPU engines, which are at ZERO
+#     replicas at rest. Nothing holds it, so the seeding Pod attaches
+#     straight away.
+#   · `modelos-cpu` is mounted by engine-cpu, which has `replicas: 1`
+#     always. The claim is ReadWriteOnce, so on a single node the mount
+#     can be shared but NOT in read-write mode while a reader holds it.
+#     So that lane's seeding scales engine-cpu to zero first and puts it
+#     back afterwards — and it says so, because a command that silently
+#     takes a service down is worse than one that asks.
+_AI_CLAIM_FOR() {
+  case "$1" in
+    cpu) printf 'modelos-cpu' ;;
+    gpu) printf 'models-hf' ;;
+    *)   return 1 ;;
+  esac
+}
+
+cmd_seed() {
+  local lane="${1:-}" cache="${AEGIS_AI_MODELS:-$AI_MODELS_DEFAULT}" claim
+  claim="$(_AI_CLAIM_FOR "$lane")" || {
+    red "which lane: cpu or gpu"
+    echo "  ${AEGIS_CMD:-aegis} ai seed cpu   -> the modelos-cpu volume"
+    echo "  ${AEGIS_CMD:-aegis} ai seed gpu   -> the models-hf volume"
+    exit 3
+  }
+  [ -d "$cache" ] || { red "there is no cache at $cache — run \`${AEGIS_CMD:-aegis} ai models\` first"; exit 1; }
+  command -v kubectl >/dev/null || { red "kubectl is not on the PATH"; exit 1; }
+  kubectl get pvc -n "$NS" "$claim" >/dev/null 2>&1 \
+    || { red "the $claim volume does not exist in $NS: the subsystem is not deployed"; exit 1; }
+
+  local scaled_down=""
+  if [ "$lane" = cpu ]; then
+    # SAID, not done quietly. The reader has to let go of the claim
+    # before a writer can take it read-write, and taking a live service
+    # down without saying so is how a seeding turns into an outage
+    # nobody connected to a seeding.
+    yellow "engine-cpu holds $claim and has to let go: scaling it to 0 for the copy"
+    kubectl scale -n "$NS" deploy/engine-cpu --replicas=0 >/dev/null || {
+      red "could not scale engine-cpu down"; exit 1; }
+    kubectl wait -n "$NS" --for=delete pod -l app=engine-cpu --timeout=120s >/dev/null 2>&1 || true
+    scaled_down=1
+  fi
+
+  # The image is DERIVED from what the subsystem already pins, not
+  # written here: whatever registry this instance uses, the seeding pod
+  # pulls from the same one and through the same regcred. A literal
+  # would be a second place to keep the registry's address right.
+  local _SEED_IMAGE
+  _SEED_IMAGE="$(_from_image_for __FROM_ALPINE__ 2>/dev/null)" || _SEED_IMAGE=""
+  if [ -z "$_SEED_IMAGE" ]; then
+    _SEED_IMAGE="$("$AEGIS_ROOT/libexec/aegis-image" from alpine:3.21 2>/dev/null | sed 's/^FROM //')" || _SEED_IMAGE=""
+  fi
+  [ -n "$_SEED_IMAGE" ] || { red "no mirrored alpine to run the seeding pod with — ask for it with \`${AEGIS_CMD:-aegis} image request alpine:3.21\`"; exit 1; }
+
+  local pod="aegis-seed-$lane"
+  kubectl delete pod -n "$NS" "$pod" --ignore-not-found >/dev/null 2>&1
+  kubectl apply -n "$NS" -f - >/dev/null <<YAML || { red "the seeding pod could not be created"; exit 1; }
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $pod
+  labels: {app: aegis-seed}
+spec:
+  restartPolicy: Never
+  securityContext: {runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000}
+  containers:
+    - name: seed
+      image: $_SEED_IMAGE
+      command: ["sleep", "600"]
+      volumeMounts: [{name: destino, mountPath: /destino}]
+      resources:
+        requests: {cpu: 50m, memory: 64Mi}
+        limits:   {cpu: 500m, memory: 256Mi}
+  volumes:
+    - name: destino
+      persistentVolumeClaim: {claimName: $claim}
+YAML
+  kubectl wait -n "$NS" --for=condition=Ready "pod/$pod" --timeout=180s >/dev/null || {
+    red "the seeding pod never became Ready"; kubectl describe pod -n "$NS" "$pod" | tail -20; exit 1; }
+
+  echo "Copying $(du -sh "$cache" | cut -f1) into $claim …"
+  # tar and not `kubectl cp`: cp resolves symlinks, loses permissions on
+  # some paths and has no way to report what it wrote. The pipe also
+  # keeps the bytes off any intermediate disk.
+  if tar -C "$cache" -cf - . | kubectl exec -n "$NS" -i "$pod" -- tar -C /destino -xf -; then
+    green "copied"
+  else
+    red "the copy failed — the volume may hold a partial tree"
+    kubectl delete pod -n "$NS" "$pod" --ignore-not-found >/dev/null 2>&1
+    [ -n "$scaled_down" ] && kubectl scale -n "$NS" deploy/engine-cpu --replicas=1 >/dev/null
+    exit 1
+  fi
+
+  # WHAT LANDED, MEASURED FROM THE INSIDE. Counting on this side would
+  # measure the cache, which we already knew: the question is what the
+  # volume holds.
+  kubectl exec -n "$NS" "$pod" -- sh -c 'echo "  $(find /destino -type f | wc -l) files, $(du -sh /destino | cut -f1) on the volume"'
+  kubectl delete pod -n "$NS" "$pod" --ignore-not-found >/dev/null 2>&1
+  if [ -n "$scaled_down" ]; then
+    kubectl scale -n "$NS" deploy/engine-cpu --replicas=1 >/dev/null
+    green "engine-cpu back to 1 replica"
+  fi
+}
+
 # ══ THE TENANT KEYS ═════════════════════════════════════════════════
 #
 # A ceremony of thirteen shell lines became a subcommand, and the
@@ -909,6 +1028,7 @@ main() {
       else cmd_images_pin "${args[0]}"; fi
       ;;
     models) cmd_models ${args[@]+"${args[@]}"} ;;
+    seed)   cmd_seed   ${args[@]+"${args[@]}"} ;;
     key)
       case "${args[0]:-}" in
         list)  cmd_key_list ;;

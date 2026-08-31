@@ -215,7 +215,15 @@ separate act** — issuing a new key revokes nothing.
   2026-08-31: an image with a build definition nobody can trigger is,
   from the instance's point of view, the same as an image with no
   source at all.
-- **The weight fetchers** (§4).
+- **The weight fetchers for the GPU lane.** `aegis ai models` fetches
+  the CPU lane's (their URLs were measured, with their licences), and
+  refuses the rest rather than guess: the GPU weights are gibibytes
+  named by MODEL_ID, and transcription resolves its own by name through
+  its library's cache. `--from` is the answer for both, and it is said
+  out loud instead of left as a silence.
+- **The seeding of the volumes, run for real.** `aegis ai seed <lane>`
+  exists as of 2026-08-31 and is DECLARED NOT VERIFIED: it has never
+  run against a cluster. Its first run is its verification.
 - **The consumer test.** Every gate in phase 87 measures the platform
   side. The defining test is a tenant backend reaching the internal door
   with its key and getting an answer — not a 403 (missing registry
