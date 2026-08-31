@@ -25,13 +25,13 @@ LISTING what is available.
 
 AN HONEST NOTE about the patterns below. The ones in
 cf-policy-tunnel.py and cf-policy-dns.py are CONFIRMED against the
-account (validation #3, 2026-07-09). These two are NOT: the CF master
-token is ephemeral and dies in phase 15, so there was nothing to list
-the groups with when they were written. The regexes are deliberately
-wide and the failure comes with evidence — if they do not match, the
-operator sees the real list and adjusts one line. That is better than
-an ID from memory that fails silently, but worse than a measurement,
-and it is said here so that it is not read as confirmed.
+account (validation #3, 2026-07-09). These two were NOT, and on
+2026-08-31 the first live run showed what that cost: the wide regex
+matched the WRONG group, the token minted clean, and every Access
+policy failed an hour later with a 403 that read like an account
+problem. The names below are now the EXACT ones from Cloudflare's
+documentation of the endpoints this token calls, with the regex kept
+only as a loud fallback for a rename.
 
 Usage: cf-policy-access.py <pgroups.json> <token-name> <account-id> <zone-id>
 """
@@ -43,21 +43,52 @@ pgroups_file, token_name, account_id, zone_id = sys.argv[1:5]
 groups = json.load(open(pgroups_file))["result"]
 
 
-def find(pattern, scope_hint):
+def find(exact, pattern, scope_hint):
+    """The EXACT name first, the regex only as a fallback, and loudly.
+
+    Corrected on 2026-08-31, on the first run that ever used this file.
+    The regex matched SOMETHING on the live account, the token was
+    minted, and every Access policy then failed with 403 auth.forbidden
+    — while the service token in the same token's other permission
+    worked. A regex that matches the wrong group is worse than one that
+    matches nothing: nothing fails at mint time, with the list in front
+    of you; the wrong one fails an hour later, inside tofu, as a 403
+    that looks like an account problem.
+
+    The exact names come from Cloudflare's own documentation of the
+    endpoints this token calls (`POST /accounts/{id}/access/policies`
+    requires `Access: Apps and Policies Write`). That is a measurement
+    against the docs, which is what this file said it was missing.
+
+    The regex stays as a fallback because Cloudflare renames permission
+    groups and a rename should degrade to «found it, but not by the
+    name we expected» rather than to a dead init. It says so out loud:
+    a fallback nobody hears is how a rename becomes tomorrow's silent
+    403.
+    """
+    for g in groups:
+        if g["name"] == exact:
+            return {"id": g["id"], "name": g["name"]}
     rx = re.compile(pattern, re.I)
     for g in groups:
         if rx.search(g["name"]) and any(scope_hint in s for s in
                                         g.get("scopes", []) or [scope_hint]):
+            print(f"WARNING: no permission group is named {exact!r} any more; "
+                  f"falling back to {g['name']!r} by pattern. If Access calls "
+                  f"start failing with 403, this line is where to look.",
+                  file=sys.stderr)
             return {"id": g["id"], "name": g["name"]}
-    print(f"NO MATCH for /{pattern}/ (scope ~{scope_hint}). Available:",
+    print(f"NO MATCH for {exact!r} nor /{pattern}/ (scope ~{scope_hint}). Available:",
           file=sys.stderr)
     for g in groups:
         print(f"  - {g['name']}  scopes={g.get('scopes')}", file=sys.stderr)
     sys.exit(1)
 
 
-apps_write = find(r"access.*app.*polic.*(write|edit)", "account")
-tokens_write = find(r"access.*service\s*token.*(write|edit)", "account")
+apps_write = find("Access: Apps and Policies Write",
+                  r"access.*app.*polic.*(write|edit)", "account")
+tokens_write = find("Access: Service Tokens Write",
+                    r"access.*service\s*token.*(write|edit)", "account")
 
 print(json.dumps({
     "name": token_name,

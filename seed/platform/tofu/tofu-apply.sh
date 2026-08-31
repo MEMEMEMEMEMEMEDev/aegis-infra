@@ -191,9 +191,19 @@ set -e
 if [[ -n "$PLAIN" && -f "$PLAIN" && "$(fingerprint "$PLAIN")" != "$FINGERPRINT_BEFORE" ]]; then
     command -v sops >/dev/null || die "the state changed and sops is not in PATH"
     umask 077
-    sops -e --input-type json --output-type json \
+    # --config NAMED, not looked up. sops searches for .sops.yaml
+    # upwards FROM THE CURRENT DIRECTORY, and this wrapper is called
+    # from wherever the phase happens to stand — on 2026-08-31 that was
+    # the product's clone, which has no .sops.yaml, so sops answered
+    # «no creation rules» about a rule that was right there. Measured
+    # both ways that day: from the env's directory it encrypted fine,
+    # from the product's clone it did not, with the same file and the
+    # same rule. A behaviour that depends on the caller's cwd is a
+    # behaviour nobody can reason about from reading this file.
+    sops --config "$HERE/../.sops.yaml" \
+         -e --input-type json --output-type json \
          --filename-override "$ENCRYPTED" "$PLAIN" > "$ENCRYPTED.tmp" \
-        || die "sops -e of the state failed"
+        || die "sops -e of the state failed (config: $HERE/../.sops.yaml)"
     mv "$ENCRYPTED.tmp" "$ENCRYPTED"
     log "state re-encrypted -> $(basename "$ENCRYPTED")  — COMMIT IT"
     log "  without that commit, the next recovery does not know this exists."
