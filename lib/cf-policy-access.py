@@ -90,6 +90,24 @@ apps_write = find("Access: Apps and Policies Write",
 tokens_write = find("Access: Service Tokens Write",
                     r"access.*service\s*token.*(write|edit)", "account")
 
+# WHAT WAS CHOSEN, ON STDERR, ALWAYS. Not only when something fails.
+#
+# This file spent two days minting a token whose permissions nobody
+# could see: the mint succeeded, the phase went green, and tofu got a
+# 403 an hour later in another command. Diagnosing it meant asking the
+# operator to re-run a curl with the master credential — a credential
+# this init destroys on purpose — because the one process that HAD the
+# list had printed nothing.
+#
+# The names are not secret. The token's value is, and it is not here.
+# Printing what was granted costs two lines and turns «403 somewhere
+# else» into «it was granted THIS, and this is what the account has».
+print(f"access token: granting {apps_write['name']!r} + {tokens_write['name']!r}",
+      file=sys.stderr)
+_others = sorted(g["name"] for g in groups
+                 if re.search(r"access|zero\s*trust", g["name"], re.I))
+print(f"  (Access-related groups this account offers: {_others})", file=sys.stderr)
+
 print(json.dumps({
     "name": token_name,
     "policies": [
