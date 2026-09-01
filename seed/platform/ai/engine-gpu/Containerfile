@@ -40,7 +40,11 @@
 # was measured against the upstream build definition rather than taken
 # from a release note's summary.
 #
-#   torch 2.11.0 FROM THE cu128 INDEX. PyTorch's own wheel build script
+#   torch 2.11.0 FROM THE cu130 INDEX. (It said cu128 until 2026-09-01;
+#   see «CU130, AND THE ENGINE ITSELF SAID SO» further down for the
+#   measurement that moved it. The reasoning below is unchanged and is
+#   why the INDEX is named at all — only the number moved.)
+#   PyTorch's own wheel build script
 #   decides the compiled architectures by CUDA version:
 #
 #       TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0"
@@ -54,7 +58,7 @@
 #   the cu126 wheel of this very same 2.11.0 has NO sm_120 kernels and
 #   fails at the first matmul with "no kernel image is available". That
 #   is why the index is named explicitly below and why the local version
-#   (`+cu128`) is written into the pin: `pip install torch==2.11.0` off
+#   (`+cu130`) is written into the pin: `pip install torch==2.11.0` off
 #   plain PyPI resolves to whatever CUDA variant is default that month.
 #
 #   vllm 0.25.1, which REQUIRES torch==2.11.0 (measured 2026-08-29 on
@@ -146,7 +150,20 @@ RUN python -m venv "$VENV" \
  && "$VENV/bin/pip" install --no-cache-dir --upgrade pip setuptools wheel
 ENV PATH="/opt/ai/venv/bin:${PATH}"
 
-# TORCH FIRST AND ON ITS OWN, from the cu128 index. Two reasons and both
+# CU130, AND THE ENGINE ITSELF SAID SO. This was cu128 until
+# 2026-09-01, reasoned and never verified — the sign on this file said
+# as much. The first image that ever ran crashed on import with
+# `ImportError: libcudart.so.13`, and the answer was in vllm 0.25.1's
+# own metadata: it requires `nvidia-cutlass-dsl[cu13]`. The wheel is
+# compiled against CUDA 13, so its extension looks for CUDA 13's
+# runtime, and a torch built against 12.8 ships libcudart.so.12. Two
+# correct choices that do not speak to each other.
+#
+# Blackwell (sm_120) is served by CUDA 13 as it is by 12.8, so the
+# reason cu128 was chosen is not lost by moving: what is gained is that
+# the runtime under vLLM is the one vLLM was built on.
+#
+# TORCH FIRST AND ON ITS OWN, from the cu130 index. Two reasons and both
 # are about determinism: pip would otherwise resolve torch from plain
 # PyPI while satisfying vllm's `torch==2.11.0`, and PyPI's default CUDA
 # variant is whatever upstream shipped as default that month — the one
@@ -154,14 +171,15 @@ ENV PATH="/opt/ai/venv/bin:${PATH}"
 # it first, by exact local version, from the named index, makes the
 # question have one answer.
 #
-# torchvision comes along because vllm asks for it and the cu128 index
-# carries it; torchaudio is resolved by the vllm install below, from
-# PyPI, because the cu128 index does not publish a 2.11.0 of it and it
-# carries nothing that depends on the card.
+# torchvision comes along because vllm asks for it and the cu130 index
+# carries it (measured 2026-09-01: the cp312 x86_64 wheel of
+# 0.26.0+cu130 is published); torchaudio is resolved by the vllm
+# install below, from PyPI, because the pytorch index does not publish
+# a 2.11.0 of it and it carries nothing that depends on the card.
 RUN pip install --no-cache-dir \
-      --index-url https://download.pytorch.org/whl/cu128 \
-      torch==2.11.0+cu128 \
-      torchvision==0.26.0+cu128
+      --index-url https://download.pytorch.org/whl/cu130 \
+      torch==2.11.0+cu130 \
+      torchvision==0.26.0+cu130
 
 # vLLM, with torch ALREADY satisfied so the resolver cannot replace it.
 # AND PIP ITSELF GOES. Measured 2026-09-01, after three wrong
