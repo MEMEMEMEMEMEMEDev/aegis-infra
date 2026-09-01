@@ -6,8 +6,9 @@
 # (600) in the pod that is deleted on the way out. CSRF crumb for the
 # POSTs (crumb + session cookie: the crumb is only good with the
 # session that issued it).
-# Consumers: phases 50 (ci-images), 60 (first build), 70 (anti-loop
-# wfapi), 80 (signed build).
+# Consumers: every phase that builds — the list is not kept here
+# because it drifted (85 and 87 arrived and nobody updated it); what
+# matters is the precondition, and it is stated in the code below.
 
 set -euo pipefail
 
@@ -16,6 +17,12 @@ set -euo pipefail
 # (a later --from run), it reads it from the cluster — mechanics
 # without showing it.
 _jenkins_pass_file() {
+    # Run of 2026-09-01: with no tmpfs this expanded to "/jenkins_admin_pass"
+    # under set -u… which is an UNBOUND VARIABLE error whose only visible
+    # consequence was a 401 three lines later, read as «the job does not
+    # exist». The precondition is stated where it is needed, the same way
+    # ansible_become_setup states it in lib/common.sh:
+    : "${SECRETS_TMP:?lib/jenkins.sh requires secrets_workdir first — a phase that talks to Jenkins opens the tmpfs BEFORE its first build}"
     local f="$SECRETS_TMP/jenkins_admin_pass"
     if [[ ! -s "$f" ]]; then
         # umask 077 (P2 audit 2026-07-18): the redirection created the

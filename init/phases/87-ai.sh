@@ -80,6 +80,19 @@ fi
 
 log_info "AI=$AI — deploying the AI subsystem"
 
+# The tmpfs opens HERE, and not down in 87.3 where the secrets of this
+# phase are born, because 87.1a fires Jenkins builds and lib/jenkins.sh
+# materialises the admin netrc inside $SECRETS_TMP. Run of 2026-09-01:
+# it was opened in 87.3, the build of ai-gateway ran first, and the
+# credential file resolved to the empty string — Jenkins answered 401
+# and the phase reported «the Jenkins API is down or the job does not
+# exist» about a job that was there, with its main branch indexed. The
+# same shape as the 80 ordering bug: a section arrived without its
+# precondition, and the symptom surfaced far from the cause.
+# It is opened AFTER the no-subject return: an instance with AI=no has
+# no reason to create a tmpfs, and the trap is per phase either way.
+secrets_workdir
+
 # ── 87.1 the images, BEFORE anything is created ────────────────────
 # First, because a subsystem deployed onto digests of zeros is three
 # pods in ImagePullBackOff and an operator reading events to find out
@@ -267,7 +280,8 @@ fi
 # unable to render ("ksops: no such file") while ArgoCD reports Healthy
 # about nothing — the failure that cost garage-system a clean instance.
 # Check 145 derives that obligation from the generator itself.
-secrets_workdir
+# (the tmpfs is already open: it is created at the top of the phase,
+# because 87.1a talks to Jenkins long before this point.)
 REG_HOST="$REGISTRY_HOST_INTERNAL"   # single source (P3 audit)
 # gen_or_restore reads back the SAME registry password phase 40 stored:
 # regenerating it here would produce a regcred that does not match the
