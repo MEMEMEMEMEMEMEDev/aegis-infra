@@ -12,6 +12,30 @@
 
 set -euo pipefail
 
+# ── how a job is ADDRESSED ──────────────────────────────────────────
+# Jenkins nests items by repeating /job/: the main branch of the
+# multibranch ai-gateway-mb is /job/ai-gateway-mb/job/main, never
+# /job/ai-gateway-mb/main. Run of 2026-09-01: phase 87 wrote the second
+# form, Jenkins answered 404, and the caller reported «the job does not
+# exist» about a job that was there with its branch indexed. The
+# comment above that line even said the branch is the buildable item,
+# so what failed was not the idea, it was writing the path by hand.
+#
+# Hence this: the caller names the item (`ai-gateway-mb/main`, or
+# `ai-gateway-mb/job/main`, or plain `ci-images`) and the LIBRARY
+# builds the URL. Idempotent — a `job` segment already there is
+# dropped and rebuilt — so the call sites that were already correct
+# keep working untouched. A Jenkins item literally named `job` would be
+# invisible to this, and is a name nothing in the artifact creates.
+_jenkins_job() {   # <item path> -> the nested path Jenkins addresses
+    local IFS=/ seg out=""
+    for seg in $1; do
+        [[ -n "$seg" && "$seg" != "job" ]] || continue
+        out="${out:+$out/job/}$seg"
+    done
+    printf '%s' "$out"
+}
+
 # _jenkins_pass_file: the jenkins-admin password into a tmpfs file.
 # Prefers the one generated in THIS run (phase 50); if it is not there
 # (a later --from run), it reads it from the cluster — mechanics
@@ -109,7 +133,7 @@ jenkins_post() {
 _jenkins_next_raw() {   # prints the number ONLY if it validates (a
     local out             # failed attempt must not contaminate the
                           # caller's $()):
-    out="$(jenkins_get "/job/$1/api/json" 2>/dev/null \
+    out="$(jenkins_get "/job/$(_jenkins_job "$1")/api/json" 2>/dev/null \
            | jq -r '.nextBuildNumber // empty')" || return 1
     [[ "$out" =~ ^[0-9]+$ ]] || return 1
     printf '%s' "$out"
@@ -161,12 +185,12 @@ jenkins_wait_build() {
         # out the WHOLE timeout in silence. Only the 404 is a
         # legitimate "has not started yet"; any other sustained error
         # (6 laps ≈ 2 min) cuts short with the code in plain sight:
-        if result="$(jenkins_get "/job/$job/$build/api/json" 2>/dev/null \
+        if result="$(jenkins_get "/job/$(_jenkins_job "$job")/$build/api/json" 2>/dev/null \
                      | jq -r '.result // "RUNNING"')" && [[ -n "$result" ]]; then
             api_errs=0
         else
             local code
-            code="$(jenkins_get_code "/job/$job/$build/api/json" 2>/dev/null || echo 000)"
+            code="$(jenkins_get_code "/job/$(_jenkins_job "$job")/$build/api/json" 2>/dev/null || echo 000)"
             if [[ "$code" == "404" ]]; then
                 api_errs=0
                 result=RUNNING   # the webhook/quiet period has not created it yet
@@ -188,13 +212,13 @@ jenkins_wait_build() {
                 # row without ONE line of the console — the cause lives
                 # there and the operator dug it out by hand:
                 log_error "build $job#$build ended $result — tail of the console:"
-                jenkins_get "/job/$job/$build/consoleText" 2>/dev/null \
+                jenkins_get "/job/$(_jenkins_job "$job")/$build/consoleText" 2>/dev/null \
                     | tail -n 30 >&2 || true
                 return 1 ;;
         esac
         (( waited >= timeout )) && {
             log_error "build $job#$build: timeout ${timeout}s (state: $result)"
-            jenkins_get "/job/$job/$build/consoleText" 2>/dev/null \
+            jenkins_get "/job/$(_jenkins_job "$job")/$build/consoleText" 2>/dev/null \
                 | tail -n 15 >&2 || true
             _jenkins_quota_stall "$timeout" || true
             return 1; }
@@ -220,7 +244,7 @@ jenkins_wait_build() {
 # /buildWithParameters on a plain job throws "not parameterized". The
 # job knows which one it is; ask it.
 jenkins_job_parameterized() {
-    jenkins_get "/job/$1/api/json?tree=property%5BparameterDefinitions%5Bname%5D%5D" 2>/dev/null       | jq -e '[.property[]? | select(.parameterDefinitions? and (.parameterDefinitions | length > 0))] | length > 0'       >/dev/null
+    jenkins_get "/job/$(_jenkins_job "$1")/api/json?tree=property%5BparameterDefinitions%5Bname%5D%5D" 2>/dev/null       | jq -e '[.property[]? | select(.parameterDefinitions? and (.parameterDefinitions | length > 0))] | length > 0'       >/dev/null
 }
 
 # jenkins_fire <job> [query] — the trigger POST, on the endpoint the job
@@ -232,10 +256,10 @@ jenkins_job_parameterized() {
 jenkins_fire() {
     local job="$1" query="${2:-}" path
     if jenkins_job_parameterized "$job"; then
-        path="/job/$job/buildWithParameters${query:+?$query}"
+        path="/job/$(_jenkins_job "$job")/buildWithParameters${query:+?$query}"
     else
         [[ -z "$query" ]] || { log_error "jenkins_fire $job: parameters given ('$query') to a job that declares none"; return 1; }
-        path="/job/$job/build"
+        path="/job/$(_jenkins_job "$job")/build"
     fi
     jenkins_post "$path" >/dev/null         || { log_error "jenkins_fire $job: the trigger POST to $path failed — nothing was queued (Jenkins' own log has the reason: kubectl -n jenkins-system logs jenkins-0 -c jenkins | grep 'Error while serving')"; return 1; }
 }
@@ -248,9 +272,9 @@ jenkins_fire() {
 _jenkins_build_appears() {
     local job="$1" n="$2" secs="${3:-120}" waited=0 code
     while (( waited < secs )); do
-        code="$(jenkins_get_code "/job/$job/$n/api/json" 2>/dev/null || echo 000)"
+        code="$(jenkins_get_code "/job/$(_jenkins_job "$job")/$n/api/json" 2>/dev/null || echo 000)"
         [[ "$code" == "200" ]] && return 0
-        jenkins_get "/job/$job/api/json?tree=inQueue" 2>/dev/null | jq -e '.inQueue == true' >/dev/null && return 0
+        jenkins_get "/job/$(_jenkins_job "$job")/api/json?tree=inQueue" 2>/dev/null | jq -e '.inQueue == true' >/dev/null && return 0
         sleep 10; waited=$(( waited + 10 ))
     done
     log_error "build $job#$n never appeared in ${secs}s and the job is not queued — the trigger did not take (a build that does not exist is not a slow build)"
@@ -266,7 +290,7 @@ jenkins_build_retry() {
         if jenkins_wait_build "$job" "$timeout" "$next"; then
             return 0
         fi
-        if jenkins_get "/job/$job/$next/consoleText" 2>/dev/null \
+        if jenkins_get "/job/$(_jenkins_job "$job")/$next/consoleText" 2>/dev/null \
              | grep -qiE "$AEGIS_NET_SIGS"; then
             log_warn "build $job#$next: FAILURE with a transient NETWORK signature (attempt $i/$tries) — re-firing"
             continue
