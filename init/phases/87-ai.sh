@@ -176,8 +176,21 @@ for _img in $AI_IMAGES_NEEDED; do
     esac
     log_info "$_img: not pinned — firing $_job (up to $((_to / 60)) min)"
     gate "ai-image-built-$_img" jenkins_build_retry "$_job" "$_to" 2
+    # WHICH TAG. Not guessed here, and not written twice: each lane
+    # names its tag its own way (engine-cpu the pyproject version plus
+    # the short sha, the gateway main-NNNNNN), so a second place
+    # deciding it is a second place to drift. The build declares it in
+    # the AEGIS_EVENT line — the same line Vector routes to the audit
+    # store with a year of retention — and this reads that, for the
+    # build number it just waited on.
+    _ev="$(jenkins_build_event "$_job" "$JENKINS_LAST_BUILD" "$_img")" || \
+        die "build $_job#$JENKINS_LAST_BUILD declared no AEGIS_EVENT for $_img: it cannot say which tag it pushed, so nothing gets pinned — a build that says nothing is not a build that said something else"
+    _tag="$(jq -r '.tag // empty' <<< "$_ev")"
+    [[ -n "$_tag" ]] || \
+        die "the event of $_job#$JENKINS_LAST_BUILD names no tag: $_ev"
+    log_info "$_img: the build declares tag $_tag"
     gate "ai-image-pinned-$_img" \
-        run_cmd "$AEGIS_ROOT/libexec/aegis-ai" images "$_img"
+        run_cmd "$AEGIS_ROOT/libexec/aegis-ai" images "$_img:$_tag"
 done
 unset _img _job _to
 

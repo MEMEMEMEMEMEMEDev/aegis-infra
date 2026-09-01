@@ -281,13 +281,45 @@ _jenkins_build_appears() {
     return 1
 }
 
+# jenkins_build_event <job> <build> [image] — the supply-chain event a
+# build declared, as JSON on stdout.
+#
+# `AEGIS_EVENT <json>` is not console decoration: Vector routes exactly
+# those lines to vlogs-events with a year of retention, and the
+# supply-chain dashboard reads them. So it is a DECLARED contract, and
+# reading it is not the console scraping phase 80 retired — that was
+# free-form text of a build that on a resume could be another one.
+# Here the format is declared and the build number is the one that was
+# waited on.
+#
+# With <image>, the last event naming that image; without it, simply
+# the last one. Empty output and rc 1 if the build declared none: a
+# build that says nothing is not a build that said something else.
+jenkins_build_event() {
+    local job="$1" build="$2" img="${3:-}" line
+    line="$(jenkins_get "/job/$(_jenkins_job "$job")/$build/consoleText" 2>/dev/null \
+        | grep -a 'AEGIS_EVENT ' \
+        | sed -E 's/^.*AEGIS_EVENT //' || true)"
+    [[ -n "$img" ]] && line="$(grep -F "\"image\":\"$img\"" <<< "$line" || true)"
+    line="$(tail -n1 <<< "$line")"
+    [[ -n "$line" ]] || return 1
+    printf '%s' "$line"
+}
+
+# JENKINS_LAST_BUILD: the number of the build this call ended on. It
+# is published because the caller usually needs to ask that build
+# something afterwards (which tag did it produce?), and reaching for
+# lastSuccessfulBuild instead would answer about whatever build
+# finished last — not necessarily the one waited for here.
 jenkins_build_retry() {
     local job="$1" timeout="${2:-1800}" tries="${3:-3}" query="${4:-}" i next
+    JENKINS_LAST_BUILD=""
     for ((i = 1; i <= tries; i++)); do
         next="$(jenkins_next_build "$job")"
         jenkins_fire "$job" "$query" || return 1
         _jenkins_build_appears "$job" "$next" 120 || return 1
         if jenkins_wait_build "$job" "$timeout" "$next"; then
+            JENKINS_LAST_BUILD="$next"
             return 0
         fi
         if jenkins_get "/job/$(_jenkins_job "$job")/$next/consoleText" 2>/dev/null \

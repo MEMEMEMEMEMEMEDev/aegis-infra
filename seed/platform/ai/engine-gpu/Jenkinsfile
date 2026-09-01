@@ -256,7 +256,7 @@ spec:
       steps {
         sh '''
           DIGEST=$(cat ${WORKSPACE}/image-digest 2>/dev/null || echo "")
-          printf '{"event":"supply-chain","image":"%s","tag":"%s","digest":"%s","ts":"%s"}\\n' \
+          printf 'AEGIS_EVENT {"event":"supply-chain","image":"%s","tag":"%s","digest":"%s","ts":"%s"}\\n' \
             "${IMAGE}" "${TAG}" "${DIGEST}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "NEXT STEP (building does not deploy): pin this digest with"
           echo "  aegis ai images"
