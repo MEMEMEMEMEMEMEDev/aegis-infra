@@ -241,8 +241,15 @@ spec:
           W=/home/jenkins/agent
           rm -f "$W/kaniko.rc" "$W/kaniko.go"
           : > "$W/kaniko.log"
-          printf '%s' "--context=dir://${WORKSPACE}/ai/engine-gpu --dockerfile=Containerfile --destination=${REGISTRY}/${IMAGE}:${TAG} --no-push --tarPath=${WORKSPACE}/image.tar --registry-certificate ${REGISTRY}=/kaniko/ca.crt" > "$W/kaniko.args"
+          printf '%s' "--context=dir://${WORKSPACE}/ai/engine-gpu --dockerfile=Containerfile --destination=${REGISTRY}/${IMAGE}:${TAG} --no-push --tarPath=${WORKSPACE}/image.tar --compressed-caching=false --registry-certificate ${REGISTRY}=/kaniko/ca.crt" > "$W/kaniko.args"
           touch "$W/kaniko.go"
+          # --compressed-caching=false: kaniko keeps every layer it has
+          # already snapshotted compressed IN MEMORY, and this image
+          # unpacks torch+cu128 and vLLM — several GB per layer.
+          # Measured 2026-09-01: without the flag the kaniko container
+          # was OOMKilled at its 8Gi ceiling right after torch
+          # installed. The flag trades that memory for disk, which is
+          # the resource this machine actually has.
           # the build runs for hours: its output has to be visible AS
           # it happens, not at the end.
           tail -f "$W/kaniko.log" & TAIL=$!

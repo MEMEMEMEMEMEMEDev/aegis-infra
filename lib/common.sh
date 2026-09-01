@@ -1192,7 +1192,26 @@ probe_reset() {   # <ns> <pod-name>
 # jenkins_build_retry (which re-fires the build). "server misbehaving"
 # = the upstream DNS of the operator's phone, seen LIVE in #15 taking
 # down the sync and (probably) the build:
-AEGIS_NET_SIGS='dial tcp|i/o timeout|TLS handshake timeout|server misbehaving|connection reset|connection refused|temporary failure|could not resolve|unexpected EOF|lookup .* on|failed to get git'
+#
+# 2026-09-01: the list was written from what Go and git say, and every
+# signature in it is one of those two. The longest build in the
+# product does not speak Go — it is pip pulling multi-GB wheels — and
+# when files.pythonhosted.org timed out mid-download the retry
+# declared «FAILURE with NO network signature: a real failure, it is
+# not retried» and stopped a four-hour build for a hiccup. The whole
+# reason this list exists is that a transient network fault must not
+# read as a defect, so it has to speak every language the artifact
+# downloads in: Go, git, AND python.
+AEGIS_NET_SIGS='dial tcp|i/o timeout|TLS handshake timeout|server misbehaving|connection reset|connection refused|temporary failure|could not resolve|unexpected EOF|lookup .* on|failed to get git|ReadTimeoutError|ConnectionError|IncompleteRead|Read timed out|Connection broken|Temporary failure in name resolution|Failed to establish a new connection|Remote end closed connection|ETIMEDOUT|ECONNRESET|ENOTFOUND|network timeout|temporary error|Could not resolve host'
+# Provenance, because it matters which of these were SEEN and which
+# were read: `ReadTimeoutError` and `Read timed out` were measured on
+# 2026-09-01, live, in the GPU engine's build. The go/git ones come
+# from earlier runs. The npm (ETIMEDOUT, ECONNRESET, ENOTFOUND),
+# apk (temporary error) and curl (Could not resolve host) entries are
+# taken from those tools' own documented messages and have NOT been
+# observed on this artifact — they are here so the first time one
+# happens it is retried instead of stopping a build, and that is the
+# declaration rather than the silence.
 
 # signatures of a transient VALIDATION failure of a sync (Finding A
 # v1.0): the first sync after creating/updating the root App may run
