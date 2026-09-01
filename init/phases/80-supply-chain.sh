@@ -178,7 +178,7 @@ git_push_verified "$PLATFORM_DIR"
 argo_sync jenkins-secrets    # now the generator completes the 7
 # F-B #15: Synced only counts for the JUST-pushed revision:
 argo_secrets_gate jenkins-secrets 300 \
-    "$(git -C "$PLATFORM_DIR" rev-parse HEAD)"
+    "$(git -C "$PLATFORM_DIR" rev-parse HEAD)" "$PLATFORM_DIR"
 gate "cosign-secret-vivo" poll 180 5 bash -c \
   "kubectl -n jenkins-system get secret cosign-signing-key >/dev/null 2>&1"
 
@@ -389,7 +389,7 @@ gate "kyverno-webhook-sirviendo" \
 argo_sync kyverno-policies
 # P1.14: Synced only counts for the revision of THIS phase's commit:
 argo_secrets_gate kyverno-policies 300 \
-    "$(git -C "$PLATFORM_DIR" rev-parse HEAD)"
+    "$(git -C "$PLATFORM_DIR" rev-parse HEAD)" "$PLATFORM_DIR"
 # P1.9 audit: it was single-shot over an ASYNCHRONOUS step (the
 # controller admits the policy and only then sets Ready):
 gate "policy-ready" poll 180 5 bash -c \

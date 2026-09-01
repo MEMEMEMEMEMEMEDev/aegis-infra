@@ -38,7 +38,7 @@ argo_sync jenkins-secrets
 # F-B run #15: the sync died from transient DNS and the gate passed
 # with the OLD Synced — it now demands the JUST-pushed revision:
 argo_secrets_gate jenkins-secrets 300 \
-    "$(git -C "$PLATFORM_DIR" rev-parse HEAD)"
+    "$(git -C "$PLATFORM_DIR" rev-parse HEAD)" "$PLATFORM_DIR"
 gate "los-6-secrets" poll 180 5 bash -c "kubectl -n jenkins-system get secret \
   jenkins-admin hello-aegis-repo regcred-internal github-token \
   ops-stack-repo-ro github-webhook-hmac >/dev/null 2>&1"

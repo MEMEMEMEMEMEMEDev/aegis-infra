@@ -790,8 +790,47 @@ argo_sync() {   # <app> [timeout_s] [nohooks]
 # (rev-parse HEAD after the push) — Synced only counts if
 # revision/revisions contains it (ArgoCD automated retries on its own
 # refresh cycle, so the poll converges):
-argo_secrets_gate() {   # <app> [timeout_s] [expected_sha]
-    local app="$1" timeout="${2:-300}" expected="${3:-}" waited=0
+# Run of 2026-09-01: "Synced TO $expected" turned out to be the wrong
+# question. The platform repo is written by MORE than the init — the
+# base-images job pushes back the digest of the base it just built —
+# and that push lands BETWEEN this phase's push and ArgoCD's sync. The
+# App then sits, CORRECTLY, on a revision NEWER than the one the phase
+# pushed, and a gate demanding equality waited out its whole 300 s for
+# a state that had already been overtaken. Measured: phase 80 pushed
+# 2507e4e at 09:27:58, base-images pushed 5eeb1d9 at 09:31:29, the
+# gate died at 09:39:01 against a cluster that was entirely correct.
+#
+# What the gate really proves is «the platform has caught up to at
+# least my commit»: ANCESTRY, not equality. The F-B #15 fault this
+# gate was born for still fails, and that is the point — an OLD
+# revision does not descend from the new one, so a sync that stayed
+# behind is as red as it ever was. Only moving FORWARD is forgiven.
+#
+# Ancestry needs the objects, so it needs a clone: the fourth
+# parameter. With no clone (phase 70 pushes from an ephemeral one and
+# reads the sha off the remote) the strict comparison stands — a gate
+# that cannot measure ancestry says so by keeping the older, tighter
+# question, never by passing.
+_rev_is_applied() {   # <expected> <live_revs> <repo_dir> ; 0 = applied
+    local expected="$1" revs="$2" dir="$3" live
+    grep -q "$expected" <<< "$revs" && return 0
+    [[ -n "$dir" && -d "$dir/.git" ]] || return 1
+    for live in $revs; do
+        [[ "$live" =~ ^[0-9a-f]{40}$ ]] || continue
+        # the live revision may be a commit this clone has never seen
+        # (somebody else pushed it); fetch ONCE before judging it:
+        git -C "$dir" cat-file -e "${live}^{commit}" 2>/dev/null \
+            || git -C "$dir" fetch --quiet origin 2>/dev/null || true
+        if git -C "$dir" merge-base --is-ancestor "$expected" "$live" 2>/dev/null; then
+            log_info "sync: on ${live:0:8}, which DESCENDS from the pushed ${expected:0:8} — the platform moved on (a build pushed after this phase), it did not stay behind"
+            return 0
+        fi
+    done
+    return 1
+}
+
+argo_secrets_gate() {   # <app> [timeout_s] [expected_sha] [repo_dir]
+    local app="$1" timeout="${2:-300}" expected="${3:-}" repo="${4:-}" waited=0
     local cond msg t0=$SECONDS
     while :; do
         cond="$(kubectl -n argocd get application "$app" \
@@ -822,11 +861,11 @@ argo_secrets_gate() {   # <app> [timeout_s] [expected_sha]
                 revs="$(kubectl -n argocd get application "$app" \
                     -o jsonpath='{.status.sync.revision} {.status.sync.revisions}' \
                     2>/dev/null || true)"
-                if ! grep -q "$expected" <<< "$revs"; then
+                if ! _rev_is_applied "$expected" "$revs" "$repo"; then
                     # the if form (not `(( )) &&`): with errexit ALIVE
                     # (F-A) a statement that returns 1 kills the phase:
                     if (( waited % 30 == 0 )); then
-                        log_warn "$app: Synced, but to an OLD revision — waiting for ${expected:0:8} (${waited}s/${timeout}s)"
+                        log_warn "$app: Synced, but NOT to a revision that includes ${expected:0:8} — waiting (${waited}s/${timeout}s)"
                     fi
                     sleep 5; waited=$(( waited + 5 ))
                     if (( waited >= timeout )); then

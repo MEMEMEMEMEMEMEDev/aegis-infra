@@ -313,7 +313,8 @@ argo_sync ai-system 600
 # F-B run #15: a sync can die from transient DNS and leave the gate
 # passing over the OLD Synced revision. This demands the revision that
 # was JUST pushed.
-argo_secrets_gate ai-system 300 "$(git -C "$PLATFORM_DIR" rev-parse HEAD)"
+argo_secrets_gate ai-system 300 "$(git -C "$PLATFORM_DIR" rev-parse HEAD)" \
+    "$PLATFORM_DIR"
 
 # The volumes, which is where the weights will land. Four of them:
 # models-hf (shared by both GPU lanes, read-only), one compilation cache

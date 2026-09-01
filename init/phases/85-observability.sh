@@ -653,7 +653,7 @@ fi
 # F-B #15: Synced counts ONLY for the JUST-pushed revision (the HEAD
 # is the one from 85.7's push — nothing commits in between):
 argo_secrets_gate observability-base 300 \
-    "$(git -C "$PLATFORM_DIR" rev-parse HEAD)"
+    "$(git -C "$PLATFORM_DIR" rev-parse HEAD)" "$PLATFORM_DIR"
 # A7: post-sync validation ALWAYS — Synced+Healthy does not guarantee
 # the Secrets if the generator did not run:
 gate "obs-secretos-vivos" poll 180 5 bash -c \
