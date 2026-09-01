@@ -762,11 +762,20 @@ cmd_seed() {
   # written here: whatever registry this instance uses, the seeding pod
   # pulls from the same one and through the same regcred. A literal
   # would be a second place to keep the registry's address right.
-  local _SEED_IMAGE
-  _SEED_IMAGE="$(_from_image_for __FROM_ALPINE__ 2>/dev/null)" || _SEED_IMAGE=""
-  if [ -z "$_SEED_IMAGE" ]; then
-    _SEED_IMAGE="$("$AEGIS_ROOT/libexec/aegis-image" from alpine:3.21 2>/dev/null | sed 's/^FROM //')" || _SEED_IMAGE=""
-  fi
+  # `_from_image_for` answers with the NAME the placeholder stands for
+  # (`alpine:3.21`), never with a runnable reference — resolving that
+  # name against THIS instance's registry is `aegis image from`'s job,
+  # and it is the only party that knows the internal digest and refuses
+  # an image that is present but unsigned.
+  #
+  # Measured 2026-09-01: the name was used as the image, so the pod
+  # asked for `docker.io/alpine:3.21` and Kyverno refused it — rightly,
+  # since nothing signed it. A tool of this product cannot run on an
+  # image this product's own policy forbids.
+  local _SEED_REF _SEED_IMAGE
+  _SEED_REF="$(_from_image_for __FROM_ALPINE__ 2>/dev/null)" || _SEED_REF=""
+  [ -n "$_SEED_REF" ] || _SEED_REF="alpine:3.21"
+  _SEED_IMAGE="$("$AEGIS_ROOT/libexec/aegis-image" from "$_SEED_REF" 2>/dev/null | sed 's/^FROM //')" || _SEED_IMAGE=""
   [ -n "$_SEED_IMAGE" ] || { red "no mirrored alpine to run the seeding pod with — ask for it with \`${AEGIS_CMD:-aegis} image request alpine:3.21\`"; exit 1; }
 
   local pod="aegis-seed-$lane"
@@ -779,15 +788,41 @@ metadata:
   labels: {app: aegis-seed}
 spec:
   restartPolicy: Never
+  # the image comes from the INTERNAL registry, which asks for a
+  # credential like every other pull in this namespace
+  imagePullSecrets: [{name: regcred-internal}]
   securityContext: {runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000}
   containers:
     - name: seed
       image: $_SEED_IMAGE
-      command: ["sleep", "600"]
+      # Long, and the pod is deleted on EVERY path out of here — the
+      # success one, the failure one and the interrupt. Measured
+      # 2026-09-01: 600 s was fine for the CPU lane's 1 GB and killed
+      # the GPU lane's 15 GB mid-copy, with the pod dying under the
+      # stream and the failure arriving as «connection reset by peer»,
+      # which reads like a network fault and is a stopwatch.
+      command: ["sleep", "14400"]
+      # ai-system enforces the restricted Pod Security profile, and a
+      # helper this product ships has to satisfy the product's own
+      # floor — measured 2026-09-01, when it did not and the namespace
+      # refused it. Nothing here is a concession: a pod that copies
+      # files into a volume needs no privileges, no capabilities and no
+      # custom seccomp.
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: {drop: ["ALL"]}
+        seccompProfile: {type: RuntimeDefault}
       volumeMounts: [{name: destino, mountPath: /destino}]
       resources:
-        requests: {cpu: 50m, memory: 64Mi}
-        limits:   {cpu: 500m, memory: 256Mi}
+        # Measured 2026-09-01: with 256Mi the CPU lane's 1 GB copied
+        # fine and the GPU lane's 15 GB was killed thirty seconds in
+        # with exit 137. Writing at speed fills the page cache, and the
+        # page cache is charged to this container's cgroup — so the
+        # ceiling that never mattered for a gigabyte is the ceiling
+        # that kills fifteen. The failure arrives as «connection reset
+        # by peer», which reads like a network fault.
+        requests: {cpu: 100m, memory: 128Mi}
+        limits:   {cpu: 1000m, memory: 2Gi}
   volumes:
     - name: destino
       persistentVolumeClaim: {claimName: $claim}
