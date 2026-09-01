@@ -165,9 +165,9 @@ spec:
           // which code this is, and the manifest pins by digest anyway.
           def version = sh(returnStdout: true, script:
             'sed -n "s/^version = \\"\\(.*\\)\\"/\\1/p" ai/engine-cpu/pyproject.toml').trim()
-          def corto = sh(returnStdout: true, script:
+          def commit = sh(returnStdout: true, script:
             'git rev-parse --short=7 HEAD').trim()
-          env.TAG = "${version}-${corto}"
+          env.TAG = "${version}-${commit}"
           echo "tag: ${env.TAG}"
         }
       }

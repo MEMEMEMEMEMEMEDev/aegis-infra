@@ -188,9 +188,14 @@ spec:
           // engine this is, and the manifest still pins by digest.
           def version = sh(returnStdout: true, script:
             'sed -n "s/^RUN pip install --no-cache-dir vllm==\\([0-9.]*\\).*/\\1/p" ai/engine-gpu/Containerfile | head -1').trim()
-          def short = sh(returnStdout: true, script: 'git rev-parse --short=7 HEAD').trim()
+          // `commit`, and NOT `short`: short is a primitive type in
+          // Groovy, so `def short = …` does not parse and the whole
+          // pipeline dies before its first stage. This lane's twin
+          // called it `corto`; translating the product into English
+          // turned that into a keyword.
+          def commit = sh(returnStdout: true, script: 'git rev-parse --short=7 HEAD').trim()
           if (!version) { error 'could not read the vllm version out of the Containerfile' }
-          env.TAG = "vllm${version}-${short}"
+          env.TAG = "vllm${version}-${commit}"
           echo "tag: ${env.TAG}"
         }
       }
