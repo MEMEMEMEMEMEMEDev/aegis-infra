@@ -34,11 +34,28 @@ spec:
     # the exception. Today: limits jenkins-0 = 2200m/2.25Gi; app build
     # = 5000m/4.25Gi (W-05: +crane container for the push of the
     # scanned tar) → minimum 12200m/10.75Gi. limits are a ceiling, not
-    # a reservation — overcommit is cheap:
-    requests.cpu: "6"
-    requests.memory: 8Gi
-    limits.cpu: "13"
-    limits.memory: 12Gi
+    # a reservation — overcommit is cheap.
+    #
+    # 2026-09-01, first real run of phase 87: the heaviest pod stopped
+    # being the app build. The GPU engine's agent carries five
+    # containers (jnlp 1Gi + kaniko 8Gi + trivy 2Gi + crane 1Gi +
+    # cosign 256Mi) and sums 6500m/12544Mi, which did not fit in a
+    # 12Gi quota EVEN WITH THE NAMESPACE EMPTY: every agent pod was
+    # refused with 403 and the build spun until its timeout instead of
+    # failing. Check 036 said ALL PASS throughout, because its
+    # derivation globbed one level deep and the AI lanes live in
+    # ai/engine-*/ — the instrument that finds the heaviest pod could
+    # not see it.
+    #
+    # Recomputed against the same invariant, not a relaxed one:
+    #   jenkins-0 2200m/2304Mi + 2 × 6500m/12544Mi = 15200m/27392Mi
+    # Requests are the half that IS a reservation, so they move too:
+    # jenkins-0 550m/1088Mi + 2 × 2100m/3456Mi = 4750m/8000Mi left
+    # only 192Mi of margin under the old 8Gi.
+    requests.cpu: "8"
+    requests.memory: 12Gi
+    limits.cpu: "16"
+    limits.memory: 28Gi
   # A29: a strict RQ => EVERY container (init/sidecar/jnlp/buildah)
   # needs limits; the chart values declare them all.
 ---

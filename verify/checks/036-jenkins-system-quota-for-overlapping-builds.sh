@@ -40,7 +40,39 @@ def pod_sum(path):
 # noticing: the arithmetic was right about a platform that no longer
 # existed. The list is DERIVED from the tree: seed/platform/*/Jenkinsfile
 # plus the tenant template.
-jfs = sorted(P.glob("*/Jenkinsfile")) + [P/"docs/protocols/templates/Jenkinsfile.app"]
+#
+# AND THE DERIVATION HAS TO REACH. Until 2026-09-01 this globbed
+# `*/Jenkinsfile`, one level deep, so when the AI lanes landed in
+# ai/engine-gpu/ and ai/engine-cpu/ they were invisible — to the very
+# instrument whose job is to find the heaviest pod. engine-gpu sums
+# 12544Mi against a 12Gi quota: it could never be scheduled at all,
+# and this check reported ALL PASS with build-max=4608Mi. The exact
+# failure it was written to prevent, committed by itself. rglob now,
+# and any name starting with Jenkinsfile, so neither nesting nor a
+# suffix can hide a pipeline again.
+jfs = sorted({f for f in P.rglob("Jenkinsfile*") if f.is_file()})
+# AND THE COVERAGE IS PROVED, not assumed. Reaching deeper is not
+# enough on its own: a derivation that silently misses a pipeline
+# makes this check pass, so the miss is invisible by construction —
+# which is exactly what happened. So the set found here is measured
+# against a DIFFERENT source: every scriptPath the job-dsl declares.
+# If Jenkins is configured to run a pipeline whose pod this
+# arithmetic never weighed, that is the failure, said out loud.
+dsl = (P/"k8s/base/platform/jenkins/values.yaml").read_text(encoding="utf-8")
+declared = set(re.findall(r"scriptPath\('([^']+)'\)", dsl))
+found = {str(f.relative_to(P)) for f in jfs}
+# The tenant template is NOT in the job-dsl — every organization
+# derives its own job from it — so the dsl cannot vouch for it and it
+# is named here on purpose. The previous version required it by
+# construction (it was a literal in the list); rglob made its absence
+# silent, and the tooth for exactly that stopped biting.
+TPL = "docs/protocols/templates/Jenkinsfile.app"
+missing = sorted(declared - found) + ([TPL] if TPL not in found else [])
+if missing:
+    print("FAIL pipelines this arithmetic never weighed: "
+          + ", ".join(missing)
+          + " — a pod that is not on the scale cannot make the quota short")
+    sys.exit(1)
 builds = {}
 for jf in jfs:
     if not jf.is_file():
