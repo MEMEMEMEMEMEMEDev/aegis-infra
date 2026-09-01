@@ -35,6 +35,18 @@ clases:
     temperature: 0.6
     peso: 1
 
+  # The CPU lane. Zero output tokens and zero context is not a
+  # placeholder: these tasks do not GENERATE text. Text goes in and a
+  # vector, an audio or a transcription comes out, so the two ceilings
+  # that bound generation have nothing to bound. What does bound them
+  # is the input, and the gateway caps the audio itself in bytes.
+  cpu:
+    max_output_tokens: 0
+    max_context_tokens: 0
+    max_input_chars: 2000
+    temperature: 0
+    peso: 1
+
 # And the departures, one per task, with the reason beside each. If this
 # section grows a lot it is a sign that a class is missing, not that more
 # exceptions should be added.

@@ -2668,16 +2668,26 @@ def ai_registry_json():
         for task in (ai.get("tareas") or []):
             key = f"{org}.{task['nombre']}"
             override = overrides.get(key) or {}
-            cls = override.get("clase", "interactive")
-            if cls not in classes:
-                raise Invalid(
-                    f"the task {key!r} uses the class {cls!r}, which is not in\n"
-                    f"  ai/tasks.yaml. The ones there are: {', '.join(sorted(classes))}")
             cap = task["capacidad"]
             if cap not in caps:
                 raise Invalid(
                     f"the task {key!r} asks for the capability {cap!r}, which is not in\n"
                     f"  ai/routes.yaml. The ones there are: {', '.join(sorted(caps))}")
+            # THE DEFAULT IS DERIVED, not assumed. Until 2026-09-01 a
+            # task with no hand-written override defaulted to
+            # `interactive`, so an embeddings task was declared to
+            # generate text and the generator demanded a prompt for it
+            # — for a task that answers with a vector. The routing
+            # table already says which engine serves the capability,
+            # and that is the same fact: what the CPU lane serves does
+            # not generate text. An explicit override still wins, for
+            # the case the artifact cannot know.
+            cls = override.get("clase") or (
+                "cpu" if caps[cap].get("engine") == "cpu" else "interactive")
+            if cls not in classes:
+                raise Invalid(
+                    f"the task {key!r} uses the class {cls!r}, which is not in\n"
+                    f"  ai/tasks.yaml. The ones there are: {', '.join(sorted(classes))}")
             # A task on the CPU lane (class `cpu`, #26) carries NO
             # prompt: it does not generate text. Coherence is demanded
             # in both directions — a prompt on an embeddings task is

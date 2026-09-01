@@ -177,6 +177,13 @@ EOF
 #
 # Idempotent: an already-resolved base reports so and writes nothing,
 # and git_commit_if_changes has nothing to commit.
+# What is about to be BUILT is the instance's copy, not the seed's.
+# If a fix to the product has not been brought over, the build fails
+# with the error that was already corrected — say it before firing,
+# not after twenty minutes.
+seed_drift_report ai/engine-gpu/Containerfile ai/engine-gpu/Jenkinsfile \
+                  ai/engine-cpu/Containerfile ai/engine-cpu/Jenkinsfile
+
 run_cmd "$AEGIS_ROOT/libexec/aegis-ai" bases
 git_commit_if_changes "$PLATFORM_DIR" \
     "fix(ai): AI Containerfile bases resolved against the internal registry, by digest"

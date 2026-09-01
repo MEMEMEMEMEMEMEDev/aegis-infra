@@ -46,7 +46,45 @@ capacidades:
     modelo: qwen3-4b
     contexto_max: 12288
 
-# Pending on purpose, undeclared until there is something to serve them:
-#
-#   embeddings     -> CPU lane (task #26)
-#   transcripcion  -> faster-whisper, same lane
+  # Translation, served by the SPECIALIST and not by the conversation
+  # lane. Two capabilities and not one because a 1.8B translator does
+  # one thing well and narrates badly, and the day a bigger model
+  # serves both, the contracts that asked for `traduccion` are not
+  # touched.
+  traduccion:
+    proveedor: local
+    engine: mt
+    modelo: hy-mt2-1.8b
+    contexto_max: 4096
+
+  # ── the CPU lane ────────────────────────────────────────────────
+  # Declared on 2026-09-01 under the rule this file states above: only
+  # capabilities the gateway knows how to serve. Until today they were
+  # listed as pending, and that was correct while nothing served them
+  # — but the seed had come to ship engine-cpu.yaml and engine-mt.yaml,
+  # so the artifact was DEPLOYING engines whose capabilities nothing
+  # routed to. The first real run found it the moment a contract asked
+  # for `traduccion` and the validator answered that only chat.rapido
+  # and chat.largo exist.
+  #
+  # `contexto_max` here is the input ceiling in TOKENS for embeddings
+  # (the model truncates at 512); for the audio pair it bounds the
+  # request's TEXT, because the audio itself is bounded by the
+  # gateway's hard byte cap. Same field, different unit.
+  embeddings:
+    proveedor: local
+    engine: cpu
+    modelo: multilingual-e5-small
+    contexto_max: 512
+
+  voz:
+    proveedor: local
+    engine: cpu
+    modelo: kokoro-82m
+    contexto_max: 512
+
+  oido:
+    proveedor: local
+    engine: cpu
+    modelo: whisper-small
+    contexto_max: 512

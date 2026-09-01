@@ -1186,6 +1186,47 @@ probe_reset() {   # <ns> <pod-name>
         >/dev/null 2>&1 || true
 }
 
+# ── the instance's copy vs the one the artifact ships ───────────────
+# `seed_platform_dir` refuses, correctly, to copy the seed over an
+# instance that has a history of its own: that working tree is the
+# truth, and overwriting it would destroy work. The consequence nobody
+# had measured is that a FIX TO THE PRODUCT NEVER REACHES A LIVE
+# INSTANCE, and says nothing while not reaching it.
+#
+# Measured three times on 2026-09-01, and the third was the cheapest to
+# see and the most expensive to miss: a pipeline was corrected in the
+# seed, the instance kept the old one, and the build failed with the
+# error that had already been fixed — byte for byte, including the line
+# number. Nothing in the output suggested the file being executed was
+# not the file being read.
+#
+# This does NOT copy anything. It compares and says so, which is the
+# whole fix: a failure with a name costs a minute, and the same failure
+# without one cost a cycle, three times.
+#
+# The FROM lines are normalised away because the instance rewrites them
+# on purpose — `aegis ai bases` resolves each placeholder against the
+# internal registry, so a resolved FROM is agreement, not drift.
+seed_drift_report() {   # <path relative to platform/>...
+    local rel seedf instf drift=""
+    for rel in "$@"; do
+        seedf="$AEGIS_ROOT/seed/platform/$rel"
+        instf="$PLATFORM_DIR/$rel"
+        [[ -f "$seedf" && -f "$instf" ]] || continue
+        diff -q <(sed -E 's|^FROM .*|FROM __NORMALISED__|' "$seedf") \
+                <(sed -E 's|^FROM .*|FROM __NORMALISED__|' "$instf") >/dev/null 2>&1 \
+            || drift="$drift $rel"
+    done
+    [[ -n "$drift" ]] || return 0
+    log_warn "the instance's copy DIFFERS from the one this artifact ships:$drift"
+    log_warn "  what runs is the INSTANCE's, not the seed's — a fix made in the product is not here yet"
+    log_warn "  to bring it over (the instance's tree is yours, so this is deliberate and manual):"
+    for rel in $drift; do
+        log_warn "    cp \"\$AEGIS_ROOT/seed/platform/$rel\" \"\$PLATFORM_DIR/$rel\"   # then commit and push"
+    done
+    return 0   # NOT a failure: an instance is allowed to differ. It is not allowed to differ SILENTLY.
+}
+
 # ── signatures of a transient NETWORK error (E-1, one place) ────────
 # They are consumed by argo_sync (which re-fires the sync),
 # argo_secrets_gate (which waits instead of dying) and
