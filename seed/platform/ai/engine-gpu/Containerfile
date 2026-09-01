@@ -181,6 +181,36 @@ RUN pip install --no-cache-dir \
       torch==2.11.0+cu130 \
       torchvision==0.26.0+cu130
 
+# THE TWO INSTALLS STAY IN TWO LAYERS, and this is a decision, not an
+# oversight — it is written here because the temptation to merge them
+# is real and arrives with a stopwatch in hand.
+#
+# Measured 2026-09-01 on build #16: of sixteen minutes of build, nine
+# were kaniko photographing the filesystem. It does not use kernel
+# layers like Docker: after every RUN it walks the whole tree and
+# hashes each file to work out the diff, and with torch and CUDA
+# unpacked that is tens of thousands of files, twice. Merging these
+# two RUNs removes one of those two passes.
+#
+# It was not merged, and the reason is the one this whole file is
+# written for. What that layer boundary buys is that a finding — a
+# CVE, a wrong version, a file that should not be there — can be
+# attributed to the step that introduced it: the image manifest says
+# which layer brought torch and which brought vLLM, and a scanner
+# reports the DiffID of every finding. That is worth more than minutes,
+# because the expensive thing in this subsystem has never been a
+# failure: it is a failure that surfaces far from its cause.
+#
+# The saving was also never measured. The remaining snapshot would run
+# over a larger tree, so it is less than it looks. A permanent property
+# that helps the day something breaks is not traded for an unmeasured
+# saving that happens once per build.
+#
+# This does NOT contradict the apt rule above. What a step creates and
+# discards is discarded in the SAME layer, or it ships in the one
+# below. What two different decisions do belongs in two different
+# steps. The two rules are about different things.
+#
 # vLLM, with torch ALREADY satisfied so the resolver cannot replace it.
 # AND PIP ITSELF GOES. Measured 2026-09-01, after three wrong
 # guesses: the last two findings the scan refused —msgpack 1.1.x and
@@ -218,6 +248,24 @@ RUN pip install --no-cache-dir vllm==0.25.1 \
  && python -m pip uninstall -y pip \
  && /usr/local/bin/python -m pip uninstall -y pip \
  && python -c "import vllm, torch; print('vllm', vllm.__version__, 'torch', torch.__version__)"
+
+# A NAME FOR uid 1000, and it is not cosmetics.
+#
+# The manifests already set HOME explicitly, with a comment saying this
+# user has no passwd entry — which covered every library that asks
+# «where is my home». torch 2.11 asks a different question: its
+# inductor builds a cache path from getpass.getuser(), and getpwuid()
+# raises for a uid nobody declared. Measured 2026-09-01: the engine
+# died on import with `KeyError: getpwuid(): uid not found: 1000`,
+# with HOME set correctly the whole time.
+#
+# So the hole was patched for a CASE and not for the CLASS. Declaring
+# the user answers the question once, for every library that ever asks
+# it, instead of one environment variable per caller. The home here
+# matches the HOME the manifests set, so the two agree instead of
+# merely not colliding.
+RUN printf 'aegis:x:1000:1000::%s:/usr/sbin/nologin\n' '/cache' >> /etc/passwd \
+ && printf 'aegis:x:1000:\n' >> /etc/group
 
 # uid numeric, like the rest of the house: the Deployment declares
 # runAsNonRoot + runAsUser 1000 and this is the belt as well as the

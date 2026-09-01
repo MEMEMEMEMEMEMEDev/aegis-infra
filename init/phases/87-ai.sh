@@ -195,14 +195,30 @@ for _img in $AI_IMAGES_NEEDED; do
         continue
     fi
     case "$_img" in
-        aegis-engine-cpu) _job=engine-cpu   ; _to=3600  ;;
-        aegis-ai-vllm)    _job=engine-gpu   ; _to=14400 ;;
+        aegis-engine-cpu) _job=engine-cpu   ; _to=3600  ; _gib=10 ;;
+        aegis-ai-vllm)    _job=engine-gpu   ; _to=14400 ; _gib=36 ;;
         # The gateway is a multibranch: its buildable item is the
         # branch, not the folder. Firing the folder does nothing and
         # would look like a success.
-        ai-gateway)       _job="ai-gateway-mb/main" ; _to=1800 ;;
+        ai-gateway)       _job="ai-gateway-mb/main" ; _to=1800 ; _gib=5 ;;
     esac
-    log_info "$_img: not pinned — firing $_job (up to $((_to / 60)) min)"
+    # ROOM BEFORE FIRING, and it is measured because the alternative
+    # was measured too: on 2026-09-01 the GPU engine's build was
+    # evicted three times for ephemeral-storage, each time after
+    # fifteen or twenty minutes of work, and the message the operator
+    # saw was «ABORTED» — a word about a pipeline, not about a disk.
+    # kaniko unpacks the whole image and writes its layers and its tar
+    # on the node: for this engine that is 36 GiB, measured, and the
+    # kubelet starts evicting with less than ~11 GiB free.
+    #
+    # Refusing here costs a second. Discovering it there costs twenty
+    # minutes and reads like a different problem.
+    _room_gib="$(df -BG --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9')"
+    _need_gib=$(( _gib + 12 ))   # what the build writes + the kubelet's own floor
+    if [[ -n "$_room_gib" ]] && (( _room_gib < _need_gib )); then
+        die "building $_img needs about ${_gib} GiB of scratch on the node and the kubelet evicts below ~12 GiB free — there are ${_room_gib} GiB. Free space and run this phase again; firing the build now would spend $((_to / 60)) minutes to be evicted. \`aegis image gc\` does not exist yet: the registry keeps every image ever built, and an old one of this engine is usually the biggest thing there."
+    fi
+    log_info "$_img: not pinned — firing $_job (up to $((_to / 60)) min; needs ~${_gib} GiB free, has ${_room_gib:-?})"
     gate "ai-image-built-$_img" jenkins_build_retry "$_job" "$_to" 2
     # WHICH TAG. Not guessed here, and not written twice: each lane
     # names its tag its own way (engine-cpu the pyproject version plus

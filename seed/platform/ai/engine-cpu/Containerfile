@@ -71,6 +71,24 @@ RUN pip install --no-cache-dir uv \
  && pip install --no-cache-dir --upgrade setuptools \
  && python -m pip uninstall -y pip
 
+# A NAME FOR uid 1000, and it is not cosmetics.
+#
+# The manifests already set HOME explicitly, with a comment saying this
+# user has no passwd entry — which covered every library that asks
+# «where is my home». torch 2.11 asks a different question: its
+# inductor builds a cache path from getpass.getuser(), and getpwuid()
+# raises for a uid nobody declared. Measured 2026-09-01: the engine
+# died on import with `KeyError: getpwuid(): uid not found: 1000`,
+# with HOME set correctly the whole time.
+#
+# So the hole was patched for a CASE and not for the CLASS. Declaring
+# the user answers the question once, for every library that ever asks
+# it, instead of one environment variable per caller. The home here
+# matches the HOME the manifests set, so the two agree instead of
+# merely not colliding.
+RUN printf 'aegis:x:1000:1000::%s:/usr/sbin/nologin\n' '/tmp' >> /etc/passwd \
+ && printf 'aegis:x:1000:\n' >> /etc/group
+
 # Numeric uid, like the rest of the house: the Deployment declares
 # runAsNonRoot + runAsUser and this is the belt on top of the braces.
 USER 1000:1000
