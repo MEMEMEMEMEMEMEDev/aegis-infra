@@ -13,7 +13,10 @@ SLASH = re.compile(r'(^|\s)//.*$')
 def code_of(text):
     return "\n".join(SLASH.sub(r'\1', HASH.sub(r'\1', l)) for l in text.splitlines())
 
-APT = re.compile(r'apt-get\s+install')
+# `upgrade` as well as `install`: both unpack packages, and the CPU
+# lane needed only an upgrade to bring its base's openssl up to the
+# fixed version — which is enough to meet the exec-API fault.
+APT = re.compile(r'apt-get\s+(install|upgrade)')
 EXECAPI = re.compile(r"container\(\s*['\"]kaniko['\"]\s*\)")
 
 n = 0

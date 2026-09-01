@@ -37,6 +37,17 @@ COPY pyproject.toml motor.py ./
 # uv resolves the dependencies FROM pyproject.toml: one single source of
 # truth for the local venv and for the image. --no-cache so the wheel
 # cache is not baked into a layer.
+# The base is a floor, not a promise. Measured on the GPU lane
+# 2026-09-01, which stands on the SAME base: the blocking scan refused
+# it over libssl3t64 CVE-2026-14456 (HIGH, fixed upstream in
+# 3.5.7-1~deb13u2) plus setuptools, wheel and jaraco.context. Fixed and
+# not excepted, in the same layer so the apt lists never ship — the
+# same thing the platform's own bases do with `apk upgrade`.
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && rm -rf /var/lib/apt/lists/* \
+ && pip install --no-cache-dir --upgrade pip setuptools wheel
+
 RUN pip install --no-cache-dir uv \
  && uv pip install --system --no-cache -r pyproject.toml \
  && pip uninstall -y uv

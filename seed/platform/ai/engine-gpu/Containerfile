@@ -118,7 +118,15 @@ FROM __FROM_PYTHON__
 # --no-install-recommends, and the lists deleted in the SAME layer: a
 # separate `RUN rm` leaves the 40 MB of apt lists in the layer below,
 # where they still ship and still get scanned.
+# `apt-get upgrade` FIRST, and it is not hygiene theatre: the blocking
+# scan measured 2026-09-01 refused this image over libssl3t64
+# CVE-2026-14456 (HIGH, fixed in 3.5.7-1~deb13u2) which the base still
+# ships at 3.5.6. It is the same reason the platform's own bases exist
+# and run `apk upgrade` on top of what the mirror gave them: a base is
+# a floor, not a promise, and the fix is upstream and available — so it
+# is applied, not excepted.
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends gcc-14 libgomp1 \
  && rm -rf /var/lib/apt/lists/*
 
@@ -127,7 +135,15 @@ RUN apt-get update \
 # --system install so that the engine's interpreter is unambiguous and
 # so that a future stage could copy the tree wholesale.
 ENV VENV=/opt/ai/venv
-RUN python -m venv "$VENV"
+# The venv is created and its OWN tooling is brought up to date in the
+# same layer. `python -m venv` seeds pip, setuptools and wheel from
+# what the base image froze, and on 2026-09-01 those three carried
+# three of the four findings that blocked this build: setuptools
+# CVE-2025-47273, wheel CVE-2026-24049 and jaraco.context
+# CVE-2026-23949 (vendored inside setuptools). All three are fixed
+# upstream; none of them needs an exception.
+RUN python -m venv "$VENV" \
+ && "$VENV/bin/pip" install --no-cache-dir --upgrade pip setuptools wheel
 ENV PATH="/opt/ai/venv/bin:${PATH}"
 
 # TORCH FIRST AND ON ITS OWN, from the cu128 index. Two reasons and both

@@ -46,7 +46,31 @@ spec:
   # unpacks wheels of hundreds of MB (onnxruntime, ctranslate2, av).
   - name: kaniko
     image: gcr.io/kaniko-project/executor:v1.23.2-debug
-    command: ['sleep', 'infinity']
+    # NOT `sleep infinity` plus `container('kaniko'){ sh }`, which is
+    # the usual shape and the one every other lane uses. Measured on
+    # 2026-09-01: kaniko started through the container EXEC API dies
+    # with «failed to execute command: permission denied» the moment
+    # the build installs an OS package — one `apt-get install less` is
+    # enough, and the RUN itself completes first, so the error lands
+    # nowhere near its cause. The same Containerfile, the same pod,
+    # the same kaniko, started inside the container's OWN process
+    # tree, builds fine. It is not Debian, not apt, not the snapshot
+    # mode: four flags and five hypotheses were tried and only this
+    # distinction holds.
+    #
+    # So the container's main process IS the builder: it waits for the
+    # arguments the pipeline writes, runs the executor as its own
+    # child, leaves the exit code in a file and stays alive so Jenkins
+    # keeps its agent. The pipeline never execs into this container.
+    command:
+    - /busybox/sh
+    - -c
+    - |
+      until [ -f /home/jenkins/agent/kaniko.go ]; do /busybox/sleep 2; done
+      /kaniko/executor $(/busybox/cat /home/jenkins/agent/kaniko.args) \
+        > /home/jenkins/agent/kaniko.log 2>&1
+      /busybox/echo $? > /home/jenkins/agent/kaniko.rc
+      exec /busybox/sleep infinity
     volumeMounts:
     - name: regcred
       mountPath: /kaniko/.docker/config.json
@@ -59,7 +83,7 @@ spec:
     resources:
       requests: { cpu: 1000m, memory: 1Gi }
       limits:   { cpu: 2500m, memory: 3Gi }
-  # trivy: THIN client — the server (trivy-system) holds the DB.
+  # trivy: a THIN client — the server (trivy-system) holds the database.
   - name: trivy
     image: ghcr.io/aquasecurity/trivy:0.72.0
     command: ['sleep', 'infinity']
@@ -194,17 +218,35 @@ spec:
     }
     stage('build') {
       steps {
-        container('kaniko') {
-          sh '''
-            /kaniko/executor \
-              --context=dir://${WORKSPACE}/ai/engine-cpu \
-              --dockerfile=Containerfile \
-              --destination=${REGISTRY}/${IMAGE}:${TAG} \
-              --no-push \
-              --tarPath=${WORKSPACE}/image.tar \
-              --registry-certificate ${REGISTRY}=/kaniko/ca.crt
-          '''
-        }
+        // Driven from the agent: the arguments go to a file, the
+        // builder is woken with a flag file, its log is streamed and
+        // its exit code is read back. See the kaniko container above
+        // for why it is not `container('kaniko'){ sh }`.
+        sh '''
+          set -eu
+          W=/home/jenkins/agent
+          rm -f "$W/kaniko.rc" "$W/kaniko.go"
+          : > "$W/kaniko.log"
+          printf '%s' "--context=dir://${WORKSPACE}/ai/engine-cpu --dockerfile=Containerfile --destination=${REGISTRY}/${IMAGE}:${TAG} --no-push --tarPath=${WORKSPACE}/image.tar --compressed-caching=false --registry-certificate ${REGISTRY}=/kaniko/ca.crt" > "$W/kaniko.args"
+          touch "$W/kaniko.go"
+          # --compressed-caching=false: kaniko keeps every layer it has
+          # already snapshotted compressed IN MEMORY, and this image
+          # unpacks torch+cu128 and vLLM — several GB per layer.
+          # Measured 2026-09-01: without the flag the kaniko container
+          # was OOMKilled at its 8Gi ceiling right after torch
+          # installed. The flag trades that memory for disk, which is
+          # the resource this machine actually has.
+          # the build runs for hours: its output has to be visible AS
+          # it happens, not at the end.
+          tail -f "$W/kaniko.log" & TAIL=$!
+          while [ ! -f "$W/kaniko.rc" ]; do sleep 5; done
+          sleep 2; kill "$TAIL" 2>/dev/null || true
+          RC="$(cat "$W/kaniko.rc")"
+          [ "$RC" = "0" ] || {
+            echo "kaniko finished with rc=$RC — the console above is its whole output"
+            exit 1
+          }
+        '''
       }
     }
     stage('scan') {
