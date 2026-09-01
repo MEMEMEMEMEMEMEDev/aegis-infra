@@ -164,7 +164,14 @@ RUN pip install --no-cache-dir \
       torchvision==0.26.0+cu128
 
 # vLLM, with torch ALREADY satisfied so the resolver cannot replace it.
+# The setuptools upgrade is LAST, and the order is the whole point.
+# Measured 2026-09-01: upgrading it beside the venv creation was
+# undone — installing torch pulls setuptools 78.1.0 back in as a build
+# dependency, and with it the vendored jaraco.context 5.3.0 and wheel
+# 0.45.1 that the scan refuses. Three findings that are really one, and
+# the fix is not a different command but a later one.
 RUN pip install --no-cache-dir vllm==0.25.1 \
+ && pip install --no-cache-dir --upgrade setuptools \
  && python -c "import vllm, torch; print('vllm', vllm.__version__, 'torch', torch.__version__)"
 
 # uid numeric, like the rest of the house: the Deployment declares

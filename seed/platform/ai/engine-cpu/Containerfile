@@ -48,9 +48,14 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && pip install --no-cache-dir --upgrade pip setuptools wheel
 
+# The setuptools upgrade is LAST for the reason the GPU lane measured
+# on 2026-09-01: a dependency install pulls it back to the version the
+# scan refuses, together with the copies it vendors. Upgrading it
+# earlier is undone silently.
 RUN pip install --no-cache-dir uv \
  && uv pip install --system --no-cache -r pyproject.toml \
- && pip uninstall -y uv
+ && pip uninstall -y uv \
+ && pip install --no-cache-dir --upgrade setuptools
 
 # Numeric uid, like the rest of the house: the Deployment declares
 # runAsNonRoot + runAsUser and this is the belt on top of the braces.
