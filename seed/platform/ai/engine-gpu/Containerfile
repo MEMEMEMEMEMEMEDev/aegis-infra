@@ -164,6 +164,30 @@ RUN pip install --no-cache-dir \
       torchvision==0.26.0+cu128
 
 # vLLM, with torch ALREADY satisfied so the resolver cannot replace it.
+# AND PIP ITSELF GOES. Measured 2026-09-01, after three wrong
+# guesses: the last two findings the scan refused —msgpack 1.1.x and
+# setuptools 70.3.0— were never the INSTALLED packages. They are the
+# copies pip carries inside `pip/_vendor/`, declared in its own
+# vendor.txt, and they have no dist-info, which is why a `find` for
+# dist-info directories came back empty and why upgrading setuptools
+# could never touch them.
+#
+# So the fix is not a newer version, it is not shipping an installer
+# in a runtime image at all: nothing here installs packages once it
+# runs, and the engine's own dependencies stay exactly as resolved.
+# Both interpreters, because the scan reads both.
+#
+# THE VERSION IS BOUNDED, and that is not fussiness: a bare
+# `--upgrade setuptools` installed 84.0.0 on 2026-09-01 and BROKE the
+# constraints the engine itself declares — torch asks for <82 and vllm
+# for <81. pip reported that as a warning and carried on, which is the
+# worst outcome: a green build carrying an engine whose dependencies
+# do not agree. 78.1.1 is the fixed version AND satisfies both.
+#
+# Two interpreters get touched, because the scan sees both: the venv
+# (which is what runs) and the base's system python, whose setuptools
+# 70.3.0 carries the same finding and answers to no constraint here.
+#
 # The setuptools upgrade is LAST, and the order is the whole point.
 # Measured 2026-09-01: upgrading it beside the venv creation was
 # undone — installing torch pulls setuptools 78.1.0 back in as a build
@@ -171,7 +195,10 @@ RUN pip install --no-cache-dir \
 # 0.45.1 that the scan refuses. Three findings that are really one, and
 # the fix is not a different command but a later one.
 RUN pip install --no-cache-dir vllm==0.25.1 \
- && pip install --no-cache-dir --upgrade setuptools \
+ && pip install --no-cache-dir --upgrade "setuptools>=78.1.1,<81" msgpack \
+ && /usr/local/bin/pip install --no-cache-dir --upgrade setuptools \
+ && python -m pip uninstall -y pip \
+ && /usr/local/bin/python -m pip uninstall -y pip \
  && python -c "import vllm, torch; print('vllm', vllm.__version__, 'torch', torch.__version__)"
 
 # uid numeric, like the rest of the house: the Deployment declares

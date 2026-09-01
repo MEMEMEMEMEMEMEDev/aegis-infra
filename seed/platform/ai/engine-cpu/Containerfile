@@ -48,6 +48,19 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && pip install --no-cache-dir --upgrade pip setuptools wheel
 
+# AND PIP ITSELF GOES. Measured 2026-09-01, after three wrong
+# guesses: the last two findings the scan refused —msgpack 1.1.x and
+# setuptools 70.3.0— were never the INSTALLED packages. They are the
+# copies pip carries inside `pip/_vendor/`, declared in its own
+# vendor.txt, and they have no dist-info, which is why a `find` for
+# dist-info directories came back empty and why upgrading setuptools
+# could never touch them.
+#
+# So the fix is not a newer version, it is not shipping an installer
+# in a runtime image at all: nothing here installs packages once it
+# runs, and the engine's own dependencies stay exactly as resolved.
+# Both interpreters, because the scan reads both.
+#
 # The setuptools upgrade is LAST for the reason the GPU lane measured
 # on 2026-09-01: a dependency install pulls it back to the version the
 # scan refuses, together with the copies it vendors. Upgrading it
@@ -55,7 +68,8 @@ RUN apt-get update \
 RUN pip install --no-cache-dir uv \
  && uv pip install --system --no-cache -r pyproject.toml \
  && pip uninstall -y uv \
- && pip install --no-cache-dir --upgrade setuptools
+ && pip install --no-cache-dir --upgrade setuptools \
+ && python -m pip uninstall -y pip
 
 # Numeric uid, like the rest of the house: the Deployment declares
 # runAsNonRoot + runAsUser and this is the belt on top of the braces.
