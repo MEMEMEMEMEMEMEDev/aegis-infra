@@ -161,6 +161,27 @@ sys.exit(1)
 EOF
 }
 
+# THE BASES, BEFORE ANY BUILD. Each AI Containerfile ships with a
+# `__FROM_X__` placeholder instead of a base, and the pipeline's own
+# preflight refuses to build while it is still there — correctly: a
+# base that did not come through the mirror was neither scanned nor
+# signed, and a pod built on it is rejected at admission.
+#
+# Resolving is a WRITE to the platform repo, and the build reads the
+# Containerfile from the REMOTE, not from this working tree, so the
+# commit and the push are part of the step and not housekeeping after
+# it. Run of 2026-09-01: the resolver already existed and was correct,
+# and nothing called it before building — the same shape as every
+# other hole this phase had, a section that arrived without its
+# precondition.
+#
+# Idempotent: an already-resolved base reports so and writes nothing,
+# and git_commit_if_changes has nothing to commit.
+run_cmd "$AEGIS_ROOT/libexec/aegis-ai" bases
+git_commit_if_changes "$PLATFORM_DIR" \
+    "fix(ai): AI Containerfile bases resolved against the internal registry, by digest"
+git_push_verified "$PLATFORM_DIR"
+
 for _img in $AI_IMAGES_NEEDED; do
     if _ai_row_pinned "$_img"; then
         log_info "$_img: already pinned, not rebuilt"

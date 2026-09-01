@@ -158,6 +158,26 @@ spec:
         }
       }
     }
+    stage('base-is-mirrored') {
+      steps {
+        sh '''
+          # ONLY the FROM lines. Until 2026-09-01 this grepped the whole
+          # file, and the file DOCUMENTS its own placeholder in a comment
+          # right above the FROM — so the guard matched its own
+          # explanation and the pipeline could never be built, resolved
+          # or not. The same trap that had to be corrected in checks 161,
+          # 163, 165 and 166 the same day: prose read as code.
+          if grep -E '^[[:space:]]*FROM[[:space:]]' ai/engine-cpu/Containerfile | grep -q '__FROM_'; then
+            echo "ERROR: the FROM of ai/engine-cpu/Containerfile is still a placeholder."
+            echo "It is resolved against the INTERNAL registry, by digest, before building:"
+            echo "  aegis ai bases"
+            echo "A base that did not go through the mirror was neither scanned nor signed,"
+            echo "and a pod built on it is rejected at admission."
+            exit 1
+          fi
+        '''
+      }
+    }
     stage('compute-tag') {
       steps {
         script {

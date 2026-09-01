@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # aegis-summary: The operator's control over the AI substrate
 # aegis-group:   operate
-# aegis-subcommands: status start stop open demo max logs engine-logs images models seed key
+# aegis-subcommands: status start stop open demo max logs engine-logs images bases models seed key
 # ai — the operator's control over the AI substrate.
 #
 # ONE SINGLE SOURCE OF TRUTH: this script writes the ai-modo ConfigMap and
@@ -384,8 +384,13 @@ EOF
 # knows the internal digest (the mirror rewrites the manifest as it
 # copies, so the public digest in images.txt pulls nothing here) and
 # which refuses an image that is present but unsigned.
+# With --check it REPORTS and writes nothing. The distinction exists
+# because `aegis ai images`, which reads like a status command, used to
+# call this one and rewrote two Containerfiles as a side effect of being
+# asked a question. A command that reads must not write.
 cmd_images_resolve_bases() {
-  local rc=0 rel f ph ref line
+  local rc=0 rel f ph ref line dry=0
+  [ "${1:-}" = "--check" ] && dry=1
   for rel in $AI_CONTAINERFILES; do
     f="$PLATFORM_DIR/$rel"
     if [ ! -f "$f" ]; then
@@ -399,6 +404,10 @@ cmd_images_resolve_bases() {
     if [ -z "$ph" ]; then
       green "  $rel: base already resolved"
       continue
+    fi
+    if [ "$dry" = "1" ]; then
+      red "  $rel: $ph is still a placeholder — resolve it with: ${AEGIS_CMD:-aegis} ai bases"
+      rc=1; continue
     fi
     ref=$(_from_image_for "$ph") || {
       red "  $rel: $ph is in no table — nothing in the product's placeholder table names it"
@@ -450,7 +459,7 @@ cmd_images_status() {
   done < <(_kust_rows)
   echo
   echo "Bases of the AI Containerfiles:"
-  cmd_images_resolve_bases || true
+  cmd_images_resolve_bases --check || true
   echo
   gray "To pin one:  ${AEGIS_CMD:-aegis} ai images <name>:<tag>"
   gray "The tag has to exist in the INTERNAL registry — building or mirroring is the"
@@ -1047,6 +1056,7 @@ main() {
       if [ ${#args[@]} -eq 0 ]; then cmd_images_status
       else cmd_images_pin "${args[0]}"; fi
       ;;
+    bases)  cmd_images_resolve_bases ;;
     models) cmd_models ${args[@]+"${args[@]}"} ;;
     seed)   cmd_seed   ${args[@]+"${args[@]}"} ;;
     key)
