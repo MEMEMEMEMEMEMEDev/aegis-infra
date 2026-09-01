@@ -752,6 +752,11 @@ argo_sync() {   # <app> [timeout_s] [nohooks]
             _gate_record "sync-$app" pass $(( SECONDS - t0 ))
             return 0
         fi
+        if _argo_only_waiting_pvcs "$app"; then
+            log_warn "sync $app: Healthy is out of reach and the reason is declared — everything that is not healthy is a volume WAITING FOR ITS FIRST CONSUMER, and its workload is deliberately at zero replicas. It binds the first time that workload runs."
+            _gate_record "sync-$app" pass $(( SECONDS - t0 ))
+            return 0
+        fi
         if (( hwaited >= timeout )); then
             log_error "sync $app: no Healthy in ${timeout}s (health=${health:-?}) — unhealthy resources:"
             kubectl -n argocd get application "$app" -o json 2>/dev/null \
@@ -772,6 +777,59 @@ argo_sync() {   # <app> [timeout_s] [nohooks]
         fi
         sleep 5; hwaited=$(( hwaited + 5 ))
     done
+}
+
+# _argo_only_waiting_pvcs <app> — 0 when the ONLY resources that are
+# not Healthy are volumes waiting for their first consumer.
+#
+# Measured 2026-09-01, first real run of phase 87: `local-path` binds
+# on first consumer, and the AI engines are deliberately at zero
+# replicas (they are born off; the mode controller keeps them there).
+# So a lane's cache volume has no consumer, ArgoCD reports the App
+# Progressing, and the wait for Healthy could only ever time out. The
+# App was not sick — it was as healthy as its design allows.
+#
+# This is NOT "accept Progressing". Every other resource must be
+# Healthy, the offender must be a PVC, and its events must say
+# WaitForFirstConsumer. Anything else keeps waiting.
+_argo_only_waiting_pvcs() {   # <app>
+    local app="$1" ns name phase want got kind rest any=0
+    ns="$(kubectl -n argocd get application "$app" \
+        -o jsonpath='{.spec.destination.namespace}' 2>/dev/null || true)"
+    [[ -n "$ns" ]] || return 1
+
+    # It is asked of the NAMESPACE and not of ArgoCD's resource list.
+    # Measured 2026-09-01: the App reported Progressing while every
+    # entry of that list came back with no health at all, so a helper
+    # that reads the list finds nothing to forgive and forgives
+    # nothing. The truth is one level down.
+
+    # every workload is where it wants to be — including deliberately
+    # at zero, which is what an engine that is off looks like
+    while read -r name want got; do
+        [[ -n "$name" ]] || continue
+        [[ "${got:-0}" == "${want:-0}" ]] || return 1
+    done < <(kubectl -n "$ns" get deploy,statefulset \
+                -o jsonpath='{range .items[*]}{.metadata.name} {.spec.replicas} {.status.readyReplicas}{"\n"}{end}' \
+                2>/dev/null | sed 's/  */ /g; s/ $/ 0/')
+
+    # no pod is in trouble
+    kubectl -n "$ns" get pods --no-headers 2>/dev/null \
+      | grep -qE 'CrashLoopBackOff|Error|ImagePull|CreateContainer' && return 1
+
+    # and every volume is bound, or waiting for a consumer that is off
+    while read -r name phase; do
+        [[ -n "$name" ]] || continue
+        [[ "$phase" == "Bound" ]] && continue
+        [[ "$phase" == "Pending" ]] || return 1
+        kubectl -n "$ns" get events --field-selector "involvedObject.name=$name" \
+            -o jsonpath='{range .items[*]}{.reason}{"\n"}{end}' 2>/dev/null \
+          | grep -q '^WaitForFirstConsumer$' || return 1
+        any=1
+    done < <(kubectl -n "$ns" get pvc \
+                -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase}{"\n"}{end}' 2>/dev/null)
+
+    (( any == 1 ))
 }
 
 # ── reinforced gate for Apps of (almost) only Secrets ───────────────

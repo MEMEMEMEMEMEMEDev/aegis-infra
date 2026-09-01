@@ -375,11 +375,42 @@ argo_secrets_gate ai-system 300 "$(git -C "$PLATFORM_DIR" rev-parse HEAD)" \
 # models-hf (shared by both GPU lanes, read-only), one compilation cache
 # per GPU lane (two vLLM processes writing JIT kernels into the same
 # volume trip over Triton's locks), and the CPU lane's models.
+# BOUND, OR WAITING FOR A CONSUMER THE DESIGN KEEPS AT ZERO.
+#
+# `local-path` binds on first consumer. The GPU engines declare no
+# `replicas`, so Kubernetes gives them 1 and the mode controller takes
+# them to 0 within a few loops — which is the design, and which means
+# a lane's cache volume binds only if its pod happened to be scheduled
+# during that window. Measured 2026-09-01 on the first real run:
+# engine-llm-cache bound, engine-mt-cache did not, and the phase sat
+# 600 s waiting for a state the design prevents.
+#
+# So the question changes to the one that is actually true: no volume
+# is FAILED, and every one that is not bound is waiting for a consumer
+# that is deliberately off. It binds by itself the first time that
+# engine runs, which is the honest moment for it to happen. Saying it
+# out loud beats a green that had to be arranged.
 _pvcs_bound() {
-    local want=4 got
-    got="$(kubectl -n "$AI_NS" get pvc -o jsonpath='{range .items[*]}{.status.phase}{"\n"}{end}' 2>/dev/null \
-           | grep -c '^Bound$' || true)"
-    [[ "${got:-0}" == "$want" ]]
+    local want=4 total bound pending line name phase
+    total=0; bound=0; pending=""
+    while read -r name phase; do
+        [[ -n "$name" ]] || continue
+        total=$(( total + 1 ))
+        case "$phase" in
+            Bound)   bound=$(( bound + 1 )) ;;
+            Pending) pending="$pending $name" ;;
+            *)       log_warn "  PVC $name is in $phase, which is neither bound nor waiting"; return 1 ;;
+        esac
+    done < <(kubectl -n "$AI_NS" get pvc \
+                -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase}{"\n"}{end}' 2>/dev/null)
+    [[ "$total" == "$want" ]] || return 1
+    for name in $pending; do
+        kubectl -n "$AI_NS" get events --field-selector "involvedObject.name=$name" \
+            -o jsonpath='{range .items[*]}{.reason}{"\n"}{end}' 2>/dev/null \
+          | grep -q '^WaitForFirstConsumer$' || return 1
+        log_info "  PVC $name: waiting for its first consumer, and its engine is off by design — it binds when that engine first runs"
+    done
+    return 0
 }
 gate_diag "ai-pvcs-bound" \
   'kubectl -n ai-system get pvc 2>/dev/null;
