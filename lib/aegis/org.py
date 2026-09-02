@@ -72,6 +72,13 @@ PROVISION_K8S = os.path.join(GARAGE_DIR, "aprovisionar.yaml")
 GARAGE_KUSTOMIZATION = os.path.join(GARAGE_DIR, "kustomization.yaml")
 GARAGE_SECRETGEN = os.path.join(GARAGE_DIR, "secret-generator.yaml")
 APPPROJECTS_K8S = os.path.join(PLATFORM_ROOT, "k8s", "bootstrap", "appprojects-tenants.yaml")
+# The same path as the operator has to type it, DERIVED from the one
+# above and never written out a second time. The step this command hands
+# over (report_pending_cluster) is a command line with a path in it, and
+# a path typed by hand inside a message is a path that goes on naming
+# the old place the day the file moves: the message stays green, the
+# operator applies nothing, and it surfaces at deploy time.
+APPPROJECTS_REL = os.path.relpath(APPPROJECTS_K8S, PLATFORM_ROOT)
 ARGOCD_SECRETGEN = os.path.join(PLATFORM_ROOT, "k8s", "base", "platform", "argocd-secrets",
                                 "secret-generator.yaml")
 def platform_repo():
@@ -2960,7 +2967,13 @@ def render_appprojects():
 # with kubectl before root: (a) it avoids the AppProject-vs-Application
 # race inside a single sync, and (b) it closes the privilege-escalation
 # vector of an App that edits projects. That is why they live outside
-# k8s/argocd-apps/, which is the App-of-Apps path."""]
+# k8s/argocd-apps/, which is the App-of-Apps path.
+#
+# AND SO NOBODY APPLIES THEM ON ITS OWN. The init's phase 35 applies this
+# file while orgs/ is still empty —an init has no tenants— so an
+# organization that arrives afterwards, which is every organization,
+# reaches the cluster only when this file is applied again. That is why
+# `{CMD_ORG_APPLY}` ends by handing that step over, by name."""]
 
     if not projects:
         parts.append("#\n# (no contract declares a repo yet)")
@@ -3061,11 +3074,15 @@ spec:
 
 def apply_appprojects(write):
     new = render_appprojects()
-    print(f"\nprojects  {grey}(k8s/bootstrap/appprojects-tenants.yaml){off}")
+    print(f"\nprojects  {grey}({APPPROJECTS_REL}){off}")
     try:
         old = open(APPPROJECTS_K8S, encoding="utf-8").read()
     except FileNotFoundError:
         old = None
+    # BEFORE the early return, and that placement IS the fix. What has to
+    # be handed over is what the artifact DECLARES, not what this run
+    # happened to change: see _record_appprojects_step.
+    _record_appprojects_step(new, old)
     if old == new:
         print(f"  {grey}={off} organization AppProjects")
         return 0
@@ -3074,16 +3091,107 @@ def apply_appprojects(write):
     if write:
         os.makedirs(os.path.dirname(APPPROJECTS_K8S), exist_ok=True)
         open(APPPROJECTS_K8S, "w", encoding="utf-8").write(new)
-        # ArgoCD does not manage them (see the file's header), so nobody
-        # is going to apply them on their own. Saying it here and not in
-        # the documentation: the step you have to remember is the step
-        # that gets forgotten, and the edge has already been paid for
-        # twice on that account.
-        print(f"  {yellow}!{off} the project does not exist in the cluster until you run this:")
-        print(f"    {grey}kubectl apply -f k8s/bootstrap/appprojects-tenants.yaml{off}")
-        print(f"    {grey}(it goes BEFORE {CMD_SYNC_ROOT}: an Application whose{off}")
-        print(f"    {grey} project does not exist stays in 'project not found'){off}")
     return 0
+
+
+# ── the one step this command cannot take ─────────────────────────────
+#
+# `aegis org apply` writes files and stops there (module header), and for
+# everything else that is enough: ArgoCD picks up whatever is committed.
+# The tenant AppProjects are the exception BY DESIGN — they live outside
+# the App-of-Apps path so that no App can edit projects (W-06 / R1-B) —
+# so nothing in GitOps applies them.
+#
+# The only automatic applier is the init's phase 35, and phase 35 runs
+# with orgs/ empty: it applies a file with zero documents and logs, quite
+# correctly, «0 contracts in orgs/, nothing to derive». Organizations
+# arrive AFTER the init, always. So on the day it matters the automatic
+# path has already run, over an empty file.
+#
+# MEASURED 2026-09-01 on a real install: the new organization's
+# Applications sat at «Application referencing project
+# aegis-tenant-portafolio which does not exist», nothing deployed, and it
+# took a `kubectl apply -f` by hand to move.
+#
+# THE FIX IS NOT TO MAKE THIS COMMAND TALK TO THE CLUSTER. It runs from a
+# laptop over a checkout, and the verifier runs it over throwaway copies
+# of the tree: a generator that reached for a kubeconfig would reach for
+# the REAL one, from a harness, with write verbs. The honest fix is that
+# the run which DERIVES the projects hands the step over — by name, with
+# the exact command, and LAST, where the reading ends.
+#
+# TWO THINGS THAT LOOK LIKE DETAIL AND ARE THE WHOLE POINT:
+#
+#   · it is handed over on EVERY run that leaves projects derived, and
+#     not only on the run that changed the file. Announcing only the
+#     change is what hid this: an operator runs `apply` twice —a typo,
+#     one more service— and the second run printed a quiet «=» while the
+#     cluster still had no project. Applying an AppProject that did not
+#     change prints «unchanged» and costs nothing; a step said once and
+#     then dropped costs a deploy.
+#   · with ZERO derived projects there is NO block at all. There is
+#     nothing to apply, and a notice that is always on says as little as
+#     no notice — that is Disease E, and the orphanedResources exception
+#     a few lines above exists for the same reason.
+_PENDING_CLUSTER = []
+
+
+def _appproject_names(text):
+    """The AppProjects a rendered artifact declares, read FROM it.
+
+    From the document and not rebuilt from the contracts: whoever
+    announces the step has to name exactly what the file carries, or the
+    day the naming scheme moves the announcement goes on naming the old
+    shape and the operator applies looking for the wrong thing.
+    """
+    names = []
+    try:
+        docs = list(yaml.safe_load_all(text or ""))
+    except yaml.YAMLError:
+        # A file broken by hand parses as nothing. Everything then looks
+        # new, which is the safe direction: it over-announces instead of
+        # going quiet.
+        return names
+    for d in docs:
+        if isinstance(d, dict) and d.get("kind") == "AppProject":
+            n = (d.get("metadata") or {}).get("name")
+            if n:
+                names.append(n)
+    return names
+
+
+def _record_appprojects_step(new, old):
+    names = _appproject_names(new)
+    if not names:
+        return
+    before = set(_appproject_names(old))
+    _PENDING_CLUSTER.append({"file": APPPROJECTS_REL, "names": names,
+                             "new": [n for n in names if n not in before]})
+
+
+def report_pending_cluster():
+    """Print the steps this run derived and cannot take. LAST.
+
+    Last on purpose: `projects` is the fourth stage of twelve, and the
+    eight that follow push it off the screen. The one action only a
+    person can take goes where the reading ends, not in the middle of it.
+    """
+    for step in _PENDING_CLUSTER:
+        names, fresh = step["names"], step["new"]
+        print(f"\nnext step  {grey}(this command writes files; it does not "
+              f"touch the cluster){off}")
+        for n in names:
+            mark = f"{yellow}!{off} new" if n in fresh else f"{grey}={off}   "
+            print(f"  {mark}  {n}")
+        print(f"  {len(names)} organization AppProject(s) — "
+              + ("the new ones do not exist in the cluster until this runs:"
+                 if fresh else
+                 "nothing applies them for you;"
+                 " re-applying an unchanged one is a no-op:"))
+        print(f"    {green}kubectl apply -f {step['file']}{off}")
+        print(f"    {grey}and BEFORE {CMD_SYNC_ROOT}: an Application whose project does{off}")
+        print(f"    {grey}not exist stays in 'project not found' and deploys nothing{off}")
+    _PENDING_CLUSTER.clear()
 
 
 # ── the argocd-secrets generator, derived ─────────────────────────────
@@ -4134,6 +4242,9 @@ def main():
                 except Invalid as e:
                     print(f"{red}✗ {stage}{off}\n  {e}", file=sys.stderr)
                     rc = 1
+        # AFTER every stage, not inside one of them: what the run cannot
+        # do itself is read last or it is not read at all.
+        report_pending_cluster()
         return rc
 
     rc = 0
@@ -4178,5 +4289,8 @@ def main():
             except Invalid as e:
                 print(f"{red}✗ {stage}{off}\n  {e}", file=sys.stderr)
                 rc = 1
+    # AFTER every stage, not inside one of them: what the run cannot do
+    # itself is read last or it is not read at all.
+    report_pending_cluster()
     return rc
 

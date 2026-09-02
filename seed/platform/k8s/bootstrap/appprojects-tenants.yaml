@@ -21,4 +21,10 @@
 # vector of an App that edits projects. That is why they live outside
 # k8s/argocd-apps/, which is the App-of-Apps path.
 #
+# AND SO NOBODY APPLIES THEM ON ITS OWN. The init's phase 35 applies this
+# file while orgs/ is still empty —an init has no tenants— so an
+# organization that arrives afterwards, which is every organization,
+# reaches the cluster only when this file is applied again. That is why
+# `aegis org apply` ends by handing that step over, by name.
+#
 # (no contract declares a repo yet)

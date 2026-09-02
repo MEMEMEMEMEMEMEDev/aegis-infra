@@ -26,6 +26,15 @@ CONF="$AEGIS_HOME/aegis.conf"; source "$CONF"
 #                              contracts that declare a repo
 # Without the second one, the organizations' Applications start up and
 # ArgoCD leaves them at "project not found" (#19).
+#
+# AND THIS IS THE ONLY AUTOMATIC APPLY OF THE SECOND FILE, which is why
+# it is not enough on its own: this phase runs during the init, when
+# orgs/ is still empty and the derived file has zero documents (the
+# branch below says exactly that). Every organization arrives AFTER the
+# init, and reaches the cluster because `aegis org apply` ends by handing
+# over the `kubectl apply -f` for this file, by name. This apply here
+# covers the other case: an init over a tree that ALREADY carries
+# contracts (a re-init, a restore, a lab copy).
 # ── D5, the other half: on a RE-INIT the signature policy goes OFF ──
 # The seed lists no ClusterPolicy (resources: []) and phase 80 is the
 # last thing that turns it on — with the CA and the regcred already in
