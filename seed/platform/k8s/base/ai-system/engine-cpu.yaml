@@ -65,8 +65,8 @@ spec:
           # The digest is set by the kustomization's `images:` block.
           image: registry.registry-system.svc.cluster.local:5000/aegis-engine-cpu
           env:
-            - {name: AEGIS_IN_CLUSTER, value: "1"}
-            - {name: AEGIS_CPU_MODELS, value: /models}
+            - {name: AEGIS_EN_CLUSTER, value: "1"}
+            - {name: AEGIS_MODELOS_CPU, value: /models}
             # A PATH and not an alias: there is no internet egress here
             # (netpol), and an alias would make the transcriber try to
             # download it. `aegis ai models` seeds the directory.
