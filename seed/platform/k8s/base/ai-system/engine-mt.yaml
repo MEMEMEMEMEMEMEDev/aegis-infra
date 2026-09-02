@@ -191,6 +191,21 @@ spec:
             - {name: HF_HUB_OFFLINE, value: "1"}
             - {name: TRANSFORMERS_OFFLINE, value: "1"}
             - {name: CC, value: /usr/bin/gcc-14}
+            # And WHERE the CUDA headers are, which is the other half of
+            # the same sentence. Triton's JIT compiles cuda_utils.c on
+            # the engine's first start: it needs a compiler (CC, above)
+            # AND cuda.h. Measured 2026-09-02: with CC set and CUDA_HOME
+            # unset the compile failed and the engine died after loading
+            # the weights — the visible error was a CalledProcessError
+            # from gcc, and the real one was a warning fifty lines
+            # earlier saying `_find_cuda_home() ... AssertionError`.
+            #
+            # The path is not arbitrary: CUDA 13's wheels renamed the
+            # package. What used to be nvidia/cuda_runtime/ is now
+            # nvidia/cu13/, and it is a full toolkit root (bin, include,
+            # lib, nvvm). The engine was moved to cu130 the day before
+            # this line was written, so the two changes are one.
+            - {name: CUDA_HOME, value: /opt/ai/venv/lib/python3.12/site-packages/nvidia/cu13}
             - {name: VLLM_USE_FLASHINFER_SAMPLER, value: "0"}
             - {name: HOME, value: /cache}
           ports:

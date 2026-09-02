@@ -112,6 +112,18 @@
 # to deploy while any AI image is still unresolved.
 FROM __FROM_PYTHON__
 
+# libc6-dev IS PART OF THE COMPILER, and leaving it out is what
+# `--no-install-recommends` does. Measured 2026-09-02: with gcc-14
+# installed and CC pointing at it, Triton's first JIT died with
+#
+#     cuda.h:56:10: fatal error: stdlib.h: No such file or directory
+#
+# A compiler with no standard headers is not a compiler, and the
+# failure said so four frames deep inside a CalledProcessError, after
+# the model had already been loaded — sixty seconds of work to reach a
+# missing header. The flag is right and stays: what it dropped is
+# named explicitly instead.
+#
 # gcc-14 AND NOT `gcc`. Triton compiles its kernels JIT at the engine's
 # first start and dies with no compiler; the engine manifests set
 # CC=/usr/bin/gcc-14 explicitly because the Debian package installs the
@@ -131,7 +143,7 @@ FROM __FROM_PYTHON__
 # is applied, not excepted.
 RUN apt-get update \
  && apt-get upgrade -y --no-install-recommends \
- && apt-get install -y --no-install-recommends gcc-14 libgomp1 \
+ && apt-get install -y --no-install-recommends gcc-14 libgomp1 libc6-dev \
  && rm -rf /var/lib/apt/lists/*
 
 # THE VIRTUALENV IS AT A FIXED PATH because the manifests name it:

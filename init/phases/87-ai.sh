@@ -196,7 +196,7 @@ for _img in $AI_IMAGES_NEEDED; do
     fi
     case "$_img" in
         aegis-engine-cpu) _job=engine-cpu   ; _to=3600  ; _gib=10 ;;
-        aegis-ai-vllm)    _job=engine-gpu   ; _to=14400 ; _gib=36 ;;
+        aegis-ai-vllm)    _job=engine-gpu   ; _to=14400 ; _gib=42 ;;
         # The gateway is a multibranch: its buildable item is the
         # branch, not the folder. Firing the folder does nothing and
         # would look like a success.
@@ -208,7 +208,8 @@ for _img in $AI_IMAGES_NEEDED; do
     # fifteen or twenty minutes of work, and the message the operator
     # saw was «ABORTED» — a word about a pipeline, not about a disk.
     # kaniko unpacks the whole image and writes its layers and its tar
-    # on the node: for this engine that is 36 GiB, measured, and the
+    # on the node: for this engine that is 42 GiB, measured from a node
+    # that went from 53 GiB free to eviction at 11, and the
     # kubelet starts evicting with less than ~11 GiB free.
     #
     # Refusing here costs a second. Discovering it there costs twenty

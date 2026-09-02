@@ -71,9 +71,25 @@ data:
   MODEL_ID: "cpatonn/Qwen3-4B-Instruct-2507-AWQ-4bit"
   # THE NAME ai/routes.yaml PROMISES. Not decoration — see the header.
   SERVED_NAME: "qwen3-4b"
-  # Half the card. Paired with engine-mt's 0.38 and with the threshold
-  # `aegis ai` derives — see the header.
-  GPU_MEM_UTIL: "0.38"
+  # 0.42 for THIS lane, 0.38 for engine-mt: the card is not split down
+  # the middle because the two lanes do not carry the same load. This
+  # one serves a 4B at 12288 tokens of context; the translator serves a
+  # 1.8B at 4096.
+  #
+  # Measured 2026-09-02, first real start on this machine: at 0.38 the
+  # engine loaded the model (3.29 GiB) and then refused to start —
+  # 0.84 GiB of KV cache needed for a single request at max context,
+  # 0.79 available. Fifty megabytes short.
+  #
+  # And the number that matters is not the fraction, it is what the
+  # fraction is a fraction OF: vLLM takes it over the card's TOTAL
+  # memory, while the desktop session on this machine holds about
+  # 1.1 GiB the engine knows nothing about. 0.42 + 0.38 = 0.80 of the
+  # card = 9782 MiB, against 11122 MiB free with both engines down.
+  # The headroom is real but it is not generous: something GPU-heavy
+  # opened on the desktop while the engines run will take one of them
+  # with it, and that is a property of sharing one card, not a defect.
+  GPU_MEM_UTIL: "0.42"
   # THE CONTEXT ai/routes.yaml PROMISES for chat.rapido and chat.largo.
   # A routing that offers more context than the engine will accept is a
   # 400 the caller cannot do anything about; check 159 demands that this
@@ -176,6 +192,21 @@ spec:
             # ships gcc-14 without a bare `gcc` symlink, so CC is
             # explicit.
             - {name: CC, value: /usr/bin/gcc-14}
+            # And WHERE the CUDA headers are, which is the other half of
+            # the same sentence. Triton's JIT compiles cuda_utils.c on
+            # the engine's first start: it needs a compiler (CC, above)
+            # AND cuda.h. Measured 2026-09-02: with CC set and CUDA_HOME
+            # unset the compile failed and the engine died after loading
+            # the weights — the visible error was a CalledProcessError
+            # from gcc, and the real one was a warning fifty lines
+            # earlier saying `_find_cuda_home() ... AssertionError`.
+            #
+            # The path is not arbitrary: CUDA 13's wheels renamed the
+            # package. What used to be nvidia/cuda_runtime/ is now
+            # nvidia/cu13/, and it is a full toolkit root (bin, include,
+            # lib, nvvm). The engine was moved to cu130 the day before
+            # this line was written, so the two changes are one.
+            - {name: CUDA_HOME, value: /opt/ai/venv/lib/python3.12/site-packages/nvidia/cu13}
             # FlashInfer's sampler off: it compiles with nvcc, which is
             # not in this image. At ten sequences the difference is
             # irrelevant.
