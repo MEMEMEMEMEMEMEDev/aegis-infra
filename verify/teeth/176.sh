@@ -183,6 +183,28 @@ open(p, "w", encoding="utf-8").write(t.replace(old, new, 1))
 PY
 }
 
+# The same second deleter as red_11, spelled the other way curl spells
+# it. `--request DELETE` is the identical call; before 2026-09-02 this
+# check counted the literal string `-X DELETE`, so this mutation stayed
+# GREEN while the file still reported «1 place deletes». What is
+# guarded is the removal, not one way of typing it.
+red_14() {
+    python3 - "$AEGIS_ROOT/$IMG" <<'PYX'
+import sys
+p = sys.argv[1]; t = open(p, encoding="utf-8").read()
+old = "do_gc() {\n"
+assert t.count(old) == 1
+new = '''gc_drop() {
+    curl -sS --netrc-file "$SECRETS_TMP/registry.netrc" --cacert "$SECRETS_TMP/aegis-ca.crt" \\
+        --request DELETE "https://$REGISTRY_CLUSTER_IP:5000/v2/$1/manifests/$2"
+}
+
+do_gc() {
+'''
+open(p, "w", encoding="utf-8").write(t.replace(old, new, 1))
+PYX
+}
+
 # The verb disappears from the dispatch: `aegis image gc` is accepted
 # and then does nothing at all, which is the quietest of the three ways
 # to be missing.

@@ -96,8 +96,15 @@ else:
 # A guard at the call site has to be written again by whoever adds the
 # next one, and the one who forgets is the one nobody notices — the
 # class, not the case.
+# WHAT COUNTS AS DELETING, and it is the class and not one spelling.
+# `-X DELETE` was the shape the command was written in; `--request
+# DELETE` is curl's own long form for the very same call, and a second
+# deleter written that way would have left this check green and still
+# reporting «1 place deletes». What is being counted is the removal,
+# so every way of asking for it counts.
+DELETES = re.compile(r'-X\s*DELETE\b|--request[\s=]+DELETE\b|\bcrane\s+delete\b|\boras\s+manifest\s+delete\b')
 deleters = [fn for fn in re.findall(r'^([a-z_][a-z0-9_]*)\(\)', code, re.M)
-            if "-X DELETE" in body_of(fn)]
+            if DELETES.search(body_of(fn))]
 if not deleters:
     D.append("nothing in aegis-image issues a DELETE against the registry: the manifests are "
              "never unlinked, so the collector has nothing to collect and nothing is ever freed")
@@ -107,7 +114,7 @@ elif len(deleters) > 1:
              % (len(deleters), ", ".join(deleters)))
 else:
     dbody = body_of(deleters[0]).splitlines()
-    where_curl = next((i for i, l in enumerate(dbody) if "-X DELETE" in l), len(dbody))
+    where_curl = next((i for i, l in enumerate(dbody) if DELETES.search(l)), len(dbody))
     before = "\n".join(dbody[:where_curl])
     if not re.search(r'\(\(\s*GC_ACT\s*==\s*1\s*\)\)', before):
         D.append("%s issues the DELETE without asking whether this run was told to act: the dry "
