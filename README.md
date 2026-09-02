@@ -431,7 +431,7 @@ verificador).
 
 | comando | qué hace |
 |---|---|
-| `aegis ci build` / `digests` | `build` dispara los jobs de imágenes de la plataforma en orden (`mirror-images`, `ci-images`, `base-images`, `image-watch`) y espera a cada uno; `digests` lista `imagen@digest` de lo que guarda el registro interno. |
+| `aegis ci build` / `jobs` / `digests` | `build` dispara los jobs de imágenes de la plataforma en orden (`mirror-images`, `ci-images`, `base-images`, `image-watch`) y espera a cada uno, y también dispara por nombre cualquier otro job que el job-dsl declare; `jobs` lista los jobs derivados de ese job-dsl sin hablar con el clúster; `digests` lista `imagen@digest` de lo que guarda el registro interno. |
 | `aegis edge check` | Compara los hostnames vivos con los derivados de los contratos. |
 | `aegis registry check` / `rotate` | `check` verifica que la credencial del registro interno esté alineada en sus diez destinos; `rotate` la genera de nuevo y reescribe los diez. |
 | `aegis rotate list` / `check` / `run` / `continue` | El protocolo de rotación hecho comando: inventario, comprobar si una credencial funciona sin rotarla, rotar con el radio de impacto a la vista, y reanudar un lote interrumpido. |
