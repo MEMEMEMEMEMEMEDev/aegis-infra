@@ -541,19 +541,13 @@ Dicho claro, porque los checks lo dirían igual.
 - El perfil `cloudflare` no se ha corrido en una máquina ajena.
 - Un arreglo en la semilla no llega a una instancia ya sembrada;
   volver a sembrar una instancia viva es manual.
-- `aegis data restore` restaura la base de datos, no los objetos del
-  bucket (lo avisa al correr). Restaurar entre instancias no es
-  automático: el bundle viene cifrado con la clave age de la instancia
-  que lo hizo, hay que recifrarlo con la clave de la nueva, y `restore`
-  exige `--force` porque detecta que la credencial de la base de datos
-  cambió. Tras `--force`, el rol de la base de datos se realinea a
-  mano.
-- Una sola plantilla de aplicación (`base`). Una plantilla de sitio
-  estático y un Jenkinsfile para varios servicios están diseñados, no
-  distribuidos.
-- `aegis secret create` no deriva la copia por namespace de la
-  credencial del registro; `aegis secret move` lo hace, con la clave
-  privada.
+- Restaurar entre instancias no es automático: el bundle viene cifrado
+  con la clave age de la instancia que lo hizo, hay que recifrarlo con
+  la clave de la nueva, y `restore` exige `--force` porque detecta que
+  la credencial de la base de datos cambió.
+- Un repositorio por servicio. El monorepo no es de primera clase, y
+  los sitios que hoy comparten repositorio llevan su Jenkinsfile
+  escrito a mano.
 - Kyverno solo alcanza registros firmados por la CA de la instancia;
   una imagen pública se rechaza con un error `x509`, no con «sin
   firma».
@@ -569,7 +563,7 @@ Dicho claro, porque los checks lo dirían igual.
 Lo próximo, en este orden y sin fechas: la capa amigable para personas
 no técnicas y para desarrolladores que recién empiezan; el perfil
 `cloudflare` en una máquina ajena, con sus puertas pasando de no
-evaluables a medidas; más plantillas de aplicación.
+evaluables a medidas; el monorepo como caso de primera clase.
 
 ## Sobre el idioma y el historial
 

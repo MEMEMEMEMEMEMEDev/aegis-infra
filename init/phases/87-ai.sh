@@ -270,7 +270,7 @@ for _img in $AI_IMAGES_NEEDED; do
     _room_gib="$(df -BG --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9')"
     _need_gib=$(( _gib + 12 ))   # what the build writes + the kubelet's own floor
     if [[ -n "$_room_gib" ]] && (( _room_gib < _need_gib )); then
-        die "building $_img needs about ${_gib} GiB of scratch on the node and the kubelet evicts below ~12 GiB free — there are ${_room_gib} GiB. Free space and run this phase again; firing the build now would spend $((_to / 60)) minutes to be evicted. \`aegis image gc\` does not exist yet: the registry keeps every image ever built, and an old one of this engine is usually the biggest thing there."
+        die "building $_img needs about ${_gib} GiB of scratch on the node and the kubelet evicts below ~12 GiB free — there are ${_room_gib} GiB. Free space and run this phase again; firing the build now would spend $((_to / 60)) minutes to be evicted. The registry keeps every image ever built and nothing prunes it on its own, so an old build of this same engine is usually the biggest thing on the disk: \`aegis image gc\` lists what it would remove and removes nothing until you add --yes."
     fi
     log_info "$_img: not pinned — firing $_job (up to $((_to / 60)) min; needs ~${_gib} GiB free, has ${_room_gib:-?})"
     gate "ai-image-built-$_img" jenkins_build_retry "$_job" "$_to" 2
