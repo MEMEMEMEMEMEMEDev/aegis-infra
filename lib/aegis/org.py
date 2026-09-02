@@ -2662,6 +2662,29 @@ def ai_registry_json():
     rt = yaml.safe_load(open(ROUTES, encoding="utf-8"))
     caps = rt.get("capacidades") or {}
 
+    # THE PROMPTS, TO ASK EACH TASK WHETHER IT FITS INSIDE ITSELF.
+    #
+    # Measured in production on 2026-09-02: `portafolio.chat.guia` ran
+    # with its class ceiling of 1500 context tokens, and its prompt alone
+    # tokenised to 1509. The task could not fit its own prompt, without a
+    # single character from the visitor, and nothing said so — not the
+    # contract, not `apply`, not a gate. It surfaced months later as a
+    # 400 on the public path, and only after ANOTHER defect that was
+    # hiding it got fixed.
+    #
+    # The floor below is deliberately generous: four characters per token
+    # is optimistic for every language this serves (Spanish measured at
+    # 3.38 against the engine's own tokeniser), so the estimate
+    # UNDERCOUNTS tokens and this refuses only what is certainly
+    # impossible. A task that passes here can still be tight; a task that
+    # fails here cannot answer at all.
+    try:
+        _pdoc = yaml.safe_load(open(os.path.join(AI_DIR, "prompts.yaml"),
+                                    encoding="utf-8")) or {}
+        prompts = _pdoc.get("data") or {}
+    except OSError:
+        prompts = {}
+
     tasks = {}
     for fname in sorted(os.listdir(ORGS_DIR)):
         if not fname.endswith((".yaml", ".yml")):
@@ -2713,6 +2736,21 @@ def ai_registry_json():
                     f"  generates text: the prompt is mandatory.")
             e = dict(classes[cls])
             e.update({k: v for k, v in override.items() if k != "clase"})
+            # It has to fit its own prompt plus what it is allowed to
+            # answer, or it cannot answer at all.
+            _texto = prompts.get(task.get("prompt", ""))
+            if isinstance(_texto, str) and cls != "cpu":
+                _piso = len(_texto) // 4 + e["max_output_tokens"]
+                if _piso >= e["max_context_tokens"]:
+                    raise Invalid(
+                        f"the task {key!r} cannot fit inside itself.\n"
+                        f"  its prompt {task.get('prompt')!r} is {len(_texto)} characters, which is\n"
+                        f"  at least {len(_texto) // 4} tokens, and it may answer with\n"
+                        f"  {e['max_output_tokens']} more: {_piso} against a max_context_tokens of\n"
+                        f"  {e['max_context_tokens']}. Raise max_context_tokens for this task in\n"
+                        f"  ai/tasks.yaml under `tareas:`, or shorten the prompt. Leaving it\n"
+                        f"  as is does not fail here: it fails as a 400 in front of a visitor.")
+
             tasks[key] = {
                 "clase": cls,
                 "capacidad": cap,
