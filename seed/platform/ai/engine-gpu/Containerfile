@@ -1,19 +1,27 @@
 # engine-gpu — the vLLM image of the two GPU lanes.
 #
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║  DECLARED AS NOT VERIFIED (2026-08-29).                          ║
+# ║  VERIFIED 2026-09-02, on the machine this was written blind for. ║
 # ║                                                                  ║
-# ║  This file has NOT been built and the image it describes has NOT ║
-# ║  been run. It was written on a machine with no GPU and no        ║
-# ║  cluster, from measurements taken against the upstream build     ║
-# ║  definitions (each one cited below, with its URL), and NOT from  ║
-# ║  an execution. Every version pin here is defensible; none of     ║
-# ║  them is confirmed by a running engine.                          ║
+# ║  Built, scanned clean, signed, deployed, started, and answering  ║
+# ║  a request that came in from the public internet.                ║
 # ║                                                                  ║
-# ║  An image that claims to be tested and is not is worse than one  ║
-# ║  that warns. The first build is the verification, and the        ║
-# ║  protocol (docs/protocols/ai-subsystem.md §3) says what to watch ║
-# ║  while it runs and what to write down afterwards.                ║
+# ║    build            24 min · image scanned with 0 findings       ║
+# ║    KV cache         18,192 tokens (concurrency 1.48x @ 12,288)   ║
+# ║    weights loaded   3.29 GiB in 2.27 s                           ║
+# ║    both lanes up    llm + mt on one RTX 5070, 10,173 of 12,227   ║
+# ║                     MiB in use                                   ║
+# ║    end to end       200 in 0.53 s through the public site        ║
+# ║                                                                  ║
+# ║  FOUR of the pins written blind were wrong, and each is now      ║
+# ║  corrected in place with the measurement that moved it:          ║
+# ║    · cu128 -> cu130   vllm 0.25.1 requires cutlass-dsl[cu13]     ║
+# ║    · libc6-dev        gcc with no stdlib.h is not a compiler     ║
+# ║    · a passwd entry   torch asks getpass.getuser()               ║
+# ║    · 0.38 -> 0.42     50 MiB short of one request's KV cache     ║
+# ║                                                                  ║
+# ║  The reasoning of the original header was sound and is kept      ║
+# ║  below: what it lacked was an execution, and this is it.         ║
 # ╚══════════════════════════════════════════════════════════════════╝
 #
 # ── WHY THIS FILE EXISTS AT ALL ────────────────────────────────────

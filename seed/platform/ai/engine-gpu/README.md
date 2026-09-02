@@ -1,11 +1,35 @@
 # engine-gpu — the vLLM image, reproducible at last
 
-**Status: NOT VERIFIED.** This directory has never been built and the
-image it describes has never been run. It was written on a machine with
-no GPU and no cluster, from the upstream build definitions rather than
-from an execution. The Containerfile says so in its own header, and it
-says it there and not only here because the header is what somebody
-reads at the moment they would be about to trust it.
+**Status: VERIFIED 2026-09-02.** Built, scanned clean, signed,
+deployed, started and answering a request that arrived from the public
+internet. It was written on a machine with no GPU and no cluster, from
+the upstream build definitions rather than from an execution — and the
+first execution is what turned four defensible pins into measured ones.
+
+| | |
+|---|---|
+| build | 24 min, image scanned with 0 findings |
+| weights loaded | 3.29 GiB in 2.27 s |
+| KV cache | 18,192 tokens · concurrency 1.48x at 12,288 per request |
+| both lanes | llm + mt on one RTX 5070, 10,173 of 12,227 MiB in use |
+| end to end | 200 in 0.53 s through the public site |
+
+**What the first build corrected**, each in place with its measurement:
+
+- **cu128 → cu130.** The reasoning for naming the index was right; the
+  half that was missing was which CUDA vLLM itself was compiled
+  against. Its own metadata says `nvidia-cutlass-dsl[cu13]`.
+- **libc6-dev.** `gcc-14` was installed and `CC` pointed at it, and
+  `--no-install-recommends` had dropped the C headers. A compiler with
+  no `stdlib.h` is not a compiler.
+- **A passwd entry for uid 1000.** The manifests already set `HOME`
+  because the user had none; that answered «where do I live». torch
+  asks «what is my name».
+- **0.38 → 0.42 of the card.** Fifty megabytes short of the KV cache a
+  single request at full context needs.
+
+None of those was visible without running it, and that is the whole
+argument for the banner that used to be here.
 
 ## What it replaces
 
@@ -62,10 +86,10 @@ Fire the job, and while it runs watch for these, in this order:
    the same instant, which is what the second lane's init container
    exists to prevent.
 
-When it has run, come back and replace the NOT VERIFIED banner in the
-Containerfile with what was measured — the build's duration, the image
-size, the KV cache each lane reported. A banner removed without those
-numbers is just a banner removed.
+That is what was done on 2026-09-02: the banner in the Containerfile
+was replaced by the numbers, not deleted. A banner removed without
+those numbers is just a banner removed — and the numbers are the only
+part of it that a reader can check.
 
 ## What is still owed
 

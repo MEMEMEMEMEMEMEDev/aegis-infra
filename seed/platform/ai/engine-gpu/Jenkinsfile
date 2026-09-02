@@ -29,11 +29,17 @@
 //    `__FROM_PYTHON__`, which is a clear error but a late one — the
 //    preflight stage below turns it into an immediate one.
 //
-// ── NOT VERIFIED ───────────────────────────────────────────────────
-// This pipeline has never been run: the job that would register it is
-// one item in jenkins/values.yaml's job-dsl and that item does not
-// exist yet. Written from the shape of the pipelines that DO run, and
-// declared unverified rather than assumed to work.
+// ── VERIFIED 2026-09-02 ────────────────────────────────────────────
+// Run for the first time on this date, and it took several runs to
+// get there — every one of them a defect this pipeline could not have
+// known about while it was only written: a reserved word that stopped
+// it from parsing, a builder that cannot work through the container
+// exec API, a node with no room for the layers, and a scan that
+// refused four fixable CVEs. All corrected in place, each with the
+// measurement that moved it.
+//
+// It now builds in ~24 minutes and pushes an image that scans with
+// zero findings.
 pipeline {
   agent {
     kubernetes {

@@ -140,10 +140,15 @@ ships as a placeholder for a reason the file explains: the mirror
 rewrites the manifest as it copies, so the public digest in `images.txt`
 pulls nothing here. Only the live registry knows the internal digest.
 
-**The vLLM image is DECLARED AS NOT VERIFIED.** It has never been built
-and never been run: it was written from the upstream build definitions,
-not from an execution. Its README says what to watch during the first
-build and what to write down afterwards. Read it before you trust it.
+**The vLLM image was VERIFIED on 2026-09-02.** It had been written
+from the upstream build definitions rather than from an execution, and
+it carried a banner saying so. The first real build corrected four of
+its pins — the CUDA variant, the C headers, a passwd entry for uid 1000
+and the share of the card — and its README now carries the measured
+numbers instead of the warning. What that banner bought is worth
+keeping in mind: none of those four was visible without running it, and
+an image that claims to be tested and is not is worse than one that
+warns.
 
 ---
 
