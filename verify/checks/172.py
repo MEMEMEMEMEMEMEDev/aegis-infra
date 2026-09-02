@@ -164,6 +164,43 @@ try:
             continue
         ways[f] = took[0][0]
 
+        # AND, FOR THE COPIED ONES, THAT `rotate` REFUSES.
+        #
+        # A copied credential is not invented here: the registry's
+        # htpasswd is the original, and every namespace holds the same
+        # material. Rotating it in this pass would write new material
+        # that the htpasswd does not match, in ONE namespace, and leave
+        # every other holding the old one — a break that surfaces as
+        # ImagePullBackOff somewhere else entirely.
+        #
+        # `create` guards that and raises. What makes it worth a fact of
+        # its own is the shape of the failure if the guard goes: control
+        # falls through to the copy, the same old material is written
+        # again, and the command returns 0. `aegis secret rotate` would
+        # report a rotation it did not perform, which is the one outcome
+        # the operator cannot detect by reading the output.
+        #
+        # Exercised, not read: the guard is CALLED, and a version that
+        # merely mentions rotate in a comment does not pass.
+        if took[0][0] == "copies":
+            took.clear()
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    mod.create(str(target), rotate=True)
+            except mod.Error:
+                pass
+            except Exception as e:                       # noqa: BLE001
+                print(f"{f} is a copied credential and rotating it fails with something that "
+                      f"is not the product's own error ({type(e).__name__}: {e}): the refusal "
+                      f"has to be the explained one, or the operator reads a crash instead of "
+                      f"a reason")
+            else:
+                print(f"{f} is copied from another namespace and `aegis secret rotate` does "
+                      f"NOT refuse it: it falls through and writes the same old material "
+                      f"again, returning 0. The operator is told the credential was rotated "
+                      f"when it was not — and the real rotation, at the registry's password, "
+                      f"never happened")
+
     invented = sum(1 for w in ways.values() if w == "invents")
     copied = sum(1 for w in ways.values() if w == "copies")
     print(f"__COUNT__ {len(subject)} {invented} {copied}", file=sys.stderr)

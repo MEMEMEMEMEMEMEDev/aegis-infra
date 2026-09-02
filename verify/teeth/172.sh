@@ -80,3 +80,39 @@ control_3() {
     printf '  - secret-queue-credenciales.enc.yaml\n' \
         >> "$AEGIS_ROOT/seed/platform/k8s/organizations/org-canary/secret-generator.yaml"
 }
+
+# THE GUARD THAT REFUSES TO ROTATE A COPIED CREDENTIAL, REMOVED.
+#
+# Without it control falls straight through to the copy: the same old
+# material is written again and the command returns 0. `aegis secret
+# rotate regcred-internal` then reports a rotation that did not happen
+# — and the real one, at the registry's password, never happened
+# either. A false success is the one outcome reading the output cannot
+# catch, which is why it is worth a mutation of its own.
+red_7() {
+    python3 - "$AEGIS_ROOT/libexec/aegis-secret" <<'PYEOF'
+import re, sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+s = re.sub(r'\n[ ]{12}if rotate:\n[ ]{16}raise Error\((?:[^\n]*\n)+?[^\n]*remade from there\."\)\n',
+           "\n", s, count=1)
+open(p, "w", encoding="utf-8").write(s)
+PYEOF
+}
+
+# control: the PROSE that argues the refusal. The reason a copied
+# credential is rotated at its origin is explained right beside the
+# code that enforces it, and explaining is not enforcing — this check
+# exercises the command, so the paragraph must not satisfy it.
+control_4() {
+    python3 - "$AEGIS_ROOT/libexec/aegis-secret" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+anchor = "        source = copy_source_for(name, path)\n"
+note = ("        # note: a copied credential is rotated where it is derived —\n"
+        "        # the registry's password — and the copies are remade from there.\n")
+s = s.replace(anchor, note + anchor, 1)
+open(p, "w", encoding="utf-8").write(s)
+PYEOF
+}
