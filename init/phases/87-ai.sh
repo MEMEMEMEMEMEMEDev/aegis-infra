@@ -149,16 +149,42 @@ fi
 # 12.8 torch and its own Jenkinsfile declares four hours, because on a
 # domestic uplink the first build is measured in hours and a timeout
 # that cuts it would turn a slow success into a red that says nothing.
-_ai_row_pinned() {
+_ai_row_digest() {
     python3 - "$AI_DIR/kustomization.yaml" "$1" <<'EOF'
 import sys, yaml
 k = yaml.safe_load(open(sys.argv[1], encoding="utf-8")) or {}
 zeros = "sha256:" + "0" * 64
 for i in (k.get("images") or []):
     if i.get("name", "").rsplit("/", 1)[-1] == sys.argv[2]:
-        sys.exit(0 if i.get("digest", zeros) != zeros else 1)
+        d = i.get("digest", zeros)
+        if d != zeros:
+            print(d)
+            sys.exit(0)
 sys.exit(1)
 EOF
+}
+
+# AND WHETHER THIS REGISTRY ACTUALLY HOLDS IT, SIGNED.
+#
+# The pin is a line in a file. It says which image this installation
+# decided to run; it does not say that the image is reachable, and it
+# says nothing at all about WHICH registry holds it. Those are three
+# different claims and the skip above used to make all three from the
+# first one.
+#
+# The verification is the same one phase 80 already does over the
+# canary, deliberately: same key, same CA, same direct-IP route (the
+# host does not resolve .svc, and the registry's cert carries the IP in
+# its SANs). --insecure-ignore-tlog is not TOFU — the signature is
+# fully checked against cosign.pub; only the public transparency log is
+# skipped, and it was never used here (--tlog-upload=false, a private
+# registry).
+_ai_image_signed_here() {   # <image> <digest> ; 0 = it is here and signed
+    DOCKER_CONFIG="$SECRETS_TMP/docker" cosign verify \
+        --key "$PLATFORM_DIR/k8s/base/platform/cosign/cosign.pub" \
+        --registry-cacert "$SECRETS_TMP/aegis-ca.crt" \
+        --insecure-ignore-tlog=true \
+        "$REGISTRY_CLUSTER_IP:5000/$1@$2" >/dev/null 2>&1
 }
 
 # THE BASES, BEFORE ANY BUILD. Each AI Containerfile ships with a
@@ -189,10 +215,37 @@ git_commit_if_changes "$PLATFORM_DIR" \
     "fix(ai): AI Containerfile bases resolved against the internal registry, by digest"
 git_push_verified "$PLATFORM_DIR"
 
+# The verification below talks to the registry, so it needs the
+# registry's credentials and CA in tmpfs. Idempotent: it re-reads them
+# from the cluster and rewrites the same files.
+registry_creds "$REGISTRY_HOST_INTERNAL" "$REGISTRY_CLUSTER_IP"
+
 for _img in $AI_IMAGES_NEEDED; do
-    if _ai_row_pinned "$_img"; then
-        log_info "$_img: already pinned, not rebuilt"
-        continue
+    if _dig="$(_ai_row_digest "$_img")"; then
+        if _ai_image_signed_here "$_img" "$_dig"; then
+            log_ok "$_img: pinned at ${_dig:7:12} and this registry holds it, signed — not rebuilt"
+            continue
+        fi
+        # A PIN THAT NAMES AN IMAGE NOBODY HERE HAS.
+        #
+        # This is the normal state of a NEW installation, not an
+        # exotic one: the seed ships pinned rows, and every instance
+        # is born with an empty registry. It is also what a restored
+        # kustomization, a re-created registry or a garbage collection
+        # leaves behind. In all of those the row is honest and the
+        # image is absent, and the old skip read the row alone and
+        # declared the work done.
+        #
+        # What made it expensive is that nothing failed here. The
+        # phase went green, and the engine's pod stayed pulling — or,
+        # worse, was denied at admission for an unsigned digest — and
+        # the operator was left reading a symptom several steps away
+        # from the phase that caused it.
+        #
+        # So the question the skip asks is no longer «did somebody
+        # decide?» but «is it here?». Rebuilding costs a build;
+        # skipping wrongly costs a green phase that installed nothing.
+        log_warn "$_img: pinned at ${_dig:7:12}, but no signed image with that digest is in THIS registry — rebuilding. A pin is a note about an image; it is not the image."
     fi
     case "$_img" in
         aegis-engine-cpu) _job=engine-cpu   ; _to=3600  ; _gib=10 ;;
@@ -237,7 +290,7 @@ for _img in $AI_IMAGES_NEEDED; do
     gate "ai-image-pinned-$_img" \
         run_cmd "$AEGIS_ROOT/libexec/aegis-ai" images "$_img:$_tag"
 done
-unset _img _job _to
+unset _img _job _to _dig
 
 gate_diag "ai-images-pinned" \
   'echo "  the AI images this lane needs are pinned in";
