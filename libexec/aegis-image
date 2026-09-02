@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # aegis-summary: Ask for a base image: mirrored, scanned, signed, and the FROM to paste
 # aegis-group:   apps
-# aegis-subcommands: request list from check
+# aegis-subcommands: request list from check gc
 # aegis-help:
 # Usage: aegis image request <repo>:<tag> [--bump]
 #                           [--allow <CVE> --until <YYYY-MM-DD> --reason "<text>"]
 #        aegis image list
 #        aegis image from <name>:<tag>
 #        aegis image check
+#        aegis image gc [--keep <N>] [--repo <name>] [--yes]
 #
 # request  asks the platform for a base image. It measures the digest the
 #          tag points at TODAY, declares it in mirror-images/images.txt,
@@ -32,6 +33,19 @@
 #          it is not there.
 # check    everything declared is mirrored and signed; what is not comes
 #          with the command that fixes it.
+# gc       prunes the internal registry: it deletes the manifests that
+#          nothing fixes and nothing runs, and then collects the blobs
+#          they held. It PRINTS ITS PLAN AND STOPS unless --yes is
+#          given, because deleting images is not an operation that
+#          happens on its own.
+#          --keep <N>  how many of the newest images of each repository
+#                  survive on age alone (default 2: the one that is
+#                  running and the one to roll back to; a third is not
+#                  a rollback, it is history). Whatever the instance
+#                  fixes by digest is kept whatever N says.
+#          --repo <name>  one repository instead of all of them.
+#          --yes   act. Without it nothing is deleted and nothing is
+#                  collected.
 #
 # AEGIS_IMAGE_DRY_RUN=1  request and list explain what they WOULD do and
 #          touch nothing: no cluster, no registry, no git, no build. It
@@ -96,11 +110,32 @@ bad_usage() { printf '%s image: %s\n' "${AEGIS_CMD:-aegis}" "$*" >&2; printf 'tr
 VERB="${1:-}"; [[ $# -gt 0 ]] && shift
 case "$VERB" in
     -h|--help|"")               usage; exit 0 ;;
-    request|list|from|check)    ;;
-    *) bad_usage "«$VERB» is not a subcommand (request | list | from | check)" ;;
+    request|list|from|check|gc) ;;
+    *) bad_usage "«$VERB» is not a subcommand (request | list | from | check | gc)" ;;
 esac
 
 REF="" ; BUMP=0 ; ALLOW="" ; UNTIL="" ; REASON=""
+
+# ── gc: the retention policy, and the two states of this command ────
+# GC_KEEP_DEFAULT is the number of images each repository keeps ON AGE
+# ALONE, on top of everything that is fixed or running. It is 2 and the
+# reason is arithmetic, not taste — the long form is in
+# docs/protocols/images.md §8:
+#   · what a rollback needs is two digests, the one deployed and the
+#     one it replaced. A third is not a rollback, it is history;
+#   · the GPU engine costs about 5.6 GB per build in this registry (two
+#     rebuilds occupied 11.2 GB, measured 2026-09-01), and the same
+#     disk has to hold the ~42 GiB of scratch its next build needs
+#     while the kubelet evicts below ~11 GiB free. Each extra copy of
+#     THAT one repository spends 5.6 GB of that margin.
+# It is a floor, never a ceiling on safety: a digest the instance fixes
+# or the cluster runs is kept whatever this number says.
+GC_KEEP_DEFAULT=2
+# GC_ACT is the whole difference between saying and doing, and it opens
+# at 0: this command explains its plan and touches nothing unless a
+# person typed --yes. There is no environment variable that flips it.
+GC_ACT=0
+KEEP="$GC_KEEP_DEFAULT" ; ONLY_REPO=""
 case "$VERB" in
   request)
     while (($#)); do
@@ -139,6 +174,24 @@ case "$VERB" in
     ;;
   list|check)
     (($# == 0)) || { [[ "$1" == -h || "$1" == --help ]] && { usage; exit 0; }; bad_usage "$VERB takes no arguments (got «$1»)"; }
+    ;;
+  gc)
+    while (($#)); do
+        case "$1" in
+            -h|--help)  usage; exit 0 ;;
+            --keep)     [[ $# -ge 2 ]] || bad_usage "--keep needs a number"; KEEP="$2"; shift 2 ;;
+            --keep=*)   KEEP="${1#--keep=}"; shift ;;
+            --repo)     [[ $# -ge 2 ]] || bad_usage "--repo needs a repository name"; ONLY_REPO="$2"; shift 2 ;;
+            --repo=*)   ONLY_REPO="${1#--repo=}"; shift ;;
+            --dry-run)  shift ;;
+            --yes)      GC_ACT=1; shift ;;
+            --force*)   bad_usage "there is no --force here either: what protects an image from this command is that something fixes it or runs it, and no flag is going to argue with that. If a pin is wrong, fix the pin" ;;
+            -*)         bad_usage "unknown flag «$1»" ;;
+            *)          bad_usage "gc takes no positional arguments (got «$1»): one repository is --repo <name>" ;;
+        esac
+    done
+    [[ "$KEEP" =~ ^[0-9]+$ ]] \
+        || bad_usage "--keep needs a whole number of images to retain per repository (got «$KEEP»)"
     ;;
 esac
 
@@ -1011,9 +1064,576 @@ do_check() {
     log_ok "the $n declared images are mirrored and signed"
 }
 
+# ═══════════════════════════════════════════════════════════════════
+#  gc — what the registry keeps, and what nobody was ever going to use
+# ═══════════════════════════════════════════════════════════════════
+# MEASURED 2026-09-01. The internal registry stores every image that is
+# ever built and nothing prunes it. The GPU engine costs about 5.6 GB
+# compressed per build, so two rebuilds occupied 11.2 GB; pruning by
+# hand —deleting the manifest through the registry's API and then
+# running `registry garbage-collect --delete-untagged` inside the pod—
+# brought it back to 3.5 GB. It had to be done three times in one day,
+# and one of the images deleted had never even started.
+#
+# IT COMPOSES WITH THE OTHER CONSUMER OF THAT DISK, and that is what
+# makes it expensive. The build of that same engine needs about 42 GiB
+# of ephemeral storage on the node (phase 87 measures it before firing)
+# and the kubelet starts evicting pods below roughly 11 GiB free. So
+# EVERY REBUILD MAKES THE NEXT ONE HARDER — and the symptom never
+# mentions a disk: the pod is «Evicted» and the pipeline says ABORTED.
+#
+# WHAT PROTECTS AN IMAGE FROM THIS COMMAND. Not its tag, and not its
+# age on its own. Three facts, each read from where it is true, and any
+# one of them is enough:
+#   1. THE INSTANCE FIXES IT BY DIGEST. A digest written in a manifest
+#      of this instance is in use even if its tag is a year old — that
+#      is the whole point of pinning by digest.
+#   2. IT IS DECLARED IN images.txt. `aegis image check` promises the
+#      registry serves every destination of that list; pruning one
+#      would make this file break its own promise.
+#   3. THE CLUSTER IS RUNNING IT. The app overlays of the tenants live
+#      in the ORGANISATIONS' repositories, not in the platform's, so a
+#      pruner that only read the platform tree would cheerfully delete
+#      the image of a pod that is serving traffic. The cluster is
+#      asked, and if it does not answer this command stops: a prune
+#      planned over an unanswered read is a prune planned blind.
+# On top of those, the newest --keep images of every repository survive
+# on age alone. Everything else is a candidate.
+#
+# THE SIGNATURES TRAVEL WITH THE MANIFEST, and they have to be deleted
+# explicitly. cosign publishes the signature of <digest> as a TAG in
+# the same repository, `sha256-<hex>.sig`; from the registry's side
+# that is a TAGGED manifest, so `--delete-untagged` marks it live and
+# leaves it —and its blobs— exactly where they are. Deleting an image
+# without its companion therefore frees less than it looks like and
+# leaves behind a signature of nothing. So the companions of a pruned
+# digest are pruned in the same pass, derived from the digest itself
+# (`sha256-<hex>.*`, which covers .sig and any .att/.sbom that may
+# appear), and the ones already orphaned by the hand-pruning of
+# 2026-09-01 are picked up by that same rule.
+
+GC_PLAN=""            # the plan, once it exists: the only list a delete may come from
+GC_CFG="" GC_ROOT=""  # the config the running registry was told to read, and the storage root it declares
+
+gc_gb() { awk -v b="${1:-0}" 'BEGIN{printf "%.2f GB", b/1000000000}'; }
+gc_kb_gb() { awk -v k="${1:-0}" 'BEGIN{printf "%.2f GB", k*1024/1000000000}'; }
+
+# ── the registry as an object on a disk ─────────────────────────────
+# WHICH CONFIG, and it is derived rather than typed. `garbage-collect`
+# takes a config file and sweeps the storage THAT file declares; a
+# second copy of the path written here would be a second thing to keep
+# in step with the Deployment, and the day the two diverge this command
+# would sweep a directory nobody is serving and report freeing nothing.
+# The one the running binary was handed is in its args.
+gc_registry_target() {
+    GC_CFG="$(kubectl -n registry-system get deploy registry -o json 2>/dev/null \
+        | jq -r '.spec.template.spec.containers[]? | select(.name=="registry") | .args[]?' \
+        | grep -E '\.ya?ml$' | head -1)"
+    [[ -n "$GC_CFG" ]] \
+        || could_not "registry-system/deploy/registry names no config file in its args: the collector sweeps the storage its config declares, and guessing that path would sweep something else"
+    GC_ROOT="$(kubectl -n registry-system exec deploy/registry -- cat "$GC_CFG" 2>/dev/null \
+        | python3 -c 'import sys, yaml; d = yaml.safe_load(sys.stdin) or {}; print(((d.get("storage") or {}).get("filesystem") or {}).get("rootdirectory", ""))' 2>/dev/null || true)"
+    [[ -n "$GC_ROOT" ]] \
+        || could_not "could not read $GC_CFG from inside the registry pod: without the storage root there is nowhere to measure before and after, and a prune that cannot say what it freed is a prune nobody can audit"
+    # THE VERSION MATTERS, in one direction only. distribution 2.x had a
+    # collector that did not mark the per-architecture manifests an
+    # INDEX references, so `--delete-untagged` could strip the children
+    # of a mirrored multi-arch tag and leave the tag pointing at
+    # nothing. 3.x marks them. The platform pins 3.1.1 in
+    # k8s/base/registry-system/registry.yaml; what is read here is what
+    # is actually running, because that is the one doing the sweeping.
+    local ver major
+    ver="$(kubectl -n registry-system exec deploy/registry -- registry --version 2>/dev/null | tr -d '\r' || true)"
+    major="$(grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' <<< "${ver:-}" | tail -1 | tr -d v | cut -d. -f1 || true)"
+    if [[ -n "$major" ]] && (( major < 3 )); then
+        die "the registry running here is «$ver», and on 2.x --delete-untagged does not mark the manifests an index references: sweeping would break every mirrored multi-architecture tag. Nothing was deleted"
+    fi
+    [[ -n "$major" ]] \
+        || log_warn "the registry did not say its version («${ver:-nothing}»): the collector is being assumed to be the 3.x one the platform pins, which is the one that marks the children of an index"
+    log_info "registry storage $GC_ROOT, config $GC_CFG${ver:+, $ver}"
+}
+
+# gc_disk_kb — the storage as the filesystem sees it, which is the only
+# number that answers «how much did this free». The registry's API can
+# add up the blobs it knows about; it cannot see what the collector
+# actually removed.
+gc_disk_kb() {
+    kubectl -n registry-system exec deploy/registry -- du -sk "$GC_ROOT" 2>/dev/null \
+        | awk 'NR==1 && $1 ~ /^[0-9]+$/ {print $1}'
+}
+
+# ── (1) what may not be touched ─────────────────────────────────────
+# The protected set, one row per fact: kind <TAB> repo <TAB> value <TAB>
+# where it was read. Nothing in it is a list somebody maintains; all
+# three sources are derived, and deliberately so — half the bugs of
+# 2026-09-01 were hand-written lists that had quietly stopped being
+# true.
+gc_pins() {
+    local out="$SECRETS_TMP/gc-protected.tsv"
+    : > "$out"
+
+    # (1) THE INSTANCE'S OWN MANIFESTS. Every reference to the internal
+    # registry that carries a digest, plus the `images:` blocks that
+    # kustomize and services.yaml write as a name and a digest on two
+    # lines. Comments are stripped first: this tree documents every
+    # decision beside the code, so the file that pins a digest is also
+    # the file whose prose quotes the digest it used to pin.
+    gc_scan_manifests "$PLATFORM_DIR" >> "$out" \
+        || die "the scan of $PLATFORM_DIR for pinned digests failed: nothing was planned and nothing was deleted — a prune that cannot read what the instance fixes is a prune that deletes what is running"
+
+    # (2) WHAT images.txt DECLARES. `aegis image check` promises the
+    # registry serves every destination of that list; a prune that
+    # removed one would break the promise of another subcommand of this
+    # same file.
+    local src dst
+    while read -r src dst; do
+        [[ -n "$dst" ]] || continue
+        printf 'tag\t%s\t%s\tdeclared in %s\n' "${dst%%:*}" "${dst#*:}" "$IMAGES_REL" >> "$out"
+    done < <(entries)
+
+    # (3) WHAT THE CLUSTER IS RUNNING. The tenants' overlays live in the
+    # organisations' repositories, which this disk does not have, so
+    # source (1) cannot see the image of an app that is serving traffic
+    # right now. The workloads are asked directly and every string under
+    # them that names an image counts — `image` as desired and `imageID`
+    # as resolved, anywhere in the object, which is how a sidecar or an
+    # initContainer added tomorrow is covered without anybody editing
+    # this.
+    local live
+    live="$(kubectl get pods,deployments,statefulsets,daemonsets,cronjobs,jobs -A -o json 2>/dev/null \
+        | jq -r '[.. | objects | (.image?, .imageID?) | strings] | .[]' 2>/dev/null || true)"
+    [[ -n "$live" ]] \
+        || could_not "the cluster did not answer what it is running: that is NOT «it is running nothing», and planning a prune over that answer would be planning it blind. Nothing was deleted"
+    gc_live_refs <<< "$live" >> "$out" \
+        || die "the live images of the cluster could not be read into the protected set: nothing was deleted"
+
+    sort -u -o "$out" "$out"
+    log_info "$(wc -l < "$out") protected reference(s): what the instance fixes, what $IMAGES_REL declares, and what the cluster is running"
+}
+
+# gc_scan_manifests <dir> — the pins written down in a tree.
+# It lives in python for the reason check 166 paid for: a sed that fails
+# silently prints nothing, and «nothing is pinned» is the one wrong
+# answer this command must never get. A scan that dies exits non-zero
+# and takes the command down with it.
+gc_scan_manifests() {
+    python3 - "$1" "$REGISTRY_HOST_INTERNAL" <<'PY'
+import os, re, sys
+
+root, host = sys.argv[1], sys.argv[2]
+# `#` opens a comment in YAML at the start of a line or after
+# whitespace, which is the shape that leaves `${var#pat}` and a URL's
+# `https://` intact.
+HASH = re.compile(r'(^|\s)#.*$')
+REF = re.compile(re.escape(host) + r"/([A-Za-z0-9._/-]+?)(?::[A-Za-z0-9._-]+)?@(sha256:[0-9a-f]{64})")
+# the two-line shape: kustomize writes `name:` + `digest:`, services.yaml
+# writes `imagen:` + `digest:`. One fact, two spellings, one rule.
+NAME = re.compile(r'^\s*-?\s*(?:name|image|imagen):\s*["\']?([A-Za-z0-9._:/-]+)["\']?\s*$')
+DIG = re.compile(r'^\s*digest:\s*["\']?(sha256:[0-9a-f]{64})["\']?\s*$')
+
+
+def repo_of(value):
+    v = value
+    if v.startswith(host + "/"):
+        v = v[len(host) + 1:]
+    v = v.split("@", 1)[0]
+    head, _, last = v.rpartition("/")
+    if ":" in last:
+        last = last.split(":", 1)[0]
+    return (head + "/" + last) if head else last
+
+
+seen, files, skipped = set(), 0, 0
+for dirpath, dirnames, filenames in os.walk(root):
+    dirnames[:] = [d for d in dirnames if d != ".git"]
+    for fn in sorted(filenames):
+        path = os.path.join(dirpath, fn)
+        try:
+            if os.path.getsize(path) > 2 * 1024 * 1024:
+                skipped += 1
+                continue
+            text = open(path, encoding="utf-8").read()
+        except (OSError, UnicodeDecodeError):
+            skipped += 1
+            continue
+        files += 1
+        rel = os.path.relpath(path, root)
+        lines = [HASH.sub(r'\1', l) for l in text.splitlines()]
+        for m in REF.finditer("\n".join(lines)):
+            seen.add(("digest", repo_of(m.group(1)), m.group(2), "fixed by digest in " + rel))
+        pending = None
+        for i, line in enumerate(lines):
+            m = NAME.match(line)
+            if m:
+                pending = (repo_of(m.group(1)), i)
+                continue
+            m = DIG.match(line)
+            if m and pending and i - pending[1] <= 12:
+                seen.add(("digest", pending[0], m.group(1), "fixed by digest in " + rel))
+for row in sorted(seen):
+    print("\t".join(row))
+print("__SCANNED__ %d files read, %d skipped as unreadable or too large" % (files, skipped), file=sys.stderr)
+PY
+}
+
+# gc_live_refs — the image strings the cluster handed back, turned into
+# protected rows. A reference with a digest protects the digest; one
+# with only a tag protects the tag, which is the same protection said
+# in the other of the two ways a Pod can name an image.
+gc_live_refs() {
+    python3 - "$REGISTRY_HOST_INTERNAL" <<'PY'
+import re, sys
+
+host = sys.argv[1]
+REF = re.compile(re.escape(host) + r"/([A-Za-z0-9._/-]+?)(?::[A-Za-z0-9._-]+)?@(sha256:[0-9a-f]{64})$")
+TAG = re.compile(re.escape(host) + r"/([A-Za-z0-9._/-]+?):([A-Za-z0-9._-]+)$")
+n = 0
+for line in sys.stdin:
+    s = line.strip()
+    # the kubelet reports what it resolved with this prefix on it
+    if s.startswith("docker-pullable://"):
+        s = s[len("docker-pullable://"):]
+    m = REF.match(s)
+    if m:
+        print("digest\t%s\t%s\trunning in the cluster" % m.groups())
+        n += 1
+        continue
+    m = TAG.match(s)
+    if m:
+        print("tag\t%s\t%s\trunning in the cluster" % m.groups())
+        n += 1
+print("__LIVE__ %d reference(s) of the internal registry are in use" % n, file=sys.stderr)
+PY
+}
+
+# ── (2) the registry as it is ───────────────────────────────────────
+# reg_body <path under /v2/> — the body of a GET, with the three
+# verdicts kept apart the way reg_head keeps them: 0 it served it, 1 it
+# answered that it does not have it, 2 it did not answer. No `curl -f`,
+# for the reason written above reg_head.
+reg_body() {
+    local code
+    code="$(retry_net 3 curl -sS --max-time 60 \
+        --netrc-file "$SECRETS_TMP/registry.netrc" --cacert "$SECRETS_TMP/aegis-ca.crt" \
+        -o "$SECRETS_TMP/reg.body" -D "$SECRETS_TMP/reg.hdr" -w '%{http_code}' \
+        -H "Accept: $OCI_ACCEPT" \
+        "https://$REGISTRY_CLUSTER_IP:5000/v2/$1")" || return 2
+    case "$code" in
+        200) cat "$SECRETS_TMP/reg.body"; return 0 ;;
+        404) return 1 ;;
+        *)   log_warn "the internal registry answered HTTP $code for /v2/$1"; return 2 ;;
+    esac
+}
+
+# gc_meta <repo> <digest> — «when was this image made» and «what does it
+# cost», printed as created<TAB>bytes. Both come out of the image's own
+# manifest and config, because the tag says nothing about either: the
+# tags in this registry are `main-000012`, `vllm0.11.2-9f3a1c` and
+# `2.1-260827`, three schemes no sort orders together. The date the
+# image carries orders all of them.
+gc_meta() {
+    local repo="$1" dig="$2" body mt sub cfg created bytes
+    body="$(reg_body "$repo/manifests/$dig")" || return 2
+    mt="$(jq -r '.mediaType // empty' <<< "$body" 2>/dev/null || true)"
+    # A multi-architecture index has no config of its own: the date and
+    # the size live in the manifests it points at. The first of them
+    # answers both questions to within minutes and megabytes of its
+    # siblings, and this is a retention decision, not an audit.
+    if [[ "$mt" == *".index."* || "$mt" == *".list."* ]]; then
+        sub="$(jq -r '.manifests[0].digest // empty' <<< "$body" 2>/dev/null || true)"
+        [[ -n "$sub" ]] || return 2
+        body="$(reg_body "$repo/manifests/$sub")" || return 2
+    fi
+    cfg="$(jq -r '.config.digest // empty' <<< "$body" 2>/dev/null || true)"
+    bytes="$(jq '[(.config.size // 0)] + [((.layers // [])[].size)] | add' <<< "$body" 2>/dev/null || true)"
+    [[ -n "$cfg" ]] || return 2
+    created="$(reg_body "$repo/blobs/$cfg" | jq -r '.created // empty' 2>/dev/null || true)"
+    printf '%s\t%s' "${created:-}" "${bytes:-0}"
+}
+
+# gc_inventory — one row per (repo, tag) the registry SERVES:
+# repo <TAB> tag <TAB> digest <TAB> created <TAB> bytes. Everything in
+# it is read. A repository or a tag whose read fails takes the command
+# down, because a plan built on a partial inventory prunes what it saw
+# and calls the rest orphaned.
+gc_inventory() {
+    local out="$SECRETS_TMP/gc-inventory.tsv"
+    : > "$out"
+    local catalog repos repo tags_json tag digest created bytes meta rc n=0
+    catalog="$(reg_body '_catalog?n=1000')" \
+        || could_not "the internal registry did not answer its catalogue: this is NOT «the registry is empty», and a plan over an empty answer deletes nothing while the disk keeps filling"
+    # distribution answers a truncated catalogue with a Link header. A
+    # plan over half a registry is a plan that calls the other half
+    # gone, so half an answer is no answer.
+    if grep -qi '^link:' "$SECRETS_TMP/reg.hdr" 2>/dev/null; then
+        could_not "the registry's catalogue came back paginated (a Link header): this command reads it in one page, so it would be planning over part of the registry"
+    fi
+    repos="$(jq -r '.repositories[]?' <<< "$catalog" | sort)"
+    if [[ -n "$ONLY_REPO" ]]; then
+        repos="$(grep -Fx -- "$ONLY_REPO" <<< "$repos" || true)"
+        [[ -n "$repos" ]] || die "the internal registry holds no repository called «$ONLY_REPO»"
+    fi
+    while IFS= read -r repo; do
+        [[ -n "$repo" ]] || continue
+        tags_json="$(reg_body "$repo/tags/list")" \
+            || could_not "$repo: the registry did not answer its tag list — a repository whose tags could not be read cannot be planned, and planning it as empty would make every signature in it look orphaned"
+        while IFS= read -r tag; do
+            [[ -n "$tag" ]] || continue
+            rc=0; digest="$(reg_digest "$repo" "$tag")" || rc=$?
+            (( rc != 2 )) \
+                || could_not "$repo:$tag: the registry did not answer about its manifest, so this repository cannot be planned"
+            (( rc == 0 )) || { log_warn "$repo:$tag went away between the tag list and the manifest read — left out of the plan"; continue; }
+            created="" ; bytes=0
+            if meta="$(gc_meta "$repo" "$digest")"; then
+                created="${meta%%$'\t'*}" ; bytes="${meta##*$'\t'}"
+            else
+                log_warn "$repo:$tag: the registry did not say when this image was made — it goes into the plan UNDATED, which is read as «not a candidate»"
+            fi
+            printf '%s\t%s\t%s\t%s\t%s\n' "$repo" "$tag" "$digest" "$created" "${bytes:-0}" >> "$out"
+            n=$((n + 1))
+        done < <(jq -r '.tags[]?' <<< "$tags_json" | sort)
+    done <<< "$repos"
+    log_info "$n tag(s) read from the registry, across $(awk -F'\t' '{print $1}' "$out" | sort -u | grep -c . || true) repository/ies"
+}
+
+# ── (3) the plan ────────────────────────────────────────────────────
+# The ONE place that decides, and it subtracts the protected set from
+# the inventory before anything else. It is python and in one piece for
+# the reason this tree keeps paying for: a scanner that dies must take
+# the command with it, and an awk pipeline that prints nothing looks
+# exactly like a registry with nothing to prune.
+gc_plan() {
+    GC_PLAN="$SECRETS_TMP/gc-plan.tsv"
+    python3 - "$SECRETS_TMP/gc-inventory.tsv" "$SECRETS_TMP/gc-protected.tsv" "$KEEP" "$GC_PLAN" <<'PY'
+import collections, re, sys
+
+inv_p, prot_p, keep_s, out_p = sys.argv[1:5]
+keep = int(keep_s)
+
+# cosign publishes the signature of <digest> as the tag
+# `sha256-<hex>.sig` in the same repository. .att and .sbom follow the
+# same layout, so the rule is derived from the shape and not from a
+# list of three suffixes that would be two suffixes next year.
+COMPANION = re.compile(r'^sha256-([0-9a-f]{64})\.[A-Za-z0-9]+$')
+
+prot_digest, prot_tag, why = set(), set(), {}
+with open(prot_p, encoding="utf-8") as fh:
+    for line in fh:
+        parts = line.rstrip("\n").split("\t")
+        if len(parts) < 4:
+            continue
+        kind, repo, value, where = parts[:4]
+        if kind == "digest":
+            prot_digest.add((repo, value))
+            why.setdefault(("digest", repo, value), where)
+        elif kind == "tag":
+            prot_tag.add((repo, value))
+            why.setdefault(("tag", repo, value), where)
+
+repos = collections.defaultdict(lambda: {"img": {}, "comp": collections.defaultdict(list)})
+with open(inv_p, encoding="utf-8") as fh:
+    for line in fh:
+        parts = line.rstrip("\n").split("\t")
+        if len(parts) != 5:
+            continue
+        repo, tag, digest, created, size = parts
+        m = COMPANION.match(tag)
+        if m:
+            repos[repo]["comp"]["sha256:" + m.group(1)].append((tag, digest, int(size or 0)))
+        else:
+            e = repos[repo]["img"].setdefault(digest, {"tags": [], "created": "", "bytes": int(size or 0)})
+            e["tags"].append(tag)
+            if created and not e["created"]:
+                e["created"] = created
+
+rows, kept, pruned, freeable = [], 0, 0, 0
+for repo in sorted(repos):
+    imgs = repos[repo]["img"]
+    # The newest --keep, by the date the image itself carries. One the
+    # registry could not date has no place in that order and is not a
+    # candidate at all: «I do not know how old this is» is not a reason
+    # to delete something.
+    dated = sorted((d for d in imgs if imgs[d]["created"]),
+                   key=lambda d: imgs[d]["created"], reverse=True)
+    recent = set(dated[:keep])
+    verdicts = {}
+    for digest, e in sorted(imgs.items(), key=lambda kv: kv[1]["created"], reverse=True):
+        reason = None
+        if (repo, digest) in prot_digest:
+            reason = why[("digest", repo, digest)]
+        else:
+            held = [t for t in e["tags"] if (repo, t) in prot_tag]
+            if held:
+                reason = "%s: %s" % (held[0], why[("tag", repo, held[0])])
+            elif not e["created"]:
+                reason = "undated: the registry did not say when it was made"
+            elif digest in recent:
+                reason = "one of the newest %d of this repository" % keep
+        verdicts[digest] = "KEEP" if reason else "PRUNE"
+        rows.append((verdicts[digest], repo, digest, e["bytes"], e["created"] or "-",
+                     ",".join(sorted(e["tags"])),
+                     reason or "nothing fixes it, nothing runs it, and %d newer images exist here" % keep))
+    for parent, companions in sorted(repos[repo]["comp"].items()):
+        for tag, digest, size in companions:
+            if parent not in imgs:
+                verdict, reason = "PRUNE", "orphan: the manifest it signs is no longer in this repository"
+            elif verdicts.get(parent) == "KEEP":
+                verdict, reason = "KEEP", "it signs a manifest that stays"
+            else:
+                # --delete-untagged will NOT collect this one: it is a
+                # TAG, so the collector marks it live and keeps its
+                # blobs. It has to be deleted here or not at all.
+                verdict, reason = "PRUNE", "it signs a manifest being pruned"
+            rows.append((verdict, repo, digest, size, "-", tag, reason))
+
+with open(out_p, "w", encoding="utf-8") as out:
+    for r in rows:
+        out.write("\t".join(str(x) for x in r) + "\n")
+        if r[0] == "PRUNE":
+            pruned += 1
+            freeable += int(r[3])
+        else:
+            kept += 1
+print("__PLAN__\t%d keep\t%d prune\t%d bytes" % (kept, pruned, freeable), file=sys.stderr)
+PY
+}
+
+# ── (4) acting ──────────────────────────────────────────────────────
+# gc_planned_prune <repo> <digest> — 0 only when THE PLAN says so.
+gc_planned_prune() {
+    [[ -s "${GC_PLAN:-}" ]] || return 1
+    awk -F'\t' -v r="$1" -v d="$2" '$1=="PRUNE" && $2==r && $3==d {found=1} END{exit !found}' "$GC_PLAN"
+}
+
+# reg_delete_manifest — THE ONLY PLACE IN THIS FILE THAT DELETES, and
+# both refusals live HERE and not at the call site. A guard written at
+# the call site has to be written again by whoever adds the next one,
+# and the one who forgets is the one nobody notices: that is the class
+# this arrangement closes, not the case.
+reg_delete_manifest() {   # <repo> <digest>
+    local repo="$1" dig="$2" code
+    (( GC_ACT == 1 )) \
+        || { log_error "refusing to delete $repo@$dig: nobody asked this run to act — it is a dry run"; return 1; }
+    gc_planned_prune "$repo" "$dig" \
+        || { log_error "refusing to delete $repo@$dig: the plan does not list it as a candidate. What the instance fixes by digest, what $IMAGES_REL declares, what the cluster is running and the newest images of each repository are KEEP rows, and a KEEP row is not deletable from here"; return 1; }
+    code="$(retry_net 3 curl -sS --max-time 60 \
+        --netrc-file "$SECRETS_TMP/registry.netrc" --cacert "$SECRETS_TMP/aegis-ca.crt" \
+        -o /dev/null -w '%{http_code}' -X DELETE \
+        "https://$REGISTRY_CLUSTER_IP:5000/v2/$repo/manifests/$dig")" \
+        || { log_warn "$repo@$dig: the registry did not answer the delete"; return 2; }
+    case "$code" in
+        202|200) return 0 ;;
+        404)     log_warn "$repo@$dig was already gone"; return 0 ;;
+        405)     log_error "the registry refuses DELETE (405): its config carries no storage.delete.enabled, so nothing can be pruned until that is on"; return 2 ;;
+        *)       log_error "the registry answered HTTP $code deleting $repo@$dig"; return 2 ;;
+    esac
+}
+
+# gc_collect — the half that was missing the three times this was done
+# by hand. Deleting a manifest through the API only unlinks it; the
+# layers stay on the disk until the collector sweeps them.
+gc_collect() {
+    log_info "registry garbage-collect --delete-untagged over $GC_CFG: this is the step that actually frees the blobs"
+    kubectl -n registry-system exec deploy/registry -- \
+        registry garbage-collect --delete-untagged "$GC_CFG" >&2
+}
+
+# gc_no_build_in_flight — the collector walks the blob store while the
+# registry keeps serving it, and distribution says so itself: a blob
+# uploaded during the sweep can be freed before the manifest that
+# references it is written. Jenkins' own convention names the condition
+# —a job that is building carries an `_anime` colour— so the question
+# is derived instead of guessed.
+gc_no_build_in_flight() {
+    local api building
+    # The read and the parse are two steps, and the reason is the shape
+    # this tree keeps meeting: `curl | jq` exits with jq's code, and jq
+    # over an empty stdin prints nothing and exits 0. A Jenkins that
+    # never answered would come out of one pipeline as «nothing is
+    # building», which is the one answer that must never be guessed.
+    api="$(jenkins_get '/api/json?tree=jobs[name,color,jobs[name,color]]' 2>/dev/null)" \
+        || could_not "Jenkins did not answer what is building: sweeping while a push is in flight can free the blobs that push just uploaded, so this is not a question to skip"
+    [[ -n "$api" ]] \
+        || could_not "Jenkins answered nothing when asked what is building: an empty answer is not «nothing is building»"
+    building="$(jq -r '[.. | objects | select(has("color") and has("name")) | select(.color | type=="string" and endswith("_anime")) | .name] | join(", ")' <<< "$api")" \
+        || could_not "Jenkins' answer about what is building could not be read as JSON: nothing can be concluded from it"
+    [[ -z "$building" ]] \
+        || die "these jobs are building right now: $building. The collector sweeps the blob store while the registry keeps serving it, and a blob uploaded during the sweep can be freed before the manifest that references it is written. Wait for them and run this again — nothing was deleted"
+}
+
+do_gc() {
+    need_list
+    # There is no answer to this question without the instance: what may
+    # be pruned is decided by what THIS instance fixes, and the seed's
+    # copy of the list fixes sixty-four zeros. The dry run of `request`
+    # may fall back to it; this one may not.
+    [[ "$LIST_ROOT" == "$PLATFORM_DIR" ]] \
+        || could_not "there is no instance at $PLATFORM_DIR: what may be pruned is decided by what this instance fixes, and the seed's copy of the list fixes nothing real"
+    secrets_workdir
+    reg_ready
+    gc_registry_target
+
+    gc_pins
+    gc_inventory
+    gc_plan || die "the plan could not be computed: nothing was deleted"
+
+    printf '%-8s %-26s %-14s %-10s %-20s %s\n' VERDICT REPOSITORY DIGEST SIZE CREATED 'TAGS — WHY'
+    local verdict repo digest bytes created tags reason
+    while IFS=$'\t' read -r verdict repo digest bytes created tags reason; do
+        [[ -n "$verdict" ]] || continue
+        printf '%-8s %-26s %-14s %-10s %-20s %s\n' \
+            "$verdict" "$repo" "${digest:7:12}" "$(gc_gb "$bytes")" "${created:0:19}" "$tags — $reason"
+    done < "$GC_PLAN"
+
+    local n_keep n_prune freeable
+    n_keep="$(awk -F'\t' '$1=="KEEP"{n++} END{print n+0}' "$GC_PLAN")"
+    n_prune="$(awk -F'\t' '$1=="PRUNE"{n++} END{print n+0}' "$GC_PLAN")"
+    freeable="$(awk -F'\t' '$1=="PRUNE"{s+=$4} END{print s+0}' "$GC_PLAN")"
+    log_info "$n_keep manifest(s) stay, $n_prune are candidates, about $(gc_gb "$freeable") of image bytes behind them"
+
+    if (( GC_ACT == 0 )); then
+        log_warn "DRY RUN — nothing was deleted and nothing was collected. Deleting images is not an operation that happens on its own: --yes does it, --keep <N> changes how many stay on age alone"
+        return 0
+    fi
+    (( n_prune > 0 )) \
+        || { log_ok "there is nothing to prune: every manifest in the registry is fixed, declared, running, or among the newest $KEEP of its repository"; return 0; }
+
+    jenkins_ready
+    gc_no_build_in_flight
+
+    local before after freed=0 deleted=0 failed=0
+    before="$(gc_disk_kb)"
+    [[ -n "$before" ]] \
+        || could_not "could not measure $GC_ROOT before deleting: a prune that cannot say what it freed is one nobody can audit, and that measurement is half of what this verb exists to produce"
+    log_info "before: $(gc_kb_gb "$before") in $GC_ROOT"
+
+    while IFS=$'\t' read -r verdict repo digest bytes created tags reason; do
+        [[ "$verdict" == PRUNE ]] || continue
+        if reg_delete_manifest "$repo" "$digest"; then
+            deleted=$((deleted + 1))
+            log_info "deleted $repo@${digest:7:12} ($tags — $reason)"
+        else
+            failed=$((failed + 1))
+        fi
+    done < "$GC_PLAN"
+
+    gc_collect \
+        || die "$deleted manifest(s) were deleted and the collector did not finish: the blobs behind them are still on the disk. Read the registry pod's log and run this again — re-running is safe, a deletion already made answers 404 and is counted as done"
+
+    after="$(gc_disk_kb)"
+    [[ -n "$after" ]] \
+        || could_not "$deleted manifest(s) deleted and collected, and $GC_ROOT could not be measured afterwards: the work was done and the number cannot be given"
+    freed=$(( before - after ))
+    (( freed >= 0 )) || freed=0
+    log_ok "$deleted manifest(s) deleted · $GC_ROOT went $(gc_kb_gb "$before") → $(gc_kb_gb "$after") · freed $(gc_kb_gb "$freed")"
+    (( failed == 0 )) \
+        || die "$failed of the $n_prune candidates could not be deleted (the reasons are above); what was deleted has been collected"
+}
+
 case "$VERB" in
     request) do_request ;;
     list)    do_list ;;
     from)    do_from ;;
     check)   do_check ;;
+    gc)      do_gc ;;
 esac

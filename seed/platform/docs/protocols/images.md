@@ -232,6 +232,7 @@ only be a way of not looking.
 | `aegis image list` | what is declared, crossed against the registry: name, tag, short digest, mirrored, signed, live exception with its expiry |
 | `aegis image from` | ONLY the `FROM` line of something already mirrored, so a generator or a template can consume it. Nothing on stdout when it is not there, and a non-zero exit code |
 | `aegis image check` | everything declared is mirrored and signed; whatever is not comes with the command that fixes it |
+| `aegis image gc` | what the registry is keeping that nothing fixes, declares or runs — the plan only, until `--yes`. §8 |
 
 `AEGIS_IMAGE_DRY_RUN=1` makes `request` and `list` explain what they
 WOULD do and touch nothing: no cluster, no registry, no git, no build.
@@ -687,3 +688,116 @@ go false, they go empty. `ImageWatchSilent` is the only thing that
 sees that, and it is critical for that reason: with it quiet, the
 other five are mute and the image nobody pushes to is, again, never
 re-scanned.
+
+## 8. Pruning: what the registry keeps, and what it lets go
+
+The registry stored every image that was ever built and nothing pruned
+it. Measured on 2026-09-01: the GPU engine costs about 5.6 GB
+compressed per build, so **two rebuilds occupied 11.2 GB**; deleting
+the manifests through the registry's API and running
+`registry garbage-collect --delete-untagged` inside the pod brought it
+back to **3.5 GB**. It had to be done by hand three times that day, and
+one of the images deleted had never even started.
+
+The cost is not the disk on its own. It is that the same disk has to
+hold the **~42 GiB of ephemeral storage** the build of that engine
+needs on the node, and the kubelet starts evicting pods below roughly
+**11 GiB free**. So every rebuild made the next one likelier to be
+evicted, and the symptom said nothing about a disk: the pod was
+`Evicted` and the pipeline said `ABORTED`, twenty minutes in. Phase 87
+refuses a build that does not fit before it fires it (check 171); this
+is the other half — the reason the room ran out.
+
+```
+aegis image gc                    # the plan, and nothing else
+aegis image gc --yes              # delete the candidates and collect the blobs
+aegis image gc --keep 4 --repo aegis-ai-vllm
+```
+
+### It says before it does
+
+`gc` prints its plan and stops. Every row carries a verdict, the tags,
+the size and the reason, and nothing is deleted until somebody types
+`--yes`. There is no `--force` and no environment variable that flips
+it: the two states of this command are *explain* and *act*, and only a
+person moves it from one to the other.
+
+### What protects an image
+
+Three facts, each read from where it is true, and **any one of them is
+enough**:
+
+| source | question it answers | why it cannot be dropped |
+|---|---|---|
+| the instance's manifests | what does this platform fix by digest? | a digest written in a manifest is in use even if its tag is a year old — that is what pinning by digest means |
+| `mirror-images/images.txt` | what does the platform promise to serve? | `aegis image check` says every destination of that list is mirrored and signed; pruning one would make it break its own promise |
+| the live cluster | what is running right now? | the tenants' overlays live in the ORGANISATIONS' repositories, not on this disk. Without this question the image of a pod serving traffic is a candidate |
+
+All three are derived, never listed. The manifests are scanned with
+their comments stripped — this tree argues every decision beside the
+code, so the file that pins a digest is also the file whose prose
+quotes the digest it used to pin — and a scan that fails takes the
+command down with it rather than returning an empty protected set. If
+the cluster does not answer, the command stops: that answer is not
+«nothing is running», it is «I could not look».
+
+### The retention policy, and why the number is 2
+
+**Default `--keep`:** 2
+
+On top of everything protected above, the newest N images of each
+repository survive on age alone. The argument for N = 2:
+
+- what a **rollback** needs is two digests: the one deployed and the
+  one it replaced. A third is not a rollback, it is history.
+- the arithmetic of the repository that actually hurts. The GPU engine
+  is ~5.6 GB per build here; N = 2 is ~11.2 GB for that one repository,
+  which is the measured number that left the node at the eviction
+  floor. N = 3 would be ~16.8 GB — more than the kubelet's floor
+  itself, spent on an image nobody is going to roll back to. Before a
+  heavy build, `--keep 1` is the honest setting.
+- it is a **floor, not a ceiling on safety**: a digest the instance
+  fixes or the cluster runs is kept whatever N says. N only decides how
+  much history survives on age alone.
+
+Age is read from the date the image itself carries, not from its tag.
+The tags in this registry are `main-000012`, `vllm0.11.2-9f3a1c` and
+`2.1-260827`; no sort orders those three together, and an image the
+registry cannot date is not a candidate at all — «I do not know how old
+this is» is not a reason to delete something.
+
+### The signatures are part of the image, and `--delete-untagged` does not collect them
+
+cosign publishes the signature of `<digest>` as a **tag**,
+`sha256-<hex>.sig`, in the same repository. From the registry's side
+that is a *tagged* manifest, so the collector marks it live and leaves
+it — and its blobs — exactly where they are. Deleting an image without
+its companion therefore frees less than it looks like and leaves a
+signature of nothing behind.
+
+So `gc` deletes the companions itself, in the same pass, derived from
+the digest being pruned (`sha256-<hex>.*`, which covers `.sig` and any
+`.att`/`.sbom` that may appear), and the same rule picks up the ones
+already orphaned by the hand-pruning of 2026-09-01. `--delete-untagged`
+is still what frees the *blobs*: deleting a manifest through the API
+only unlinks it.
+
+### The two hazards it refuses to walk into
+
+- **A push in flight.** The collector sweeps the blob store while the
+  registry keeps serving it, and a blob uploaded during the sweep can
+  be freed before the manifest that references it is written. `gc`
+  refuses to act while any Jenkins job is building, and names them.
+- **A 2.x collector.** distribution 2.x did not mark the
+  per-architecture manifests an *index* references, so
+  `--delete-untagged` could strip the children of a mirrored
+  multi-architecture tag. 3.x marks them; the platform pins 3.1.1 in
+  `k8s/base/registry-system/registry.yaml`, and `gc` reads the version
+  of the registry that is actually running before it sweeps.
+
+### What it measures
+
+`du` over the storage root the running registry's own config declares,
+before and after, and the difference is what it reports. The registry's
+API can add up the blobs it knows about; only the filesystem knows what
+the collector actually removed.
