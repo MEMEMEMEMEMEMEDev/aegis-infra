@@ -9,6 +9,11 @@ __pycache__/
 /.state-secrets/
 /.age-public
 /aegis.conf
+# Los checkouts que deja `aegis app rebase` (REBASE_DIR = $AEGIS_HOME/
+# .aegis-rebase): repos AJENOS, con su propio .git adentro. En la forma
+# v2 caen acá, y un clon anidado en un repo se cuela como «embedded
+# repository» — que es justo lo que ese directorio se mudó a evitar.
+/.aegis-rebase/
 
 # El expediente de cada corrida vive en $AEGIS_HOME/.init-state/runs/ —
 # ya cubierto por /.init-state/ de arriba. En v2 hacía falta una línea
