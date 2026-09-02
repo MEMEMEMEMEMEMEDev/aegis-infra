@@ -1,16 +1,27 @@
 #!/usr/bin/env bash
 # aegis-summary: The platform's image chain: fire the builds, read the digests
 # aegis-group:   infra
-# aegis-subcommands: build digests
+# aegis-subcommands: build digests jobs
 # aegis-help:
-# Usage: aegis ci build [--members "<m> ..."] [<job>...]
+# Usage: aegis ci build [--members "<m> ..."] [<job>[/<branch>]...]
+#        aegis ci jobs
 #        aegis ci digests
 #
-# build    fires the platform's image jobs in Jenkins through the API
-#          and WAITS for each one. With no job named, the ORDER IS THE
-#          CONTRACT and follows the supply chain:
+# jobs     prints every job the job-dsl declares — the platform chain,
+#          the AI lanes, and the tenant multibranches `aegis org apply`
+#          derives — with the item Jenkins builds, the timeout `build`
+#          gives it, and whether it belongs to the default chain. There
+#          is NO list of jobs in this file: it is read from the job-dsl
+#          that creates them.
+# build    fires jobs in Jenkins through the API and WAITS for each one.
+#          With no job named, the ORDER IS THE CONTRACT and follows the
+#          supply chain:
 #            mirror-images -> ci-images -> base-images -> image-watch
-#          With jobs named: exactly those, in the order given.
+#          With jobs named: exactly those, in the order given — ANY job
+#          `jobs` lists, not only the four of the chain.
+#          A multibranch job is built by BRANCH (`<job>` means
+#          `<job>/main`, which is the item Jenkins builds); name
+#          `<job>/<branch>` to build another one.
 #          --members "<m> ..." is passed to base-images as MEMBERS
 #          (space-separated member directories; empty = all of them).
 # digests  prints image@digest for what the internal registry holds:
@@ -37,6 +48,17 @@
 # the regcred the cluster holds, through the internal CA, from the
 # registry's manifest (Docker-Content-Digest), never from a build log.
 #
+# The third half (2026-09-01): the four jobs above were also the only
+# ones this file would ACCEPT, written out as an array, and
+# `aegis ci build engine-gpu` answered «engine-gpu is not a job of the
+# chain» about a job THIS SAME ARTIFACT creates. Jenkins had eleven
+# jobs that morning — the four of the chain, three AI lanes and four
+# tenant multibranches `aegis org apply` had derived — and firing one
+# of them meant calling lib/jenkins.sh by hand. So the set of jobs is
+# no longer written here: it is derived from the job-dsl that declares
+# them. What stays written down is the ORDER of the chain, because
+# that one is not in the job-dsl and cannot be.
+#
 # ── what it does NOT do ───────────────────────────────────────────
 # It does not edit any FROM, it does not commit and it does not sync.
 # It fires and it reads; the bump stays a decision a person takes with
@@ -61,21 +83,6 @@ source "$AEGIS_ROOT/lib/paths.sh"
 usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
 bad_usage() { printf '%s ci: %s\n' "${AEGIS_CMD:-aegis}" "$*" >&2; printf 'try: %s ci --help\n' "${AEGIS_CMD:-aegis}" >&2; exit 3; }
 
-# ── the chain: order, timeouts ───────────────────────────────────────
-# The order IS the contract (see the header). The timeouts are per job:
-# mirroring pulls from the internet and scans every image, so it is the
-# longest; the watch only reads.
-CHAIN=(mirror-images ci-images base-images image-watch)
-timeout_of() {
-    case "$1" in
-        mirror-images) echo 2700 ;;
-        ci-images)     echo 1800 ;;
-        base-images)   echo 1800 ;;
-        image-watch)   echo 1200 ;;
-    esac
-}
-is_job() { local j; for j in "${CHAIN[@]}"; do [[ "$j" == "$1" ]] && return 0; done; return 1; }
-
 # ── arguments, BEFORE anything runs ─────────────────────────────────
 # `--help` is answered here, with nothing sourced beyond paths.sh and
 # nothing executed: until 2026-08-26 `aegis preflight --help` installed
@@ -83,10 +90,15 @@ is_job() { local j; for j in "${CHAIN[@]}"; do [[ "$j" == "$1" ]] && return 0; d
 VERB="${1:-}"; [[ $# -gt 0 ]] && shift
 case "$VERB" in
     -h|--help|"") usage; exit 0 ;;
-    build|digests) ;;
-    *) bad_usage "«$VERB» is not a subcommand (build | digests)" ;;
+    build|digests|jobs) ;;
+    *) bad_usage "«$VERB» is not a subcommand (build | jobs | digests)" ;;
 esac
-JOBS=(); MEMBERS=""; MEMBERS_GIVEN=0
+# The names are only COLLECTED here. Whether a name is a job is not a
+# question this file can answer on its own any more — the answer is in
+# the job-dsl, and reading it needs libs that are not sourced yet. So
+# the SHAPE is checked here and the MEMBERSHIP in ci_resolve_jobs,
+# still before anything is fired and still without a cluster.
+ARGV_JOBS=(); MEMBERS=""; MEMBERS_GIVEN=0
 if [[ "$VERB" == build ]]; then
     while (($#)); do
         case "$1" in
@@ -95,15 +107,11 @@ if [[ "$VERB" == build ]]; then
                         MEMBERS="$2"; MEMBERS_GIVEN=1; shift 2 ;;
             --members=*) MEMBERS="${1#--members=}"; MEMBERS_GIVEN=1; shift ;;
             -*)         bad_usage "unknown flag «$1»" ;;
-            *)          is_job "$1" || bad_usage "«$1» is not a job of the chain: ${CHAIN[*]}"
-                        JOBS+=("$1"); shift ;;
+            *)          ARGV_JOBS+=("$1"); shift ;;
         esac
     done
-    (( ${#JOBS[@]} > 0 )) || JOBS=("${CHAIN[@]}")
-    if (( MEMBERS_GIVEN )); then
-        has_base=0; for j in "${JOBS[@]}"; do [[ "$j" == base-images ]] && has_base=1; done
-        (( has_base )) || bad_usage "--members only means something for base-images, and base-images is not among the jobs to fire (${JOBS[*]})"
-    fi
+elif [[ "$VERB" == jobs ]]; then
+    (($# == 0)) || { [[ "$1" == -h || "$1" == --help ]] && { usage; exit 0; }; bad_usage "jobs takes no arguments (got «$1»)"; }
 else
     (($# == 0)) || { [[ "$1" == -h || "$1" == --help ]] && { usage; exit 0; }; bad_usage "digests takes no arguments (got «$1»)"; }
 fi
@@ -133,6 +141,213 @@ could_not() { log_error "COULD NOT EVALUATE: $*"; exit 2; }
 : "${REGISTRY_CLUSTER_IP:=}"
 
 # ═══════════════════════════════════════════════════════════════════
+#  the jobs, DERIVED from the job-dsl that creates them
+# ═══════════════════════════════════════════════════════════════════
+#
+# The job-dsl in k8s/base/platform/jenkins/values.yaml is the single
+# declarative truth about which jobs exist: JCasC seeds Jenkins from
+# it, `aegis org apply` re-derives the tenant block inside it, and
+# nothing else creates a job. Deriving the set from there is what lets
+# this command fire whatever the artifact grows — the AI lanes arrived
+# on 2026-08-31 and a tenant multibranch arrives with every contract,
+# and neither had to be typed here.
+#
+# The INSTANCE's copy is read first and the product's seed is the
+# fallback: the tenant rows only exist in the instance's copy (the seed
+# ships the markers and no rows), while a bare product checkout with no
+# instance can still answer `aegis ci jobs`.
+JOBDSL_REL="k8s/base/platform/jenkins/values.yaml"
+CI_VALUES=""
+ci_values_file() {
+    local f
+    for f in "$PLATFORM_DIR/$JOBDSL_REL" "$AEGIS_ROOT/seed/platform/$JOBDSL_REL"; do
+        [[ -f "$f" ]] && { printf '%s' "$f"; return 0; }
+    done
+    return 1
+}
+
+# ── how long each job is given ───────────────────────────────────────
+# NOT derivable: the job-dsl declares what a job IS, never how long it
+# takes. What was measured is written down and everything else gets the
+# default, so a job the job-dsl gains tomorrow is buildable today with
+# a sane ceiling instead of an empty one — jenkins_wait_build reads an
+# empty timeout as zero and gives up on its first lap.
+timeout_of() {
+    case "$1" in
+        mirror-images) echo 2700 ;;   # pulls from the internet and scans every image
+        ci-images)     echo 1800 ;;
+        base-images)   echo 1800 ;;
+        image-watch)   echo 1200 ;;   # it only reads
+        engine-cpu)    echo 5400 ;;
+        engine-gpu)    echo 21600 ;;  # torch + vllm: on a domestic uplink the first build is measured in hours
+        *)             echo 1800 ;;   # a job nobody has measured still gets a ceiling
+    esac
+}
+
+# ── the platform chain: the ORDER, and ONLY the order ────────────────
+# This is not the list of jobs — that one is derived below. It is the
+# order the platform's four have to be fired in when no job is named,
+# and it is the one thing here that cannot be derived: the job-dsl
+# declares four items with no relation between them, and the relation
+# is the supply chain. mirror-images pulls the third parties the rest
+# are built FROM; ci-images builds the tooling out of those mirrors;
+# base-images builds the bases aegis OWNS on top of both; image-watch
+# looks at what the other three produced. Firing them out of order does
+# not fail loudly — it builds on top of yesterday's mirror and says
+# SUCCESS.
+#
+# It is INTERSECTED with what the job-dsl declares and never trusted on
+# its own, so a job that leaves the job-dsl leaves the default run with
+# it. And it is NOT a membership test: every job `jobs` lists can be
+# named on the command line, in the chain or not. The AI lanes and the
+# multibranches stay out of the default run on purpose — the job-dsl
+# says in its own words that the AI images are fired by hand, and a
+# multibranch builds on a push.
+CHAIN_ORDER=(mirror-images ci-images base-images image-watch)
+
+CI_JOB_NAMES=(); CI_JOB_KINDS=()
+ci_load_jobs() {
+    if (( ${#CI_JOB_NAMES[@]} > 0 )); then return 0; fi
+    local values out n k
+    values="$(ci_values_file)" \
+        || could_not "no $JOBDSL_REL under $PLATFORM_DIR and none in the product's seed — the job-dsl is where the jobs are declared, and answering from a list written here is the bug this replaced"
+    # In python, and a reader that dies takes the command with it: a
+    # reader that failed quietly would leave the set EMPTY, and an
+    # empty set makes every name the operator types look invalid — a
+    # verdict about the reader dressed up as one about the artifact.
+    out="$(python3 - "$values" <<'PY'
+import re, sys, yaml
+
+# The declarative truth, read as YAML twice: the outer document, then
+# the job-dsl the configScript carries as a block scalar. Comments
+# inside that block are comments of the INNER yaml, so a paragraph
+# naming a job never becomes a job.
+v = yaml.safe_load(open(sys.argv[1], encoding="utf-8")) or {}
+items = yaml.safe_load(v["controller"]["JCasC"]["configScripts"]["aegis-jobs"])["jobs"]
+
+# `if ('__AI_GATEWAY_REPO__') { ... }` — the gateway's job is seeded
+# only when the instance rendered a repository into it. An empty string
+# is falsy in the groovy this job-dsl already is, so with AI=no that job
+# does not exist and offering it would be offering a 404.
+GUARD = re.compile(r"^\s*if\s*\(\s*'([^']*)'\s*\)")
+DECL = re.compile(r"\b(pipelineJob|multibranchPipelineJob)\(\s*'([^']+)'")
+
+seen, out = set(), []
+for it in items:
+    script = it.get("script", "") if isinstance(it, dict) else str(it or "")
+    g = GUARD.match(script)
+    if g is not None and not g.group(1):
+        continue
+    for kind, name in DECL.findall(script):
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append((name, "multibranch" if kind.startswith("multi") else "pipeline"))
+
+if not out:
+    raise SystemExit("the job-dsl declares no job at all")
+for name, kind in out:
+    print("%s\t%s" % (name, kind))
+PY
+)" || could_not "the job-dsl of $values could not be read — with no job derived every name would look invalid, and that is a verdict about the reader and not about the artifact"
+    while IFS=$'\t' read -r n k; do
+        [[ -n "$n" ]] || continue
+        CI_JOB_NAMES+=("$n"); CI_JOB_KINDS+=("$k")
+    done <<< "$out"
+    CI_VALUES="$values"
+}
+
+# ci_kind_of <name> — prints pipeline|multibranch; rc 1 when the
+# job-dsl does not declare that name.
+ci_kind_of() {
+    local i
+    for i in "${!CI_JOB_NAMES[@]}"; do
+        [[ "${CI_JOB_NAMES[$i]}" == "$1" ]] && { printf '%s' "${CI_JOB_KINDS[$i]}"; return 0; }
+    done
+    return 1
+}
+
+# ci_job_list — what an error message offers instead of a constant.
+ci_job_list() {
+    local i out=""
+    for i in "${!CI_JOB_NAMES[@]}"; do
+        if [[ "${CI_JOB_KINDS[$i]}" == multibranch ]]; then
+            out="$out ${CI_JOB_NAMES[$i]}/<branch>"
+        else
+            out="$out ${CI_JOB_NAMES[$i]}"
+        fi
+    done
+    printf '%s' "${out# }"
+}
+
+# ci_item_of <name> <kind> [branch] — the item Jenkins actually BUILDS.
+# A multibranch job is a FOLDER: it has no build of its own, its BRANCH
+# does. Turning that into the path Jenkins addresses is lib/jenkins.sh's
+# job and not this file's — writing the nesting by hand is how phase 87
+# turned a live job into a 404 reported as «the job does not exist»
+# (check 164).
+ci_item_of() {
+    if [[ "$2" == multibranch ]]; then printf '%s/%s' "$1" "${3:-main}"
+    else printf '%s' "$1"; fi
+}
+
+# ci_resolve_jobs — ARGV (or the chain) into the items to fire. It runs
+# BEFORE the cluster is touched: a name that is not a job is a usage
+# error (rc 3), not a build that failed.
+NAMES=(); ITEMS=()
+ci_resolve_jobs() {
+    ci_load_jobs
+    local a head rest kind has_base
+    if (( ${#ARGV_JOBS[@]} == 0 )); then
+        for a in "${CHAIN_ORDER[@]}"; do
+            ci_kind_of "$a" >/dev/null 2>&1 && ARGV_JOBS+=("$a")
+        done
+        (( ${#ARGV_JOBS[@]} > 0 )) \
+            || could_not "the job-dsl of $CI_VALUES declares none of the platform chain (${CHAIN_ORDER[*]}) — firing instead everything it does declare is a decision this command does not get to take"
+    fi
+    for a in "${ARGV_JOBS[@]}"; do
+        head="${a%%/*}"; rest=""
+        [[ "$a" == */* ]] && rest="${a#*/}"
+        kind="$(ci_kind_of "$head")" \
+            || bad_usage "«$head» is not a job of $CI_VALUES, which declares: $(ci_job_list)"
+        if [[ "$kind" != multibranch && -n "$rest" ]]; then
+            bad_usage "«$a» names a branch and $head is a pipelineJob, not a multibranch: it has no branches, its builds hang off the job itself"
+        fi
+        NAMES+=("$head"); ITEMS+=("$(ci_item_of "$head" "$kind" "$rest")")
+    done
+    if (( MEMBERS_GIVEN )); then
+        has_base=0
+        for a in "${NAMES[@]}"; do [[ "$a" == base-images ]] && has_base=1; done
+        (( has_base )) \
+            || bad_usage "--members only means something for base-images, and base-images is not among the jobs to fire (${NAMES[*]})"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════
+#  jobs
+# ═══════════════════════════════════════════════════════════════════
+# Reads a file and nothing else: no cluster, no credentials. That is
+# on purpose — the operator who has just been told a name is not a job
+# has to be able to ask what the names ARE without a session.
+do_jobs() {
+    ci_load_jobs
+    local i k name kind item when
+    printf '%-22s %-12s %-30s %8s  %s\n' JOB KIND "ITEM JENKINS BUILDS" TIMEOUT WHEN
+    for i in "${!CI_JOB_NAMES[@]}"; do
+        name="${CI_JOB_NAMES[$i]}"; kind="${CI_JOB_KINDS[$i]}"
+        item="$(ci_item_of "$name" "$kind")"
+        when="on demand"
+        for ((k = 0; k < ${#CHAIN_ORDER[@]}; k++)); do
+            [[ "${CHAIN_ORDER[$k]}" == "$name" ]] && when="chain step $((k + 1))"
+        done
+        printf '%-22s %-12s %-30s %8s  %s\n' \
+            "$name" "$kind" "$(_jenkins_job "$item")" "$(timeout_of "$name")s" "$when"
+    done
+    printf '\n%s job(s), derived from %s\n' "${#CI_JOB_NAMES[@]}" "$CI_VALUES"
+    return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════
 #  build
 # ═══════════════════════════════════════════════════════════════════
 
@@ -150,7 +365,7 @@ could_not() { log_error "COULD NOT EVALUATE: $*"; exit 2; }
 ci_settled_build() {
     local job="$1" first="$2" tries="$3" n res
     for ((n = first; n < first + tries; n++)); do
-        res="$(jenkins_get "/job/$job/$n/api/json" 2>/dev/null | jq -r '.result // empty' 2>/dev/null || true)"
+        res="$(jenkins_get "/job/$(_jenkins_job "$job")/$n/api/json" 2>/dev/null | jq -r '.result // empty' 2>/dev/null || true)"
         [[ "$res" == SUCCESS ]] && { printf '%s' "$n"; return 0; }
     done
     return 0
@@ -158,6 +373,9 @@ ci_settled_build() {
 
 do_build() {
     local tries=3
+    # WHICH jobs, first of all: a name that is not a job is answered
+    # from the job-dsl (rc 3), with no cluster in the middle.
+    ci_resolve_jobs
     # The subject has to be reachable BEFORE anything is fired: the
     # jenkins.sh functions exec into the pod and read the admin
     # credential out of the cluster; an absent cluster is «could not»,
@@ -177,34 +395,36 @@ do_build() {
     [[ -n "$root" ]] || root="https://jenkins.${ROOT_DOMAIN:-localhost}"
     root="${root%/}"
 
-    local job q missing=()
-    for job in "${JOBS[@]}"; do
-        jenkins_get_code "/job/$job/api/json" 2>/dev/null | grep -q '^200$' || missing+=("$job")
+    local i name item q missing=()
+    for i in "${!ITEMS[@]}"; do
+        jenkins_get_code "/job/$(_jenkins_job "${ITEMS[$i]}")/api/json" 2>/dev/null | grep -q '^200$' \
+            || missing+=("${ITEMS[$i]}")
     done
     (( ${#missing[@]} == 0 )) \
-        || could_not "Jenkins does not have the job(s): ${missing[*]} — did the jenkins App sync the Job DSL?"
+        || could_not "the job-dsl of $CI_VALUES declares them and Jenkins does not have the item(s): ${missing[*]} — did the jenkins App sync the Job DSL? (a multibranch also needs its branch INDEXED: the folder can be there while the branch is not)"
 
-    log_info "chain to fire, in this order: ${JOBS[*]}"
+    log_info "chain to fire, in this order: ${ITEMS[*]}"
     local timeout first settled
-    for job in "${JOBS[@]}"; do
-        timeout="$(timeout_of "$job")"
-        first="$(jenkins_next_build "$job")" \
-            || could_not "no nextBuildNumber for $job — the Jenkins API stopped answering"
+    for i in "${!ITEMS[@]}"; do
+        name="${NAMES[$i]}"; item="${ITEMS[$i]}"
+        timeout="$(timeout_of "$name")"
+        first="$(jenkins_next_build "$item")" \
+            || could_not "no nextBuildNumber for $item — the Jenkins API stopped answering"
         q=""
-        if [[ "$job" == base-images && $MEMBERS_GIVEN == 1 ]]; then
+        if [[ "$name" == base-images && $MEMBERS_GIVEN == 1 ]]; then
             q="MEMBERS=$(jq -rn --arg m "$MEMBERS" '$m|@uri')"
-            log_info "firing $job with MEMBERS='${MEMBERS:-<all>}' (timeout ${timeout}s) → build #$first  $root/job/$job/$first/"
+            log_info "firing $item with MEMBERS='${MEMBERS:-<all>}' (timeout ${timeout}s) → build #$first  $root/job/$(_jenkins_job "$item")/$first/"
         else
-            log_info "firing $job (timeout ${timeout}s) → build #$first  $root/job/$job/$first/"
+            log_info "firing $item (timeout ${timeout}s) → build #$first  $root/job/$(_jenkins_job "$item")/$first/"
         fi
-        jenkins_build_retry "$job" "$timeout" "$tries" "$q" \
-            || { printf '%-14s build #%s  FAILED  %s/job/%s/%s/\n' "$job" "$first" "$root" "$job" "$first"
-                 die "the chain stops at $job: what comes after would build on top of a failed step"; }
-        settled="$(ci_settled_build "$job" "$first" "$tries")"
+        jenkins_build_retry "$item" "$timeout" "$tries" "$q" \
+            || { printf '%-22s build #%s  FAILED  %s/job/%s/%s/\n' "$item" "$first" "$root" "$(_jenkins_job "$item")" "$first"
+                 die "the chain stops at $item: what comes after would build on top of a failed step"; }
+        settled="$(ci_settled_build "$item" "$first" "$tries")"
         [[ -n "$settled" ]] || settled="$first"
-        printf '%-14s build #%s  SUCCESS  %s/job/%s/%s/\n' "$job" "$settled" "$root" "$job" "$settled"
+        printf '%-22s build #%s  SUCCESS  %s/job/%s/%s/\n' "$item" "$settled" "$root" "$(_jenkins_job "$item")" "$settled"
     done
-    log_ok "the chain is done: ${JOBS[*]}"
+    log_ok "the chain is done: ${ITEMS[*]}"
     return 0
 }
 
@@ -294,5 +514,6 @@ do_digests() {
 
 case "$VERB" in
     build)   do_build ;;
+    jobs)    do_jobs ;;
     digests) do_digests ;;
 esac
