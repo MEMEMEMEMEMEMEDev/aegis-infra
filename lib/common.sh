@@ -1280,9 +1280,67 @@ seed_drift_report() {   # <path relative to platform/>...
     log_warn "  what runs is the INSTANCE's, not the seed's — a fix made in the product is not here yet"
     log_warn "  to bring it over (the instance's tree is yours, so this is deliberate and manual):"
     for rel in $drift; do
-        log_warn "    cp \"\$AEGIS_ROOT/seed/platform/$rel\" \"\$PLATFORM_DIR/$rel\"   # then commit and push"
+        log_warn "    seed_fetch $rel   # then commit and push"
     done
+    # The advice used to be a bare `cp` of the seed's file over the
+    # instance's, and it was wrong in the exact way this area is about:
+    # measured on the night of 2026-09-01, carrying a fix in
+    # k8s/base/platform/jenkins-secrets/bundle.yaml that way put
+    # __ROOT_DOMAIN__ back into Jenkins's route and jenkins.<domain>
+    # stopped routing through Traefik. The seed carries placeholders by
+    # design; the instance has them resolved. seed_fetch is that copy
+    # WITH the render, in one act.
+    log_warn "  seed_fetch copies AND renders: a bare cp puts the seed's placeholders back into a rendered tree"
+    log_warn "  outside a run: AEGIS_ROOT=<the product> bash -c '. \"\$AEGIS_ROOT/lib/common.sh\"; seed_fetch <path>'"
     return 0   # NOT a failure: an instance is allowed to differ. It is not allowed to differ SILENTLY.
+}
+
+# ── bringing ONE file of the seed over to the instance ──────────────
+# The other half of seed_drift_report, and the half that acts. The
+# report names the files whose instance copy differs; this is the only
+# supported way to act on that name, and it exists because the obvious
+# way is wrong in a way nothing catches until much later.
+#
+# MEASURED 2026-09-01, at night, carrying a fix by hand:
+# `cp seed/platform/k8s/base/platform/jenkins-secrets/bundle.yaml` over
+# the instance's copy brought __ROOT_DOMAIN__ back into Jenkins's route
+# and jenkins.<domain> stopped routing through Traefik. Nothing failed
+# at copy time; the file was simply un-rendered, and the platform said
+# so through a route that had stopped existing.
+#
+# So the copy and the render are ONE act here, with no human step in
+# between. The substitution is NOT repeated in this function: it is
+# render_platform_placeholders, the single owner of it (two places that
+# substitute placeholders is exactly how the two drift), and its final
+# refusal — not one config-class placeholder survives — is what makes
+# this path refuse a half-rendered file instead of leaving one in the
+# tree the platform runs from.
+#
+# It writes ONLY the paths it is given. The instance's working tree is
+# the operator's: this is a tool they invoke, file by file, never
+# something a phase does behind their back.
+seed_fetch() {   # <path relative to platform/>...
+    (( $# )) || die "seed_fetch: give it at least one path relative to platform/ (the ones seed_drift_report just named)"
+    # A run has the config sourced; an operator calling this from a
+    # shell does not, and the render needs those values. Same idiom as
+    # aegis-image/aegis-ci, and the same file: there is one conf.
+    if [[ -z "${GH_OWNER:-}" && -f "$AEGIS_CONF" ]]; then
+        # shellcheck source=/dev/null
+        source "$AEGIS_CONF"
+    fi
+    local rel seedf instf
+    for rel in "$@"; do
+        seedf="$AEGIS_ROOT/seed/platform/$rel"
+        [[ -f "$seedf" ]] || die "seed_fetch: this artifact does not ship platform/$rel"
+        instf="$PLATFORM_DIR/$rel"
+        run_cmd mkdir -p "$(dirname "$instf")"
+        run_cmd cp -a "$seedf" "$instf"
+        log_info "fetched from the seed: $rel"
+    done
+    # and the render is the rest of the same act — never a step the
+    # operator has to remember, which is what made the bug possible:
+    render_platform_placeholders
+    log_ok "brought over from the seed and rendered: $* (review with git diff, then commit and push)"
 }
 
 # ── signatures of a transient NETWORK error (E-1, one place) ────────
