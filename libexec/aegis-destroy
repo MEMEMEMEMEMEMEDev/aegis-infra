@@ -65,6 +65,58 @@ INIT_STATE="${AEGIS_STATE_DIR:-$AEGIS_HOME/.init-state}"
 CONF="$AEGIS_HOME/aegis.conf"
 
 say()  { printf '[destroy] %s\n' "$*"; }
+
+# _disconnect_tunnel: leave the tunnel with NO live connections before
+# asking Cloudflare to delete it.
+#
+# MEASURED 2026-09-02, tearing down the house instance for a clean
+# reinstall. `aegis destroy --yes --k3s` cannot succeed on a live
+# instance and never could: the edge is destroyed FIRST and the
+# cluster LAST, so when tofu asks Cloudflare to delete the tunnel,
+# cloudflared is still running in the cluster this same command has
+# not touched yet, and the API refuses with
+#
+#     1022 This tunnel has active connections. Please stop all
+#          cloudflared replicas, or wait a few minutes...
+#
+# The `die` that followed stopped the run, so `--k3s` never ran either:
+# the operator got a FATAL, an edge half destroyed (the CNAMEs DO get
+# deleted before the tunnel, so every hostname is already dark) and no
+# hint that the way out is to stop a Deployment they were not thinking
+# about.
+#
+# Scaling to zero is not enough on its own, and that is the part that
+# is easy to miss: ArgoCD's automated syncPolicy has selfHeal, so it
+# puts the replica back within seconds. Measured: the pod came back
+# with a NEW name in under four minutes while we watched. So the hand
+# comes off the Application first, and only then the Deployment goes
+# to zero.
+#
+# Everything here is best-effort and silent about absences: no
+# kubectl, no cluster, no Deployment — all of them mean there is
+# nothing connected, which is exactly the state this wants.
+_disconnect_tunnel() {
+  command -v kubectl >/dev/null 2>&1 || return 0
+  kubectl cluster-info >/dev/null 2>&1 || return 0
+  kubectl -n infra-edge get deploy cloudflared >/dev/null 2>&1 || return 0
+
+  if kubectl -n argocd get application cloudflare-tunnel >/dev/null 2>&1; then
+    say "edge: taking ArgoCD's hand off cloudflare-tunnel (selfHeal would undo the scale-down)"
+    kubectl -n argocd patch application cloudflare-tunnel --type merge \
+      -p '{"spec":{"syncPolicy":{"automated":null}}}' >/dev/null 2>&1 || true
+  fi
+
+  say "edge: stopping cloudflared so the tunnel has no live connections"
+  kubectl -n infra-edge scale deploy cloudflared --replicas=0 >/dev/null 2>&1 || true
+
+  local i
+  for i in $(seq 1 60); do
+    kubectl -n infra-edge get pods --no-headers 2>/dev/null \
+      | grep -q '^cloudflared-' || { say "edge: cloudflared is down"; return 0; }
+    sleep 2
+  done
+  say "WARNING: cloudflared did not stop in 120s — Cloudflare may still refuse to delete the tunnel"
+}
 die()  { printf '[destroy] FATAL: %s\n' "$*" >&2; exit 1; }
 
 usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
@@ -95,9 +147,24 @@ if [[ -f "$TUNNEL_ENV/terraform.tfstate" ]]; then
   "$TOFU" -chdir="$TUNNEL_ENV" init -input=false >/dev/null \
     || die "tofu init failed (are the age key / SOPS available to the wrapper?)"
   if [[ $YES -eq 1 ]]; then
+    _disconnect_tunnel
     say "cloudflare-tunnel: DESTROY…"
-    "$TOFU" -chdir="$TUNNEL_ENV" destroy -auto-approve \
-      || die "tofu destroy failed — check the state of CF by hand before re-creating"
+    _dlog="$(mktemp)"
+    if ! "$TOFU" -chdir="$TUNNEL_ENV" destroy -auto-approve 2>&1 | tee "$_dlog"; then
+      # A tunnel with live connections is the ONE failure worth retrying:
+      # Cloudflare closes them on its own once the last replica is gone,
+      # and it does not always notice within the same second.
+      if grep -q 'active connections' "$_dlog"; then
+        say "edge: Cloudflare still sees connections; waiting 60s and retrying ONCE"
+        sleep 60
+        "$TOFU" -chdir="$TUNNEL_ENV" destroy -auto-approve \
+          || { rm -f "$_dlog"; die "tofu destroy failed twice — the tunnel still reports connections. Something outside this cluster is running cloudflared with this instance's token"; }
+      else
+        rm -f "$_dlog"
+        die "tofu destroy failed — check the state of CF by hand before re-creating"
+      fi
+    fi
+    rm -f "$_dlog"
     say "cloudflare-tunnel destroyed (tunnel + config + CNAMEs)"
   else
     say "cloudflare-tunnel: destruction plan (DRY-RUN):"
