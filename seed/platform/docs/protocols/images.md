@@ -432,6 +432,73 @@ is the other direction: a consumer that is **not** listed is the
 the propagation reports success, and what runs still stands on the
 old base. That is why the block is derived and never written by hand.
 
+
+### 3.5 A repo that arrives pinned by another installation
+
+§3.4 solves the propagation **inside** one installation: a base is
+rebuilt here, and the job rewrites the `FROM` of every consumer here.
+The other direction has no job and cannot have one — a repo that comes
+from somewhere else, or that is being brought up on a fresh
+installation, carries pins that were measured in a registry that is not
+this one:
+
+```
+FROM <REGISTRY>/aegis-base-nginx:3.22-000001@sha256:394ed28…
+```
+
+Both halves of that line are wrong here, and each for its own reason.
+The **digest** was born in the other installation's registry — the same
+bytes get a different name inside, because `crane` rebuilds the
+manifest as it copies — so this registry has never heard of it. The
+**tag** may be wrong too: a base's build number is born in the registry
+that builds it (§3.3), and the installation that produced the line
+above was on its first build while this one is on its fourth. The
+`from-guard` stage refuses the build, correctly: nothing of that image
+passed through this installation's scan or its key.
+
+```
+aegis app rebase <org> --check     # what it would repoint, touching nothing
+aegis app rebase <org>             # repoints it; the push stays yours
+```
+
+It checks out every repo of the organization — the list is the
+generator's `repos_of`, the same one the Applications and the
+AppProject's `sourceRepos` come from — finds the Containerfiles by
+looking rather than by path, and rewrites **only** the `FROM`s that
+name the internal registry. A public `FROM` is left alone: whether it
+may be built from is the `from-guard`'s business and it is a different
+problem.
+
+**Where each half of the new reference comes from**, and neither is
+written down in the product:
+
+- the **digest** is `aegis image from <name>:<tag>` — the only command
+  that knows the internal digest, and the only one that refuses an
+  image that is present and **unsigned**. A table of digests in the
+  product would be a second place for the truth to live, and the stale
+  one is always the cheaper to read.
+- the **tag** is derived from whichever artifact owns it. For a
+  mirrored third party that is `mirror-images/images.txt`: which
+  python, which alpine, is a declaration, and the repo's old tag does
+  not get a vote. For a base the platform builds it is the registry
+  itself, through `aegis ci digests`: the alpine minor the repo names is
+  **kept** — a rebase does not move anybody from the 3.21 line to 3.22
+  — and only the build number, the part born in this installation, is
+  re-derived to the highest one served.
+
+It writes files and it does **not** commit and does **not** push. That
+is the same line §2 draws for `aegis image request`: pulling an image
+and putting it in production are two decisions. The command prints the
+exact `git -C … commit && git -C … push` per repo and stops there.
+`--check` goes further and leaves nothing at all behind, not even the
+checkout.
+
+Check 175 holds the verb: it exercises the rewriter over a
+Containerfile of every shape (internal, public, a stage reference, a
+commented one) and the tag derivation over both families, and it fails
+if the reference stops coming from `aegis image from`, if a digest
+appears written into the product, or if the verb ever pushes.
+
 ---
 
 ## 4. What image-watch asks each morning

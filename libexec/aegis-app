@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # aegis-summary: Signing an organization up: contract first, apply afterwards
 # aegis-group:   apps
-# aegis-subcommands: new apply
+# aegis-subcommands: new apply rebase
 """aegis-app — signing an organization up: `new` writes files, `apply` touches GitHub.
 
 THE PROBLEM IT SOLVES
@@ -35,6 +35,11 @@ is the whole design (journeys/design.md §0.2 and §3):
            does not use `gh` and it creates nothing anywhere.
   `apply`  CHANGES THE WORLD (GitHub) AND NEVER WRITES INTO THE REPOS —
            neither into platform/ nor into the app's repo WITH HISTORY.
+  `rebase` WRITES FILES, on `new`'s side of the line: it checks out the
+           organization's repos and repoints every FROM that names the
+           internal registry at the digest THIS installation serves. It
+           does not commit and it does not push — pinning an image and
+           putting it in production are two decisions (images.md §2).
 
 The line is «who can leave a mark outside», and it is NOT «who opens a
 socket» — since 2026-08-29 `new --template` does open one. Every FROM in
@@ -97,6 +102,8 @@ broken by the first re-mirror.
                                            # there, it only re-derives (re-entry)
     aegis app apply orgs/ejemplo.yaml      # converges against GitHub
     aegis app apply ejemplo --check        # says what it would do, without touching
+    aegis app rebase ejemplo --check       # which FROMs point at another installation
+    aegis app rebase ejemplo               # repoints them; the push stays yours
 
 It returns 0 if everything was or has been done, 1 if something is left to
 do (--check), 2 if something COULD NOT BE EVALUATED or aborted.
@@ -135,6 +142,12 @@ PLATFORM_DIR = str(paths.platform_dir())
 HERE = os.path.join(_AEGIS_ROOT, "libexec")
 ORGS_DIR = os.path.join(PLATFORM_DIR, "orgs")
 STAGING_DIR = os.path.join(PLATFORM_DIR, ".aegis-app")
+# Where `rebase` checks the organization's repos out. Under the INSTANCE
+# and deliberately NOT under platform/: that directory is a git repo the
+# operator commits by hand, and a clone nested inside it appears in its
+# `git status` as an embedded repository — committed by accident once, it
+# is very hard to explain afterwards.
+REBASE_DIR = os.path.join(str(paths.aegis_home()), ".aegis-rebase")
 WEBHOOK = os.path.join(HERE, "aegis-webhook")
 
 # The repos THIS command creates carry a topic of their own, not the
@@ -509,15 +522,46 @@ _FROM_IMAGES = {
 
 _FROM_PLACEHOLDER = re.compile(r"__FROM_[A-Z0-9_]+__")
 
+# WHERE «THE INTERNAL REGISTRY» IS WRITTEN DOWN, and it is written down
+# once. `lib/common.sh` declares REGISTRY_HOST_INTERNAL and every bash
+# command of the product reads it from there; this file used to carry
+# the host a second time, spelled out inside the regular expression
+# below. Two files naming the same registry is the shape of bug this
+# whole command exists to end — one of them gets left behind — so the
+# value is DERIVED from the one file that owns it.
+#
+# The anchor is column 0 (`^REGISTRY_HOST_INTERNAL=`), which is what
+# leaves the paragraph ABOVE the assignment out of the reading: a `#`
+# in front of it is a comment, and a comment declares nothing.
+def _internal_registry():
+    """host:port of the internal registry, from the file that declares it."""
+    p = os.path.join(_AEGIS_ROOT, "lib", "common.sh")
+    try:
+        text = open(p, encoding="utf-8").read()
+    except OSError as e:
+        raise Error(f"I cannot read {p}: {e}\n"
+                    f"  That file declares REGISTRY_HOST_INTERNAL, and without it I do not\n"
+                    f"  know which registry «internal» means. A tree that has this command\n"
+                    f"  and not that library is a partial checkout of the product.")
+    m = re.search(r'^REGISTRY_HOST_INTERNAL="?([A-Za-z0-9.:_-]+)"?', text, re.M)
+    if m is None:
+        raise Error(f"{p} no longer declares REGISTRY_HOST_INTERNAL at the start of a\n"
+                    f"  line, so the one place that says which registry is the internal\n"
+                    f"  one is gone. Nothing is guessed here: this command would have to\n"
+                    f"  spell the host out a second time, which is the arrangement that\n"
+                    f"  fails silently.")
+    return m.group(1)
+
+
 # The CONTRACT of `aegis image from`: one line on stdout and nothing
 # else, the whole FROM, against the internal registry and pinned by
 # digest. It is matched and not merely captured because an answer of
 # another shape is a third outcome —the command ran and said something
 # I do not understand— and collapsing it into "not mirrored" would send
 # the operator to mirror an image that is already there.
-_FROM_ANSWER = re.compile(
-    r"FROM (registry\.registry-system\.svc\.cluster\.local:5000/"
-    r"[^\s@]+@sha256:[0-9a-f]{64})")
+def _from_answer_re():
+    return re.compile(r"FROM (" + re.escape(_internal_registry())
+                      + r"/[^\s@]+@sha256:[0-9a-f]{64})")
 
 
 def _from_reference(ref):
@@ -575,7 +619,7 @@ def _from_reference(ref):
               f"  up mirroring an image that was already mirrored. Nothing has been\n"
               f"  written; re-run this same command when the line above is fixed.")
     line = (out or "").strip()
-    m = _FROM_ANSWER.fullmatch(line)
+    m = _from_answer_re().fullmatch(line)
     if m is None:
         raise Error(
             f"{cli.cmd('image from')} {ref} answered something that is not a FROM\n"
@@ -815,6 +859,398 @@ def new(org, template, tot):
     return 0
 
 
+
+# ── rebase: the FROMs of a repo, repointed at THIS installation ───────
+#
+# THE PROBLEM, measured on 2026-09-01 during an install from zero.
+# An application repo pins its bases the way the protocol demands
+# (images.md §3.3): the internal registry, a tag, and a digest.
+#
+#     FROM <internal>/aegis-base-nginx:3.22-000001@sha256:394ed28…
+#
+# That digest was measured in the registry of the installation the repo
+# was last built on. In a NEW installation the very same tag exists
+# with ANOTHER digest —this installation built it— and, for a base the
+# platform owns, frequently under another tag as well: the old instance
+# served 3.22-000001 and the new one served 3.22-000004. The
+# `from-guard` stage of Jenkinsfile.app refuses the build, and it is
+# right to: nothing of that image passed through this installation's
+# scan or its key. Four repos had to be rewritten by hand.
+#
+# The operation is not new — phase 80 of the init does it for the
+# canary, deriving the tag from the mirror list instead of writing it
+# down — and neither is the propagation: after rebuilding a base,
+# base-images rewrites the FROM of every consumer (images.md §3.4).
+# What was missing is the same move for a repo that arrives from
+# ANOTHER installation, and that is this subcommand.
+#
+# IT IS `rebase` and not `repin` because that is what the operation is
+# called where images are handled (crane rebase): the base changes, the
+# app's own layer does not. And it sits on `new`'s side of the house
+# border — it writes files and creates nothing outside this machine.
+# The commit and the push are the operator's, deliberately: pinning an
+# image and putting it in production are two decisions (images.md §2),
+# and this command takes only the first.
+
+
+def _git(d, *args, check=True):
+    r = subprocess.run(["git", "-C", d, *args], capture_output=True, text=True)
+    if check and r.returncode != 0:
+        last = (r.stderr or r.stdout).strip().splitlines()
+        raise Error(f"git {args[0]} failed in {d}: "
+                    f"{last[-1] if last else f'rc {r.returncode}'}\n"
+                    f"  (a private repo is cloned over https with gh's credential helper,\n"
+                    f"   which phase 12 of the init leaves configured: `gh auth setup-git`)")
+    return r
+
+
+def _checkout(org, owner, repo, write):
+    """A clean checkout of the app's repo, to rewrite in.
+
+    OUTSIDE platform/, and that is not decoration: platform/ is a git
+    repo the operator commits by hand, and a clone nested in it shows up
+    in its `git status` as an embedded repository — the kind of thing
+    that gets committed by accident and is then very hard to explain.
+
+    Returns (directory, disposable). WHO CREATED IT SAYS WHETHER IT IS
+    THROWN AWAY, and the caller obeys that flag instead of deciding for
+    itself from the mode: the two rules would be the same one written
+    twice, and the day they drift apart the loser is a real checkout
+    with somebody's work in it.
+
+    With --check the checkout goes to a temporary directory and is
+    removed on the way out, so the dry run leaves NOTHING behind. On a
+    real run it stays, because it is where the operator commits and
+    pushes from: a rewrite in a directory deleted a second later would
+    be a report, not a change.
+
+    Re-entry does not trample: a checkout with local modifications, or
+    with commits that never got pushed, is somebody's work in progress,
+    and this command stops and says where it is instead of cloning over
+    it. A clean one that is level with its remote holds nothing to lose
+    and is replaced.
+    """
+    url = f"https://github.com/{owner}/{repo}.git"
+    if not write:
+        d = tempfile.mkdtemp(prefix="aegis-rebase.")
+        _git(".", "clone", "--quiet", "--depth", "1", url, d)
+        return d, True
+    d = os.path.join(REBASE_DIR, org, f"{owner}__{repo}")
+    if os.path.isdir(os.path.join(d, ".git")):
+        dirty = _git(d, "status", "--porcelain").stdout.strip()
+        ahead = _git(d, "log", "--oneline", "@{upstream}..HEAD", check=False).stdout.strip()
+        if dirty or ahead:
+            raise Error(
+                f"{d} already holds a rebase that has not been pushed "
+                f"({'uncommitted changes' if dirty else ''}"
+                f"{' and ' if dirty and ahead else ''}"
+                f"{'commits ahead of the remote' if ahead else ''}).\n"
+                f"  It is not trampled: push it, or delete the directory, and re-run.")
+        shutil.rmtree(d)
+    elif os.path.exists(d):
+        raise Error(f"{d} exists and is not a git checkout — move it out of the way")
+    os.makedirs(os.path.dirname(d), exist_ok=True)
+    _git(".", "clone", "--quiet", url, d)
+    return d, False
+
+
+def _containerfiles(root):
+    """Every Containerfile of a checkout, FOUND and never assumed.
+
+    Consumers do not share a layout — the front may live at the root,
+    under front/, anywhere — which is why the base-images job greps for
+    the file instead of naming a path (images.md §3.4). `Containerfile*`
+    and not the bare name because the seed's own lanes carry suffixed
+    ones, and the scanner of check 168 already reads them that way.
+    """
+    out = []
+    for d, dirs, files in os.walk(root):
+        dirs[:] = [x for x in dirs if x != ".git"]
+        for a in sorted(files):
+            if a.startswith("Containerfile"):
+                out.append(os.path.join(d, a))
+    return sorted(out)
+
+
+def _rebase_text(text, resolve):
+    """Every FROM of a Containerfile that names the internal registry,
+    repointed. Returns (new text, [(old line, new line), ...]).
+
+    The list carries EVERY line that names the internal registry, the
+    ones that came out identical included, and the caller filters. That
+    is the difference between «this file has nothing to repoint» and
+    «this file has no such FROM at all», and a report that collapses the
+    two tells an operator their repo is fine when what happened is that
+    nothing in it was ever looked at.
+
+    PURE on purpose: text in, text out, and the reference comes from the
+    `resolve` handed in. That is what makes it exercisable without a
+    cluster — check 175 runs it over a Containerfile of every shape and
+    reads what comes out, instead of reading this file and believing it.
+
+    WHAT IS NOT TOUCHED, and each one for its own reason:
+      · a FROM that is not the internal registry's. Whether a public
+        base may be built from is the from-guard's business and it is
+        another problem; rewriting it here would be this command
+        deciding which registry an app builds from.
+      · a FROM naming an earlier stage of the same file (`FROM build`).
+      · a COMMENT that shows a FROM. `#` is not whitespace, so a line
+        that opens with one never matches — and this repo documents
+        every decision beside the code, so the file carrying the stale
+        pin very often carries the paragraph explaining it too.
+    """
+    host = _internal_registry()
+    line_re = re.compile(
+        r"^(\s*FROM\s+)" + re.escape(host) + r"/"
+        r"([A-Za-z0-9][\w./-]*?)"           # the image's name in the registry
+        r"(?::([\w][\w.-]*))?"              # the tag it carries today, if any
+        r"(?:@sha256:[0-9a-f]{64})?"        # the digest it carries today, if any
+        r"(\s.*)?$")
+    out, changes = [], []
+    for line in text.splitlines(keepends=True):
+        bare = line.rstrip("\r\n")
+        m = line_re.match(bare)
+        if m is None:
+            out.append(line)
+            continue
+        new = f"{m.group(1)}{resolve(m.group(2), m.group(3))}{m.group(4) or ''}"
+        out.append(new + line[len(bare):])
+        changes.append((bare.strip(), new.strip()))
+    return "".join(out), changes
+
+
+def _declared_tag(name):
+    """The tag the platform DECLARES for a mirrored image, or None.
+
+    mirror-images/images.txt is `<source@digest>` TAB `<destination>`, and
+    the destination is `<name>:<tag>` — the exact string `aegis image
+    from` is asked for. For a third party that list is the tag's only
+    owner: which python, which alpine, is a decision written down there
+    and not something to read off a registry that may hold three of them.
+
+    The same derivation phase 80 does for the canary, and for the reason
+    it gives there: the canary asked for `golang:1.26-alpine` while the
+    list declared `golang:1.26.6-alpine`, and a rewrite that keeps the
+    old tag matches nothing the registry serves.
+    """
+    p = os.path.join(PLATFORM_DIR, "mirror-images", "images.txt")
+    if not os.path.isfile(p):
+        return None
+    for line in open(p, encoding="utf-8"):
+        if line.lstrip().startswith("#"):
+            continue
+        fields = line.split()
+        if len(fields) < 2 or ":" not in fields[1]:
+            continue
+        dest, _, tag = fields[1].partition(":")
+        if dest == name:
+            return tag
+    return None
+
+
+_BASE_TAG = re.compile(r"^(\d+)\.(\d+)-(\d{6})$")
+
+
+# ONE reading of the registry per run, and it is memoised here and not
+# in the caller: `ci digests` reads the manifest of every tag of every
+# repository, and a repo with three owned bases in its Containerfile
+# would otherwise pay for that walk three times. A failed reading is NOT
+# memoised — the third outcome is not a value to remember.
+_SERVED = {}
+
+
+def _served_tags():
+    """Every tag the internal registry serves, per image, asked of `aegis ci`.
+
+    THE DIGESTS OF THAT ANSWER ARE DROPPED HERE, and dropping them is
+    the point. `ci digests` reads the registry's manifests and knows
+    nothing about signatures; `aegis image from` measures both and
+    REFUSES an image that is present and unsigned. Taking the digest
+    from here would be a second place where the truth about an image
+    lives, and the cheaper of the two — which is how a build ends up
+    pinned to something Kyverno then rejects at admission. So this
+    answers ONE question, «which tags exist», and the reference itself
+    is always asked of `image from`.
+
+    Read as a CONTRACT and not as prose (V-104): only lines that are
+    exactly `<host>/<repo>:<tag>@sha256:<64 hex>` are taken, which is the
+    shape that command documents. Its own progress lines go to stderr
+    and cannot be confused with data.
+    """
+    if _SERVED:
+        return _SERVED
+    try:
+        rc, out, err = cli.run("ci", "digests")
+    except cli.CouldNotEvaluate as e:
+        raise Error(f"{cli.cmd('ci')} is not usable here, so I cannot ask which tags\n"
+                    f"  this installation serves: {e}")
+    if rc == 2:
+        diag = ((err or "").strip().splitlines() or [""])[-1]
+        raise Error(f"{cli.cmd('ci digests')} COULD NOT EVALUATE"
+                    + (f" — {diag}" if diag else "")
+                    + "\n  The registry was never read, so nothing is known about which tags\n"
+                      "  it serves. A warning is not an approval: nothing has been written.")
+    host = _internal_registry()
+    answer = re.compile(re.escape(host) + r"/([^\s:@]+):([^\s@]+)@sha256:[0-9a-f]{64}")
+    tags = {}
+    for line in (out or "").splitlines():
+        m = answer.fullmatch(line.strip())
+        if m is None:
+            continue
+        tags.setdefault(m.group(1), []).append(m.group(2))
+    if not tags:
+        raise Error(f"{cli.cmd('ci digests')} listed no image of this registry (rc {rc}):\n"
+                    f"  without that list I cannot derive which tag is the current one.")
+    _SERVED.update(tags)
+    return _SERVED
+
+
+def _current_tag(name, old):
+    """The tag THIS installation serves for <name>. Derived, never kept.
+
+    TWO FAMILIES, and each one's tag is derived from the artifact that
+    owns it — which is the whole answer to «where does the tag come
+    from», and the reason there is no table in this file:
+
+      · a MIRRORED third party (golang, alpine, python…). Its tag is a
+        DECLARATION and it lives in mirror-images/images.txt. Whatever
+        the repo arrived pinned to, what this installation serves is
+        what that list declares.
+      · a base the platform BUILDS (aegis-base-nginx, aegis-base-node).
+        Its tag is `<alpine minor>-<build number padded to 6>` (§3.3)
+        and the build number is BORN in this installation's registry, so
+        no file on this disk can know it: it is asked of the registry.
+        The minor is a version decision and is KEPT — a rebase does not
+        move anybody from the 3.21 line to 3.22 — and only the build
+        number, the part that belongs to the installation, is
+        re-derived. The highest one, by number and not by the order the
+        listing happened to come in.
+
+    A repo pinned to a minor this installation no longer serves is the
+    one case where the line itself moves; it is not silent — every
+    rewrite is printed old → new, and nothing is committed from here.
+    """
+    declared = _declared_tag(name)
+    if declared:
+        return declared
+    served = _served_tags().get(name)
+    if not served:
+        raise Error(
+            f"{name} is neither declared in mirror-images/images.txt nor served by the\n"
+            f"  internal registry, so there is no tag to derive. If it is a third party,\n"
+            f"  ask for it: {cli.cmd('image request')} <source>:<tag>. If it is a base this\n"
+            f"  platform owns, it has not been built here yet: {cli.cmd('ci build')}")
+    shaped = [(int(m.group(1)), int(m.group(2)), int(m.group(3)), t)
+              for t in served if (m := _BASE_TAG.match(t))]
+    if not shaped:
+        if old in served:
+            return old
+        raise Error(f"the internal registry serves {name} only under "
+                    f"{', '.join(sorted(served))}, and none of those is the "
+                    f"«<minor>-<build>» shape a base carries, nor the tag this repo names")
+    line = [x for x in shaped if old and x[3].rsplit("-", 1)[0] == old.rsplit("-", 1)[0]]
+    return max(line or shaped)[3]
+
+
+def _rebase_repo(org, url, write, tot):
+    """One repo: check it out, and repoint what points at another installation."""
+    try:
+        owner, repo = _owner_repo(url)
+    except Error as e:
+        mark(tot, "not_evaluable", url, str(e))
+        return None
+    try:
+        d, disposable = _checkout(org, owner, repo, write)
+    except Error as e:
+        mark(tot, "not_evaluable", f"{owner}/{repo}", str(e))
+        return None
+    cache = {}
+
+    def resolve(name, tag):
+        # ONE resolution per <name, tag> and per run: `image from` is a
+        # read of the cluster, and a Containerfile with three stages on
+        # the same base would otherwise ask for it three times.
+        if (name, tag) not in cache:
+            cache[(name, tag)] = _from_reference(f"{name}:{_current_tag(name, tag)}")
+        return cache[(name, tag)]
+
+    touched = 0
+    try:
+        files = _containerfiles(d)
+        if not files:
+            mark(tot, "not_evaluable", f"{owner}/{repo}",
+                 "no Containerfile in the checkout: either nothing here builds an image, "
+                 "or the repo does not carry its own build")
+            return None
+        for f in files:
+            rel = os.path.relpath(f, d)
+            try:
+                text = open(f, encoding="utf-8").read()
+                new, seen = _rebase_text(text, resolve)
+            except (Error, UnicodeDecodeError, OSError) as e:
+                mark(tot, "not_evaluable", f"{owner}/{repo} {rel}", str(e))
+                continue
+            changes = [(a, b) for a, b in seen if a != b]
+            if not seen:
+                mark(tot, "already", f"{owner}/{repo} {rel}",
+                     "no FROM here names the internal registry — nothing for this verb "
+                     "to repoint")
+                continue
+            if not changes:
+                mark(tot, "already", f"{owner}/{repo} {rel}",
+                     f"{len(seen)} FROM already pinned to what this installation serves")
+                continue
+            for old, fresh in changes:
+                print(f"      {gray}- {old}{reset}")
+                print(f"      {green}+ {fresh}{reset}")
+            if write:
+                open(f, "w", encoding="utf-8").write(new)
+                mark(tot, "done", f"{owner}/{repo} {rel}", f"{len(changes)} FROM rewritten")
+                touched += 1
+            else:
+                mark(tot, "would", f"{owner}/{repo} {rel}", f"rewrite {len(changes)} FROM")
+    finally:
+        # What _checkout said, not what this function would have guessed:
+        # the same rule written in two places is one rule until the day
+        # it is two, and the loser here would be a real checkout with
+        # somebody's work inside it.
+        if disposable:
+            shutil.rmtree(d, ignore_errors=True)
+    return d if (touched and not disposable) else None
+
+
+def rebase(org, write, tot):
+    """`aegis app rebase <org>` — files only, and the push stays human."""
+    path, c = _contract(org)
+    # The list of repos is the generator's, the same one the Applications,
+    # the AppProject's sourceRepos, the credentials and `apply` are built
+    # from. Fifth consumer of one source, for the reason that never
+    # changes: two lists computed apart drift, and here the drift would
+    # show up as a repo nobody rebased and a build nobody could explain.
+    repos = _generator().repos_of(c)
+    print(f"\n{c['organizacion']}  {gray}({os.path.relpath(path, PLATFORM_DIR)} — "
+          f"{'files only: the commit and the push are yours' if write else 'dry run: nothing is written'}"
+          f"){reset}")
+    if not repos:
+        print(f"  {gray}={reset} no repos declared — there is no Containerfile to rebase")
+        return 0
+    ready = []
+    for url, _name in sorted(repos.items()):
+        print(f"\n{url}")
+        d = _rebase_repo(c["organizacion"], url, write, tot)
+        if d:
+            ready.append(d)
+    if ready:
+        print(f"\n{green}rewritten{reset} — and NOT pushed: pinning an image and putting it "
+              f"in production are two decisions (images.md §2).")
+        print(f"  review it, and then, per repo:")
+        for d in ready:
+            print(f"    git -C {d} diff")
+            print(f"    git -C {d} commit -am 'ci: bases repinned to this installation'"
+                  f" && git -C {d} push")
+    return 0
+
+
 # ── the walk ──────────────────────────────────────────────────────────
 
 def mark(tot, state, step, detail=""):
@@ -994,6 +1430,24 @@ def main():
                    help="orgs/<n>.yaml or the name of the organization")
     s.add_argument("--check", action="store_true",
                    help="shows what it would do, without touching anything (the init's run_cmd culture)")
+    # `rebase` is on the SAME side of the border as `new`: it writes
+    # files here and creates nothing anywhere else. It does read the
+    # cluster —every reference comes from `aegis image from`, the only
+    # command that knows the internal digest and the only one that
+    # refuses an image that is present and unsigned— and it reads
+    # GitHub, because the Containerfiles it rewrites live in the
+    # organization's repos.
+    s = sub.add_parser("rebase",
+                       help="repoints every FROM of the organization's repos that names "
+                            "the internal registry at the tag and digest THIS installation "
+                            "serves. It writes files and does not push: pinning an image "
+                            "and putting it in production are two decisions")
+    s.add_argument("organization", metavar="ORG",
+                   help="orgs/<n>.yaml or the name of the organization")
+    s.add_argument("--check", action="store_true",
+                   help="shows what it would rewrite, without touching anything (not even "
+                        "the checkout: with this the repos are cloned to a temporary "
+                        "directory that is removed on the way out)")
     a = p.parse_args()
 
     if a.cmd == "new":
@@ -1009,6 +1463,25 @@ def main():
                   f"{gray}— review them before applying{reset}")
             return 2
         return rc
+
+    if a.cmd == "rebase":
+        # No `gh auth status` gate here, unlike `apply`: this subcommand
+        # does not act on GitHub, it CLONES from it, and a public repo
+        # clones with no session at all. Demanding one would refuse work
+        # that can be done; when the clone does need the credential, git
+        # says so and that line is relayed as COULD NOT EVALUATE.
+        tot = {"already": 0, "done": 0, "would": 0, "not_evaluable": 0}
+        rebase(a.organization, not a.check, tot)
+        print(f"\nsummary: {tot['already']} already · {tot['done']} rewritten · "
+              f"{tot['would']} to rewrite · {tot['not_evaluable']} warning(s)")
+        if tot["not_evaluable"]:
+            print(f"  {yellow}there are repos NOT EVALUATED{reset} {gray}— a warning is not "
+                  f"an approval: sort out the cause and re-run{reset}")
+            return 2
+        if tot["would"]:
+            print(f"  {gray}to do it: {cli.cmd('app rebase')} {a.organization}{reset}")
+            return 1
+        return 0
 
     write = not a.check
 
