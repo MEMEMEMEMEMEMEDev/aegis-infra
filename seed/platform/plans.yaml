@@ -227,6 +227,27 @@ ai:
   # AND THE NEIGHBOR WENT ON BEING SERVED: with the portfolio at 429,
   # org-blog answered its 5 requests with 200. The bucket is per tenant,
   # and that is now measured and not assumed.
+  # ── WHAT A REQUEST REALLY COSTS, and it depends on the task ──────
+  # Measured in production 2026-09-02, on a portfolio whose guide does
+  # retrieval before answering:
+  #
+  #   a plain chat            ~426 tokens  (383 in + 43 out)
+  #   a chat WITH retrieval  ~3000 tokens  — and it is TWO requests:
+  #                                          a vector call over 16 texts,
+  #                                          then the chat, which alone
+  #                                          enters with 1526 of context
+  #                                          (prompt + retrieved corpus)
+  #
+  # The numbers below were calibrated against the first figure. Anyone
+  # sizing a plan for a task that retrieves and reads only that one is
+  # wrong by a factor of seven — which is exactly what happened: the
+  # portfolio on `estandar` (40000) was cut at 13 messages per minute,
+  # shared among every visitor at once.
+  #
+  # The lesson is not that the ceilings are small. It is that a plan
+  # cannot be chosen without knowing what THAT organization's task
+  # costs, and the way to know is to read the gateway's `tokens_in` in
+  # its own log.
   basico:
     tokens_min: 6000
     concurrencia: 2
