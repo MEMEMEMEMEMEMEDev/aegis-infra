@@ -16,8 +16,13 @@ PYEOF
 
 # an image whose build cost nobody wrote down: it cannot be refused
 # before it is too late, and it is the heaviest one.
+# The mutation does NOT name the number. It named 36 once, the measured
+# cost was later corrected to 42, and the tooth went inert in silence —
+# it kept passing a sed that matched nothing, so the check looked
+# protected and was not. A tooth that quotes a value it does not own
+# decays the moment that value is measured again.
 red_2() {
-    sed -i 's/_job=engine-gpu   ; _to=14400 ; _gib=36/_job=engine-gpu   ; _to=14400/' \
+    sed -i -E 's/(_job=engine-gpu[^;]*; _to=[0-9]+) ; _gib=[0-9]+/\1/' \
         "$AEGIS_ROOT/init/phases/87-ai.sh"
 }
 
