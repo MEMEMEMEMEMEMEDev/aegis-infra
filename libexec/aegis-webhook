@@ -181,9 +181,27 @@ def main():
     # it is a VERB. `check` measures; `apply` creates the missing ones
     # and re-syncs the HMAC of the ones that are there. No arguments =
     # check, which is what the round invokes.
+    # --json HAS TO BE ACCEPTED AFTER THE VERB TOO, and this is a
+    # contract and not a courtesy: `cli.run_json` appends `--json` at
+    # the END of whatever it was given, so a delegating command always
+    # says `webhook apply --json`. Measured 2026-09-03, installing from
+    # zero: `aegis app apply` could not register a single webhook
+    # because argparse refused that order, and what the operator saw
+    # was «COULD NOT EVALUATE», never a syntax error.
+    #
+    # default=SUPPRESS is the whole trick: without it the subparser
+    # would write its own False over a --json that came BEFORE the
+    # verb, and `webhook --json apply` would break while fixing
+    # `webhook apply --json`.
+    flags = argparse.ArgumentParser(add_help=False)
+    flags.add_argument("--json", action="store_true", dest="json_mode",
+                       default=argparse.SUPPRESS,
+                       help="replaces the narration with the document of states")
     sub = p.add_subparsers(dest="verb")
-    sub.add_parser("check", help="measures: do all the repos with a job have a webhook?")
-    sub.add_parser("apply", help="creates the missing ones and re-syncs the HMAC")
+    sub.add_parser("check", parents=[flags],
+                   help="measures: do all the repos with a job have a webhook?")
+    sub.add_parser("apply", parents=[flags],
+                   help="creates the missing ones and re-syncs the HMAC")
     # The exit CONTRACT (03 §3). Until today, whoever wanted to know
     # whether this command had CREATED something —and not merely
     # re-synced— had to read the sentence «webhook creado» in the
