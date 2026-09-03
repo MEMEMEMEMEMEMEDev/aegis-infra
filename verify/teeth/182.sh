@@ -18,9 +18,18 @@ PYEOF
 
 # present but toothless: an estimate ten times too generous accepts a
 # prompt that fills the window on its own.
+# The mutation targets the DIVISOR and nothing else. Naming the whole
+# expression made this tooth inert the moment the arithmetic was
+# corrected, on the same day it was written.
 red_2() {
-    sed -i 's|_piso = len(_texto) // 4 + e\["max_output_tokens"\]|_piso = len(_texto) // 40 + e["max_output_tokens"]|' \
-        "$AEGIS_ROOT/lib/aegis/org.py"
+    python3 - "$AEGIS_ROOT/lib/aegis/org.py" <<'PYEOF'
+import re, sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+nuevo, n = re.subn(r'(^\s*_piso = .*?) // 4\b', r'\1 // 40', s, count=1, flags=re.M)
+assert n == 1, "the divisor of the floor could not be located"
+open(p, "w", encoding="utf-8").write(nuevo)
+PYEOF
 }
 
 # it refuses, and does not say what to change. The operator is left with

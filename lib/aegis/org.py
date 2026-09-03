@@ -2740,13 +2740,21 @@ def ai_registry_json():
             # answer, or it cannot answer at all.
             _texto = prompts.get(task.get("prompt", ""))
             if isinstance(_texto, str) and cls != "cpu":
-                _piso = len(_texto) // 4 + e["max_output_tokens"]
+                # The window has to hold THREE things, not one: the
+                # prompt, the largest input the task says it accepts,
+                # and the answer it is allowed to write. Counting only
+                # the prompt was measured too weak on 2026-09-02 — the
+                # real task that motivated this rule came out at 1493
+                # against a ceiling of 1500 and slipped through by seven
+                # tokens, while its true cost was 1729.
+                _piso = (len(_texto) + e["max_input_chars"]) // 4 \
+                        + e["max_output_tokens"]
                 if _piso >= e["max_context_tokens"]:
                     raise Invalid(
                         f"the task {key!r} cannot fit inside itself.\n"
-                        f"  its prompt {task.get('prompt')!r} is {len(_texto)} characters, which is\n"
-                        f"  at least {len(_texto) // 4} tokens, and it may answer with\n"
-                        f"  {e['max_output_tokens']} more: {_piso} against a max_context_tokens of\n"
+                        f"  its prompt {task.get('prompt')!r} is {len(_texto)} characters and it accepts\n"
+                        f"  {e['max_input_chars']} more of input: at least {(len(_texto) + e['max_input_chars']) // 4} tokens together, plus the\n"
+                        f"  {e['max_output_tokens']} it may answer: {_piso} against a max_context_tokens of\n"
                         f"  {e['max_context_tokens']}. Raise max_context_tokens for this task in\n"
                         f"  ai/tasks.yaml under `tareas:`, or shorten the prompt. Leaving it\n"
                         f"  as is does not fail here: it fails as a 400 in front of a visitor.")
