@@ -213,6 +213,64 @@ spec:
           ).trim()
           def files = changed ? (changed.split('\n') as List) : []
           def onlyManifests = files && files.every { it.startsWith('k8s/') }
+
+          // ...AND ONLY IF WHAT THOSE MANIFESTS PIN IS ACTUALLY HERE.
+          //
+          // MEASURED 2026-09-03, installing from zero. A manifest-only
+          // commit is a reason to skip because the image it pins was
+          // just built. That reasoning holds for the instance that
+          // built it and for no other: an application repo travels
+          // between installations, and every installation is born with
+          // an EMPTY registry. The last commit was `deploy: ... por
+          // digest`, this stage said «only manifests», the job went
+          // green in sixty seconds having built nothing, and the
+          // Deployment was then denied at admission with «no signatures
+          // found» — a message about a signature, for an image that was
+          // never there.
+          //
+          // Nothing was red. The build succeeded, the pipeline
+          // succeeded, and what failed was three steps away. It is the
+          // same hole phase 87 had for the AI images and it takes the
+          // same fix: the question is not «did the source change?» but
+          // «is it in THIS registry, signed?».
+          //
+          // cosign answers both halves in one call: an absent image and
+          // an unsigned one both fail. With no key —the bootstrap
+          // window before phase 80— the check cannot be made and the
+          // old behaviour stands, which is exactly what `sign` does.
+          if (onlyManifests) {
+            def missing = ''
+            container('cosign') {
+              missing = sh(returnStdout: true, script: '''
+                set -e
+                OVERLAY="${OVERLAY:-k8s/overlays/dev/kustomization.yaml}"
+                [ -f /cosign/keys/cosign.key ] || exit 0
+                [ -f "$OVERLAY" ] || exit 0
+                cosign public-key --key /cosign/keys/cosign.key > /tmp/cosign.pub 2>/dev/null || exit 0
+                nombre=""
+                while IFS= read -r linea; do
+                  case "$linea" in
+                    *"- name: "*)
+                      nombre="$(printf '%s' "${linea#*- name: }" | tr -d ' \r')" ;;
+                    *"digest: "*)
+                      dig="$(printf '%s' "${linea#*digest: }" | tr -d ' \r')"
+                      if [ -n "$nombre" ]; then
+                        cosign verify --key /tmp/cosign.pub \
+                          --insecure-ignore-tlog=true \
+                          --registry-cacert /cosign/ca/ca.crt \
+                          "${nombre}@${dig}" >/dev/null 2>&1 || printf '%s ' "$nombre"
+                      fi
+                      nombre="" ;;
+                  esac
+                done < "$OVERLAY"
+              ''').trim()
+            }
+            if (missing) {
+              echo "detect-change: the manifests pin images this registry does not serve signed (${missing}) — BUILDING anyway"
+              onlyManifests = false
+            }
+          }
+
           env.SKIP_BUILD = onlyManifests ? 'true' : 'false'
           echo "detect-change: onlyManifests=${onlyManifests} -> SKIP_BUILD=${env.SKIP_BUILD}"
         }
