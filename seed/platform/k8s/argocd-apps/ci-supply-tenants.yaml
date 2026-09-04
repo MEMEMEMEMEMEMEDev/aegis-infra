@@ -166,6 +166,24 @@ spec:
     - group: apiextensions.k8s.io
       kind: CustomResourceDefinition
       jsonPointers: [/spec/conversion]
+    # And the empty maps the chart writes by hand. MEASURED 2026-09-04
+    # with `helm template` outside the cluster: chart 3.8.1 renders
+    # `annotations: {}` and `labels: {}` on the eleven CRDs of the NEW
+    # policies.kyverno.io group and on no other, and neither
+    # crds.annotations nor crds.customLabels reaches those templates.
+    # The apiserver drops an empty map, so desired never equals live and
+    # the App stays OutOfSync forever with nothing wrong with it: on the
+    # instance from the clean install it had been so since birth.
+    #
+    # The condition is what makes this safe, and check 187 holds it:
+    # `select` matches ONLY when the map is empty, so a real annotation
+    # or label on a CRD is still compared. Ignoring /metadata/annotations
+    # outright is the shortcut, and it would hide every one of them.
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jqPathExpressions:
+        - '.metadata | select((.annotations | length) == 0) | .annotations'
+        - '.metadata | select((.labels | length) == 0) | .labels'
 ---
 # THE LAST one enabled (D5): Enforce only with a signature in place.
 apiVersion: argoproj.io/v1alpha1
