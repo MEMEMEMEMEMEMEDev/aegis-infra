@@ -2918,7 +2918,10 @@ spec:
   destination: {{server: https://kubernetes.default.svc, namespace: org-{org}}}
   syncPolicy:
     automated: {{selfHeal: true}}
-    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+    # RespectIgnoreDifferences: without it the ignore below reaches
+    # only the DIFF and not the APPLY, so ArgoCD keeps sending the
+    # very fields it claims to ignore and the drift never closes.
+    syncOptions: [ServerSideApply=true, CreateNamespace=true, RespectIgnoreDifferences=true]
   ignoreDifferences:
     # The apiserver adds a `status` block INSIDE each of a
     # StatefulSet's volumeClaimTemplates. It is observed state, not
@@ -2936,7 +2939,43 @@ spec:
     - group: apps
       kind: StatefulSet
       jqPathExpressions:
-        - '.spec.volumeClaimTemplates[]?.status'""")
+        - '.spec.volumeClaimTemplates[]?.status'
+    # And Kyverno's defaults on the size Policy, for the SAME reason the
+    # `kyverno-policies` App ignores them on ClusterPolicy: the webhook
+    # writes fields the manifest does not declare, desired never equals
+    # live, and the App stays OutOfSync forever after a Succeeded sync.
+    #
+    # MEASURED 2026-09-04: `.spec.rules[].skipBackgroundRequests` alone
+    # held org-portafolio OutOfSync for two days while every one of its
+    # resources was Healthy and every sync succeeded. That is worse than
+    # a red light: it is a light that stopped meaning anything, and the
+    # operator learns to read past it.
+    #
+    # The list is THE SAME ONE as kyverno-policies', and a check holds
+    # them equal. The lesson was paid for once on ClusterPolicy; the
+    # namespaced Policy that `tamano` introduced walked into the same
+    # hole because nobody carried the list across.
+    #
+    # The defaults are NOT written into the generated manifest: each
+    # Kyverno version may add more and the seed would end up married to
+    # one version. What git DOES declare (background, rules, and
+    # webhookConfiguration.failurePolicy) is off the list, so a real
+    # change to any of them is still seen.
+    - group: kyverno.io
+      kind: Policy
+      jqPathExpressions:
+        - '.spec.admission'
+        - '.spec.emitWarning'
+        - '.spec.validationFailureAction'
+        - '.spec.rules[].skipBackgroundRequests'
+        - '.spec.rules[].validationFailureAction?'
+        - '.spec.rules[].verifyImages[]?.validationFailureAction'
+        - '.spec.rules[].verifyImages[]?.required'
+        - '.spec.rules[].verifyImages[]?.useCache'
+        - '.spec.rules[].verifyImages[]?.verifyDigest'
+        - '.spec.rules[].verifyImages[]?.signatureAlgorithm'
+        - '.spec.rules[].verifyImages[]?.attestors[]?.entries[]?.signatureAlgorithm'
+        - '.spec.rules[].verifyImages[]?.attestors[]?.entries[]?.keys.signatureAlgorithm'""")
     return "\n".join(parts) + "\n"
 
 
