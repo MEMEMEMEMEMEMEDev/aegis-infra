@@ -196,29 +196,15 @@ tipos:
   # below.
   redis:
     imagen: redis
-    # NO `digest:`, and that is not an oversight. The digest that goes
-    # here is the INTERNAL registry's, and it is NOT the one images.txt
-    # pins: a `crane copy` of a multi-architecture index does not
-    # preserve it (postgres, measured 2026-08-04:
-    # 742f40ea... at the origin, fe30b547... inside). It can only be READ
-    # off a live registry, and this image has not been mirrored by any
-    # instance yet — writing a plausible number here would be inventing
-    # the one fact this whole file exists to pin.
+    # The digest is the INTERNAL registry's, and it is NOT the one
+    # images.txt pins: a `crane copy` of a multi-architecture index does
+    # not preserve it (postgres, measured 2026-08-04: 742f40ea... at the
+    # origin, fe30b547... inside). It can only be READ off a live
+    # registry, which is where this one comes from: `aegis image from
+    # redis:8.6.4-alpine` on the first clean instance, 2026-09-04, once
+    # the mirror job had pulled, scanned, pushed and signed it.
+    digest: sha256:56b7b6108e832bd4e6024838729f649125943c4a09988b4d66c4695e8acf5958
     tag_origen: 8.6.4-alpine # informational: what is being read
-    pending:
-      commands:
-        - aegis image check
-        - aegis image from redis:8.6.4-alpine
-      reason: |
-        The line is already declared in mirror-images/images.txt, so
-        nothing has to be asked for: `aegis image check` says whether it
-        is mirrored and signed and prints the command that fixes it if
-        it is not, and `aegis image from` prints the FROM whose digest
-        is the one that goes in `digest:` above. Until then the
-        generator REFUSES a contract that declares this type, naming
-        these two commands. A type nobody can deploy is honest; a type
-        deployed from a guessed digest is an ImagePullBackOff with a
-        manifest that looks right.
     puerto: 6379 # measured: the image EXPOSEs 6379
     # NO `disco`, and this is the decision the type turns on.
     #

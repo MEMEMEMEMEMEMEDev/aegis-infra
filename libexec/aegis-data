@@ -315,8 +315,26 @@ def sql_literal(value):
 # cluster. A source that is on one side and not on the other is exactly
 # the condition that makes a backup dangerous —capturing too little
 # without finding out— so it is an error and not a warning.
+# The stateful types the catalogue knows how to dump. Postgres has its
+# own bespoke path in this file —globals apart, one file per database,
+# the --clean lesson— and mongodb (and anything added later with
+# `component: datos` and `backup.method: dump`) rides the GENERIC path,
+# which runs the very commands services.yaml carries. The set is DERIVED
+# from the catalogue, not listed here: a type whose backup nobody wrote
+# does not become a silent gap, it simply is not a source.
+def _dump_types():
+    cat = (yaml.safe_load(open(SERVICES, encoding="utf-8")) or {}).get("tipos") or {}
+    out = {}
+    for name, spec in cat.items():
+        b = (spec or {}).get("backup") or {}
+        if (spec or {}).get("component") == "datos" and b.get("method") == "dump":
+            out[name] = b
+    return out
+
+
 def sources():
-    databases, buckets = [], []
+    databases, mongos, buckets = [], [], []
+    dump_types = _dump_types()
     for f in sorted(os.listdir(ORGS_DIR)):
         if not f.endswith(".yaml"):
             continue
@@ -324,21 +342,38 @@ def sources():
         org = d.get("organizacion") or d.get("nombre")
         ns = f"org-{org}"
         for s in d.get("servicios", []) or []:
-            if s.get("tipo") == "postgres":
-                databases.append({"org": org, "ns": ns, "servicio": s["nombre"],
-                                  "pod": f"{s['nombre']}-0",
+            tipo = s.get("tipo")
+            if tipo == "postgres":
+                databases.append({"tipo": "postgres", "org": org, "ns": ns,
+                                  "servicio": s["nombre"], "pod": f"{s['nombre']}-0",
                                   "secreto": f"{s['nombre']}-credenciales"})
+            elif tipo in dump_types:
+                # mongodb and its kin: the templates travel WITH the piece,
+                # resolved for this org and service, so capture and restore
+                # run exactly what the catalogue declares and this file
+                # never hard-codes a mongo command.
+                b = dump_types[tipo]
+                subs = {"<org>": org, "<service>": s["nombre"]}
+                tmpl = {k: _sub(b[k], subs) for k in ("databases", "dump", "restore") if b.get(k)}
+                mongos.append({"tipo": tipo, "org": org, "ns": ns,
+                               "servicio": s["nombre"], "pod": f"{s['nombre']}-0",
+                               "secreto": f"{s['nombre']}-credenciales", "tmpl": tmpl})
         if (d.get("almacenamiento") or {}).get("bucket"):
             buckets.append({"org": org, "ns": ns, "bucket": org})
 
-    # contrast against the cluster
+    # contrast against the cluster. Every stateful service carries
+    # `aegis.dev/component=datos` —postgres AND mongodb— so BOTH have to
+    # be in the declared set, or a mongo StatefulSet would read as «alive
+    # and undeclared» and abort the backup of every OTHER organization
+    # too (measured 2026-09-04, building the shop demo).
     r = kubectl(["get", "statefulset", "-A", "-l", "aegis.dev/component=datos",
                  "--no-headers", "-o",
                  "custom-columns=NS:.metadata.namespace,N:.metadata.name"])
     if r.returncode != 0:
         die("I could not read the cluster's StatefulSets (kubeconfig?)")
     alive = {tuple(l.split()) for l in r.stdout.splitlines() if l.strip()}
-    declared = {(b["ns"], b["servicio"]) for b in databases}
+    declared = {(b["ns"], b["servicio"]) for b in databases} \
+             | {(m["ns"], m["servicio"]) for m in mongos}
     if alive != declared:
         for x in sorted(alive - declared):
             print(f"  {red}!{reset} {x[0]}/{x[1]} lives in the CLUSTER and does not come out of any "
@@ -347,7 +382,13 @@ def sources():
             print(f"  {red}!{reset} {x[0]}/{x[1]} comes out of a contract and is not in the "
                   f"cluster — either it did not sync, or the contract lies")
         die("the contracts and the cluster do not match: nothing is backed up blind")
-    return databases, buckets
+    return databases, mongos, buckets
+
+
+def _sub(tmpl, subs):
+    for k, v in subs.items():
+        tmpl = tmpl.replace(k, v)
+    return tmpl
 
 
 # ── SigV4 signature, minimal and without dependencies ───────────────
@@ -664,6 +705,109 @@ def capture_bucket(bk, target):
     return {"tipo": "bucket", "org": bk["org"], "bucket": bk["bucket"],
             "directorio": f"{bk['org']}-bucket", "objetos": objects,
             "total_bytes": sum(o["bytes"] for o in objects)}
+
+
+def _tmpl_run(cmd, database, stdin_data=None):
+    """Runs one of the catalogue's dump/restore templates, with <database>
+    filled in. The templates are full `kubectl exec` shell strings and
+    read the credential from a file INSIDE the pod, so nothing secret
+    ever reaches argv on either side — the same rule the rest of this
+    file keeps. stdout comes back as bytes (a dump is an archive)."""
+    full = cmd.replace("<database>", database)
+    return subprocess.run(["bash", "-c", full], capture_output=True,
+                          input=stdin_data)
+
+
+def _mongosh(m, database, js):
+    """Runs a mongosh --eval INSIDE the pod, with the credential read
+    from the mounted file and NEVER on argv (on either side). The JS
+    sees U, P and DB already bound; auth is `db.getSiblingDB("admin")
+    .auth(U, P)` in the script itself, the same way the catalogue's
+    `databases` template authenticates."""
+    script = (
+        "kubectl exec -n %s %s -- sh -c '\n"
+        "  U=$(cat /etc/aegis/credential/usuario)\n"
+        "  P=$(cat /etc/aegis/credential/password)\n"
+        "  mongosh --quiet --eval \"var U=\\\"$U\\\",P=\\\"$P\\\",DB=\\\"%s\\\"\" --eval %s'\n"
+        % (m["ns"], m["pod"], database, shq(js))
+    )
+    return subprocess.run(["bash", "-c", script], capture_output=True)
+
+
+def mongo_databases(m):
+    """The databases mongodb holds, minus admin/local/config — the list
+    the catalogue's `databases` template prints."""
+    r = _tmpl_run(m["tmpl"]["databases"], "")
+    if r.returncode != 0:
+        die(f"listing the databases of {m['ns']}/{m['servicio']} failed: "
+            f"{(r.stderr or b'').decode(errors='replace')[:200]}")
+    return [l for l in (r.stdout or b"").decode(errors="replace").splitlines() if l.strip()]
+
+
+def mongo_inventory(m, database):
+    """Collections and their document counts — mongodb's answer to the
+    row inventory postgres gives, and what the restore is checked
+    against. Auth travels in the script over stdin (a heredoc), never in
+    argv, the same way the catalogue's `databases` template authenticates."""
+    js = ('db.getSiblingDB("admin").auth(U,P);'
+          'var d=db.getSiblingDB(DB);'
+          'print(d.getCollectionNames().sort()'
+          '.map(function(c){return c+" "+d.getCollection(c).countDocuments({})}).join("\\n"))')
+    r = _mongosh(m, database, js)
+    if r.returncode != 0:
+        return None
+    cols = []
+    for l in (r.stdout or b"").decode(errors="replace").splitlines():
+        parts = l.rsplit(" ", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            cols.append({"coleccion": parts[0], "docs": int(parts[1])})
+    return cols
+
+
+def capture_mongo(m, target):
+    """One archive per database (mongodump --archive --gzip), the mongo
+    twin of capture_database. No globals: mongodb keeps its users in the
+    admin database, and the demo's single root credential is the Secret
+    the platform generated — which is what realigns on restore."""
+    v = subprocess.run(["kubectl", "exec", "-n", m["ns"], m["pod"], "--",
+                        "sh", "-c", "mongod --version 2>/dev/null | head -1"],
+                       capture_output=True, text=True)
+    bases = []
+    for database in mongo_databases(m):
+        d = _tmpl_run(m["tmpl"]["dump"], database)
+        if d.returncode != 0 or not d.stdout:
+            die(f"the mongodump of {database} failed: "
+                f"{(d.stderr or b'').decode(errors='replace')[:200]}")
+        fn = f"{m['org']}-{m['servicio']}-{database}.archive.gz"
+        open(os.path.join(target, fn), "wb").write(d.stdout)
+        bases.append({"nombre": database, "archivo": fn, "bytes": len(d.stdout),
+                      "sha256": hashlib.sha256(d.stdout).hexdigest(),
+                      "colecciones": mongo_inventory(m, database)})
+    return {
+        "tipo": m["tipo"], "org": m["org"], "servicio": m["servicio"], "ns": m["ns"],
+        "motor": (v.stdout or "").strip(),
+        "bases": bases,
+        "bytes": sum(x["bytes"] for x in bases),
+        "credencial_sha256": credential_fingerprint(m["ns"], m["secreto"]),
+        "secreto": m["secreto"],
+        "tmpl": m["tmpl"],
+    }
+
+
+def mongo_sizes(m):
+    """(database, dataSize+indexSize) per database, asked of db.stats() —
+    mongodb's pg_database_size. What does not answer goes out as -1, the
+    same floor rule postgres follows."""
+    out = []
+    for database in mongo_databases(m):
+        js = ('db.getSiblingDB("admin").auth(U,P);'
+              'var s=db.getSiblingDB(DB).stats();'
+              'print((s.dataSize||0)+(s.indexSize||0))')
+        r = _mongosh(m, database, js)
+        txt = (r.stdout or b"").decode(errors="replace").strip()
+        out.append((database, int(txt) if r.returncode == 0 and txt.isdigit() else -1))
+    return out
+
 
 
 def bundle_age(p):
@@ -1027,25 +1171,29 @@ def capture(root, remote=True):
     """
     root = prepare_root(root)
     print(f"{gray}sources (contracts ∩ cluster):{reset}")
-    databases, buckets = sources()
+    databases, mongos, buckets = sources()
     for b in databases:
         print(f"  {gray}·{reset} postgres  {b['ns']}/{b['servicio']}")
+    for m in mongos:
+        print(f"  {gray}·{reset} {m['tipo']:8}  {m['ns']}/{m['servicio']}")
     for b in buckets:
         print(f"  {gray}·{reset} bucket    {b['bucket']}  {gray}(shared garage){reset}")
-    if not databases and not buckets:
+    if not databases and not mongos and not buckets:
         die("no contract declares data to back up")
 
     per_org = {}
     for b in databases:
-        per_org.setdefault(b["org"], ([], []))[0].append(b)
+        per_org.setdefault(b["org"], ([], [], []))[0].append(b)
+    for m in mongos:
+        per_org.setdefault(m["org"], ([], [], []))[1].append(m)
     for bk in buckets:
-        per_org.setdefault(bk["org"], ([], []))[1].append(bk)
+        per_org.setdefault(bk["org"], ([], [], []))[2].append(bk)
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
     rc = 0
     done_orgs = []
     for org in sorted(per_org):
-        ob, obk = per_org[org]
+        ob, omongo, obk = per_org[org]
         folder = os.path.join(root, f"org-{org}")
         os.makedirs(folder, exist_ok=True)
         # The name repeats the organization even though the folder already
@@ -1058,7 +1206,7 @@ def capture(root, remote=True):
         # backup: it is not translated.
         out = os.path.join(folder, f"aegis-datos-org-{org}-{stamp}.age")
         print(f"\n{gray}── organization {org}{reset}")
-        r = capture_org(org, ob, obk, out, remote=remote)
+        r = capture_org(org, ob, omongo, obk, out, remote=remote)
         rc |= r
         if r == 0:
             done_orgs.append(org)
@@ -1190,7 +1338,7 @@ def write_readme(root, expected, done_orgs, stamp):
     ok(f"LEER.md up to date in {root} ({len(expected)} organization(s) according to the contracts)")
 
 
-def capture_org(org, databases, buckets, out, remote=True):
+def capture_org(org, databases, mongos, buckets, out, remote=True):
     stage = tempfile.mkdtemp(prefix="aegis-resp-")
     pay = os.path.join(stage, "payload"); os.makedirs(pay)
     try:
@@ -1199,6 +1347,10 @@ def capture_org(org, databases, buckets, out, remote=True):
             m = capture_database(b, pay); pieces.append(m)
             step(f"postgres {m['org']}/{m['servicio']}: {m['bytes']} bytes "
                  f"({m['motor']})")
+        for mo in mongos:
+            m = capture_mongo(mo, pay); pieces.append(m)
+            step(f"{m['tipo']} {m['org']}/{m['servicio']}: {m['bytes']} bytes, "
+                 f"{len(m['bases'])} database(s)")
         for bk in buckets:
             m = capture_bucket(bk, pay); pieces.append(m)
             step(f"bucket {m['bucket']}: {len(m['objetos'])} objects, "
@@ -1264,6 +1416,12 @@ def capture_org(org, databases, buckets, out, remote=True):
             for p in pieces:
                 if p["tipo"] == "postgres":
                     for piece in [p["globals"]] + p["bases"]:
+                        q = os.path.join(check_dir, piece["archivo"])
+                        if not os.path.exists(q) or \
+                           hashlib.sha256(open(q, "rb").read()).hexdigest() != piece["sha256"]:
+                            bad_ones.append(f"{p['org']}/{p['servicio']}:{piece['archivo']}")
+                elif p["tipo"] == "mongodb":
+                    for piece in p["bases"]:
                         q = os.path.join(check_dir, piece["archivo"])
                         if not os.path.exists(q) or \
                            hashlib.sha256(open(q, "rb").read()).hexdigest() != piece["sha256"]:
@@ -1349,6 +1507,15 @@ def list_bundle(bundle):
                     tt = b_["tablas"] or []
                     print(f"            {gray}database {b_['nombre']}: {b_['bytes']} B, "
                           f"{len(tt)} tables, {sum(x['filas'] for x in tt)} rows{reset}")
+                print(f"            {gray}expected credential sha256:"
+                      f"{(p.get('credencial_sha256') or '?')[:16]}…{reset}")
+            elif p["tipo"] == "mongodb":
+                print(f"  mongodb   {p['org']}/{p['servicio']:10} {p['bytes']:>9} bytes  "
+                      f"{gray}{p['motor']}{reset}")
+                for b_ in p["bases"]:
+                    cc = b_.get("colecciones") or []
+                    print(f"            {gray}database {b_['nombre']}: {b_['bytes']} B, "
+                          f"{len(cc)} collections, {sum(x['docs'] for x in cc)} docs{reset}")
                 print(f"            {gray}expected credential sha256:"
                       f"{(p.get('credencial_sha256') or '?')[:16]}…{reset}")
             else:
@@ -1647,7 +1814,8 @@ def restore(bundle, org, force):
             die(f"the bundle has nothing of {org!r}. There is: "
                 f"{', '.join(sorted({p['org'] for p in man['piezas']}))}")
         postgres = [p for p in pieces if p["tipo"] == "postgres"]
-        buckets = [p for p in pieces if p["tipo"] != "postgres"]
+        mongos = [p for p in pieces if p["tipo"] == "mongodb"]
+        buckets = [p for p in pieces if p["tipo"] not in ("postgres", "mongodb")]
 
         for p in postgres:
             # THE BRAKE, which since the realignment exists is no longer
@@ -1755,6 +1923,18 @@ def restore(bundle, org, force):
                 user = realign_role(p["ns"], pod, p["secreto"], app_db)
                 step(f"role {user} realigned with {p['ns']}/{p['secreto']}: "
                      f"the live credential opens {app_db}")
+            # mongodb: --drop --archive, one database at a time, feeding
+            # the captured archive over stdin. No role to realign — the
+            # root credential lives in the Secret the platform holds, and
+            # mongorestore replaces DATA, not the admin user.
+            for p in mongos:
+                for base in p["bases"]:
+                    archive = open(os.path.join(tmp, base["archivo"]), "rb").read()
+                    r = _tmpl_run(p["tmpl"]["restore"], base["nombre"], stdin_data=archive)
+                    if r.returncode != 0:
+                        die(f"the mongorestore of {base['nombre']} failed: "
+                            f"{(r.stderr or b'').decode(errors='replace')[:200]}")
+                    step(f"mongodb {base['nombre']} restored ({len(archive)} bytes)")
         finally:
             scale_consumers_up(ns, consumers)
 
@@ -1795,6 +1975,33 @@ def restore(bundle, org, force):
             n_t = sum(len(b_["tablas"] or []) for b_ in p["bases"])
             ok(f"{p['org']}/{p['servicio']} restored and VERIFIED "
                f"({len(p['bases'])} databases, {n_t} tables, the rows match)")
+        # The same measurement for mongodb: the collections and their
+        # document counts, read back and compared against capture. A
+        # mongorestore that returns 0 over a database it did not touch is
+        # exactly the 2026-08-09 lie in another engine.
+        for p in mongos:
+            problems = []
+            alive = mongo_databases(p)
+            for base in p["bases"]:
+                if base["nombre"] not in alive:
+                    problems.append(f"the database {base['nombre']} DOES NOT EXIST")
+                    continue
+                now = {c["coleccion"]: c["docs"] for c in (mongo_inventory(p, base["nombre"]) or [])}
+                for c in base.get("colecciones") or []:
+                    if c["coleccion"] not in now:
+                        problems.append(f"{base['nombre']}: the collection {c['coleccion']} is missing")
+                    elif now[c["coleccion"]] != c["docs"]:
+                        problems.append(
+                            f"{base['nombre']}.{c['coleccion']}: {now[c['coleccion']]} docs, "
+                            f"{c['docs']} were expected")
+            if problems:
+                for x in problems[:12]:
+                    print(f"  {red}✗{reset} {x}")
+                die(f"{p['org']}/{p['servicio']}: the mongodb restore does NOT reproduce "
+                    f"what was captured — I do not call it good")
+            n_c = sum(len(b_.get("colecciones") or []) for b_ in p["bases"])
+            ok(f"{p['org']}/{p['servicio']} restored and VERIFIED "
+               f"({len(p['bases'])} database(s), {n_c} collection(s), the counts match)")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return 0
@@ -1823,7 +2030,7 @@ def sizes(only_org=None):
     `metrics()` turns this into series, and where they are pushed is the
     caller's decision.
     """
-    databases, buckets = sources()
+    databases, mongos, buckets = sources()
     measured = []
     for b in databases:
         if only_org and b["org"] != only_org:
@@ -1842,6 +2049,13 @@ def sizes(only_org=None):
         # is the same lie as a restore that reports success.
         measured.append({"tipo": "postgres", "org": b["org"], "ns": b["ns"],
                          "servicio": b["servicio"], "bases": bases,
+                         "bytes": sum(x["bytes"] for x in bases if x["bytes"] >= 0)})
+    for m in mongos:
+        if only_org and m["org"] != only_org:
+            continue
+        bases = [{"nombre": name, "bytes": b_} for name, b_ in mongo_sizes(m)]
+        measured.append({"tipo": "mongodb", "org": m["org"], "ns": m["ns"],
+                         "servicio": m["servicio"], "bases": bases,
                          "bytes": sum(x["bytes"] for x in bases if x["bytes"] >= 0)})
     for bk in buckets:
         if only_org and bk["org"] != only_org:
@@ -1902,11 +2116,12 @@ def metrics(measured):
         # not through a variable prepared above: the rule «a label is
         # escaped where it is written» is one a reader can check at a
         # glance, and check 154 measures exactly that.
-        if m["tipo"] == "postgres":
+        if m["tipo"] in ("postgres", "mongodb"):
             for b in m["bases"]:
                 lines.append(
                     f'aegis_org_database_bytes{{org="{label_value(m["org"])}",'
                     f'service="{label_value(m["servicio"])}",'
+                    f'motor="{label_value(m["tipo"])}",'
                     f'database="{label_value(b["nombre"])}"}} {b["bytes"]}')
         else:
             lines.append(
@@ -1934,9 +2149,9 @@ def measure(only_org):
         die("no organization to measure" + (f": {only_org!r} is not one of the "
                                             f"contracts" if only_org else ""))
     for m in measured:
-        if m["tipo"] == "postgres":
+        if m["tipo"] in ("postgres", "mongodb"):
             blind = [x["nombre"] for x in m["bases"] if x["bytes"] < 0]
-            print(f"  {gray}·{reset} postgres {m['ns']}/{m['servicio']}: {m['bytes']} "
+            print(f"  {gray}·{reset} {m['tipo']} {m['ns']}/{m['servicio']}: {m['bytes']} "
                   f"bytes in {len(m['bases']) - len(blind)} databases",
                   file=sys.stderr)
             if blind:
