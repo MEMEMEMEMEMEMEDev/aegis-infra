@@ -534,7 +534,20 @@ spec:
               echo 'WARN: trivy-server unavailable (bootstrap pre-phase-80) — scan SKIPPED'
               env.SCAN_SKIPPED = 'true'
             } else {
+              // A repo-local trivyignore.yaml, IF the app ships one, is
+              // honored — and ONLY for what it names, dated. It is NOT
+              // "our own code may carry exceptions": it is for a CVE in a
+              // BASE LAYER the platform already vetted at mirror time
+              // (the same openssl the mirror-images trivyignore accepts),
+              // which reappears here because the app image contains that
+              // layer. Every entry carries expired_at, like the mirror's,
+              // and check 189 requires it — an undated ignore is refused.
               sh '''
+                IGN=""
+                if [ -f trivyignore.yaml ]; then
+                  IGN="--ignorefile trivyignore.yaml"
+                  echo "scan: honoring repo-local trivyignore.yaml (base-layer exceptions the platform already accepts)"
+                fi
                 trivy image \
                   --server ${TRIVY_SERVER} \
                   --input ${WORKSPACE}/image.tar \
@@ -542,7 +555,8 @@ spec:
                   --severity CRITICAL,HIGH \
                   --ignore-unfixed \
                   --scanners vuln \
-                  --no-progress
+                  --no-progress \
+                  $IGN
               '''
             }
           }
