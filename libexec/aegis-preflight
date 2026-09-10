@@ -224,10 +224,70 @@ for u in https://github.com https://api.github.com https://api.cloudflare.com/cl
 done
 
 echo "== 8/9 the machine's resources =="
-free_g=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
-[ "${free_g:-0}" -ge 25 ] && ok "free disk on /: ${free_g}G (>=25G)" || bad "free disk ${free_g}G (<25G)"
-mem_g=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo)
-[ "${mem_g:-0}" -ge 7 ] && ok "total RAM: ${mem_g}G" || warn "RAM ${mem_g}G - jenkins+kyverno+trivy end up tight, 8G+ is ideal"
+# This section used to measure the machine and THROW THE NUMBERS AWAY.
+# `mem_g` was read from /proc/meminfo, compared against 7, printed, and
+# forgotten -- and it was the only reading of RAM in the whole product.
+# So nothing downstream could size anything to the host: not the
+# kubelet's reservation, not the AI's budget, not the floor a desktop
+# needs. Measured 2026-09-09, that is how two engines carrying 18 GiB
+# of declared limits came to be deployed onto a 30 GiB workstation with
+# a graphical session, and why the freeze that followed left no trace
+# the instance could show.
+#
+# The measuring now belongs to `aegis host`, which WRITES IT DOWN. This
+# section is a reader like any other; being the first one is the only
+# thing special about it.
+HOST_FACTS="$("$AEGIS_ROOT/libexec/aegis-host" measure --json 2>/dev/null)"
+if [ -z "$HOST_FACTS" ]; then
+  # Not a warn. The instrument never reached the subject, and every
+  # later reader of host.json is about to find nothing there.
+  bad "the machine COULD NOT BE MEASURED ('aegis host measure' produced nothing): the reservations and budgets derived from it have no source"
+else
+  eval "$(printf '%s' "$HOST_FACTS" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+gib = 1024 ** 3
+def sh(k, v): print("%s=%s" % (k, "" if v is None else v))
+for key, name in (("ram_total_bytes", "H_RAM_G"), ("disk_avail_bytes", "H_DISK_G")):
+    v = d.get(key)
+    sh(name, None if v is None else v // gib)
+sh("H_VRAM", d.get("vram_total_mib"))
+sh("H_SHARED", {True: "yes", False: "no"}.get(d.get("shared_with_a_human"), ""))
+sh("H_UNDET", ",".join(d.get("undetermined") or []))
+')"
+
+  # A REAL INCONSISTENCY THIS WAVE DOES NOT YET CLOSE, written here so
+  # it is not discovered twice: this command demands 25 GiB free while
+  # the init's own gate `disco-20G` (init/phases/00-preflight.sh)
+  # demands 20, for the same requirement. Two thresholds for one thing
+  # means one of them is wrong and nobody can say which. They get a
+  # single home in plans.yaml next to the host floors, and both read it
+  # from there.
+  if [ -z "${H_DISK_G:-}" ]; then
+    bad "free disk on / could not be measured"
+  elif [ "$H_DISK_G" -ge 25 ]; then ok "free disk on /: ${H_DISK_G}G (>=25G)"
+  else bad "free disk ${H_DISK_G}G (<25G)"; fi
+
+  if [ -z "${H_RAM_G:-}" ]; then
+    bad "total RAM could not be measured"
+  elif [ "$H_RAM_G" -ge 7 ]; then ok "total RAM: ${H_RAM_G}G"
+  else warn "RAM ${H_RAM_G}G - jenkins+kyverno+trivy end up tight, 8G+ is ideal"; fi
+
+  # Reported and NOT judged, on purpose. What a shared machine costs is
+  # not something this command can put a threshold on: it is a floor
+  # the operator chooses and `aegis host` derives. Saying it out loud
+  # here is what keeps the surprise from arriving later, in the shape
+  # of a frozen session.
+  case "${H_SHARED:-}" in
+    yes) warn "a human shares this machine (graphical session): aegis has to leave it a floor — see 'aegis host show'" ;;
+    no)  ok "no graphical session: aegis has this machine to itself" ;;
+    *)   warn "whether a human shares this machine could not be established" ;;
+  esac
+  if [ -n "${H_VRAM:-}" ]; then ok "GPU present: ${H_VRAM} MiB of VRAM"
+  else ok "no GPU answered (the AI's GPU lane needs one; the CPU lane does not)"; fi
+  [ -n "${H_UNDET:-}" ] && warn "not measured: ${H_UNDET} — whoever needs one of these has to refuse, not guess"
+fi
+
 [ -d /dev/shm ] && touch /dev/shm/.aegis-probe 2>/dev/null && rm -f /dev/shm/.aegis-probe \
   && ok "/dev/shm writable (age/cosign ceremonies)" || bad "/dev/shm not writable"
 
