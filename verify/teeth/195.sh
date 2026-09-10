@@ -86,3 +86,19 @@ control_2() {
     printf '\n# a legitimate note: ExecStartPost=- is what the backup unit uses.\n' \
         >> "$AEGIS_ROOT/share/systemd/aegis-host-metrics.service"
 }
+
+# THE HEADLESS SERVICE, unhandled. vmsingle has `clusterIP: None`, so
+# reading that jsonpath yields the four characters N-o-n-e and curl
+# tries to resolve a host by that name. Measured 2026-09-10 — and the
+# backup unit had carried exactly this bug since it was written,
+# silently, because its `-` prefix swallowed the failure: the instance
+# had zero aegis_backup_remote_* series while three alerts read them.
+red_7() {
+    python3 -c '
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+s = s.replace("""&& [ "$ip" = "None" ] && ip=$(kubectl get endpointslice -n observability -l kubernetes.io/service-name=vmsingle -o jsonpath="{.items[0].endpoints[0].addresses[0]}"); pt=""", "&& pt=")
+open(p, "w", encoding="utf-8").write(s)
+' "$AEGIS_ROOT/share/systemd/aegis-host-metrics.service"
+}

@@ -117,6 +117,18 @@ else:
         print("FAILthe unit does not resolve vmsingle's ClusterIP: it runs on the HOST, "
               "where the cluster's DNS names do not resolve, and a "
               "*.svc.cluster.local here would fail every single time")
+    elif '"None"' not in e and "'None'" not in e:
+        # vmsingle IS HEADLESS. Measured 2026-09-10:
+        # `jsonpath={.spec.clusterIP}` on that Service returns the four
+        # characters N-o-n-e, and curl faithfully tries to resolve a
+        # host by that name. The backup unit had carried this bug since
+        # it was written and nobody saw it, because its `-` prefix kept
+        # the failure quiet: the instance had ZERO
+        # aegis_backup_remote_* series while three alerts read them.
+        print("FAILthe unit reads the ClusterIP and does not handle it being `None`: "
+              "vmsingle is a HEADLESS Service, so that jsonpath yields the string "
+              "None and curl tries to resolve a host by that name. An endpoint has "
+              "to be asked for instead")
 
 print("    metrics() publishes watermarks and its own VRAM mark · timer %s · the push "
       "fails loudly" % (mt.group(0).split("=")[1] if mt else "?"))

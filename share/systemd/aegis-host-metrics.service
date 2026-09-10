@@ -48,7 +48,12 @@ Type=oneshot
 # leave the operator with a dashboard that stays green because nothing
 # ever arrived — which is the exact failure this whole area exists to
 # end.
-ExecStart=/bin/sh -c 'ip=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.clusterIP}") && pt=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.ports[0].port}") && /usr/local/bin/aegis host metrics | curl -sS --fail --max-time 20 --data-binary @- "http://$ip:$pt/api/v1/import/prometheus"'
+# AND THE SERVICE IS HEADLESS, which is why this asks for an
+# ENDPOINT when the ClusterIP comes back as the string "None".
+# Measured 2026-09-10: vmsingle has `clusterIP: None`, so the
+# obvious `jsonpath={.spec.clusterIP}` yields the four characters
+# N-o-n-e and curl faithfully tries to resolve a host by that name.
+ExecStart=/bin/sh -c 'ip=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.clusterIP}") && [ "$ip" = "None" ] && ip=$(kubectl get endpointslice -n observability -l kubernetes.io/service-name=vmsingle -o jsonpath="{.items[0].endpoints[0].addresses[0]}"); pt=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.ports[0].port}") && /usr/local/bin/aegis host metrics | curl -sS --fail --max-time 20 --data-binary @- "http://$ip:$pt/api/v1/import/prometheus"'
 
 # Reading /proc and one nvidia-smi call. It shares the machine with
 # everything else and should never be the reason something else waited.

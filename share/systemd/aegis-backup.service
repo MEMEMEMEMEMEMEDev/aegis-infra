@@ -52,7 +52,17 @@ ExecStart=/usr/local/bin/aegis data backup
 # every single time, silently, behind the `-` that keeps the unit
 # green. The node does route to a ClusterIP, so the IP is read from
 # the Service the same way `aegis check` reads it.
-ExecStartPost=-/bin/sh -c 'ip=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.clusterIP}") && pt=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.ports[0].port}") && /usr/local/bin/aegis data remote status 2>/dev/null | curl -sS --max-time 20 --data-binary @- "http://$ip:$pt/api/v1/import/prometheus"'
+# AND vmsingle IS HEADLESS, which this line did not know. Measured
+# 2026-09-10: `jsonpath={.spec.clusterIP}` on that Service returns
+# the four characters N-o-n-e, so curl tried to resolve a host by
+# that name and failed every single time. The `-` above is what
+# kept it quiet: this instance had ZERO aegis_backup_remote_*
+# series, and BackupStale, BackupMeasurementStopped and
+# BackupNeverArrived were all reading a measurement that had never
+# arrived. The `-` is still right — losing the measurement is not
+# losing the backup — but it is why the bug lived this long, and
+# the fix is to ask for an ENDPOINT when the ClusterIP is None.
+ExecStartPost=-/bin/sh -c 'ip=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.clusterIP}") && [ "$ip" = "None" ] && ip=$(kubectl get endpointslice -n observability -l kubernetes.io/service-name=vmsingle -o jsonpath="{.items[0].endpoints[0].addresses[0]}"); pt=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.ports[0].port}") && /usr/local/bin/aegis data remote status 2>/dev/null | curl -sS --max-time 20 --data-binary @- "http://$ip:$pt/api/v1/import/prometheus"'
 
 # The capture is not urgent and it is not alone on this machine: it
 # shares the disk with k3s and the CPU with every tenant. Being polite
