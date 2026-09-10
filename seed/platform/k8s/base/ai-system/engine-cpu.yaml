@@ -60,6 +60,28 @@ spec:
     metadata:
       labels: {app: engine-cpu, aegis.dev/component: ai}
     spec:
+      # ── WHY THIS ENGINE TAKES NO TURN ──────────────────────────────
+      #
+      # `engine-mt` waits for `engine-llm` to serve before it starts,
+      # so the two GPU lanes do not reserve VRAM in the same instant.
+      # The obvious next step is to hang this one off the end of that
+      # chain, and it was proposed. It is wrong, for two measured
+      # reasons.
+      #
+      # ONE: this engine is ALWAYS UP and the GPU ones almost never
+      # are. The controller scales llm and mt between 0 and 1 with the
+      # mode; engine-cpu has replicas 1 permanently. A wait on
+      # engine-mt's /health would therefore spend the full 600 s cap on
+      # every ordinary start, because the thing it is waiting for is
+      # not coming — the CPU lane would be ten minutes late to serve
+      # embeddings so that it could avoid a peak that is not happening.
+      #
+      # TWO: taking turns does not lower the steady state, only the
+      # transient. engine-llm stays resident once it is ready, so when
+      # engine-mt then loads, both are in memory anyway: 6.42 + 6.08 +
+      # 2.24 GiB measured 2026-09-09. What the turn buys is that the
+      # two LOADING spikes do not land together; what governs the total
+      # is `aegis host budget`, and that is where it belongs.
       containers:
         - name: engine
           # The digest is set by the kustomization's `images:` block.
@@ -75,6 +97,52 @@ spec:
             # model is missing the error must be "it is not there", not
             # a hang against a closed network.
             - {name: HF_HUB_OFFLINE, value: "1"}
+            # ── THE THREAD BUDGET, AND WHY IT IS WRITTEN HERE ────────
+            #
+            # `motor.py` reads all eight of these and, until
+            # 2026-09-09, this manifest set none of them — so the
+            # engine ran the defaults its own comment describes as a
+            # budget "over 32 threads", inside a container whose
+            # `limits.cpu` is 6.
+            #
+            # It is not that the defaults were wrong; it is that
+            # NOTHING INSIDE A CONTAINER KNOWS ITS OWN LIMIT. `nproc`
+            # in here answers 32, because a cgroup caps CPU TIME and
+            # does not change what the kernel reports. Measured
+            # 2026-09-09 in the live pod: nproc 32, sixty threads in
+            # the process, limit 6. Every library that sizes a pool
+            # from `cpu_count()` does this, which is why these numbers
+            # have to be declared next to the limit they answer to.
+            #
+            # WHAT CHANGED AND WHAT DID NOT, on purpose: the WORKERS
+            # are untouched, so concurrency is exactly what it was —
+            # four transcriptions at once is what the gateway's
+            # AI_EN_VUELO_CPU=4 expects to be able to hand over. What
+            # comes down is THREADS PER WORKER, which is intra-op
+            # parallelism with sharply diminishing returns on models
+            # this size, and which is where the oversubscription lived.
+            #
+            # The budget: oido 4x1 + voz 2x1 + vision 2x1 + vector 2x1
+            # = 10 at the theoretical peak against a limit of 6. The
+            # original chose 48 over 32 threads, a ratio of 1.5; this
+            # is 1.67, and these caps still do not all happen at once.
+            - {name: AEGIS_HILOS_OIDO, value: "1"}
+            - {name: AEGIS_HILOS_VOZ, value: "1"}
+            - {name: AEGIS_HILOS_VISION, value: "1"}
+            - {name: AEGIS_HILOS_VECTOR, value: "1"}
+            - {name: AEGIS_OBREROS_OIDO, value: "4"}
+            - {name: AEGIS_OBREROS_VOZ, value: "2"}
+            - {name: AEGIS_OBREROS_VISION, value: "2"}
+            - {name: AEGIS_OBREROS_VECTOR, value: "2"}
+            # And the libraries underneath, which size their own pools
+            # from cpu_count() without asking anybody. One thread each,
+            # because here the WORKER count is the concurrency.
+            - {name: OMP_NUM_THREADS, value: "1"}
+            - {name: MKL_NUM_THREADS, value: "1"}
+            # glibc opens up to eight malloc arenas per core and does
+            # not give them back. On a 32-thread machine inside a
+            # container with a memory limit, that is measured as a leak.
+            - {name: MALLOC_ARENA_MAX, value: "2"}
           ports:
             - {name: http, containerPort: 8600}
           volumeMounts:

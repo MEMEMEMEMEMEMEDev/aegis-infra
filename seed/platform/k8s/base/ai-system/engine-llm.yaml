@@ -211,6 +211,37 @@ spec:
             # not in this image. At ten sequences the difference is
             # irrelevant.
             - {name: VLLM_USE_FLASHINFER_SAMPLER, value: "0"}
+            # ── THE THREAD CAPS, WRITTEN NEXT TO THE LIMIT THEY
+            # ANSWER TO ───────────────────────────────────────────────
+            #
+            # NOTHING INSIDE A CONTAINER KNOWS ITS OWN LIMIT. `nproc`
+            # in here answers with the machine's 32 threads, because a
+            # cgroup caps CPU TIME and does not change what the kernel
+            # reports. Every library that sizes a pool from
+            # `cpu_count()` therefore sizes it for a machine it is not
+            # allowed to use.
+            #
+            # TORCHINDUCTOR_COMPILE_THREADS is the one that matters for
+            # MEMORY and not only for CPU. On a COLD torch.compile,
+            # inductor forks one worker process per thread and each one
+            # imports torch — on a 32-thread host that is thirty-two
+            # copies of a heavy import arriving at once, in the same
+            # minute both engines are also reading their weights. The
+            # compile cache hides it: measured 2026-09-09, every start
+            # in seven days hit the cache and took 6 s (32 s worst
+            # case). A rebuilt image, a new vLLM, or a wiped cache
+            # volume is where the cold path comes back, and it comes
+            # back on somebody else's smaller machine.
+            #
+            # The value mirrors `limits.cpu` below. Check 197 asserts
+            # that it keeps mirroring it, because the pair that drifts
+            # is the pair nobody re-reads.
+            - {name: TORCHINDUCTOR_COMPILE_THREADS, value: "6"}
+            - {name: OMP_NUM_THREADS, value: "6"}
+            # glibc opens up to eight malloc arenas per core and does
+            # not give them back; against a memory limit that is
+            # measured as a leak.
+            - {name: MALLOC_ARENA_MAX, value: "2"}
             # uid 1000 with no passwd entry: HOME must be explicit so
             # that ~/.triton and ~/.cache land on the cache volume.
             - {name: HOME, value: /cache}
