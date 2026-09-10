@@ -1,0 +1,70 @@
+[Unit]
+Description=aegis: report what only the host can see
+Documentation=file:///usr/local/share/aegis/systemd/README.md
+# With no cluster there is nowhere to send this, and a unit that fails
+# once a minute from boot is how a real failure stops being read. The
+# same condition, and the same reason, as the backup unit's.
+ConditionPathExists=%h/.kube/config
+
+[Service]
+Type=oneshot
+
+# A USER unit, like the backup's, and for a related reason rather than
+# the same one. The backup needs the operator's age key; this one needs
+# their kubeconfig to find vmsingle, and it needs to read
+# /sys/fs/cgroup/user.slice — the human's own slice, which is the whole
+# point of the measurement. Running it as root would buy nothing and
+# would put a timer with cluster credentials in the system manager.
+#
+# The consequence is the same as the backup's and has to be said twice
+# because it is silent: a user timer only runs while the user has a
+# session, unless lingering is enabled.
+#   loginctl enable-linger $USER
+# Without that, the machine stops reporting on itself the moment the
+# operator logs out — and logging out is precisely when a server-shaped
+# machine is left alone to work.
+
+# WHY THIS PUSHES INSTEAD OF BEING SCRAPED.
+#
+# Everything this prints lives OUTSIDE the cluster:
+# /proc/pressure/memory, the root cgroup's slices, and nvidia-smi. No
+# pod can see any of it, so there is nothing for vmagent to pull. The
+# alternative shape is a node_exporter DaemonSet, which would mean new
+# RBAC, a hostPath mount, a new scrape job, and moving
+# __OBS_SCRAPE_JOBS_MIN__ with the check that cross-checks it. The
+# precedent for this shape is aegis-backup.service, which measures on
+# the host and imports the result; the whole cost here is one timer.
+#
+# THE ADDRESS IS ASKED FOR, NEVER WRITTEN DOWN. This runs on the HOST,
+# where the cluster's DNS names do not resolve: a
+# `vmsingle.observability.svc.cluster.local` here would fail every
+# single time. The node does route to a ClusterIP, so the IP is read
+# from the Service, the same way `aegis check` reads it.
+#
+# NO LEADING `-`, and that is the deliberate difference from the backup
+# unit. There, the `-` is right: the capture already happened and is
+# already off-site, so losing the measurement is not losing the backup.
+# Here the measurement IS the work. A push that fails silently would
+# leave the operator with a dashboard that stays green because nothing
+# ever arrived — which is the exact failure this whole area exists to
+# end.
+ExecStart=/bin/sh -c 'ip=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.clusterIP}") && pt=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.ports[0].port}") && /usr/local/bin/aegis host metrics | curl -sS --fail --max-time 20 --data-binary @- "http://$ip:$pt/api/v1/import/prometheus"'
+
+# Reading /proc and one nvidia-smi call. It shares the machine with
+# everything else and should never be the reason something else waited.
+Nice=10
+IOSchedulingClass=idle
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+RestrictNamespaces=yes
+# NOT ProtectControlGroups: this unit's job is to read
+# /sys/fs/cgroup/user.slice and the other top-level slices. The backup
+# unit sets it because it has no business there; here it would hide the
+# subject.
+
+# A run that hangs is worse than one that fails: the next one never
+# starts, the series stops, and a gauge that stopped looks exactly like
+# a machine that is fine.
+TimeoutStartSec=60

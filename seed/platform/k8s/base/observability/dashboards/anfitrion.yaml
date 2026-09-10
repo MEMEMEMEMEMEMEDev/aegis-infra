@@ -1,0 +1,462 @@
+# The machine itself. Every other dashboard in here measures what aegis
+# RUNS; this one measures what it runs ON, and until 2026-09-09 nothing
+# did: of 1670 series in vmsingle, zero began with `node_`.
+#
+# The series come from `aegis host metrics`, pushed by a systemd timer
+# on the host — the same shape as the backup measurement, and for the
+# same reason: /proc/pressure/memory, the root cgroup's slices and
+# nvidia-smi do not exist inside a pod, so there is nothing here for
+# vmagent to scrape.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-anfitrion
+  namespace: observability
+  labels:
+    aegis.dev/part-of: aegis-platform
+    grafana_dashboard: '1'
+data:
+  anfitrion.json: |
+    {
+      "uid": "aegis-anfitrion",
+      "title": "Aegis · the host",
+      "description": "The machine aegis is running on, which until 2026-09-09 nothing here measured: of 1670 series, zero began with node_. These come from `aegis host metrics`, pushed by a timer on the host itself, because /proc/pressure, the root cgroup's slices and nvidia-smi are not visible from inside a pod.",
+      "schemaVersion": 39,
+      "editable": false,
+      "timezone": "browser",
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "refresh": "1m",
+      "tags": [
+        "aegis",
+        "host"
+      ],
+      "panels": [
+        {
+          "id": 1,
+          "title": "Swap in use",
+          "description": "On a machine somebody is using, sustained swap is the desktop being evicted to make room for the cluster. That is the mechanism behind a session that stops answering, and it is what EscritorioEmpujadoAlSwap watches.",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "last_over_time(aegis_host_swap_used_bytes[5m])"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1073741824
+                  },
+                  {
+                    "color": "red",
+                    "value": 2147483648
+                  }
+                ]
+              }
+            }
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 2,
+          "title": "Swap configured",
+          "description": "How much swap there is to be pushed into. A machine with none does not freeze gently: it OOM kills.",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "last_over_time(aegis_host_swap_total_bytes[5m])"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            }
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 3,
+          "title": "The floor, and whether it is held",
+          "description": "1 means the kernel is really holding user.slice's memory.min, read from /sys/fs/cgroup and never from the file this product wrote — a drop-in that did not take effect looks identical to one that did if you only read your own writing.",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 12,
+            "y": 0
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "last_over_time(aegis_host_desktop_floor_enforced[5m])"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  }
+                ]
+              }
+            }
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 4,
+          "title": "What the node hands out",
+          "description": "allocatable over capacity. 1 means the kubelet keeps nothing back and the scheduler places pods against memory the host itself needs. Measured 1.0 on 2026-09-09, on a machine with a person on it.",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 18,
+            "y": 0
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "last_over_time(aegis_host_node_allocatable_ratio[5m])"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            }
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 5,
+          "title": "Memory by slice",
+          "description": "Where the machine's memory actually is. user.slice is the person, kubepods.slice is everything aegis runs, system.slice is k3s and the host's own daemons. This is the breakdown the platform could not show on the day the session froze.",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 5
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "last_over_time(aegis_host_cgroup_memory_current_bytes[5m])",
+              "legendFormat": "{{slice}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "fillOpacity": 35,
+                "lineWidth": 1,
+                "showPoints": "never",
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                }
+              }
+            }
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            }
+          }
+        },
+        {
+          "id": 6,
+          "title": "The most each slice ever held",
+          "description": "Watermarks since boot, which is why a sampler that looks once a minute can still see a spike that lasted eight seconds: memory.peak is monotonic and the kernel keeps it.",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 5
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "last_over_time(aegis_host_cgroup_memory_peak_bytes[5m])",
+              "legendFormat": "{{slice}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never"
+              }
+            }
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            }
+          }
+        },
+        {
+          "id": 7,
+          "title": "Time spent waiting on memory",
+          "description": "The symptom a person actually feels. `some` is any task stalled, `full` is everything stalled. Measured on this machine: 3.6% while the AI engines start, 15.4% at its worst.",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 14
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "rate(aegis_host_memory_stall_seconds_total[5m])",
+              "legendFormat": "{{scope}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never"
+              }
+            }
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            }
+          }
+        },
+        {
+          "id": 8,
+          "title": "VRAM: the card is shared too",
+          "description": "The compositor allocates from the same card as the engines and fails hard when it cannot — on 2026-09-06 this machine lost its graphical session to `Failed to allocate NVKMS memory`. The peak is kept by aegis, because nvidia-smi keeps none.",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 14
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "last_over_time(aegis_host_vram_used_mib[5m])",
+              "legendFormat": "used"
+            },
+            {
+              "refId": "B",
+              "legendFormat": "total",
+              "expr": "last_over_time(aegis_host_vram_total_mib[5m])"
+            },
+            {
+              "refId": "C",
+              "legendFormat": "peak",
+              "expr": "last_over_time(aegis_host_vram_peak_mib[5m])"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "decmbytes",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never"
+              }
+            }
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            }
+          }
+        },
+        {
+          "id": 9,
+          "title": "RAM, whole and available",
+          "description": "The two numbers the panels on the usage dashboard used to approximate from cAdvisor's root cgroup — which left out swap, slab and the page cache, and so stayed calm through the freeze.",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "vmsingle"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 23
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "last_over_time(aegis_host_ram_available_bytes[5m])",
+              "legendFormat": "available"
+            },
+            {
+              "refId": "B",
+              "legendFormat": "total",
+              "expr": "last_over_time(aegis_host_ram_total_bytes[5m])"
+            },
+            {
+              "refId": "C",
+              "legendFormat": "the floor",
+              "expr": "last_over_time(aegis_host_desktop_floor_bytes[5m])"
+            },
+            {
+              "refId": "D",
+              "legendFormat": "shared with a human",
+              "expr": "last_over_time(aegis_host_shared_with_a_human[5m])"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "custom": {
+                "fillOpacity": 10,
+                "lineWidth": 1,
+                "showPoints": "never"
+              }
+            }
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            }
+          }
+        }
+      ]
+    }

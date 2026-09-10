@@ -43,3 +43,45 @@ The shipped files are complete and valid as they are, for the default
 case. There is no placeholder in this directory ON PURPOSE: check 003
 sweeps `seed/` and does not look here, so a `__TOKEN__` living in this
 folder would be one nobody is watching.
+
+## aegis-host-metrics.service / .timer
+
+What only the host can see, pushed to vmsingle once a minute.
+
+Until 2026-09-09 this instance measured its containers and never the
+computer they ran on: of 1670 series in vmsingle, zero began with
+`node_`. So when the operator's graphical session froze under the AI
+engines, the platform had nothing to show for it — the numbers in the
+post-mortem had to be reconstructed from cAdvisor's root cgroup, which
+is there by accident and was never meant to be the record.
+
+It pushes rather than being scraped for the same reason the backup
+measurement does: `/proc/pressure/memory`, the root cgroup's slices and
+`nvidia-smi` do not exist inside a pod, so there is nothing for vmagent
+to pull. The alternative shape is a node_exporter DaemonSet, with new
+RBAC, a hostPath mount, a new scrape job and the check that
+cross-checks the job count. This costs one timer.
+
+Like the backup unit it is a USER unit, and it carries the same warning
+for the same reason: **a user timer only runs while the user has a
+session** unless lingering is on.
+
+    loginctl enable-linger $USER
+    systemctl --user enable --now aegis-host-metrics.timer
+
+Unlike the backup unit, its push carries **no leading `-`**. There the
+dash is right — the capture already happened and is already off-site,
+so losing the measurement is not losing the backup. Here the
+measurement is the whole job, and a failure that does not fail would
+leave a dashboard green for never having been told anything.
+
+The cadence is 60 s and the reason it is enough is not that a minute is
+fast: the peaks are cgroup watermarks (monotonic, so a sampler reads
+the mark a spike left rather than having to catch it), the stalls are
+counters, and the only true gauge — VRAM — gets its own watermark kept
+in `$AEGIS_HOME/host-metrics.state`. What 60 s costs is the shape of
+the instantaneous curve.
+
+Read what it publishes without waiting for the timer:
+
+    aegis host metrics
