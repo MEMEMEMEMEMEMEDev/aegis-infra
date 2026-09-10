@@ -46,6 +46,11 @@ NS=ai-system
 CM=ai-modo
 # The fleet: they all go up and down with the mode, through the
 # controller.
+#
+# This list is for NAMES — what to scale, what to read the logs of. It
+# is not an input to any arithmetic: `vram_limit_mib` derives how many
+# engines there are from the manifests that declare their fractions,
+# and treats this line as a claim to be audited against them.
 ENGINES="engine-llm engine-mt"
 AI_DIR="$PLATFORM_DIR/k8s/base/ai-system"
 KUST="$AI_DIR/kustomization.yaml"
@@ -83,6 +88,12 @@ AI_CONTAINERFILES="ai/engine-gpu/Containerfile ai/engine-cpu/Containerfile"
 # cannot be read, the command says so and does not invent a threshold:
 # an unmeasured preflight that waves everything through is worse than
 # no preflight, because it looks like one.
+#
+# And so does the COUNT they are multiplied by. Measured 2026-09-09:
+# the fraction was derived and the number of engines was not — it came
+# from the $ENGINES constant below. Both halves of `n * overshoot` have
+# to move together or the block above is telling a story about the
+# fraction while repeating the same mistake one term to the right.
 VLLM_OVERSHOOT_MIB=200      # per engine, measured
 VRAM_MARGIN_MIB=300
 
@@ -149,6 +160,22 @@ vram_total_mib() {
 # The sum of the engines' memory fractions, read from THE MANIFESTS.
 # Not a copy of the number: the number itself, from the file that
 # decides it.
+#
+# It prints TWO fields, "<sum> <how many>", and they come out of the
+# SAME walk. The count used to be taken from the $ENGINES constant a
+# few lines up, which meant half of one decision lived in a manifest
+# and the other half in this file — the exact drift the block above
+# says this function exists to end. A third engine would have moved the
+# fraction and left the count behind, and the threshold would have been
+# 200 MiB too generous with nobody the wiser.
+#
+# The glob is `engine-*.yaml` and it does reach `engine-cpu.yaml`. That
+# is fine and it is not luck: the CPU engine holds no GPU_MEM_UTIL, so
+# it contributes to neither field. What is NOT fine is that it used to
+# be luck — the count came from elsewhere, so the day engine-cpu grew a
+# profile it would have contributed a fraction and no engine. Now both
+# fields see the same file, and a manifest cannot move one without the
+# other.
 vram_fraction_sum() {
   python3 - "$AI_DIR" <<'EOF'
 import glob, os, sys, yaml
@@ -165,21 +192,42 @@ for f in sorted(glob.glob(os.path.join(sys.argv[1], "engine-*.yaml"))):
         seen += 1
 if not seen:
     sys.exit(1)
-print(f"{total:.4f}")
+print(f"{total:.4f} {seen}")
 EOF
 }
 
 # The threshold, derived. Prints -1 when it cannot be measured, and the
 # caller says so out loud instead of substituting a number.
+#
+# BOTH terms of the overshoot now come from the manifests: the fraction
+# and the number of engines it is a fraction of. $ENGINES stays because
+# the kubectl loops need a list of names to scale and to read, but it
+# is no longer an INPUT to any arithmetic — it is an ASSERTION that the
+# manifests audit. If the two disagree, somebody added an engine to one
+# half of the decision and not the other, and this returns -1 naming
+# both numbers rather than picking one. That is the same rule the
+# preflight already applies to a card that will not answer: an
+# unmeasured threshold is not a permissive one, it is an absent one.
 vram_limit_mib() {
-  local total frac
+  local total frac_and_count frac derived
   total=$(vram_total_mib)
   [ "$total" = "-1" ] && { echo -1; return; }
-  frac=$(vram_fraction_sum) || { echo -1; return; }
-  local engines; engines=$(echo $ENGINES | wc -w)
+  frac_and_count=$(vram_fraction_sum) || { echo -1; return; }
+  frac=${frac_and_count% *}
+  derived=${frac_and_count#* }
+
+  local declared; declared=$(echo $ENGINES | wc -w)
+  if [ "$declared" -ne "$derived" ] 2>/dev/null; then
+    echo "the fleet and the manifests disagree: \$ENGINES names ${declared} engine(s) ($ENGINES)," >&2
+    echo "but ${derived} manifest(s) in $AI_DIR declare a GPU_MEM_UTIL." >&2
+    echo "One of the two was edited without the other; the VRAM threshold is not derivable until they agree." >&2
+    echo -1
+    return
+  fi
+
   python3 -c "
 import sys
-total, frac, n, over, margin = float('$total'), float('$frac'), int('$engines'), int('$VLLM_OVERSHOOT_MIB'), int('$VRAM_MARGIN_MIB')
+total, frac, n, over, margin = float('$total'), float('$frac'), int('$derived'), int('$VLLM_OVERSHOOT_MIB'), int('$VRAM_MARGIN_MIB')
 print(int(total * (1.0 - frac)) - n * over - margin)
 "
 }
