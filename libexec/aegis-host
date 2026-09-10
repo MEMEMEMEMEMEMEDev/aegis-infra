@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 # aegis-summary: Measures the machine aegis landed on and writes it down
 # aegis-group:   operate
-# aegis-subcommands: measure show
+# aegis-subcommands: measure show floor requires
 """aegis-host — measures the machine aegis landed on, and writes it down.
 
     aegis host measure          # look at the machine, save the facts
     aegis host show [--json]    # what was measured, and what could not be
+    aegis host floor            # how much of it aegis leaves alone, and why
+    aegis host floor --set <step>   # choose deliberately instead of deriving
+    aegis host requires         # what aegis needs of a machine, from plans.yaml
 
 ── WHY THIS COMMAND EXISTS ─────────────────────────────────────────
 
@@ -67,7 +70,7 @@ import time
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
-from aegis import cli, paths             # noqa: E402
+from aegis import cli, host as hostlib, paths   # noqa: E402
 
 HOST_JSON = paths.aegis_home() / "host.json"
 
@@ -433,6 +436,100 @@ def _render(doc):
               f"has to refuse, not guess{reset}")
 
 
+# ── requires ─────────────────────────────────────────────────────────
+
+def requires(args):
+    """What a machine has to have before aegis will install on it.
+
+    It exists so that the requirement has ONE reader. Two commands used
+    to hold their own copy of the free-disk threshold and they did not
+    agree — 25 GiB here, 20 in the init's gate, for the same PVCs — and
+    the READMEs published a third opinion nobody could check against
+    either.
+    """
+    try:
+        req = hostlib.requirements(hostlib.check_anfitrion(hostlib.load_plans()))
+    except hostlib.Unusable as e:
+        print(f"{red}{e}{reset}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(req, indent=2, sort_keys=True))
+        return 0
+    print(f"{bold}what aegis needs of a machine{reset}"
+          f"   {gray}from plans.yaml, anfitrion{reset}")
+    print(f"  free disk on /   {req['disk_free']}")
+    return 0
+
+
+# ── floor ────────────────────────────────────────────────────────────
+
+def floor(args):
+    """How much of this machine aegis leaves alone, and where that came from."""
+    try:
+        plans = hostlib.load_plans()
+        anfitrion = hostlib.check_anfitrion(plans)
+    except hostlib.Unusable as e:
+        print(f"{red}{e}{reset}", file=sys.stderr)
+        return 2
+
+    known = hostlib.steps_of(anfitrion)
+
+    if args.set:
+        if args.set not in known:
+            print(f"{red}{args.set!r} is not an anfitrion step plans.yaml "
+                  f"declares{reset}", file=sys.stderr)
+            print(f"  declared: {', '.join(known)}", file=sys.stderr)
+            return 3
+        hostlib.floor_file().parent.mkdir(parents=True, exist_ok=True)
+        hostlib.floor_file().write_text(args.set + "\n", encoding="utf-8")
+        print(f"{green}the floor is now {args.set}{reset} "
+              f"{gray}({hostlib.floor_file()}){reset}")
+    elif args.unset:
+        # Not an error when there was nothing to remove: going back to
+        # the derived answer is the same outcome either way.
+        hostlib.floor_file().unlink(missing_ok=True)
+        print(f"{green}the floor goes back to being derived from the "
+              f"measurement{reset}")
+
+    try:
+        facts = hostlib.read_facts()
+        f = hostlib.floor(anfitrion, facts)
+    except hostlib.Unusable as e:
+        print(f"{red}{e}{reset}", file=sys.stderr)
+        return 2
+
+    if args.json:
+        print(json.dumps(f, indent=2, sort_keys=True))
+        return 0
+
+    print(f"{bold}the floor{reset}   {gray}what the cluster may never take away{reset}")
+    print(f"  step        {bold}{f['step']}{reset}   {gray}{f['source']}{reset}")
+    print(f"  RAM         {_gib(f['ram_bytes'])}")
+    print(f"  VRAM        {f['vram_mib']} MiB")
+    print()
+    print(f"  {gray}a floor, not a cap: above it the desktop competes like "
+          f"anything else{reset}")
+
+    # What that floor turns into for the node, shown here because the
+    # number nobody could see is the whole reason this area exists.
+    try:
+        r = hostlib.node_reservation(anfitrion, facts)
+    except hostlib.Unusable as e:
+        print()
+        print(f"  {yellow}the node's reservation cannot be derived yet{reset}")
+        print(f"    {gray}{str(e).splitlines()[0]}{reset}")
+        return 0
+    print()
+    print(f"{bold}what that reserves on the node{reset}")
+    print(f"  machine     {_gib(r['ram_total_bytes'])}")
+    print(f"  reserved    {_gib(r['system_reserved_bytes'])}"
+          f"   {gray}the floor plus the host's own daemons{reset}")
+    print(f"  eviction    {_gib(r['eviction_bytes'])}")
+    print(f"  left to k8s {_gib(r['allocatable_bytes'])}"
+          f"   {gray}today the node says allocatable == capacity{reset}")
+    return 0
+
+
 # ── main ─────────────────────────────────────────────────────────────
 
 def main():
@@ -448,6 +545,21 @@ def main():
     p = sub.add_parser("show", help="what was measured, and what could not be")
     p.add_argument("--json", action="store_true", help="print the facts as JSON")
     p.set_defaults(fn=show)
+
+    p = sub.add_parser("floor",
+                       help="how much of the machine aegis leaves alone, and why")
+    p.add_argument("--set", metavar="STEP",
+                   help="choose a step from plans.yaml instead of deriving one")
+    p.add_argument("--unset", action="store_true",
+                   help="go back to deriving it from the measurement")
+    p.add_argument("--json", action="store_true", help="print the floor as JSON")
+    p.set_defaults(fn=floor)
+
+    p = sub.add_parser("requires",
+                       help="what aegis needs of a machine before installing")
+    p.add_argument("--json", action="store_true",
+                   help="print the requirements as JSON")
+    p.set_defaults(fn=requires)
 
     args = ap.parse_args()
     if not getattr(args, "fn", None):

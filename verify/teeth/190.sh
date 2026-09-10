@@ -74,6 +74,25 @@ control_1() {
         >> "$AEGIS_ROOT/libexec/aegis-preflight"
 }
 
+# control: a MESSAGE that names /proc/meminfo without reading it. This
+# is not hypothetical — it is the false positive this check produced in
+# its own first hour, from the refusal that tells the operator to
+# re-run on a machine where the file is readable. A mention is not a
+# use, in a python string exactly as in a comment.
+control_3() {
+    python3 - "$AEGIS_ROOT/lib/aegis/host.py" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+s = s.replace('def floor_file():',
+              'def _why_it_failed():\n'
+              '    return ("the machine\'s RAM comes from /proc/meminfo and "\n'
+              '            "MemTotal was not there")\n\n\n'
+              'def floor_file():')
+open(p, "w", encoding="utf-8").write(s)
+PY
+}
+
 # control: one more probe, written the way the rule asks — returning
 # None when it cannot measure. Growing the profile has to stay green.
 control_2() {

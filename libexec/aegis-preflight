@@ -256,17 +256,24 @@ sh("H_SHARED", {True: "yes", False: "no"}.get(d.get("shared_with_a_human"), ""))
 sh("H_UNDET", ",".join(d.get("undetermined") or []))
 ')"
 
-  # A REAL INCONSISTENCY THIS WAVE DOES NOT YET CLOSE, written here so
-  # it is not discovered twice: this command demands 25 GiB free while
-  # the init's own gate `disco-20G` (init/phases/00-preflight.sh)
-  # demands 20, for the same requirement. Two thresholds for one thing
-  # means one of them is wrong and nobody can say which. They get a
-  # single home in plans.yaml next to the host floors, and both read it
-  # from there.
-  if [ -z "${H_DISK_G:-}" ]; then
+  # THE THRESHOLD IS NOT WRITTEN HERE, and until 2026-09-09 it was —
+  # twice. This command demanded 25 GiB free and the init's own gate
+  # `disco-20G` demanded 20, for the same registry+jenkins+trivy PVCs,
+  # and both READMEs published a third opinion nobody could check
+  # against either. Two thresholds for one requirement means one of
+  # them is wrong and nobody can say which. It now lives in
+  # plans.yaml's `anfitrion` section and both readers ask for it.
+  DISK_MIN_G="$("$AEGIS_ROOT/libexec/aegis-host" requires --json 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["disk_free_bytes"] // (1024**3))' 2>/dev/null)"
+  if [ -z "${DISK_MIN_G:-}" ]; then
+    bad "the free-disk requirement COULD NOT BE READ from plans.yaml ('aegis host requires'): the machine may well have room, but nothing here measured it against anything"
+  elif [ -z "${H_DISK_G:-}" ]; then
     bad "free disk on / could not be measured"
-  elif [ "$H_DISK_G" -ge 25 ]; then ok "free disk on /: ${H_DISK_G}G (>=25G)"
-  else bad "free disk ${H_DISK_G}G (<25G)"; fi
+  elif [ "$H_DISK_G" -ge "$DISK_MIN_G" ]; then
+    ok "free disk on /: ${H_DISK_G}G (>=${DISK_MIN_G}G)"
+  else
+    bad "free disk ${H_DISK_G}G (<${DISK_MIN_G}G)"
+  fi
 
   if [ -z "${H_RAM_G:-}" ]; then
     bad "total RAM could not be measured"

@@ -164,9 +164,27 @@ gate "github-auth" check_github_reachable
 #     GitHub rotation BEFORE baking the values into the cluster):
 gate "github-hostkeys-vigentes" check_github_hostkeys_pin
 
-# 4. Disk space (registry+jenkins+trivy PVCs; threshold 20G):
-gate "disco-20G" bash -c \
-    '[[ $(df --output=avail -BG / | tail -1 | tr -dc 0-9) -ge 20 ]]'
+# 4. Disk space (registry+jenkins+trivy PVCs). THE THRESHOLD IS NOT
+#    WRITTEN HERE, and until 2026-09-09 it was: this gate demanded 20
+#    GiB while `aegis preflight` demanded 25 for the same PVCs, and
+#    both READMEs published 25. Two thresholds for one requirement
+#    means one of them is wrong and nobody could say which. It lives
+#    in plans.yaml's `anfitrion.disco_minimo` now, and the gate asks
+#    `aegis host requires` for it like every other reader.
+#
+#    The gate keeps its name WITHOUT a number in it, because a name
+#    that carries the number is the same drift one layer up: rename
+#    the threshold and the dossier of every past run starts lying.
+gate "disco-suficiente" bash -c '
+    min_g=$("$AEGIS_ROOT/libexec/aegis-host" requires --json 2>/dev/null \
+      | python3 -c "import json,sys; print(json.load(sys.stdin)[\"disk_free_bytes\"] // (1024**3))" 2>/dev/null)
+    # No threshold, no verdict. A gate that passes because it could not
+    # read its own requirement is the green-for-not-having-looked this
+    # house refuses.
+    [[ -n "$min_g" ]] || { echo "the free-disk requirement could not be read from plans.yaml" >&2; exit 1; }
+    free_g=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
+    [[ -n "$free_g" ]] || { echo "the free disk on / could not be measured" >&2; exit 1; }
+    [[ "$free_g" -ge "$min_g" ]] || { echo "free disk ${free_g}G, and aegis needs ${min_g}G" >&2; exit 1; }'
 
 # 5. Greenfield on a host with a previous kubeconfig: confirm that
 #    nothing live is being stepped on (A11 inverted: here the danger

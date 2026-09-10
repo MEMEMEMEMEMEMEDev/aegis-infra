@@ -1,0 +1,309 @@
+"""What the machine has, what it has to keep, and what is left over.
+
+`aegis host` measures; this decides what the measurement MEANS. The two
+are split because they fail differently: a probe fails when a machine
+will not answer, and this fails when the numbers are missing from
+plans.yaml or when nobody said who else uses the computer.
+
+The rule inherited from `vram_limit_mib` in `libexec/aegis-ai`, and the
+one every function here obeys: a value that could not be derived comes
+back as a refusal that NAMES what is missing, never as a default. An
+unmeasured threshold is not a permissive one; it is an absent one, and
+a floor derived from a RAM total nobody read looks exactly like a floor
+derived from a real machine.
+"""
+import json
+import os
+
+import yaml
+
+from . import paths, quantity
+
+# The steps of the `anfitrion:` section, and the two keys every one of
+# them has to carry. Both are DERIVED from plans.yaml when it is read —
+# these names exist so the validation below can say which one is
+# missing, not so the code can skip reading the file.
+FLOOR_KEYS = ("ram", "vram")
+RESERVA_KEYS = ("sistema", "desalojo")
+
+# The keys of `anfitrion:` that are NOT steps. This is a fact about the
+# section's SHAPE, not a copy of its contents: the step names
+# themselves are never written down here, they are whatever is left
+# after these. A list of step names in this file would be the second
+# place to edit that the whole section exists to abolish.
+NON_STEPS = ("reservas", "disco_minimo", "por_omision")
+
+# What the measurement maps onto, when nobody chose. The two words are
+# the QUESTION ("is this machine shared?"), not the answer: which step
+# each one leads to is declared in plans.yaml under `por_omision`.
+SHARED_KEY = "compartida"
+DEDICATED_KEY = "dedicada"
+
+# Where the operator's chosen step is written down, when they choose
+# one. A single word in a file, the same shape `aegis data remote
+# cadence --set` uses for the backup clock.
+FLOOR_FILE_NAME = "host-floor"
+FLOOR_ENV = "AEGIS_HOST_FLOOR"
+
+
+class Unusable(Exception):
+    """The numbers or the facts needed to decide are not there.
+
+    Deliberately not org.py's `Invalid`: that one judges a CONTRACT
+    somebody wrote, this one reports that the artifact or the machine
+    did not supply something the arithmetic needs. Mixing them would
+    tell an operator they made a mistake when the product did.
+    """
+
+
+def floor_file():
+    return paths.aegis_home() / FLOOR_FILE_NAME
+
+
+def load_plans():
+    """plans.yaml, from wherever it is legible on this machine."""
+    p = paths.plans_yaml()
+    if not p.is_file():
+        raise Unusable(
+            f"plans.yaml is not readable ({p}).\n"
+            f"  It is where the numbers live, including how much of this machine\n"
+            f"  aegis may take. Without it nothing here can be derived, and\n"
+            f"  guessing a floor would be worse than having none.")
+    try:
+        return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as e:
+        raise Unusable(f"plans.yaml could not be parsed ({p}): {e}")
+
+
+def check_anfitrion(plans):
+    """plans.yaml carries the whole `anfitrion:` section this code indexes.
+
+    A SEPARATE PASS over the section, in the shape of `org.py`'s
+    `_check_plans` and for the same measured reason: a lookup as each
+    value is needed turns a missing step into a `KeyError` deep inside
+    whoever asked, and a python traceback is not a verdict — it names
+    neither the file nor what is missing from it.
+
+    It lands on a real adoption path. `plans.yaml` travels in the seed
+    and an instance older than this section adopts it by COPYING the
+    section across; a copy that brings only the step that instance
+    happens to use is exactly the partial copy this refuses.
+
+    Returns the section.
+    """
+    a = plans.get("anfitrion")
+    if not a:
+        raise Unusable(
+            "plans.yaml carries no `anfitrion:` section.\n"
+            "  It is the ceiling over every other ceiling: what aegis leaves\n"
+            "  alone on the machine it landed on. The seed ships it; an\n"
+            "  instance older than the field adopts it by copying it across.")
+
+    steps = [k for k, v in a.items()
+             if k not in NON_STEPS and isinstance(v, dict)]
+    if not steps:
+        raise Unusable(
+            "plans.yaml: `anfitrion:` declares no step.\n"
+            "  Without at least one, there is no floor to leave the machine and\n"
+            "  no number to derive a reservation from.")
+    for name in sorted(steps):
+        absent = [k for k in FLOOR_KEYS if k not in (a[name] or {})]
+        if absent:
+            raise Unusable(
+                f"plans.yaml: the anfitrion step {name!r} does not declare "
+                f"{', '.join(absent)}.\n"
+                f"  A step that says what to leave in RAM and not in VRAM (or the\n"
+                f"  other way round) is half a floor: whichever half is missing\n"
+                f"  gets derived as nothing, which is the state that froze a\n"
+                f"  session on 2026-09-09.")
+
+    reservas = a.get("reservas") or {}
+    absent = [k for k in RESERVA_KEYS if k not in reservas]
+    if absent:
+        raise Unusable(
+            f"plans.yaml: `anfitrion.reservas` does not declare "
+            f"{', '.join(absent)}.\n"
+            f"  They are what the host's own daemons and the kubelet's eviction\n"
+            f"  margin need, and they are added to the floor to make the node's\n"
+            f"  reservation. Missing, the reservation comes out too small and\n"
+            f"  the scheduler goes on believing it owns the machine.")
+
+    if not a.get("disco_minimo"):
+        raise Unusable(
+            "plans.yaml: `anfitrion.disco_minimo` is not declared.\n"
+            "  It is the single home of the free-disk requirement, which used to\n"
+            "  be written in two places with two different numbers.")
+
+    por = a.get("por_omision") or {}
+    absent = [k for k in (SHARED_KEY, DEDICATED_KEY) if k not in por]
+    if absent:
+        raise Unusable(
+            f"plans.yaml: `anfitrion.por_omision` does not say which step a "
+            f"{' or '.join(absent)} machine derives.\n"
+            f"  Without it a fresh install has a measurement and no way to turn\n"
+            f"  it into a floor, and the mapping would have to be guessed in\n"
+            f"  code — which is the second place to edit this section exists to\n"
+            f"  abolish.")
+    for kind, step in por.items():
+        if step not in steps:
+            raise Unusable(
+                f"plans.yaml: `anfitrion.por_omision.{kind}` names the step "
+                f"{step!r}, which is not declared.\n"
+                f"  Declared: {', '.join(sorted(steps))}.")
+    return a
+
+
+def requirements(anfitrion):
+    """What a machine has to have before aegis will install on it.
+
+    ONE home for numbers that had two. `aegis preflight` demanded 25
+    GiB of free disk and the init's own gate `disco-20G` demanded 20,
+    for the same registry+jenkins+trivy PVCs. Two thresholds for one
+    requirement means one of them is wrong and nobody can say which —
+    and the README, which publishes 25, could not be checked against
+    either of them because neither was readable from anywhere else.
+    """
+    return {
+        "disk_free_bytes": quantity.mem(anfitrion["disco_minimo"]),
+        "disk_free": str(anfitrion["disco_minimo"]),
+    }
+
+
+def steps_of(anfitrion):
+    """The step names, DERIVED from the section and never listed here."""
+    return sorted(k for k, v in anfitrion.items()
+                  if k not in NON_STEPS and isinstance(v, dict))
+
+
+def read_facts():
+    """The host profile `aegis host measure` wrote, or a refusal."""
+    p = paths.aegis_home() / "host.json"
+    if not p.is_file():
+        raise Unusable(
+            f"this machine has not been measured ({p} is not there).\n"
+            f"  Run `aegis host measure` first. Nothing here invents a machine.")
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise Unusable(
+            f"the host profile could not be read ({p}): {e}\n"
+            f"  It is not that the machine is fine: it is that the measurement\n"
+            f"  is unreadable. Re-run `aegis host measure`.")
+
+
+def chosen_step(anfitrion, facts):
+    """Which step applies, and WHERE that came from.
+
+    Three sources, in this order, and the order is the point: what the
+    operator says for one run beats what they wrote down, and both beat
+    what the machine implies. Every answer carries its provenance so
+    `aegis host show` can print not just the number but why it is that
+    number.
+
+      1. $AEGIS_HOST_FLOOR             — this run only
+      2. $AEGIS_HOME/host-floor        — written by `aegis host floor --set`
+      3. derived from the measurement  — the default, and the common case
+
+    The derivation itself is one line: a machine somebody shares gets
+    `compartido`, a machine nobody shares gets `dedicado`. It is
+    deliberately the timid choice of the two, because the derivation
+    runs on machines whose owner has not measured anything yet.
+
+    If the measurement could not tell whether a human is there, this
+    REFUSES. Not knowing is not the same as knowing there is nobody,
+    and the difference is a frozen session.
+    """
+    known = steps_of(anfitrion)
+
+    env = os.environ.get(FLOOR_ENV)
+    if env:
+        return _validated(env.strip(), known, f"${FLOOR_ENV}")
+
+    f = floor_file()
+    if f.is_file():
+        word = f.read_text(encoding="utf-8").strip()
+        if word:
+            return _validated(word, known, str(f))
+
+    shared = facts.get("shared_with_a_human")
+    if shared is None:
+        raise Unusable(
+            "whether a human shares this machine could not be established, so "
+            "no floor can be derived.\n"
+            "  Not knowing is not the same as knowing there is nobody: the one\n"
+            "  time the difference matters is the moment somebody sits down.\n"
+            f"  Choose deliberately:  aegis host floor --set <{'|'.join(known)}>")
+    # The mapping is READ, not written here: plans.yaml says which step
+    # a shared machine derives and which one a dedicated machine does.
+    # `check_anfitrion` has already refused a file that does not say.
+    kind = SHARED_KEY if shared else DEDICATED_KEY
+    step = anfitrion["por_omision"][kind]
+    return step, ("measured: a human shares this machine" if shared
+                  else "measured: no graphical session")
+
+
+def _validated(word, known, where):
+    if word not in known:
+        raise Unusable(
+            f"{where} asks for the anfitrion step {word!r}, which plans.yaml "
+            f"does not declare.\n"
+            f"  Declared: {', '.join(known)}.")
+    return word, where
+
+
+def floor(anfitrion, facts):
+    """The floor in bytes and MiB, with the step and its provenance."""
+    step, source = chosen_step(anfitrion, facts)
+    s = anfitrion[step]
+    return {
+        "step": step,
+        "source": source,
+        "ram_bytes": quantity.mem(s["ram"]),
+        "vram_mib": int(quantity.mem(s["vram"]) / (1024 ** 2))
+        if str(s["vram"]).strip() not in ("0", "") else 0,
+    }
+
+
+def node_reservation(anfitrion, facts):
+    """What the kubelet has to be told to keep away from pods.
+
+    ONE number decides two things that used to be able to disagree, and
+    that is why it is derived here rather than written anywhere:
+
+      · `system-reserved` lowers the node's `allocatable`, so the
+        SCHEDULER stops promising memory that is not there;
+      · with `enforce-node-allocatable=pods` the kubelet writes
+        `kubepods.slice`'s own `memory.max` from the same subtraction,
+        so the KERNEL stops letting the cluster reach for the whole
+        machine.
+
+    Measured 2026-09-09: `allocatable == capacity` and
+    `kubepods.slice/memory.max` was 32448565248 — exactly the machine.
+    The enforcement mechanism was already there; what was missing was
+    anything reserved.
+    """
+    f = floor(anfitrion, facts)
+    ram = facts.get("ram_total_bytes")
+    if ram is None:
+        raise Unusable(
+            "the machine's total RAM was not measured, so no reservation can "
+            "be derived from it.\n"
+            "  `undetermined` in host.json says so; re-run `aegis host measure`\n"
+            "  on a machine where /proc/meminfo is readable.")
+    reservas = anfitrion["reservas"]
+    sistema = quantity.mem(reservas["sistema"])
+    desalojo = quantity.mem(reservas["desalojo"])
+    # system-reserved covers everything outside kubepods: the person AND
+    # the host's own daemons. They are added and not maxed, because they
+    # are different memory held at the same time.
+    system_reserved = f["ram_bytes"] + sistema
+    allocatable = ram - system_reserved - desalojo
+    return {
+        "floor": f,
+        "ram_total_bytes": ram,
+        "system_reserved_bytes": system_reserved,
+        "eviction_bytes": desalojo,
+        "allocatable_bytes": allocatable,
+        "system_reserved": quantity.mem_str(system_reserved),
+        "eviction": quantity.mem_str(desalojo),
+    }

@@ -13,6 +13,98 @@
 # every case ("what if we give them 2.5 CPU?") and six months later
 # there are thirty different quotas nobody can reason about as a whole.
 
+anfitrion:
+  # THE CEILING OVER EVERY OTHER CEILING: what aegis leaves alone on
+  # the machine it landed on.
+  #
+  # It goes first because `cuota` and `tamano` below divide up a
+  # machine, and until 2026-09-09 nothing said how much machine there
+  # was to divide. The node reported `allocatable == capacity`, so the
+  # scheduler believed it could hand out every byte, and nothing told
+  # it a person was using the same computer. Measured that day:
+  # starting the two GPU engines took the host to 25.95 GiB of 30.22,
+  # with 4 GiB of swap and the desktop stalled 3.6 % of the time.
+  # Nothing was OOM killed -- `user.slice` had `memory.min = 0`, so the
+  # kernel simply evicted the human to make room.
+  #
+  # A FLOOR, NOT A CAP, and that distinction is the whole design. What
+  # is written here is what the cluster may never take away. Above it
+  # the desktop competes like anything else and may well page out. A
+  # floor of 4 GiB does not promise the session is always comfortable:
+  # it promises it never freezes.
+  #
+  # STEPS, not a continuum, for the same reason as every other section
+  # here. Ordered by how much of the machine aegis keeps its hands off.
+
+  # NOBODY ELSE IS HERE: a rented server, a VM, a node in a rack. The
+  # floor covers sshd, the journal and a login shell and nothing more.
+  # On a dedicated machine, leaving memory unused IS the mistake.
+  dedicado:
+    ram: 2Gi
+    vram: 0
+
+  # SOMEBODY WORKS ON THIS MACHINE, and these numbers are DELIBERATELY
+  # more generous than what the house machine turned out to need. This
+  # is the step a fresh install derives for itself, and whoever is
+  # installing has not measured their machine yet. Being stingy here
+  # fails as a frozen laptop in someone's first hour with the product;
+  # being generous fails as a few GiB the cluster could have used and a
+  # line in `aegis host budget` pointing at them. Those two are not
+  # worth the same.
+  compartido:
+    ram: 6Gi
+    vram: 2Gi
+
+  # THE MACHINE IS MINE AND I KNOW WHAT I AM DOING. Chosen by the
+  # operator, never derived. Measured on the house machine 2026-09-09:
+  # ai-system peaks at 13.49 GiB with the desktop empty, and the
+  # session holds ~680 MiB of VRAM with a browser open. A 4 GiB floor
+  # leaves the cluster 24 and still keeps the compositor alive; 1 GiB
+  # of VRAM sits above what the session was measured holding, with the
+  # engines already at 0.80 of the card.
+  #
+  # Say the trade out loud, because it is a real one: the desktop on
+  # that machine holds 8.54 GiB of RSS. Four of them are guaranteed.
+  # The other four compete, and under a full fleet they will page.
+  exprimido:
+    ram: 4Gi
+    vram: 1Gi
+
+  # WHICH STEP A FRESH MACHINE DERIVES FOR ITSELF, by what the
+  # measurement found. It lives here and not in the code for the same
+  # reason the steps do: the mapping is a decision about the product,
+  # and a copy of it in python is a second place to edit that nobody
+  # would think to look at.
+  #
+  # `exprimido` is deliberately absent: it is never derived. A floor
+  # that tight is a choice an operator makes about their own machine
+  # after seeing it measured, not one the product makes for a stranger.
+  por_omision:
+    compartida: compartido
+    dedicada: dedicado
+
+  # NOT STEPS: the numbers that do not depend on who else uses the
+  # machine, and so do not vary between the three above.
+  reservas:
+    # k3s, containerd, the journal, and the rest of the host's own
+    # daemons: everything outside kubepods that is not a person.
+    # Measured 2026-09-09 on the house machine, system.slice sits at
+    # 2.83 GiB with the cluster up.
+    sistema: 2Gi
+    # The kubelet's own margin before it begins evicting. Its default
+    # is 100Mi, which on a machine this size is the width of one page
+    # cache hiccup.
+    desalojo: 500Mi
+
+  # THE DISK REQUIREMENT, and it lives here because it had TWO homes.
+  # `aegis preflight` demanded 25 GiB free while the init's own gate
+  # `disco-20G` demanded 20, for the same registry+jenkins+trivy PVCs.
+  # Two thresholds for one requirement means one of them is wrong and
+  # nobody could say which. 25 is the number both READMEs publish, so
+  # 25 is the one that survives, and the init's gate reads it from here
+  # instead of holding a second opinion.
+  disco_minimo: 25Gi
+
 cuota:
   # A static front end and at most one small backend. Deliberately
   # tight: a quota is not an aspiration, it is the ceiling that keeps a

@@ -38,16 +38,49 @@ PRE="$LIBEXEC/aegis-preflight"
 D190=""
 
 # ── 1 · one measurer ─────────────────────────────────────────────────
-# Comments are stripped first. A file EXPLAINING that it no longer
-# reads /proc/meminfo must not count as a file that reads it — six
-# repetitions of that mistake are on the record.
-READERS=""
-for f in "$LIBEXEC"/* "$LIBS"/*.sh "$LIBS"/aegis/*.py "$PHASES"/*.sh "$AEGIS_ROOT"/bin/*; do
-    [[ -f "$f" ]] || continue
-    if nc "$f" 2>/dev/null | grep -qE 'MemTotal|/proc/meminfo'; then
-        READERS="$READERS $(basename "$f")"
-    fi
-done
+# PROSE IS STRIPPED FIRST, and both kinds of it. A file EXPLAINING that
+# it no longer reads /proc/meminfo must not count as a file that reads
+# it — six repetitions of that mistake are on this project's record,
+# and the seventh happened here: `lib/aegis/host.py` names the path
+# inside a DOCSTRING, which `#`-stripping does not touch. A bash
+# comment stripper is not enough for a python file.
+READERS="$(python3 - "$LIBEXEC" "$LIBS" "$PHASES" "$AEGIS_ROOT/bin" <<'PY'
+import pathlib, re, sys
+
+def code(p):
+    try:
+        s = p.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    if p.suffix == ".py" or s.startswith("#!/usr/bin/env python"):
+        s = re.sub(r'"""(?:.|\n)*?"""', "", s)
+        s = re.sub(r"'''(?:.|\n)*?'''", "", s)
+    return "\n".join(l.split("#", 1)[0] for l in s.splitlines())
+
+# A MENTION IS NOT A USE — verify/lib.sh says so, and checks 22, 25,
+# 66 and 71 paid for the lesson. A message that TELLS the operator to
+# re-run on a machine where /proc/meminfo is readable names the path
+# without reading it; counting that as a second measurer is the same
+# mistake in a different costume. So the path has to appear next to
+# something that actually opens a file.
+READS = re.compile(r"_read\(|open\(|read_text|\bawk\b|\bgrep\b|\bsed\b|\bcat\b|<\s*/proc")
+
+seen = []
+for d in sys.argv[1:]:
+    root = pathlib.Path(d)
+    if not root.is_dir():
+        continue
+    for p in sorted(root.rglob("*")):
+        if not p.is_file():
+            continue
+        for line in code(p).splitlines():
+            if re.search(r"MemTotal|/proc/meminfo", line) and READS.search(line):
+                seen.append(p.name)
+                break
+print(" ".join(sorted(set(seen))))
+PY
+)"
+READERS=" $READERS"
 NREAD=$(printf '%s' "$READERS" | wc -w)
 if [[ "$NREAD" -eq 0 ]]; then
     D190="$D190 nothing in the product reads the machine's RAM: with no measurer there is no host profile, and every budget derived from one is derived from nothing;"

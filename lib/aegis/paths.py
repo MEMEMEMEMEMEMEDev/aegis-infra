@@ -54,6 +54,27 @@ def orgs_dir() -> pathlib.Path:
     return platform_dir() / "orgs"
 
 
+def plans_yaml() -> pathlib.Path:
+    """Where the numbers live — the instance's copy, or the seed's.
+
+    `aegis org` has always read the INSTANCE's plans.yaml, and rightly:
+    by the time an organization is rendered the instance exists.
+    `aegis host` and `aegis preflight` do not have that luxury. They
+    run on a machine where nothing has been installed yet, and the
+    question they ask — how much of this machine may aegis take — has
+    to have an answer BEFORE there is an installation to copy it into.
+
+    So: the instance's copy when there is one, the artifact's
+    otherwise. The fallback is not a default value, it is the same file
+    read from the seed; and an instance whose plans.yaml has diverged
+    keeps winning on its own machine.
+    """
+    live = platform_dir() / "plans.yaml"
+    if live.is_file():
+        return live
+    return aegis_root() / "seed" / "platform" / "plans.yaml"
+
+
 def state_dir() -> pathlib.Path:
     return pathlib.Path(os.environ.get("AEGIS_STATE_DIR") or (aegis_home() / ".init-state"))
 
