@@ -110,6 +110,20 @@ else:
               "ceilings overcommit on purpose, and judging them against the "
               "leftover room turns normal into broken")
 
+# ── 5 · the GPU lane counts only where there is one ──────────────────
+# The engines carry no `replicas:` (the controller scales them from
+# zero), and reading "absent" as one charged 11 GiB of engines to a
+# host with no card. On a 16 GiB VPS with AI=cpu that is phase 87
+# refusing a valid install. Measured 2026-09-10.
+rep = body("_replicas")
+if rep is None:
+    print("FAILthe weighing has no _replicas: an absent replicas field has to be "
+          "read as a controller-scaled pod, not as one")
+elif not (re.search(r'"cpu"', rep) and re.search(r'\bai\b', rep)):
+    print("FAILthe GPU engines are counted regardless of the instance's AI lane: on "
+          "a host without a card they are 11 GiB that will never be asked for, and "
+          "the budget refuses installs that fit")
+
 # ── and the manifests still carry the term the account depends on ────
 import pathlib
 shm = 0

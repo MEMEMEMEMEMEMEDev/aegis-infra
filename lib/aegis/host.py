@@ -437,7 +437,36 @@ def _walk_bare_resources(node, out, seen_ids):
             _walk_bare_resources(v, out, seen_ids)
 
 
-def weigh_seed(base_dir):
+def _wants_gpu(pod):
+    """A pod is a GPU-lane pod if any container asks the device plugin for a card."""
+    for c in (pod.get("containers") or []):
+        lim = (c.get("resources") or {}).get("limits") or {}
+        if any(str(k).startswith("nvidia.com/") for k in lim):
+            return True
+    return False
+
+
+def _replicas(kind, spec, pod, ai):
+    """How many of this pod the budget should count.
+
+    Declared replicas win. A Deployment that declares NONE is one a
+    controller scales, and in this seed those are exactly the GPU
+    engines: asleep at birth, raised to one by `aegis ai open`. They
+    count as one only on an instance whose lane is `gpu` -- the
+    reservation is what an open working day would demand -- and as
+    zero on a lane that will never wake them. Unknown lane: counted,
+    said out loud by the caller, never silently the cheaper number.
+    """
+    if kind in ("DaemonSet", "Pod"):
+        return 1
+    if "replicas" in spec:
+        return int(spec["replicas"] or 0)
+    if _wants_gpu(pod):
+        return 0 if ai in ("cpu", "no") else 1
+    return 1
+
+
+def weigh_seed(base_dir, ai=None):
     """What the artifact declares it will ask of a machine.
 
     Read from the seed and not from a cluster, because the question it
@@ -452,6 +481,16 @@ def weigh_seed(base_dir):
     it leaves alone is decided inside a tarball this walk never opens.
     So the number is a FLOOR of what will be asked, never a ceiling,
     and every caller prints it as such.
+
+    THE GPU LANE IS COUNTED ONLY WHEN THIS INSTANCE HAS ONE. The GPU
+    engines carry no `replicas:` in the seed -- they are born at zero
+    and the mode controller scales them -- and the first version of
+    this walk read "absent" as one. Measured 2026-09-10: 11 GiB of
+    engines counted on a host that would never run them, which on a
+    16 GiB VPS with AI=cpu would have made phase 87 refuse a perfectly
+    valid install. `ai` is the instance's lane (`AI` in aegis.conf);
+    when it is unknown the engines ARE counted, because guessing the
+    cheaper answer is how a budget stops meaning anything.
     """
     import pathlib
     base = pathlib.Path(base_dir)
@@ -478,7 +517,7 @@ def weigh_seed(base_dir):
                     spec if kind == "Pod" else {})
                 if not pod:
                     continue
-                n = 1 if kind in ("DaemonSet", "Pod") else int(spec.get("replicas") or 1)
+                n = _replicas(kind, spec, pod, ai)
                 r, l, t = _weigh_podspec(pod)
                 total["requests"] += r * n
                 total["limits"] += l * n
@@ -503,7 +542,9 @@ def memory_budget(anfitrion, facts, base_dir):
     and this one is telling them their computer is about to freeze.
     """
     r = node_reservation(anfitrion, facts)
-    w = weigh_seed(base_dir)
+    ai = (paths.read_conf().get("AI") or "").strip() or None
+    w = weigh_seed(base_dir, ai)
+    w["ai_lane"] = ai or "unknown (GPU engines counted)"
     reserves = w["requests"] + w["tmpfs"]
     takes = w["limits"] + w["tmpfs"]
     return {

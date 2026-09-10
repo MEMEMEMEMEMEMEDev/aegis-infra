@@ -117,3 +117,18 @@ control_3() {
     sed -i 's|          emptyDir: {medium: Memory, sizeLimit: 1Gi}|          emptyDir: {sizeLimit: 1Gi}|' \
         "$AEGIS_ROOT/seed/platform/k8s/base/ai-system/engine-mt.yaml"
 }
+
+# THE GPU LANE COUNTED ON A HOST THAT HAS NONE. The engines carry no
+# `replicas:` in the seed -- born at zero, raised by the controller --
+# and the first walk read "absent" as one. Measured 2026-09-10: 11 GiB
+# of engines counted on a host that would never run them, which on a
+# 16 GiB VPS with AI=cpu makes phase 87 refuse a valid install.
+red_7() {
+    python3 - "$AEGIS_ROOT/lib/aegis/host.py" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+s = s.replace('        return 0 if ai in ("cpu", "no") else 1\n', '        return 1\n')
+open(p, "w", encoding="utf-8").write(s)
+PY
+}

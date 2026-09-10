@@ -831,7 +831,7 @@ def budget(args):
           f"{_gib(r['allocatable_bytes']):>12}")
     print()
     print(f"{bold}what the cluster asks{reset}   "
-          f"{gray}from {w['files']} manifest(s) in the seed{reset}")
+          f"{gray}from {w['files']} manifest(s) in the seed · AI lane: {w.get('ai_lane', '?')}{reset}")
     print(f"  requests            {_gib(w['requests']):>12}")
     print(f"  tmpfs (/dev/shm)    {_gib(w['tmpfs']):>12}"
           f"   {gray}RAM the scheduler never sees{reset}")
