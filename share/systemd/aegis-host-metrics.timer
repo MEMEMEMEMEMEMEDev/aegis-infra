@@ -1,0 +1,48 @@
+[Unit]
+Description=aegis: the host's own heartbeat (every minute)
+Documentation=file:///usr/local/share/aegis/systemd/README.md
+
+[Timer]
+Unit=aegis-host-metrics.service
+
+# ONE MINUTE, and the reason it is enough is not that a minute is fast.
+# It is that almost nothing here is instantaneous:
+#
+#   · the peaks are cgroup WATERMARKS (memory.peak), which are
+#     monotonic. A sampler does not have to catch the spike; it reads
+#     the mark the spike left behind. This is what makes a start-up
+#     burst that lasted eight seconds visible to a sampler that looks
+#     every sixty.
+#   · the stalls are COUNTERS (`total=` in /proc/pressure/memory, in
+#     microseconds), so the rate between two samples is exact whenever
+#     they land.
+#   · only VRAM is a gauge the kernel keeps no mark for, and `aegis
+#     host metrics` therefore keeps its own watermark for it.
+#
+# What sixty seconds genuinely costs is the SHAPE of the instantaneous
+# curve — how memory moved between two marks. That is the trade, and it
+# is written here so nobody has to re-derive it before changing the
+# number.
+OnUnitActiveSec=60s
+
+# The first report waits: at minute zero the cluster is coming up,
+# kubectl answers nothing useful, and the push would fail loudly for a
+# reason that is not a failure.
+OnBootSec=2min
+
+# NEITHER RandomizedDelaySec NOR Persistent, and both absences are
+# choices rather than omissions.
+#
+# The backup timer spreads itself so it does not always land on the
+# same minute, and catches up on a run the machine missed. Here,
+# regularity IS the measurement: an alert reads a rate between samples,
+# and a jittered interval makes that rate wobble for reasons that have
+# nothing to do with the machine.
+#
+# And catching up is meaningless: a sample of what memory looked like
+# is only true at the moment it was taken. Replaying it late would
+# publish a number about a machine that no longer exists — which is
+# worse than the gap, because a gap is visible and a lie is not.
+
+[Install]
+WantedBy=timers.target

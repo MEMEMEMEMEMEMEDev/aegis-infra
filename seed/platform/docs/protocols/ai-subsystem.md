@@ -29,6 +29,39 @@ The CPU lane runs anywhere and is independent of the GPU pair. If that
 is all you need, `AI=cpu` is a complete answer — the GPU engines land
 scaled to zero and cost nothing.
 
+### How much machine this asks for, which used to be nowhere
+
+This document declared a minimum driver and said nothing at all about
+memory, and that omission had a cost. Measured on 2026-09-09: the two
+GPU engines carry 18 GiB of declared limits and about 12.5 GiB of real
+resident memory between them, plus 2 GiB of `/dev/shm` that is RAM and
+that no scheduler counts. On a 30 GiB workstation with a graphical
+session that was enough to push the desktop into swap until it stopped
+answering — nothing was OOM killed, because nothing had to be: the
+kernel evicts the human before it kills a pod that is under its limit.
+
+| | GPU lane | CPU lane |
+|---|---|---|
+| RAM the engines reserve | ~11 GiB of requests, ~21 GiB of limits | ~2 GiB / 3 GiB |
+| RAM the scheduler does NOT see | 2 GiB of tmpfs (`/dev/shm`, 1Gi per GPU engine) | — |
+| VRAM | 0.80 of the card, taken from its TOTAL and not from what is free | none |
+| Weights on disk | ~15 GB | ~1 GB |
+
+Do not size a machine from that table. Run `aegis host budget`, which
+does the same arithmetic against YOUR machine and against the floor it
+leaves whoever else uses it. The table is one machine's measurement;
+the command is the general answer, and phase 87 refuses to deploy when
+it does not close.
+
+**The card is shared too, and that is the trap the arithmetic does not
+catch.** `gpu-memory-utilization` is a fraction of the card's TOTAL, so
+what a desktop is already holding is not subtracted — it is added on
+top. On 2026-09-06 this machine lost its graphical session to `Failed
+to allocate NVKMS memory` while every engine kept serving. The
+preflight guards the START and nothing watches afterwards; the alert
+`VramSinSitioParaElEscritorio` is what covers the rest, and it only
+warns.
+
 ### The minimum driver version, which used to be an open question
 
 The previous version of this document said the minimum driver version
@@ -278,6 +311,21 @@ times and the threshold followed late every time — once refusing a start
 that fitted with 430 MiB to spare, once letting an OOM through.
 `aegis ai` now computes it from the engine profiles in the repo. Moving
 a fraction moves the threshold in the same commit.
+
+The same trap caught the term next door, and it is worth reading as one
+lesson rather than two. Until 2026-09-09 the arithmetic was
+`total * (1 - fraction) - n * overshoot - margin`, and while the
+FRACTION came from the manifests, the `n` came from a shell constant a
+hundred lines up in the same file. A third engine would have moved one
+and not the other. Both halves of a product are read from the same walk
+now, and `$ENGINES` survives as a claim the manifests audit rather than
+as an input.
+
+And the principle reaches past VRAM. `aegis host` measures the machine
+and writes it down; every floor, reservation and budget is derived from
+that file, and a consumer that needs a fact nobody could measure
+REFUSES and names it instead of substituting a number. An unmeasured
+threshold is not a permissive one — it is an absent one.
 
 **T-7 — The namespace GPU quota and the device plugin's replica count
 are one decision in two files.** The quota exists so a *third* GPU pod

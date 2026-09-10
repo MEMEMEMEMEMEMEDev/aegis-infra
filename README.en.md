@@ -127,6 +127,18 @@ generates all of it, and `aegis rotate` can rotate it.
   preflight installs what it needs with `apt`.
 - 4 CPU and 8 GB of RAM are enough (the preflight warns below 7 GB;
   Jenkins, Kyverno and Trivy get tight). 25 GB free on `/`.
+  `aegis host measure` writes down what your machine is, and
+  `aegis host budget` says whether what the platform reserves fits in
+  what that machine leaves over.
+- If somebody uses this machine, aegis leaves them a floor of memory
+  and does not touch it. It derives one; `aegis host floor --set`
+  changes it. Without a floor the thing that freezes is the desktop,
+  not the cluster: no pod dies, the kernel lets them grow and evicts
+  the human instead.
+- The AI's GPU lane wants an NVIDIA card with driver 570 or newer, and
+  it SHARES that card with your desktop: the engines take a fraction of
+  the card's TOTAL and not of what is free, so a compositor can run out
+  of VRAM while the arithmetic still adds up.
 - Outbound internet: GitHub, the container registries the mirror
   pulls from, k3s.
 - A GitHub account. The init **creates and owns** the two repos it

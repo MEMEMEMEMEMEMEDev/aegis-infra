@@ -152,6 +152,12 @@ A cheat sheet of the ones that come up most while operating:
 | Kyverno refuses EVERY image right after a re-init | the signature policy was inherited ON, before phase 80 armed it | phase 35 turns it off; `aegis init --from 35-gitops` |
 | App Synced, but the live image is an OLD digest | `ignoreDifferences` on the image (the v2 answer to mutateDigest) | remove it — git carries the digest (check 144) |
 | Builds Pending, "Insufficient cpu", and the CI quota shows as used | reservations larger than the node; Pending pods hold quota | the agents' `requests`, then abort the stuck builds |
+| The whole machine crawls, the desktop stops answering, nothing is OOM killed | no floor: the cluster grew and the kernel evicted the human instead of a pod | `aegis host budget` for the account; `aegis host floor --apply` to make the floor real, `--off` to undo it |
+| `EscritorioEmpujadoAlSwap` or `MaquinaAtascadaEnMemoria` firing | the cluster reserves more than this machine leaves over | `aegis host budget` names the two ways out: leave the machine less, or ask for less |
+| `NodoSinReservaParaElAnfitrion` firing | `allocatable == capacity`: the kubelet keeps nothing back | the reservation is derived by `aegis host` and written by the host bootstrap; re-run phase 20 |
+| `PisoDelEscritorioNoAplicado` firing | the floor is declared and the kernel is not holding it | `aegis host floor --apply`; the metric reads /sys, so a drop-in that did not take effect shows here |
+| `VramSinSitioParaElEscritorio`, or the session dies with `Failed to allocate NVKMS memory` | the desktop and the engines share one card and the engines take a fraction of its TOTAL | `aegis ai stop`, or close what is holding the card. This one only warns, on purpose |
+| `MedicionDelAnfitrionAusente` firing | the host stopped reporting on itself, so every rule above is MUTE and not green | usually a user timer without lingering: `loginctl enable-linger $USER` |
 | App in ComparisonError: ksops "no such file" | an encrypted secret a generator lists and nobody wrote | the phase that owns that secret (check 145) |
 | A sync that waits on hooks forever | the hooks' image is not in THIS registry yet | sync without hooks; `aegis org apply` + sync once it is |
 | `jenkins_build_retry` waits the whole timeout; the job has no build | POST to `/build` on a parameterized job (refused, logged only by Jenkins) | `jenkins_fire` picks the endpoint; the job's `property` says which |

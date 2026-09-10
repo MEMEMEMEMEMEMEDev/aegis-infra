@@ -76,6 +76,21 @@ MODELOS = Path(
 # three together get in each other's way by ~40%, which is the real
 # ceiling. Splitting exactly 32 would leave every engine slow in the
 # normal case, which is the one that always happens.
+#
+# READ THAT "OVER 32 THREADS" CAREFULLY: it is the machine this was
+# measured on, not the container this runs in. Nothing inside a
+# container knows its own limit — a cgroup caps CPU TIME and leaves
+# `nproc` answering with the host's count — so these defaults size
+# themselves for a machine the process is not allowed to use. Measured
+# in the live pod on 2026-09-09: nproc 32, sixty threads in the
+# process, `limits.cpu` 6.
+#
+# That is why each of these has an environment variable in front of it,
+# and why the deployment now SETS all eight, next to the limit they
+# answer to (k8s/base/ai-system/engine-cpu.yaml, held in place by check
+# 197). The defaults below stay exactly as they are: they are the right
+# answer for the machine they were measured on, and this file has no
+# way to know which machine it landed on. The manifest does.
 HILOS = {
     "voz": int(os.environ.get("AEGIS_HILOS_VOZ", "6")),
     "oido": int(os.environ.get("AEGIS_HILOS_OIDO", "4")),

@@ -29,7 +29,7 @@ try:
 except ImportError:
     sys.exit("pyyaml is missing (python3-yaml)")
 
-from . import cli, markers, paths
+from . import cli, markers, paths, quantity
 
 # ── Class E: not one command name written by hand ────────────────────
 # In v2 this file had 15 of them (and the whole tree ~155). Each one is
@@ -231,36 +231,19 @@ def _q(v):
     return f'"{s}"' if re.fullmatch(r"[0-9]+(\.[0-9]+)?", s) else s
 
 
-def _cpu(q):
-    """A CPU quantity -> millicores. `2` is 2000m, `500m` is 500m."""
-    s = str(q).strip()
-    return int(s[:-1]) if s.endswith("m") else int(float(s) * 1000)
-
-
-# Two-letter units FIRST: `Ki` has to win over `K`, or a `Ki` is read as
-# a `K` with a stray letter and the sum comes out ~2.4% short — small
-# enough never to be noticed and big enough to admit a contract that
-# does not fit.
-_MEM_UNITS = (("Ki", 2 ** 10), ("Mi", 2 ** 20), ("Gi", 2 ** 30), ("Ti", 2 ** 40),
-              ("K", 10 ** 3), ("M", 10 ** 6), ("G", 10 ** 9), ("T", 10 ** 12))
-
-
-def _mem(q):
-    """A memory quantity -> bytes."""
-    s = str(q).strip()
-    for unit, mult in _MEM_UNITS:
-        if s.endswith(unit):
-            return int(float(s[: -len(unit)]) * mult)
-    return int(float(s))
-
-
-def _cpu_str(millis):
-    return f"{millis // 1000}" if millis % 1000 == 0 else f"{millis}m"
-
-
-def _mem_str(byts):
-    gi = 2 ** 30
-    return f"{byts // gi}Gi" if byts >= gi and byts % gi == 0 else f"{byts // 2 ** 20}Mi"
+# The four readers and writers of a Kubernetes quantity moved to
+# aegis/quantity.py on 2026-09-09, when `aegis host` started summing
+# memory as well. Two parsers for `2Gi` is two chances to read it
+# differently, and that failure shows up as a budget that closes on one
+# side of the product and not on the other.
+#
+# They stay reachable under their old private names so the seven call
+# sites below did not have to move with them: what mattered was that
+# there be ONE parser, not that this file stop using it.
+_cpu = quantity.cpu
+_mem = quantity.mem
+_cpu_str = quantity.cpu_str
+_mem_str = quantity.mem_str
 
 
 # The fine-grained twin of each writer above. One comparison is written

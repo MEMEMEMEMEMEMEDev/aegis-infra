@@ -408,11 +408,31 @@ for m, (src, cadence, minimum) in sorted(producers.items()):
     for where, expr in readers:
         if m not in expr:
             continue
-        window = re.findall(rf"last_over_time\(\s*{m}[^)]*\[(\d+)([smhd])\]", expr)
+        # ANY range-vector function counts, not only last_over_time.
+        # The rule is about the WINDOW and never about the verb: what a
+        # sparse metric cannot survive is an INSTANT read, because the
+        # default lookback is shorter than the push interval and the
+        # query lands between two pushes.
+        #
+        # It named last_over_time alone until 2026-09-09, and that was
+        # right for as long as every pushed metric was a gauge. The
+        # first pushed COUNTER — aegis_host_memory_stall_seconds_total,
+        # the machine's time waiting on memory — has no valid reading
+        # through last_over_time at all: a counter is read with rate()
+        # or increase() over a range, and those ARE the explicit window
+        # this rule is asking for. Demanding a gauge's verb of a
+        # counter would force the alert to be written wrong in order to
+        # satisfy the check.
+        window = re.findall(
+            rf"(?:last_over_time|max_over_time|min_over_time|avg_over_time"
+            rf"|rate|irate|increase|delta|idelta)\(\s*{m}[^)]*\[(\d+)([smhd])\]",
+            expr)
         if not window:
-            bad.append(f"{where} reads {m} without last_over_time: {src} pushes it {cadence} and "
-                       "an instant query's default window is shorter — the query falls "
-                       "between two pushes and returns empty")
+            bad.append(f"{where} reads {m} with no explicit window: {src} pushes it {cadence} and "
+                       "an instant query's default lookback is shorter — the query falls "
+                       "between two pushes and returns empty. Wrap it in last_over_time "
+                       "for a gauge, or rate/increase for a counter, with a range of at "
+                       "least two periods")
             continue
         for n, u in window:
             if int(n) * SECS[u] < minimum:

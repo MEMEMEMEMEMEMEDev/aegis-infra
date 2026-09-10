@@ -1,0 +1,1048 @@
+#!/usr/bin/env python3
+# aegis-summary: Measures the machine aegis landed on and writes it down
+# aegis-group:   operate
+# aegis-subcommands: measure show floor budget metrics reservation requires
+"""aegis-host — measures the machine aegis landed on, and writes it down.
+
+    aegis host measure          # look at the machine, save the facts
+    aegis host show [--json]    # what was measured, and what could not be
+    aegis host floor            # how much of it aegis leaves alone, and why
+    aegis host floor --set <step>   # choose deliberately instead of deriving
+    aegis host floor --apply    # put it in the kernel's hands · --off lifts it
+    aegis host budget           # what the cluster asks, against what is left
+    aegis host metrics          # what only the host can see, for vmsingle
+    aegis host reservation --for kubelet   # what the node must keep back
+    aegis host requires         # what aegis needs of a machine, from plans.yaml
+
+── WHY THIS COMMAND EXISTS ─────────────────────────────────────────
+
+aegis assumed it owned the machine and never checked whether it did.
+
+On a rented server that assumption is right, and being timid there is
+the mistake. On a workstation with a graphical session it is wrong, and
+the price is paid by the session: measured on 2026-09-09, starting the
+two GPU engines took the host to 25.95 GiB of a 30.22 GiB machine, with
+4 GiB of swap and the desktop stalled 3.6 % of the time. Nothing was
+OOM-killed. Nothing had to be: `user.slice` had `memory.min = 0`, so the
+kernel evicted the desktop to make room, which is what a freeze looks
+like from the inside.
+
+The product could not have known. It reads `MemTotal` in exactly one
+place (`aegis preflight`), warns below 7 GiB, and throws the number
+away. There was nowhere to write down what the machine is.
+
+This is that place. The facts live in `$AEGIS_HOME/host.json` and the
+rest of the product reads them from there: the kubelet's reservation,
+the desktop's floor, the AI's memory budget, and the metrics the
+instance publishes about itself.
+
+── WHY IT IS A SEPARATE FILE FROM aegis.conf ───────────────────────
+
+`aegis.conf` holds the operator's ANSWERS. `host.json` holds the
+machine's FACTS. They age differently and they are re-derived by
+different events: the answers survive a hardware change, the facts do
+not. Keeping them apart also keeps `--reset`, which clears the init's
+trail, from deleting a measurement nobody asked it to touch.
+
+── THE RULE THAT MATTERS MORE THAN ANY MEASUREMENT ─────────────────
+
+A fact that could not be measured is written as `null` and named in
+`undetermined`, and `measure` still exits 0 — measuring part of a
+machine is a legitimate outcome, and refusing to record the part that
+worked would help nobody.
+
+What is NOT legitimate is a CONSUMER quietly substituting a number for
+a null. Every reader of this file that needs a fact it does not have
+must refuse and say which fact is missing.
+
+That rule is not new here. It is `vram_limit_mib` in `libexec/aegis-ai`
+generalised: "an unmeasured preflight that waves everything through is
+worse than no preflight, because it looks like one". The same sentence
+holds for a budget derived from a RAM total nobody read.
+"""
+import argparse
+import json
+import os
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+# ── canonical python preamble (V-102) ────────────────────────────────
+_AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
+    os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
+from aegis import cli, host as hostlib, paths   # noqa: E402
+
+HOST_JSON = paths.aegis_home() / "host.json"
+
+red = "\033[31m"; green = "\033[32m"; yellow = "\033[33m"
+gray = "\033[90m"; bold = "\033[1m"; reset = "\033[0m"
+
+GIB = 1024 ** 3
+
+
+# ── the probes ───────────────────────────────────────────────────────
+# Each one returns its fact or None. None is not an error and it is not
+# a zero: it is "nobody measured this", and it travels as such all the
+# way to whoever wanted to use it.
+
+def _read(path):
+    try:
+        return pathlib.Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _meminfo_kb(key):
+    txt = _read("/proc/meminfo")
+    if txt is None:
+        return None
+    m = re.search(r"^%s:\s+(\d+) kB" % re.escape(key), txt, re.M)
+    return int(m.group(1)) * 1024 if m else None
+
+
+def probe_cpus():
+    # os.cpu_count() and nproc report the MACHINE's threads. That is the
+    # right number here, and it is worth saying why it is not always the
+    # right number elsewhere: inside a container with a cpu limit these
+    # still report the machine's, which is how an engine capped at 6 CPU
+    # ends up sizing a thread pool for 32 (measured 2026-09-09).
+    return os.cpu_count()
+
+
+def probe_vram_total_mib():
+    if not shutil.which("nvidia-smi"):
+        return None
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    first = out.stdout.strip().splitlines()
+    try:
+        return int(first[0].strip())
+    except (IndexError, ValueError):
+        return None
+
+
+def probe_disk_avail_bytes(where="/"):
+    try:
+        st = os.statvfs(where)
+    except OSError:
+        return None
+    return st.f_bavail * st.f_frsize
+
+
+def probe_cgroup_v2():
+    # The unified hierarchy is what makes memory.min, memory.peak and
+    # the per-slice accounting below exist at all. Without it the floor
+    # this product installs would be inert, and an inert floor that
+    # looks applied is the failure this whole area is about.
+    return pathlib.Path("/sys/fs/cgroup/cgroup.controllers").is_file()
+
+
+def probe_systemd_version():
+    if not shutil.which("systemctl"):
+        return None
+    try:
+        out = subprocess.run(["systemctl", "--version"],
+                             capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"^systemd\s+(\d+)", out.stdout)
+    return int(m.group(1)) if m else None
+
+
+def probe_slices():
+    """Memory now and the high-water mark, per top-level slice.
+
+    DERIVED and not listed: every top-level cgroup that keeps memory
+    accounting is reported, so a slice that appears tomorrow appears
+    here too. A written list of slices is the thing this walk exists to
+    replace.
+
+    `memory.peak` is a WATERMARK, and that is what makes it worth
+    reading: it is monotonic, so a sampler that looks every minute
+    cannot miss a spike that lasted seconds. The root cgroup does not
+    have one -- measured 2026-09-09, it ships memory.stat and
+    memory.pressure and no peak -- so the machine's total is not
+    available this way and is not invented here.
+    """
+    root = pathlib.Path("/sys/fs/cgroup")
+    if not root.is_dir():
+        return None
+    out = {}
+    try:
+        children = sorted(p for p in root.iterdir() if p.is_dir())
+    except OSError:
+        return None
+    for p in children:
+        cur = _read(p / "memory.current")
+        if cur is None:
+            continue
+        entry = {"current_bytes": _int_or_none(cur)}
+        for field, name in (("memory.peak", "peak_bytes"),
+                            ("memory.min", "min_bytes"),
+                            ("memory.max", "max_bytes"),
+                            ("memory.swap.current", "swap_current_bytes")):
+            entry[name] = _int_or_none(_read(p / field))
+        out[p.name] = entry
+    return out or None
+
+
+def _int_or_none(txt):
+    if txt is None:
+        return None
+    txt = txt.strip()
+    if txt == "max":
+        return "max"
+    try:
+        return int(txt)
+    except ValueError:
+        return None
+
+
+def probe_pressure():
+    """The stall counters, in microseconds, as the kernel reports them.
+
+    The `total=` fields are COUNTERS: read twice and the difference is
+    how long this machine spent waiting on memory. `avgN` is a decaying
+    average and is useless for a sampler, so only the totals are kept.
+    """
+    txt = _read("/proc/pressure/memory")
+    if txt is None:
+        return None
+    out = {}
+    for line in txt.splitlines():
+        scope = line.split(None, 1)[0] if line.split() else None
+        m = re.search(r"total=(\d+)", line)
+        if scope in ("some", "full") and m:
+            out[scope + "_stall_usec_total"] = int(m.group(1))
+    return out or None
+
+
+def probe_shared_with_a_human():
+    """Is there a graphical session on this machine, or could there be?
+
+    The rule is written down rather than voted on, and it errs on the
+    side of "yes":
+
+      · `graphical.target` is active, OR
+      · a login session holds a seat and is not remote.
+
+    A `graphical.target` that is up with nobody logged in STILL counts
+    as shared. The freeze this product is trying to prevent happens
+    precisely when somebody sits down -- a machine that is empty right
+    now but has a display manager waiting is a machine where a human
+    arrives without warning, and a budget derived while they were away
+    would be exactly wrong at the moment it mattered.
+
+    Returns (verdict, evidence). The verdict is None when neither probe
+    could run: not knowing whether a desktop exists is not the same as
+    knowing there is none, and callers are told which it was.
+    """
+    evidence = []
+    verdict = None
+
+    if shutil.which("systemctl"):
+        try:
+            out = subprocess.run(["systemctl", "is-active", "graphical.target"],
+                                 capture_output=True, text=True, timeout=10)
+            state = out.stdout.strip()
+            evidence.append(f"graphical.target is {state or 'unreadable'}")
+            verdict = (state == "active")
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    if shutil.which("loginctl"):
+        try:
+            out = subprocess.run(
+                ["loginctl", "list-sessions", "--no-legend"],
+                capture_output=True, text=True, timeout=10)
+            seated = []
+            for line in out.stdout.splitlines():
+                sid = line.split()[0] if line.split() else None
+                if not sid:
+                    continue
+                det = subprocess.run(
+                    ["loginctl", "show-session", sid,
+                     "-p", "Seat", "-p", "Remote", "-p", "Type"],
+                    capture_output=True, text=True, timeout=10).stdout
+                props = dict(
+                    l.split("=", 1) for l in det.splitlines() if "=" in l)
+                if props.get("Seat") and props.get("Remote") == "no":
+                    seated.append(
+                        f"session {sid} on {props['Seat']}"
+                        f" ({props.get('Type') or 'unknown type'})")
+            if seated:
+                evidence.extend(seated)
+                verdict = True
+            elif verdict is None:
+                evidence.append("no local session holds a seat")
+                verdict = False
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    if verdict is None:
+        evidence.append(
+            "neither systemctl nor loginctl could be asked")
+    return verdict, evidence
+
+
+# ── measure ──────────────────────────────────────────────────────────
+
+def measure(args):
+    """Look at the machine and write down what was found."""
+    shared, evidence = probe_shared_with_a_human()
+
+    facts = {
+        "ram_total_bytes": _meminfo_kb("MemTotal"),
+        "ram_available_bytes": _meminfo_kb("MemAvailable"),
+        "swap_total_bytes": _meminfo_kb("SwapTotal"),
+        "cpus": probe_cpus(),
+        "vram_total_mib": probe_vram_total_mib(),
+        "disk_avail_bytes": probe_disk_avail_bytes("/"),
+        "cgroup_v2": probe_cgroup_v2(),
+        "systemd_version": probe_systemd_version(),
+        "kernel": (os.uname().release if hasattr(os, "uname") else None),
+        "shared_with_a_human": shared,
+        "slices": probe_slices(),
+        "pressure": probe_pressure(),
+    }
+
+    # THE HONESTY LEDGER. Every fact that came back empty is named here,
+    # so a consumer does not have to guess whether a null means "zero"
+    # or "nobody looked", and so `show` can say it out loud instead of
+    # printing a tidy report with holes in it.
+    undetermined = sorted(k for k, v in facts.items() if v is None)
+
+    doc = dict(facts)
+    doc["shared_with_a_human_evidence"] = evidence
+    doc["undetermined"] = undetermined
+    doc["measured_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    doc["measured_by"] = cli.cmd("host measure")
+
+    _write_atomic(HOST_JSON, json.dumps(doc, indent=2, sort_keys=True) + "\n")
+
+    if args.json:
+        print(json.dumps(doc, indent=2, sort_keys=True))
+    else:
+        _render(doc)
+        print()
+        print(f"{gray}written to {HOST_JSON}{reset}")
+    return 0
+
+
+def _write_atomic(dest, text):
+    """mktemp + rename, the same shape as lib/config.sh writes aegis.conf.
+
+    A half-written host.json is worse than none: the readers of this
+    file derive reservations from it, and a truncated number is a
+    plausible one.
+    """
+    dest = pathlib.Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, dest)
+    except OSError as e:
+        tmp.unlink(missing_ok=True)
+        sys.exit(f"{red}could not write {dest}: {e}{reset}")
+
+
+# ── show ─────────────────────────────────────────────────────────────
+
+def show(args):
+    """Print what was measured, and what could not be."""
+    if not HOST_JSON.is_file():
+        print(f"{yellow}this machine has not been measured yet{reset}")
+        print(f"  {cli.cmd('host measure')}")
+        return 2
+    try:
+        doc = json.loads(HOST_JSON.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        print(f"{red}{HOST_JSON} could not be read ({e}){reset}", file=sys.stderr)
+        print("  it is not that the machine is fine: it is that the "
+              "measurement is unreadable.", file=sys.stderr)
+        print(f"  {cli.cmd('host measure')}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(doc, indent=2, sort_keys=True))
+        return 0
+    _render(doc)
+    return 0
+
+
+def _gib(v):
+    return f"{v / GIB:.2f} GiB" if isinstance(v, int) else f"{yellow}not measured{reset}"
+
+
+def _render(doc):
+    print(f"{bold}the machine{reset}   "
+          f"{gray}measured {doc.get('measured_at', '?')}{reset}")
+    print(f"  RAM         {_gib(doc.get('ram_total_bytes'))}"
+          f"   {gray}available now {_gib(doc.get('ram_available_bytes'))}{reset}")
+    print(f"  swap        {_gib(doc.get('swap_total_bytes'))}")
+    cpus = doc.get("cpus")
+    print(f"  threads     {cpus if cpus is not None else yellow + 'not measured' + reset}")
+    vram = doc.get("vram_total_mib")
+    print(f"  VRAM        "
+          f"{str(vram) + ' MiB' if vram is not None else yellow + 'no card answered' + reset}")
+    print(f"  disk free   {_gib(doc.get('disk_avail_bytes'))}   {gray}on /{reset}")
+    print(f"  kernel      {doc.get('kernel') or '?'}"
+          f"   {gray}cgroup v2 {'yes' if doc.get('cgroup_v2') else 'NO'}"
+          f" · systemd {doc.get('systemd_version') or '?'}{reset}")
+
+    shared = doc.get("shared_with_a_human")
+    print()
+    if shared is True:
+        print(f"  {bold}shared with a human{reset}: aegis is NOT alone on this machine")
+    elif shared is False:
+        print(f"  {bold}dedicated{reset}: no graphical session was found")
+    else:
+        print(f"  {yellow}unknown{reset}: whether a human shares this machine "
+              f"could not be established")
+    for e in doc.get("shared_with_a_human_evidence") or []:
+        print(f"    {gray}{e}{reset}")
+
+    # Everything measured is in the JSON; the human report drops the
+    # slices that never held anything (the .mount cgroups, all at zero)
+    # because a screen of zeros is how the two lines that matter stop
+    # being read.
+    slices = doc.get("slices") or {}
+    shown = [(n, s) for n, s in slices.items()
+             if (s.get("peak_bytes") or 0) >= 16 * 1024 * 1024
+             or (s.get("current_bytes") or 0) >= 16 * 1024 * 1024]
+    if shown:
+        width = max(len(n) for n, _ in shown)
+        print()
+        print(f"  {bold}memory by slice{reset}   {gray}peak is a watermark since boot{reset}")
+        for name, s in sorted(shown, key=lambda kv: -(kv[1].get("peak_bytes") or 0)):
+            print(f"    {name:<{width}}   now {_gib(s.get('current_bytes')):>10}"
+                  f"   peak {_gib(s.get('peak_bytes')):>10}")
+        hidden = len(slices) - len(shown)
+        if hidden:
+            print(f"    {gray}({hidden} more never held 16 MiB; they are in --json){reset}")
+
+    und = doc.get("undetermined") or []
+    if und:
+        print()
+        print(f"  {yellow}not measured{reset}: {', '.join(und)}")
+        print(f"    {gray}these are nulls, not zeros: whoever needs one of them "
+              f"has to refuse, not guess{reset}")
+
+
+# ── metrics ──────────────────────────────────────────────────────────
+
+def metrics(args):
+    """What only the host can see, in the exposition format.
+
+    THE FOURTH KIND OF PRODUCER. Most of this platform's metrics come
+    from a scrape: vmagent walks the API and pulls. That cannot work
+    here, because the numbers this prints do not exist inside the
+    cluster — `/proc/pressure/memory`, the root cgroup's slices, and
+    `nvidia-smi` all live on the host, and no pod can see them. There
+    is precedent, and it is the one this follows exactly:
+    `share/systemd/aegis-backup.service` measures on the host and
+    PUSHES to vmsingle's import endpoint.
+
+    What that buys, and it is worth saying because the alternative
+    looks more standard: no node_exporter DaemonSet, no new RBAC, no
+    hostPID, and no new scrape job — so `__OBS_SCRAPE_JOBS_MIN__` does
+    not move and check 092 §8 has nothing new to cross-check. The whole
+    cost is one systemd timer.
+
+    WHY 60 s IS ENOUGH, when the thing being watched is a spike that
+    lasts seconds. Because almost nothing here is instantaneous:
+
+      · the peaks are cgroup WATERMARKS (`memory.peak`), which are
+        monotonic — a sampler cannot miss a spike it did not see, it
+        reads the mark the spike left;
+      · the stalls are COUNTERS (`total=` in /proc/pressure/memory, in
+        microseconds), so the rate between two samples is exact no
+        matter when they land;
+      · only VRAM is a gauge with no kernel-side memory, so this keeps
+        its own watermark for it, in the state file beside host.json.
+
+    What 60 s genuinely costs is the SHAPE of the instantaneous curve.
+    That is the trade, and it is written here rather than discovered.
+    """
+    lines = []
+    described = set()
+
+    def emit(name, value, labels=None, help_=None, typ="gauge"):
+        if value is None:
+            # A metric that could not be measured is NOT published as
+            # zero. A zero is a claim; silence is the truth, and the
+            # `absent()` sibling of the alert family is what turns that
+            # silence into something the operator sees.
+            return
+        # HELP and TYPE once per metric NAME, not once per label set:
+        # repeating them for every slice is malformed exposition, and
+        # the parser that tolerates it today is not a contract.
+        if help_ and name not in described:
+            described.add(name)
+            lines.append(f"# HELP {name} {help_}")
+            lines.append(f"# TYPE {name} {typ}")
+        lab = ""
+        if labels:
+            lab = "{" + ",".join(f'{k}="{v}"' for k, v in sorted(labels.items())) + "}"
+        lines.append(f"{name}{lab} {value}")
+
+    ram_total = _meminfo_kb("MemTotal")
+    ram_avail = _meminfo_kb("MemAvailable")
+    swap_total = _meminfo_kb("SwapTotal")
+    swap_free = _meminfo_kb("SwapFree")
+    swap_used = (swap_total - swap_free
+                 if swap_total is not None and swap_free is not None else None)
+
+    emit("aegis_host_ram_total_bytes", ram_total,
+         help_="RAM of the machine aegis is running on")
+    emit("aegis_host_ram_available_bytes", ram_avail,
+         help_="RAM the kernel says is available without swapping")
+    emit("aegis_host_swap_total_bytes", swap_total, help_="swap configured")
+    emit("aegis_host_swap_used_bytes", swap_used,
+         help_="swap in use — on a shared machine this is the desktop being evicted")
+
+    pressure = probe_pressure() or {}
+    for scope in ("some", "full"):
+        v = pressure.get(scope + "_stall_usec_total")
+        emit("aegis_host_memory_stall_seconds_total",
+             None if v is None else v / 1e6, {"scope": scope},
+             help_="seconds this machine spent waiting on memory", typ="counter")
+
+    for name, s in sorted((probe_slices() or {}).items()):
+        # Slices and scopes only. The `.mount` cgroups are accounting
+        # artefacts that never hold more than a few hundred kilobytes,
+        # and publishing them doubles the cardinality of this family to
+        # say nothing. The filter is on SHAPE and not on size, so a
+        # slice that is small today still appears tomorrow.
+        if not name.endswith((".slice", ".scope")):
+            continue
+        cur, peak = s.get("current_bytes"), s.get("peak_bytes")
+        if not isinstance(cur, int) and not isinstance(peak, int):
+            continue
+        emit("aegis_host_cgroup_memory_current_bytes",
+             cur if isinstance(cur, int) else None, {"slice": name},
+             help_="memory held right now by a top-level slice")
+        emit("aegis_host_cgroup_memory_peak_bytes",
+             peak if isinstance(peak, int) else None, {"slice": name},
+             help_="high-water mark since boot — monotonic, so a sampler cannot miss a spike")
+
+    # The floor: what is DECLARED, and whether the kernel is actually
+    # holding it. They are read from two different places on purpose —
+    # the second one from /sys, never from the file this product wrote,
+    # because a drop-in that did not take effect looks identical to one
+    # that did if you only read what you wrote.
+    floor_bytes = enforced = None
+    try:
+        anfitrion = hostlib.check_anfitrion(hostlib.load_plans())
+        floor_bytes = hostlib.floor(anfitrion, hostlib.read_facts())["ram_bytes"]
+    except hostlib.Unusable:
+        pass
+    live = _read("/sys/fs/cgroup/user.slice/memory.min")
+    if live is not None:
+        try:
+            enforced = 1 if int(live.strip()) > 0 else 0
+        except ValueError:
+            enforced = None
+    emit("aegis_host_desktop_floor_bytes", floor_bytes,
+         help_="RAM the cluster may never take from the human")
+    emit("aegis_host_desktop_floor_enforced", enforced,
+         help_="1 when the kernel is really holding that floor, read from /sys and not from what we wrote")
+
+    shared = None
+    try:
+        shared = hostlib.read_facts().get("shared_with_a_human")
+    except hostlib.Unusable:
+        pass
+    emit("aegis_host_shared_with_a_human",
+         None if shared is None else int(bool(shared)),
+         help_="1 when a graphical session shares this machine")
+
+    total_mib = probe_vram_total_mib()
+    used_mib = _vram_used_mib()
+    emit("aegis_host_vram_total_mib", total_mib, help_="VRAM on the card")
+    emit("aegis_host_vram_used_mib", used_mib,
+         help_="VRAM in use, engines and desktop together")
+    emit("aegis_host_vram_peak_mib", _vram_watermark(used_mib),
+         help_="the most VRAM seen in use — a gauge with no kernel-side mark, so this keeps its own")
+
+    emit("aegis_host_node_allocatable_ratio", _allocatable_ratio(),
+         help_="allocatable over capacity: 1 means the scheduler believes it owns the machine")
+
+    # The timestamp is what the family's `absent()` sibling watches. It
+    # is last on purpose: if anything above dies, this line does not
+    # get written and the silence is total rather than partial.
+    emit("aegis_host_metrics_timestamp_seconds", int(time.time()),
+         help_="when this machine last reported on itself")
+
+    print("\n".join(lines))
+    return 0
+
+
+def _vram_used_mib():
+    if not shutil.which("nvidia-smi"):
+        return None
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=15)
+        return int(out.stdout.strip().splitlines()[0].strip())
+    except (OSError, subprocess.SubprocessError, IndexError, ValueError):
+        return None
+
+
+def _vram_watermark(now):
+    """The most VRAM ever seen in use, kept here because nothing else keeps it.
+
+    Every other peak in this file is a cgroup watermark the kernel
+    maintains, which is why a 60 s sampler is honest about them.
+    `nvidia-smi` offers no such thing: it answers what is in use at this
+    instant and forgets. Without this file, the moment the desktop and
+    both engines wanted the card at once would simply not be in the
+    record — which is exactly the moment that killed a session on
+    2026-09-06.
+    """
+    if now is None:
+        return None
+    p = paths.aegis_home() / "host-metrics.state"
+    high = 0
+    try:
+        high = int(json.loads(p.read_text(encoding="utf-8")).get("vram_peak_mib", 0))
+    except (OSError, ValueError, AttributeError):
+        high = 0
+    high = max(high, now)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"vram_peak_mib": high}) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+    return high
+
+
+def _allocatable_ratio():
+    """allocatable / capacity for memory, as the node reports them.
+
+    1.0 means the kubelet reserves nothing and the scheduler believes
+    it may hand out the whole machine — which is what this node said on
+    2026-09-09, with a person using it.
+    """
+    if not shutil.which("kubectl"):
+        return None
+    try:
+        out = subprocess.run(
+            ["kubectl", "get", "nodes", "-o",
+             "jsonpath={.items[0].status.allocatable.memory} "
+             "{.items[0].status.capacity.memory}"],
+            capture_output=True, text=True, timeout=20)
+        alloc, cap = out.stdout.split()
+        from aegis import quantity
+        c = quantity.mem(alloc.replace("Ki", "Ki"))
+        t = quantity.mem(cap)
+        return round(c / t, 6) if t else None
+    except (OSError, subprocess.SubprocessError, ValueError, ZeroDivisionError):
+        return None
+
+
+# ── reservation ──────────────────────────────────────────────────────
+
+def reservation(args):
+    """What the kubelet has to be told to keep away from pods.
+
+    ONE NUMBER DECIDES TWO THINGS that used to be able to disagree, and
+    that is why it is derived rather than written anywhere:
+
+      · `system-reserved` lowers the node's `allocatable`, so the
+        SCHEDULER stops promising memory that is not there;
+      · with `enforce-node-allocatable=pods` — the default — the
+        kubelet writes `kubepods.slice`'s own `memory.max` from the
+        same subtraction, so the KERNEL stops letting the cluster reach
+        for the whole machine.
+
+    Measured 2026-09-09: `allocatable == capacity` and
+    `kubepods.slice/memory.max` was 32448565248, exactly the machine.
+    The enforcement was already wired; what was missing was anything
+    reserved. That is why there is no drop-in for kubepods.slice
+    anywhere in this product — the ceiling is a CONSEQUENCE of the
+    floor, not a second number that can drift away from it.
+    """
+    try:
+        anfitrion = hostlib.check_anfitrion(hostlib.load_plans())
+        r = hostlib.node_reservation(anfitrion, hostlib.read_facts())
+    except hostlib.Unusable as e:
+        print(f"{red}{e}{reset}", file=sys.stderr)
+        return 2
+
+    if args.json:
+        print(json.dumps(r, indent=2, sort_keys=True))
+        return 0
+    if args.for_ == "kubelet":
+        # The exact file the host bootstrap writes. Printing it is what
+        # makes a dry run possible: this is read by a human before
+        # anything restarts.
+        print(hostlib.kubelet_dropin_text(r))
+        return 0
+    print(f"{bold}what the kubelet keeps away from pods{reset}")
+    print(f"  system-reserved   {r['system_reserved']}"
+          f"   {gray}the human's floor plus the host's own daemons{reset}")
+    print(f"  eviction-hard     {r['eviction']}")
+    print(f"  allocatable       {_gib(r['allocatable_bytes'])}"
+          f"   {gray}of {_gib(r['ram_total_bytes'])}{reset}")
+    return 0
+
+
+# ── requires ─────────────────────────────────────────────────────────
+
+def requires(args):
+    """What a machine has to have before aegis will install on it.
+
+    It exists so that the requirement has ONE reader. Two commands used
+    to hold their own copy of the free-disk threshold and they did not
+    agree — 25 GiB here, 20 in the init's gate, for the same PVCs — and
+    the READMEs published a third opinion nobody could check against
+    either.
+    """
+    try:
+        req = hostlib.requirements(hostlib.check_anfitrion(hostlib.load_plans()))
+    except hostlib.Unusable as e:
+        print(f"{red}{e}{reset}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(req, indent=2, sort_keys=True))
+        return 0
+    print(f"{bold}what aegis needs of a machine{reset}"
+          f"   {gray}from plans.yaml, anfitrion{reset}")
+    print(f"  free disk on /   {req['disk_free']}")
+    return 0
+
+
+# ── floor ────────────────────────────────────────────────────────────
+
+def floor(args):
+    """How much of this machine aegis leaves alone, and where that came from."""
+    try:
+        plans = hostlib.load_plans()
+        anfitrion = hostlib.check_anfitrion(plans)
+    except hostlib.Unusable as e:
+        print(f"{red}{e}{reset}", file=sys.stderr)
+        return 2
+
+    known = hostlib.steps_of(anfitrion)
+
+    if args.set:
+        if args.set not in known:
+            print(f"{red}{args.set!r} is not an anfitrion step plans.yaml "
+                  f"declares{reset}", file=sys.stderr)
+            print(f"  declared: {', '.join(known)}", file=sys.stderr)
+            return 3
+        hostlib.floor_file().parent.mkdir(parents=True, exist_ok=True)
+        hostlib.floor_file().write_text(args.set + "\n", encoding="utf-8")
+        print(f"{green}the floor is now {args.set}{reset} "
+              f"{gray}({hostlib.floor_file()}){reset}")
+    elif args.unset:
+        # Not an error when there was nothing to remove: going back to
+        # the derived answer is the same outcome either way.
+        hostlib.floor_file().unlink(missing_ok=True)
+        print(f"{green}the floor goes back to being derived from the "
+              f"measurement{reset}")
+
+    try:
+        facts = hostlib.read_facts()
+        f = hostlib.floor(anfitrion, facts)
+    except hostlib.Unusable as e:
+        print(f"{red}{e}{reset}", file=sys.stderr)
+        return 2
+
+    if args.apply or args.off:
+        rc = _floor_write(f, facts, off=args.off, force=args.force)
+        if rc or args.off:
+            return rc
+
+    if args.json:
+        print(json.dumps(f, indent=2, sort_keys=True))
+        return 0
+
+    print(f"{bold}the floor{reset}   {gray}what the cluster may never take away{reset}")
+    print(f"  step        {bold}{f['step']}{reset}   {gray}{f['source']}{reset}")
+    print(f"  RAM         {_gib(f['ram_bytes'])}")
+    print(f"  VRAM        {f['vram_mib']} MiB")
+    print()
+    print(f"  {gray}a floor, not a cap: above it the desktop competes like "
+          f"anything else{reset}")
+
+    # What that floor turns into for the node, shown here because the
+    # number nobody could see is the whole reason this area exists.
+    try:
+        r = hostlib.node_reservation(anfitrion, facts)
+    except hostlib.Unusable as e:
+        print()
+        print(f"  {yellow}the node's reservation cannot be derived yet{reset}")
+        print(f"    {gray}{str(e).splitlines()[0]}{reset}")
+        return 0
+    print()
+    print(f"{bold}what that reserves on the node{reset}")
+    print(f"  machine     {_gib(r['ram_total_bytes'])}")
+    print(f"  reserved    {_gib(r['system_reserved_bytes'])}"
+          f"   {gray}the floor plus the host's own daemons{reset}")
+    print(f"  eviction    {_gib(r['eviction_bytes'])}")
+    print(f"  left to k8s {_gib(r['allocatable_bytes'])}"
+          f"   {gray}today the node says allocatable == capacity{reset}")
+    return 0
+
+
+# ── budget ───────────────────────────────────────────────────────────
+
+def budget(args):
+    """What the cluster asks of this machine, against what it leaves."""
+    try:
+        anfitrion = hostlib.check_anfitrion(hostlib.load_plans())
+        facts = hostlib.read_facts()
+        base = paths.platform_dir() / "k8s" / "base"
+        if not base.is_dir():
+            base = paths.aegis_root() / "seed" / "platform" / "k8s" / "base"
+        b = hostlib.memory_budget(anfitrion, facts, base)
+    except hostlib.Unusable as e:
+        print(f"{red}{e}{reset}", file=sys.stderr)
+        return 2
+
+    if args.json:
+        print(json.dumps(b, indent=2, sort_keys=True))
+        return 0 if b["reserves_fit"] else 1
+
+    r, w = b["reservation"], b["seed"]
+    print(f"{bold}the machine{reset}")
+    print(f"  RAM                 {_gib(r['ram_total_bytes']):>12}")
+    print(f"  floor ({r['floor']['step']})".ljust(22)
+          + f"{_gib(r['floor']['ram_bytes']):>12}   {gray}{r['floor']['source']}{reset}")
+    print(f"  host daemons        "
+          f"{_gib(r['system_reserved_bytes'] - r['floor']['ram_bytes']):>12}")
+    print(f"  eviction margin     {_gib(r['eviction_bytes']):>12}")
+    print(f"  {bold}left for the cluster{reset}"
+          f"{_gib(r['allocatable_bytes']):>12}")
+    print()
+    print(f"{bold}what the cluster asks{reset}   "
+          f"{gray}from {w['files']} manifest(s) in the seed{reset}")
+    print(f"  requests            {_gib(w['requests']):>12}")
+    print(f"  tmpfs (/dev/shm)    {_gib(w['tmpfs']):>12}"
+          f"   {gray}RAM the scheduler never sees{reset}")
+    print(f"  {bold}reserves{reset}            {_gib(b['reserves_bytes']):>12}"
+          f"   {gray}promised, and cannot be unpromised{reset}")
+    print(f"  limits              {_gib(w['limits']):>12}")
+    print(f"  takes at peak       {_gib(b['takes_bytes']):>12}"
+          f"   {gray}ceilings overcommit on purpose{reset}")
+    print()
+
+    # The gap this walk cannot close, printed every time rather than
+    # rounded away: a chart's own defaults for what the seed does not
+    # override live inside a tarball nobody here opens.
+    print(f"  {gray}a FLOOR of what will be asked, not a ceiling: a chart's own\n"
+          f"  defaults for what the seed does not override are not visible "
+          f"here{reset}")
+    print()
+
+    rc = 0
+    if not b["reserves_fit"]:
+        over = b["reserves_bytes"] - r["allocatable_bytes"]
+        print(f"{red}the cluster RESERVES {_gib(b['reserves_bytes'])} and this "
+              f"machine leaves it {_gib(r['allocatable_bytes'])}"
+              f" — {_gib(over)} too much{reset}")
+        print("  requests are what the scheduler promises and cannot take back.")
+        print("  Two ways out, and they are different decisions:")
+        print(f"    · leave the machine less:  {cli.cmd('host floor')} "
+              f"--set {_thinner(anfitrion, r['floor']['step'])}")
+        print(f"    · ask for less:            lower a `tamano` or a plan in "
+              f"plans.yaml, or run fewer subsystems")
+        rc = 1
+    else:
+        print(f"{green}the cluster reserves {_gib(b['reserves_bytes'])} of the "
+              f"{_gib(r['allocatable_bytes'])} this machine leaves it{reset}")
+
+    if not b["takes_fit"]:
+        print(f"{yellow}at their ceilings the pods could ask for "
+              f"{_gib(b['takes_bytes'])}, above the machine's "
+              f"{_gib(r['ram_total_bytes'])}{reset}")
+        print("  That is overcommit and it is normal; it becomes real only if "
+              "everything peaks at once.")
+    return rc
+
+
+def _floor_write(f, facts, off=False, force=False):
+    """Put the floor in the kernel's hands, or take it back out.
+
+    BOTH DIRECTIONS IN ONE PLACE and both one command, because a
+    protection that cannot be lifted quickly is one nobody dares turn
+    on. `--off` removes the drop-in and reloads; nothing restarts and
+    no workload notices.
+    """
+    dropin = pathlib.Path(hostlib.FLOOR_DROPIN)
+
+    if off:
+        if not dropin.exists():
+            print(f"{gray}there was no floor applied{reset}")
+        rc = _sudo(["rm", "-f", str(dropin)])
+        if rc:
+            return rc
+        _sudo(["systemctl", "daemon-reload"])
+        print(f"{green}the floor is lifted{reset} "
+              f"{gray}(the cluster may now reclaim from the session again){reset}")
+        return _floor_report(0)
+
+    # A floor bigger than the machine is not a protection, it is an
+    # outage with a friendly name: every pod would be reclaimed to hold
+    # memory for a desktop that is not asking for it.
+    ram = facts.get("ram_total_bytes")
+    if ram and f["ram_bytes"] > ram // 2 and not force:
+        print(f"{red}the floor is {_gib(f['ram_bytes'])} of a "
+              f"{_gib(ram)} machine{reset}", file=sys.stderr)
+        print("  Over half the machine held irreclaimable for the session would "
+              "starve the cluster,", file=sys.stderr)
+        print("  and the kernel would reclaim pods to honour it. Choose a thinner "
+              "step, or --force", file=sys.stderr)
+        print("  if that really is what this machine is for.", file=sys.stderr)
+        return 1
+
+    text = hostlib.floor_dropin_text(f, facts)
+    rc = _sudo(["mkdir", "-p", str(dropin.parent)])
+    if rc:
+        return rc
+    # tee and not a shell redirect: the redirect would be evaluated by
+    # THIS shell, without sudo, and fail on a directory root owns.
+    p = subprocess.run(["sudo", "tee", str(dropin)], input=text,
+                       capture_output=True, text=True)
+    if p.returncode:
+        print(f"{red}could not write {dropin}: {p.stderr.strip()}{reset}",
+              file=sys.stderr)
+        return 1
+    rc = _sudo(["systemctl", "daemon-reload"])
+    if rc:
+        return rc
+    print(f"{green}the floor is applied{reset} {gray}({dropin}){reset}")
+    return _floor_report(f["ram_bytes"])
+
+
+def _floor_report(expected):
+    """Read the floor back FROM THE KERNEL and say whether it took.
+
+    Not from the file that was just written. systemd accepts a drop-in
+    on a slice that is not managing memory and reports nothing wrong;
+    the difference only shows in /sys. An applied floor that is inert
+    is worse than no floor, because the panel says protected.
+    """
+    live = pathlib.Path(hostlib.FLOOR_LIVE)
+    try:
+        got = int(live.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        print(f"{yellow}the kernel could not be asked whether it took "
+              f"({live} is not readable){reset}", file=sys.stderr)
+        print("  It is not that the floor is fine: it is that nobody checked.",
+              file=sys.stderr)
+        return 2
+    if got == expected:
+        print(f"  {gray}the kernel confirms {live} = {got}{reset}")
+        return 0
+    print(f"{red}the drop-in was written and the kernel is holding "
+          f"{got}, not {expected}{reset}", file=sys.stderr)
+    print("  An applied floor that did not take effect is worse than none, "
+          "because it reads as protection.", file=sys.stderr)
+    print("  Check that this is cgroup v2 (`aegis host show`) and that "
+          "user.slice has memory accounting.", file=sys.stderr)
+    return 1
+
+
+def _sudo(argv):
+    p = subprocess.run(["sudo"] + argv, capture_output=True, text=True)
+    if p.returncode:
+        print(f"{red}sudo {' '.join(argv)} failed: {p.stderr.strip()}{reset}",
+              file=sys.stderr)
+    return p.returncode
+
+
+def _thinner(anfitrion, current):
+    """The step that leaves the machine less than the current one.
+
+    Named and not guessed: the message offers a way out, and a way out
+    that points at a step plans.yaml does not declare is worse than no
+    suggestion at all.
+    """
+    steps = hostlib.steps_of(anfitrion)
+    here = anfitrion[current]
+    thinner = [s for s in steps
+               if hostlib.quantity.mem(anfitrion[s]["ram"])
+               < hostlib.quantity.mem(here["ram"])]
+    if not thinner:
+        return "<no step leaves less than this one>"
+    return min(thinner, key=lambda s: hostlib.quantity.mem(anfitrion[s]["ram"]))
+
+
+# ── main ─────────────────────────────────────────────────────────────
+
+def main():
+    ap = cli.parser(
+        "host",
+        "Measures the machine aegis landed on, and writes it down.")
+    sub = ap.add_subparsers(dest="verb")
+
+    p = sub.add_parser("measure", help="look at the machine and save the facts")
+    p.add_argument("--json", action="store_true", help="print the facts as JSON")
+    p.set_defaults(fn=measure)
+
+    p = sub.add_parser("show", help="what was measured, and what could not be")
+    p.add_argument("--json", action="store_true", help="print the facts as JSON")
+    p.set_defaults(fn=show)
+
+    p = sub.add_parser("floor",
+                       help="how much of the machine aegis leaves alone, and why")
+    p.add_argument("--set", metavar="STEP",
+                   help="choose a step from plans.yaml instead of deriving one")
+    p.add_argument("--unset", action="store_true",
+                   help="go back to deriving it from the measurement")
+    p.add_argument("--apply", action="store_true",
+                   help="put the floor in the kernel's hands (writes a systemd drop-in)")
+    p.add_argument("--off", action="store_true",
+                   help="lift the floor: removes the drop-in, restarts nothing")
+    p.add_argument("--force", action="store_true",
+                   help="apply a floor larger than half the machine")
+    p.add_argument("--json", action="store_true", help="print the floor as JSON")
+    p.set_defaults(fn=floor)
+
+    p = sub.add_parser("budget",
+                       help="what the cluster asks of this machine, against what it leaves")
+    p.add_argument("--json", action="store_true", help="print the account as JSON")
+    p.set_defaults(fn=budget)
+
+    p = sub.add_parser("metrics",
+                       help="what only the host can see, in the exposition format")
+    p.set_defaults(fn=metrics)
+
+    p = sub.add_parser("reservation",
+                       help="what the kubelet has to keep away from pods")
+    p.add_argument("--for", dest="for_", choices=["kubelet"],
+                   help="print the exact drop-in the host bootstrap writes")
+    p.add_argument("--json", action="store_true", help="print it as JSON")
+    p.set_defaults(fn=reservation)
+
+    p = sub.add_parser("requires",
+                       help="what aegis needs of a machine before installing")
+    p.add_argument("--json", action="store_true",
+                   help="print the requirements as JSON")
+    p.set_defaults(fn=requires)
+
+    args = ap.parse_args()
+    if not getattr(args, "fn", None):
+        ap.print_help()
+        return 3
+    return args.fn(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

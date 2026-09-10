@@ -207,6 +207,37 @@ spec:
             # this line was written, so the two changes are one.
             - {name: CUDA_HOME, value: /opt/ai/venv/lib/python3.12/site-packages/nvidia/cu13}
             - {name: VLLM_USE_FLASHINFER_SAMPLER, value: "0"}
+            # ── THE THREAD CAPS, WRITTEN NEXT TO THE LIMIT THEY
+            # ANSWER TO ───────────────────────────────────────────────
+            #
+            # NOTHING INSIDE A CONTAINER KNOWS ITS OWN LIMIT. `nproc`
+            # in here answers with the machine's 32 threads, because a
+            # cgroup caps CPU TIME and does not change what the kernel
+            # reports. Every library that sizes a pool from
+            # `cpu_count()` therefore sizes it for a machine it is not
+            # allowed to use.
+            #
+            # TORCHINDUCTOR_COMPILE_THREADS is the one that matters for
+            # MEMORY and not only for CPU. On a COLD torch.compile,
+            # inductor forks one worker process per thread and each one
+            # imports torch — on a 32-thread host that is thirty-two
+            # copies of a heavy import arriving at once, in the same
+            # minute both engines are also reading their weights. The
+            # compile cache hides it: measured 2026-09-09, every start
+            # in seven days hit the cache and took 6 s (32 s worst
+            # case). A rebuilt image, a new vLLM, or a wiped cache
+            # volume is where the cold path comes back, and it comes
+            # back on somebody else's smaller machine.
+            #
+            # The value mirrors `limits.cpu` below. Check 197 asserts
+            # that it keeps mirroring it, because the pair that drifts
+            # is the pair nobody re-reads.
+            - {name: TORCHINDUCTOR_COMPILE_THREADS, value: "6"}
+            - {name: OMP_NUM_THREADS, value: "6"}
+            # glibc opens up to eight malloc arenas per core and does
+            # not give them back; against a memory limit that is
+            # measured as a leak.
+            - {name: MALLOC_ARENA_MAX, value: "2"}
             - {name: HOME, value: /cache}
           ports:
             - {name: http, containerPort: 8000}
@@ -249,6 +280,29 @@ spec:
           persistentVolumeClaim: {claimName: models-hf}
         - name: cache
           persistentVolumeClaim: {claimName: engine-mt-cache}
+        # PyTorch uses /dev/shm for shared tensors; the runtime's 64Mi
+        # default is not enough.
+        #
+        # WHY 1Gi AND WHAT IT COSTS, which this manifest did not say
+        # until 2026-09-09. `medium: Memory` is a tmpfs: it is RAM, not
+        # disk. Every byte written to it is charged to this pod's
+        # memory cgroup, and it counts against `limits.memory` above —
+        # but the SCHEDULER never sees it, because a volume is not a
+        # request. So this line quietly spoke for 1 GiB of the host
+        # that no account in the product contained, and the two GPU
+        # engines together for 2 GiB.
+        #
+        # The size is a ceiling and not a reservation: nothing is taken
+        # until something is written. vLLM with tensor_parallel_size=1
+        # writes very little here — the 64Mi default fails on the
+        # loader's shared buffers rather than on a steady-state need —
+        # so 1Gi is head-room chosen to be obviously enough, and it is
+        # cheap precisely because it is rarely touched.
+        #
+        # `aegis host budget` counts it now, on the side of what the
+        # cluster RESERVES, which is the pessimistic side. Better to
+        # over-account a gigabyte than to keep it invisible: invisible
+        # is what it was on the day the desktop froze.
         - name: shm
           emptyDir: {medium: Memory, sizeLimit: 1Gi}
 ---

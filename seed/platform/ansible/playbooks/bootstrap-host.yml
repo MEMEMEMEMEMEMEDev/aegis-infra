@@ -96,11 +96,18 @@
         reload: true
       when: userns_restrict.stat.exists
 
-    - name: k3s config directory
+    - name: k3s config directories
       ansible.builtin.file:
-        path: /etc/rancher/k3s
+        path: "{{ item }}"
         state: directory
         mode: "0755"
+      loop:
+        - /etc/rancher/k3s
+        # k3s's own merge directory. Created unconditionally even when
+        # nothing is going to be written into it: an empty drop-in
+        # directory changes nothing, and creating it only alongside its
+        # content would make two things fail as one.
+        - /etc/rancher/k3s/config.yaml.d
 
     # ── cluster DNS with systemd-resolved (run #7, bug B) ────────────
     # Ubuntu uses systemd-resolved: /etc/resolv.conf is the STUB
@@ -127,6 +134,41 @@
           # managed by aegis-init (bootstrap-host) — bug B, run #7
           resolv-conf: /run/systemd/resolve/resolv.conf
       when: resolved_real.stat.exists
+
+    # ── what the node keeps back for the machine it lives on ────────
+    #
+    # A DROP-IN, NOT AN EDIT OF THE FILE ABOVE, and the choice is the
+    # whole reason this lands cleanly. `config.yaml` already has an
+    # owner — the task right above, whose three literal lines check 024
+    # greps for — and it is written only `when: resolved_real...`. Both
+    # facts make it the wrong home: putting a key there would mean
+    # either rewriting somebody else's task, or hanging a memory
+    # reservation off whether this host runs systemd-resolved, which
+    # has nothing to do with it.
+    #
+    # `config.yaml.d/` is k3s's own merge directory, re-read on every
+    # start exactly like the file above. Deleting this one file is a
+    # complete rollback with nothing to un-edit — which is what makes
+    # the valve in phase 20 possible.
+    #
+    # WHY HERE AND NOT IN A LATER PHASE, which is the argument this
+    # file already makes for the NVIDIA runtime: this playbook runs
+    # BEFORE k3s exists, so the very first kubelet start already knows
+    # what to keep back. Written later it would need a restart, and a
+    # restart is a window in which the scheduler still believes it owns
+    # the whole machine.
+    #
+    # NO VALUES, NO FILE. If `aegis host` could not derive the
+    # reservation the init passes nothing and this task does not run: a
+    # missing reservation is VISIBLE (allocatable == capacity, which
+    # the alert NodoSinReservaParaElAnfitrion reports) while an invented
+    # one is not.
+    - name: k3s config.yaml.d — what the node keeps for the host
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml.d/10-aegis-node-reserved.yaml
+        mode: "0644"
+        content: "{{ aegis_node_reserved }}"
+      when: aegis_node_reserved | default('') | length > 0
 
     # ── the NVIDIA container runtime, and WHY IT LIVES HERE ─────────
     # Until 2026-08-31 nothing in this artifact installed it and

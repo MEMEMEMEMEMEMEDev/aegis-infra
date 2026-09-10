@@ -427,3 +427,102 @@ data:
             annotations:
               summary: "the off-site destination is reachable and EMPTY"
               description: "The measurement ran, the destination answered, and there is not one bundle in it. This is an instance whose data lives in exactly one place. Run `aegis data backup` by hand and read what it says: the usual causes are a credential that opens nothing (`aegis data remote adopt`) and a bucket that was created under another name than the one derived."
+  # THE MACHINE ITSELF, which until 2026-09-09 nothing in this
+  # instance measured. Of 1670 series in vmsingle, ZERO began with
+  # `node_`: aegis watched its containers and never the computer they
+  # were running on. So when the operator's graphical session froze
+  # under the AI engines, the platform had nothing to show for it —
+  # the post-mortem numbers had to be reconstructed from cAdvisor's
+  # root cgroup, which happens to be there and was never meant to be
+  # the record.
+  #
+  # The series these read come from `aegis host metrics`, pushed by a
+  # host timer. Same shape as the backup family: the producer lives
+  # outside the cluster because what it measures does.
+  anfitrion.yaml: |
+    groups:
+      - name: anfitrion
+        rules:
+          # THE MECHANISM OF THE FREEZE, watched directly. Nothing was
+          # OOM killed on 2026-09-09 and nothing had to be: with
+          # `user.slice` guaranteed nothing, the kernel evicted the
+          # human to make room for the cluster. Swap in use on a
+          # machine somebody is sitting at IS that eviction. Measured
+          # that week: 2002 minutes over 2 GiB out of 168 hours.
+          - alert: EscritorioEmpujadoAlSwap
+            expr: (last_over_time(aegis_host_shared_with_a_human[5m]) == 1) and (last_over_time(aegis_host_swap_used_bytes[5m]) > 2147483648)
+            for: 15m
+            labels: {severity: warning}
+            annotations:
+              summary: "the machine has been swapping for a quarter of an hour with somebody using it"
+              description: "On a shared machine, sustained swap is the desktop being evicted to make room for the cluster — the mechanism behind a session that stops answering. Read `aegis host budget`: either what the cluster reserves no longer fits in what the host leaves, or the floor is declared and not enforced (PisoDelEscritorioNoAplicado says which)."
+          # The stall is the symptom the human actually feels, and it
+          # is a counter, so the rate is exact whatever the sampling.
+          # The threshold is measured, not chosen: this machine sat at
+          # 3.6% while the engines started and touched 15.4% on
+          # 2026-09-02. 5% sustained is well above the ordinary and
+          # well below the worst seen.
+          - alert: MaquinaAtascadaEnMemoria
+            expr: rate(aegis_host_memory_stall_seconds_total{scope="some"}[5m]) > 0.05
+            for: 10m
+            labels: {severity: warning}
+            annotations:
+              summary: "this machine spends more than 5% of its time waiting on memory"
+              description: "Measured on the house machine: 3.6% while the AI engines start, 15.4% at its worst. Sustained above 5% is what a person experiences as the computer not answering. It is a whole-machine number and not a container's: `aegis host show` breaks it down by slice."
+          # A FLOOR THAT IS DECLARED AND NOT HELD. This is the failure
+          # that would otherwise be invisible: the drop-in is written,
+          # `aegis host floor` prints a number, and the kernel is
+          # guaranteeing nothing. That is why the enforced series is
+          # read from /sys/fs/cgroup and never from the file the
+          # product wrote — a unit that did not take effect looks
+          # identical to one that did if you only read your own
+          # writing.
+          - alert: PisoDelEscritorioNoAplicado
+            expr: (last_over_time(aegis_host_shared_with_a_human[5m]) == 1) and (last_over_time(aegis_host_desktop_floor_bytes[5m]) > 0) and (last_over_time(aegis_host_desktop_floor_enforced[5m]) == 0)
+            for: 30m
+            labels: {severity: warning}
+            annotations:
+              summary: "a human shares this machine and the floor meant to protect them is not in effect"
+              description: "The floor is declared in plans.yaml and the kernel is not holding it: /sys/fs/cgroup/user.slice/memory.min is zero. Until it is applied, nothing stops the cluster reclaiming the session's memory. Apply it with `aegis host floor --apply`, and `--off` undoes it in one command."
+          # THE SCHEDULER STILL BELIEVING IT OWNS THE MACHINE. A ratio
+          # of 1 means the kubelet reserves nothing, so `allocatable`
+          # equals `capacity` and pods are placed against memory the
+          # host needs. Measured 2026-09-09: exactly 1.0, on a machine
+          # with a person on it.
+          - alert: NodoSinReservaParaElAnfitrion
+            expr: (last_over_time(aegis_host_shared_with_a_human[5m]) == 1) and (last_over_time(aegis_host_node_allocatable_ratio[5m]) >= 1)
+            for: 1h
+            labels: {severity: warning}
+            annotations:
+              summary: "the node hands out the whole machine and a person is using it"
+              description: "allocatable equals capacity: the kubelet keeps nothing back, so the scheduler places pods against memory the host itself needs. The reservation is derived from the floor and written to /etc/rancher/k3s/config.yaml.d/ by the host bootstrap; `aegis host floor` prints what it would reserve."
+          # VRAM, AND IT ONLY WARNS. Deliberate, and the operator's
+          # decision on 2026-09-09: the desktop and vLLM share one
+          # card, and the preflight that guards the start is a single
+          # shot — it tolerates foreign VRAM once and nothing watches
+          # afterwards. On 2026-09-06 the session died with `Failed to
+          # allocate NVKMS memory` after a browser grew. Bringing an
+          # engine down automatically would be aegis deciding to end
+          # somebody's inference to save their compositor, and that is
+          # a choice for the person at the keyboard.
+          - alert: VramSinSitioParaElEscritorio
+            expr: (last_over_time(aegis_host_shared_with_a_human[5m]) == 1) and ((last_over_time(aegis_host_vram_total_mib[5m]) - last_over_time(aegis_host_vram_used_mib[5m])) < 1024)
+            for: 10m
+            labels: {severity: warning}
+            annotations:
+              summary: "less than 1 GiB of VRAM is free and a person shares this card"
+              description: "The compositor allocates from the same card as the engines and fails hard when it cannot: on 2026-09-06 this machine lost its graphical session to `Failed to allocate NVKMS memory`. This only warns, on purpose. To free it: `aegis ai stop`, or close what is holding the card."
+          # THE SIBLING OF THE WHOLE FAMILY. Every rule above compares
+          # against a value, so every one of them goes EMPTY rather
+          # than false if the host stops reporting — and an empty rule
+          # is indistinguishable from a healthy machine. This is what
+          # makes the silence visible. It names each subject rather
+          # than a single series, because the producer can lose one
+          # probe and keep the others.
+          - alert: MedicionDelAnfitrionAusente
+            expr: absent(last_over_time(aegis_host_metrics_timestamp_seconds[15m])) or absent(last_over_time(aegis_host_ram_total_bytes[15m])) or absent(last_over_time(aegis_host_memory_stall_seconds_total[15m])) or absent(last_over_time(aegis_host_shared_with_a_human[15m])) or absent(last_over_time(aegis_host_cgroup_memory_peak_bytes[15m])) or absent(last_over_time(aegis_host_cgroup_memory_current_bytes[15m])) or absent(last_over_time(aegis_host_ram_available_bytes[15m])) or absent(last_over_time(aegis_host_swap_total_bytes[15m])) or absent(last_over_time(aegis_host_swap_used_bytes[15m])) or absent(last_over_time(aegis_host_desktop_floor_bytes[15m])) or absent(last_over_time(aegis_host_desktop_floor_enforced[15m])) or absent(last_over_time(aegis_host_node_allocatable_ratio[15m])) or absent(last_over_time(aegis_host_vram_total_mib[15m])) or absent(last_over_time(aegis_host_vram_used_mib[15m])) or absent(last_over_time(aegis_host_vram_peak_mib[15m]))
+            for: 30m
+            labels: {severity: critical}
+            annotations:
+              summary: "this machine stopped reporting on itself"
+              description: "The host timer pushes every minute; nothing has arrived in fifteen. Until it does, every alert in this family is MUTE and not green — the machine could be swapping itself to death and the panel would look calm. The usual cause is a user timer without lingering: `loginctl enable-linger $USER`, then `systemctl --user status aegis-host-metrics.timer`."

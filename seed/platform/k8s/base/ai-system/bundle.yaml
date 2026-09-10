@@ -60,6 +60,27 @@ spec:
     # Leaving 20 as the limit ceiling means the sum of the limits fits
     # with room to spare, and no pod can RESERVE more than 8 threads in
     # total.
+    #
+    # AND THE SAME ARITHMETIC FOR MEMORY, which this comment did not do
+    # until 2026-09-09 and should have from the first day. It was not a
+    # slip here: nothing anywhere in the product added memory up.
+    #   limits:   llm 10 + mt 8 + cpu 3 + gateway 0.25 + controller 0.06
+    #             = 21.31 GiB
+    #   requests: llm  5 + mt 4 + cpu 2 + gateway 0.06 + controller 0.03
+    #             = 11.09 GiB
+    #
+    # A THIRD TERM NEITHER LINE CONTAINS, and it is the one that hurt:
+    # the two GPU engines each mount 1Gi of `/dev/shm` as an `emptyDir`
+    # with `medium: Memory`. That is a tmpfs. The kernel charges every
+    # byte written to it against the pod's memory cgroup, and the
+    # scheduler counts none of it — it is not in `requests`, so it is
+    # not in this quota either. 2 GiB of the host were spoken for by
+    # these manifests and invisible to every account that existed.
+    #
+    # `aegis host budget` adds the three terms together now, against
+    # what the machine leaves over once the human has their floor. This
+    # quota stays what it always was — the namespace's own ceiling —
+    # and stops being mistaken for a statement about the machine.
     requests.cpu: "8"
     requests.memory: 14Gi
     limits.cpu: "20"

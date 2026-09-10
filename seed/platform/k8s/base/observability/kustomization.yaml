@@ -20,6 +20,7 @@ resources:
   - dashboards/supply-chain.yaml
   - dashboards/edge.yaml
   - dashboards/usage.yaml
+  - dashboards/anfitrion.yaml
   - routes.yaml
   # NetworkPolicy: written (netpol.yaml) but NOT listed until Cilium
   # (ADR-0014; kube-router does not enforce — validate POSITIVE
