@@ -186,6 +186,21 @@ gate "disco-suficiente" bash -c '
     [[ -n "$free_g" ]] || { echo "the free disk on / could not be measured" >&2; exit 1; }
     [[ "$free_g" -ge "$min_g" ]] || { echo "free disk ${free_g}G, and aegis needs ${min_g}G" >&2; exit 1; }'
 
+# 4b. THE MACHINE, measured and written down, before anything is sized
+#     to it. Every later phase that has to decide how much of this host
+#     it may take reads $AEGIS_HOME/host.json — the kubelet's
+#     reservation in phase 20, the AI's memory budget in phase 87 — and
+#     none of them measures on its own, because two measurers become
+#     two answers.
+#
+#     It is a GATE and not a best-effort step. An init that proceeds
+#     without knowing the machine is the init that deployed 18 GiB of
+#     declared limits onto a 30 GiB workstation with a graphical
+#     session, and the operator found out when the screen stopped
+#     responding.
+gate "perfil-del-anfitrion" bash -c \
+    '"$AEGIS_ROOT/libexec/aegis-host" measure >/dev/null'
+
 # 5. Greenfield on a host with a previous kubeconfig: confirm that
 #    nothing live is being stepped on (A11 inverted: here the danger
 #    is TRAMPLING).

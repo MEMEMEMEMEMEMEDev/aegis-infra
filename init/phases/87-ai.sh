@@ -433,6 +433,30 @@ gate "ai-secrets-encrypted" bash -c \
 git_commit_if_changes "$PLATFORM_DIR" "feat(ai): ai-system secrets (regcred + an empty key roster)"
 git_push_verified "$PLATFORM_DIR"
 
+# ── 87.3b does this machine have room for what is about to land? ───
+#
+# THE FIRST GATE OF THIS PHASE THAT LOOKS AT RAM. Until 2026-09-09 it
+# measured the driver's branch and an inotify ceiling and nothing else
+# about the machine, and then deployed two engines carrying 18 GiB of
+# declared limits. On the house workstation that worked: the memory
+# came out of the graphical session, and the session froze.
+#
+# Deliberately HERE — after the images are pinned and the secrets are
+# written, and BEFORE `argo_sync` puts anything on the node. The shape
+# is check 171's, «measure the room before asking for it», which this
+# same phase already applies to disk before firing a build.
+#
+# `aegis host budget` exits 1 when what the cluster RESERVES does not
+# fit in what the host leaves over. Requests are a promise the
+# scheduler cannot take back, so that is a stop. Ceilings
+# overcommitting is normal, prints as such, and does not fail.
+gate_diag "host-memory-budget" \
+  '"$AEGIS_ROOT/libexec/aegis-host" budget 2>&1 | sed "s/^/  /";
+   echo "  Two ways out, and they are different decisions:";
+   echo "    · leave the machine less:  aegis host floor --set <a thinner step>";
+   echo "    · ask for less:            lower a tamano or a plan in plans.yaml"' \
+  bash -c '"$AEGIS_ROOT/libexec/aegis-host" budget >/dev/null'
+
 # ── 87.4 the substrate ─────────────────────────────────────────────
 argo_sync ai-system 600
 # F-B run #15: a sync can die from transient DNS and leave the gate

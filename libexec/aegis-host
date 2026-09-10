@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # aegis-summary: Measures the machine aegis landed on and writes it down
 # aegis-group:   operate
-# aegis-subcommands: measure show floor requires
+# aegis-subcommands: measure show floor budget requires
 """aegis-host — measures the machine aegis landed on, and writes it down.
 
     aegis host measure          # look at the machine, save the facts
     aegis host show [--json]    # what was measured, and what could not be
     aegis host floor            # how much of it aegis leaves alone, and why
     aegis host floor --set <step>   # choose deliberately instead of deriving
+    aegis host budget           # what the cluster asks, against what is left
     aegis host requires         # what aegis needs of a machine, from plans.yaml
 
 ── WHY THIS COMMAND EXISTS ─────────────────────────────────────────
@@ -530,6 +531,99 @@ def floor(args):
     return 0
 
 
+# ── budget ───────────────────────────────────────────────────────────
+
+def budget(args):
+    """What the cluster asks of this machine, against what it leaves."""
+    try:
+        anfitrion = hostlib.check_anfitrion(hostlib.load_plans())
+        facts = hostlib.read_facts()
+        base = paths.platform_dir() / "k8s" / "base"
+        if not base.is_dir():
+            base = paths.aegis_root() / "seed" / "platform" / "k8s" / "base"
+        b = hostlib.memory_budget(anfitrion, facts, base)
+    except hostlib.Unusable as e:
+        print(f"{red}{e}{reset}", file=sys.stderr)
+        return 2
+
+    if args.json:
+        print(json.dumps(b, indent=2, sort_keys=True))
+        return 0 if b["reserves_fit"] else 1
+
+    r, w = b["reservation"], b["seed"]
+    print(f"{bold}the machine{reset}")
+    print(f"  RAM                 {_gib(r['ram_total_bytes']):>12}")
+    print(f"  floor ({r['floor']['step']})".ljust(22)
+          + f"{_gib(r['floor']['ram_bytes']):>12}   {gray}{r['floor']['source']}{reset}")
+    print(f"  host daemons        "
+          f"{_gib(r['system_reserved_bytes'] - r['floor']['ram_bytes']):>12}")
+    print(f"  eviction margin     {_gib(r['eviction_bytes']):>12}")
+    print(f"  {bold}left for the cluster{reset}"
+          f"{_gib(r['allocatable_bytes']):>12}")
+    print()
+    print(f"{bold}what the cluster asks{reset}   "
+          f"{gray}from {w['files']} manifest(s) in the seed{reset}")
+    print(f"  requests            {_gib(w['requests']):>12}")
+    print(f"  tmpfs (/dev/shm)    {_gib(w['tmpfs']):>12}"
+          f"   {gray}RAM the scheduler never sees{reset}")
+    print(f"  {bold}reserves{reset}            {_gib(b['reserves_bytes']):>12}"
+          f"   {gray}promised, and cannot be unpromised{reset}")
+    print(f"  limits              {_gib(w['limits']):>12}")
+    print(f"  takes at peak       {_gib(b['takes_bytes']):>12}"
+          f"   {gray}ceilings overcommit on purpose{reset}")
+    print()
+
+    # The gap this walk cannot close, printed every time rather than
+    # rounded away: a chart's own defaults for what the seed does not
+    # override live inside a tarball nobody here opens.
+    print(f"  {gray}a FLOOR of what will be asked, not a ceiling: a chart's own\n"
+          f"  defaults for what the seed does not override are not visible "
+          f"here{reset}")
+    print()
+
+    rc = 0
+    if not b["reserves_fit"]:
+        over = b["reserves_bytes"] - r["allocatable_bytes"]
+        print(f"{red}the cluster RESERVES {_gib(b['reserves_bytes'])} and this "
+              f"machine leaves it {_gib(r['allocatable_bytes'])}"
+              f" — {_gib(over)} too much{reset}")
+        print("  requests are what the scheduler promises and cannot take back.")
+        print("  Two ways out, and they are different decisions:")
+        print(f"    · leave the machine less:  {cli.cmd('host floor')} "
+              f"--set {_thinner(anfitrion, r['floor']['step'])}")
+        print(f"    · ask for less:            lower a `tamano` or a plan in "
+              f"plans.yaml, or run fewer subsystems")
+        rc = 1
+    else:
+        print(f"{green}the cluster reserves {_gib(b['reserves_bytes'])} of the "
+              f"{_gib(r['allocatable_bytes'])} this machine leaves it{reset}")
+
+    if not b["takes_fit"]:
+        print(f"{yellow}at their ceilings the pods could ask for "
+              f"{_gib(b['takes_bytes'])}, above the machine's "
+              f"{_gib(r['ram_total_bytes'])}{reset}")
+        print("  That is overcommit and it is normal; it becomes real only if "
+              "everything peaks at once.")
+    return rc
+
+
+def _thinner(anfitrion, current):
+    """The step that leaves the machine less than the current one.
+
+    Named and not guessed: the message offers a way out, and a way out
+    that points at a step plans.yaml does not declare is worse than no
+    suggestion at all.
+    """
+    steps = hostlib.steps_of(anfitrion)
+    here = anfitrion[current]
+    thinner = [s for s in steps
+               if hostlib.quantity.mem(anfitrion[s]["ram"])
+               < hostlib.quantity.mem(here["ram"])]
+    if not thinner:
+        return "<no step leaves less than this one>"
+    return min(thinner, key=lambda s: hostlib.quantity.mem(anfitrion[s]["ram"]))
+
+
 # ── main ─────────────────────────────────────────────────────────────
 
 def main():
@@ -554,6 +648,11 @@ def main():
                    help="go back to deriving it from the measurement")
     p.add_argument("--json", action="store_true", help="print the floor as JSON")
     p.set_defaults(fn=floor)
+
+    p = sub.add_parser("budget",
+                       help="what the cluster asks of this machine, against what it leaves")
+    p.add_argument("--json", action="store_true", help="print the account as JSON")
+    p.set_defaults(fn=budget)
 
     p = sub.add_parser("requires",
                        help="what aegis needs of a machine before installing")

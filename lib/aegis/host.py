@@ -264,6 +264,177 @@ def floor(anfitrion, facts):
     }
 
 
+# ── what the cluster asks of the machine ─────────────────────────────
+#
+# There was no memory arithmetic ANYWHERE in this product before
+# 2026-09-09. `org.py` sums a tenant's services against its quota, and
+# the ai-system quota's own comment does the sum in CPU and stops. So
+# nothing ever added up what the whole platform reserves and held it
+# against the machine — the one question whose wrong answer freezes a
+# desktop.
+#
+# Two numbers come out, and keeping them apart is the point:
+#
+#   RESERVES  requests + the tmpfs nobody counts. This is what the
+#             scheduler PROMISES and cannot take back. Over the room
+#             the host leaves, it is a FAILURE.
+#   TAKES     limits + the same tmpfs. Ceilings overcommit on purpose
+#             and always have. Over the machine's capacity it is a
+#             WARNING, and treating it like the first number would make
+#             every healthy cluster look broken.
+
+_POD_KINDS = ("Deployment", "StatefulSet", "DaemonSet", "ReplicaSet",
+              "Job", "Pod", "ReplicationController")
+
+
+def _res_bytes(res, side):
+    try:
+        return quantity.mem((res or {}).get(side, {}).get("memory"))
+    except (AttributeError, TypeError, ValueError):
+        return 0
+
+
+def _weigh_podspec(spec):
+    """(requests, limits, tmpfs) of one pod, the way the kubelet counts.
+
+    INIT CONTAINERS ARE A MAX, NOT A SUM, and that is not a detail: they
+    run to completion one after another and none of them is alive when
+    the app containers are. Summing them would inflate every pod that
+    waits for its turn — which, after the fleet learned to take turns,
+    is most of the AI ones.
+
+    The tmpfs is the term nobody had. An `emptyDir` with
+    `medium: Memory` is RAM: the kernel charges every byte written to
+    it against the pod's memory cgroup, and the scheduler does not see
+    it in `requests` at all. Measured 2026-09-09: the two GPU engines
+    carry 1Gi of /dev/shm each, so 2 GiB of this machine were spoken
+    for by manifests and invisible to every account that existed.
+    """
+    req = lim = 0
+    for c in spec.get("containers") or []:
+        req += _res_bytes(c.get("resources"), "requests")
+        lim += _res_bytes(c.get("resources"), "limits")
+    ireq = ilim = 0
+    for c in spec.get("initContainers") or []:
+        ireq = max(ireq, _res_bytes(c.get("resources"), "requests"))
+        ilim = max(ilim, _res_bytes(c.get("resources"), "limits"))
+    tmpfs = 0
+    for v in spec.get("volumes") or []:
+        ed = (v or {}).get("emptyDir")
+        if isinstance(ed, dict) and ed.get("medium") == "Memory" and ed.get("sizeLimit"):
+            tmpfs += quantity.mem(ed["sizeLimit"])
+    return max(req, ireq), max(lim, ilim), tmpfs
+
+
+def _walk_bare_resources(node, out, seen_ids):
+    """`resources:` blocks that are not inside a pod spec.
+
+    The seed declares resources in TWO shapes and both are real: raw
+    manifests, and the `values.yaml` of the charts it pins. A walk that
+    only understood manifests would miss observability and jenkins
+    entirely and report a reassuring number.
+    """
+    if id(node) in seen_ids:
+        return
+    seen_ids.add(id(node))
+    if isinstance(node, dict):
+        r = node.get("resources")
+        if isinstance(r, dict) and ("requests" in r or "limits" in r):
+            out["requests"] += _res_bytes(r, "requests")
+            out["limits"] += _res_bytes(r, "limits")
+        for k, v in node.items():
+            if k == "resources":
+                continue
+            _walk_bare_resources(v, out, seen_ids)
+    elif isinstance(node, list):
+        for v in node:
+            _walk_bare_resources(v, out, seen_ids)
+
+
+def weigh_seed(base_dir):
+    """What the artifact declares it will ask of a machine.
+
+    Read from the seed and not from a cluster, because the question it
+    answers is the one a stranger asks BEFORE installing: will this
+    machine hold what aegis is about to deploy? That question had no
+    answer, and the freeze it should have predicted is the reason this
+    exists.
+
+    WHAT IT CANNOT SEE, said out loud rather than rounded away: a
+    chart's OWN defaults for anything the seed does not override. The
+    seed pins versions and overrides the resources it cares about; what
+    it leaves alone is decided inside a tarball this walk never opens.
+    So the number is a FLOOR of what will be asked, never a ceiling,
+    and every caller prints it as such.
+    """
+    import pathlib
+    base = pathlib.Path(base_dir)
+    total = {"requests": 0, "limits": 0, "tmpfs": 0}
+    files = 0
+    if not base.is_dir():
+        raise Unusable(
+            f"the seed's manifests are not readable ({base}).\n"
+            f"  Without them there is nothing to weigh, and reporting a small\n"
+            f"  number would be worse than reporting none.")
+    for p in sorted(base.rglob("*.yaml")):
+        try:
+            docs = list(yaml.safe_load_all(p.read_text(encoding="utf-8")))
+        except (OSError, yaml.YAMLError):
+            continue
+        files += 1
+        for d in docs:
+            if not isinstance(d, dict):
+                continue
+            kind = d.get("kind")
+            if kind in _POD_KINDS:
+                spec = d.get("spec") or {}
+                pod = (spec.get("template") or {}).get("spec") or (
+                    spec if kind == "Pod" else {})
+                if not pod:
+                    continue
+                n = 1 if kind in ("DaemonSet", "Pod") else int(spec.get("replicas") or 1)
+                r, l, t = _weigh_podspec(pod)
+                total["requests"] += r * n
+                total["limits"] += l * n
+                total["tmpfs"] += t * n
+            else:
+                # a chart's values, or anything else that declares
+                # resources without a pod around them
+                bare = {"requests": 0, "limits": 0}
+                _walk_bare_resources(d, bare, set())
+                total["requests"] += bare["requests"]
+                total["limits"] += bare["limits"]
+    total["files"] = files
+    return total
+
+
+def memory_budget(anfitrion, facts, base_dir):
+    """The account: what the cluster asks, against what the host leaves.
+
+    Written in the shape of `org.py`'s `_check_quota_arithmetic` — the
+    terms, the sum, the ceiling, and the ways out named — because an
+    account the operator cannot follow is a number they have to trust,
+    and this one is telling them their computer is about to freeze.
+    """
+    r = node_reservation(anfitrion, facts)
+    w = weigh_seed(base_dir)
+    reserves = w["requests"] + w["tmpfs"]
+    takes = w["limits"] + w["tmpfs"]
+    return {
+        "reservation": r,
+        "seed": w,
+        "reserves_bytes": reserves,
+        "takes_bytes": takes,
+        # RESERVES over what is left is a failure: the scheduler cannot
+        # unpromise it.
+        "reserves_fit": reserves <= r["allocatable_bytes"],
+        # TAKES over capacity is a warning: ceilings overcommit by
+        # design, and calling that broken would make every healthy
+        # cluster look sick.
+        "takes_fit": takes <= r["ram_total_bytes"],
+    }
+
+
 def node_reservation(anfitrion, facts):
     """What the kubelet has to be told to keep away from pods.
 

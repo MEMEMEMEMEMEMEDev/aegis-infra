@@ -249,6 +249,29 @@ spec:
           persistentVolumeClaim: {claimName: models-hf}
         - name: cache
           persistentVolumeClaim: {claimName: engine-mt-cache}
+        # PyTorch uses /dev/shm for shared tensors; the runtime's 64Mi
+        # default is not enough.
+        #
+        # WHY 1Gi AND WHAT IT COSTS, which this manifest did not say
+        # until 2026-09-09. `medium: Memory` is a tmpfs: it is RAM, not
+        # disk. Every byte written to it is charged to this pod's
+        # memory cgroup, and it counts against `limits.memory` above —
+        # but the SCHEDULER never sees it, because a volume is not a
+        # request. So this line quietly spoke for 1 GiB of the host
+        # that no account in the product contained, and the two GPU
+        # engines together for 2 GiB.
+        #
+        # The size is a ceiling and not a reservation: nothing is taken
+        # until something is written. vLLM with tensor_parallel_size=1
+        # writes very little here — the 64Mi default fails on the
+        # loader's shared buffers rather than on a steady-state need —
+        # so 1Gi is head-room chosen to be obviously enough, and it is
+        # cheap precisely because it is rarely touched.
+        #
+        # `aegis host budget` counts it now, on the side of what the
+        # cluster RESERVES, which is the pessimistic side. Better to
+        # over-account a gigabyte than to keep it invisible: invisible
+        # is what it was on the day the desktop froze.
         - name: shm
           emptyDir: {medium: Memory, sizeLimit: 1Gi}
 ---
