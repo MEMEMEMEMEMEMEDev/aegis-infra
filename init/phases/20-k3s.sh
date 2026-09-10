@@ -41,9 +41,47 @@ log_info "bootstrap-host.yml (sysctl, kernel modules, apt, /etc/rancher)"
 # already present. Both edges of the branch are declared, which is what
 # check 115 demands of every phase that forks.
 AI="${AI:-no}"
+
+# WHAT THE NODE KEEPS BACK FOR THE MACHINE IT LIVES ON, derived here
+# and handed in. The playbook stays dumb on purpose: it writes what it
+# is given, and the arithmetic — the human's floor, the host's own
+# daemons, the eviction margin — lives in one place, `aegis host`.
+#
+# AN EMPTY ANSWER IS LEGITIMATE, which is why this does not `die`. On a
+# machine that could not be measured there is nothing to reserve from,
+# and the playbook's `when` then writes no file at all. A missing
+# reservation is VISIBLE — `allocatable == capacity`, which the alert
+# NodoSinReservaParaElAnfitrion reports — while an invented one is not
+# visible at all.
+AEGIS_RESERVED_FILE=/etc/rancher/k3s/config.yaml.d/10-aegis-node-reserved.yaml
+# What is there BEFORE the playbook, so that afterwards we can tell
+# whether the reservation actually moved. It matters on an instance
+# that already exists: `install-k3s.yml` is a no-op when the version
+# matches, k3s does not restart, and a drop-in nobody re-read is a file
+# that changes nothing while looking applied.
+AEGIS_RESERVED_WAS="$(sudo -n cat "$AEGIS_RESERVED_FILE" 2>/dev/null || true)"
+
+AEGIS_NODE_RESERVED="$("$AEGIS_ROOT/libexec/aegis-host" reservation --for kubelet 2>/dev/null || true)"
+if [[ -n "$AEGIS_NODE_RESERVED" ]]; then
+    log_info "the node will keep back $(printf '%s' "$AEGIS_NODE_RESERVED" | sed -n 's/^ *- "system-reserved=memory=\(.*\)"$/\1/p') for the host"
+else
+    log_warn "the node's reservation could not be derived: it will go on handing out the whole machine (aegis host show says what is missing)"
+fi
+
+# AS JSON, and this is a measured lesson rather than a style choice.
+# `-e key=value` is SPLIT by ansible before it is parsed, so a value
+# with newlines and quotes in it -- which a drop-in with its arithmetic
+# written above it certainly has -- makes it fail while trying to read
+# the INVENTORY, with an error that names hosts.ini and not the
+# variable. Measured 2026-09-10 on the first run. A `-e` that starts
+# with `{` is read as JSON instead: one line, quoting handled, newlines
+# escaped.
+AEGIS_RESERVED_JSON="$(printf '%s' "$AEGIS_NODE_RESERVED" | python3 -c \
+    'import json,sys; print(json.dumps({"aegis_node_reserved": sys.stdin.read()}))')"
 run_cmd retry_net 2 ansible/.venv/bin/ansible-playbook \
     -i ansible/inventory/hosts.ini \
     -e "aegis_ai=$AI" \
+    -e "$AEGIS_RESERVED_JSON" \
     ansible/playbooks/bootstrap-host.yml "${ANSIBLE_BECOME_ARGS[@]}"
 
 # ── pinned K3s ─────────────────────────────────────────────────────
@@ -51,6 +89,68 @@ log_info "install-k3s.yml (pin in group_vars, --disable traefik/servicelb)"
 run_cmd retry_net 2 ansible/.venv/bin/ansible-playbook \
     -i ansible/inventory/hosts.ini \
     ansible/playbooks/install-k3s.yml "${ANSIBLE_BECOME_ARGS[@]}"
+
+# Does the API answer? A function and not an inline command, because
+# `wait_for` takes a LABEL before the command and an inline pipeline
+# there is exactly how the label ate the verb the first time.
+_k3s_api_answers() { kubectl get --raw=/readyz >/dev/null 2>&1; }
+
+# ── the reservation, made real, with the way back wired in ─────────
+#
+# ON A FRESH MACHINE this block does nothing: k3s was just installed
+# and its first start already read the drop-in. It exists for the other
+# case, which is the common one -- an instance that already exists,
+# where install-k3s.yml is a no-op because the version matches, k3s
+# never restarts, and the drop-in sits there changing nothing while
+# looking perfectly applied.
+#
+# THE VALVE IS NOT OPTIONAL. A malformed kubelet-arg stops k3s from
+# starting at all, and a node is worth more than a reservation. So:
+# restart, wait a bounded time for the node to answer, and if it does
+# not, take the drop-in back out, restart again, and die saying so.
+#
+# Over-reserving is a different and much softer failure -- pods go
+# Pending and get evicted, the node stays up -- and it is deliberately
+# NOT what this rolls back. That one is visible in `aegis host budget`,
+# and phase 87 has its own gate that refuses to deploy into it.
+if [[ -n "$AEGIS_NODE_RESERVED" ]] \
+   && [[ "$AEGIS_NODE_RESERVED" != "$AEGIS_RESERVED_WAS" ]] \
+   && sudo -n systemctl is-active --quiet k3s 2>/dev/null; then
+    log_warn "the node's reservation changed: restarting k3s (the cluster is unreachable for a few seconds)"
+    run_cmd sudo systemctl restart k3s
+    # THE LABEL IS THE THIRD ARGUMENT. `wait_for TIMEOUT EVERY WHAT
+    # cmd...` consumes three before the command, and the first draft
+    # passed `kubectl` as the label -- so the command it actually
+    # polled was `get --raw=/readyz`, which is not a command. It never
+    # succeeded, the valve fired after 180 s, and a reservation that
+    # was working perfectly was rolled back. Measured 2026-09-10, on
+    # this machine, with the cluster healthy the whole time.
+    #
+    # A valve whose probe can only say NO is not a safety net; it is a
+    # switch that turns the feature off on a timer.
+    if wait_for 180 5 "the API to answer after the restart" \
+            _k3s_api_answers; then
+        log_info "k3s came back with the reservation in place"
+    else
+        log_warn "k3s did not answer in 180 s -- taking the reservation back out"
+        sudo -n rm -f "$AEGIS_RESERVED_FILE"
+        # NOT `|| true` on either of these, and the distinction is the
+        # one check 009 exists to protect: `|| true` DISCARDS a result,
+        # and on a path that is already dying the last thing an
+        # operator needs is a rollback that failed in silence. Both
+        # outcomes are reported; neither aborts the rollback, because
+        # the `die` below is going to run whatever happens.
+        sudo systemctl restart k3s \
+            || log_warn "the restart WITHOUT the reservation also failed: read 'systemctl status k3s'"
+        wait_for 180 5 "the API to answer without the reservation" \
+                _k3s_api_answers \
+            && log_info "the node came back once the reservation was withdrawn" \
+            || log_warn "the node did not come back even without the reservation: the cause is NOT this drop-in"
+        die "the node did not come back with the reservation, so it was withdrawn and k3s restarted without it.
+  The rejected drop-in is what 'aegis host reservation --for kubelet' prints.
+  The node is running WITHOUT a reservation: it hands out the whole machine until this is resolved."
+    fi
+fi
 
 # ── the GPU runtime, measured where it becomes true ────────────────
 # The toolkit was installed above, before k3s existed, precisely so

@@ -191,6 +191,54 @@ def floor_dropin_text(f, facts):
         f"MemoryMin={f['ram_bytes']}\n")
 
 
+# The kubelet's own merge directory. NOT `config.yaml`, and the
+# distinction is the whole reason this lands cleanly: that file already
+# has an owner — the task that pins `resolv-conf`, guarded by three
+# literal greps in check 024 — and editing it would mean either
+# rewriting somebody else's task or hanging this one off a condition
+# that has nothing to do with it (on a host without systemd-resolved,
+# `config.yaml` is not written at all). A drop-in is a separate file,
+# written unconditionally, merged by k3s on every boot, and removed by
+# deleting it.
+KUBELET_DROPIN = "/etc/rancher/k3s/config.yaml.d/10-aegis-node-reserved.yaml"
+
+
+def kubelet_dropin_text(r):
+    """The k3s fragment, with the arithmetic that produced it above it."""
+    f = r["floor"]
+    # A LIST OF LINES, not a chain of concatenations. The first draft
+    # mixed adjacent string literals with `+` and a `.ljust()`, and
+    # python concatenated the literals FIRST -- so the padding applied
+    # to the whole block and did nothing, while looking exactly like
+    # alignment. Lines that are built one at a time cannot do that.
+    def row(label, value, note=""):
+        return "#   %-18s%s%s" % (label, value, note)
+
+    daemons = r["system_reserved_bytes"] - f["ram_bytes"]
+    lines = [
+        "# Written by aegis (host bootstrap) from what the machine measured.",
+        "# Do not edit by hand: it is derived, and the derivation moves it.",
+        "#",
+        row("machine", "%d bytes" % r["ram_total_bytes"]),
+        row("floor (%s)" % f["step"], "%d bytes" % f["ram_bytes"],
+            "  (%s)" % f["source"]),
+        row("+ host daemons", "%d bytes" % daemons),
+        row("= system-reserved", "%d bytes" % r["system_reserved_bytes"]),
+        row("- eviction", "%d bytes" % r["eviction_bytes"]),
+        row("= allocatable", "%d bytes" % r["allocatable_bytes"]),
+        "#",
+        "# `enforce-node-allocatable=pods` is the default and is written",
+        "# anyway, because it is what makes the kubelet put the SAME",
+        "# subtraction into kubepods.slice's memory.max. Without it this",
+        "# file would move the scheduler's opinion and not the kernel's.",
+        "kubelet-arg:",
+        '  - "system-reserved=memory=%s"' % r["system_reserved"],
+        '  - "eviction-hard=memory.available<%s"' % r["eviction"],
+        '  - "enforce-node-allocatable=pods"',
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def requirements(anfitrion):
     """What a machine has to have before aegis will install on it.
 

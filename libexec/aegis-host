@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # aegis-summary: Measures the machine aegis landed on and writes it down
 # aegis-group:   operate
-# aegis-subcommands: measure show floor budget metrics requires
+# aegis-subcommands: measure show floor budget metrics reservation requires
 """aegis-host — measures the machine aegis landed on, and writes it down.
 
     aegis host measure          # look at the machine, save the facts
@@ -11,6 +11,7 @@
     aegis host floor --apply    # put it in the kernel's hands · --off lifts it
     aegis host budget           # what the cluster asks, against what is left
     aegis host metrics          # what only the host can see, for vmsingle
+    aegis host reservation --for kubelet   # what the node must keep back
     aegis host requires         # what aegis needs of a machine, from plans.yaml
 
 ── WHY THIS COMMAND EXISTS ─────────────────────────────────────────
@@ -653,6 +654,53 @@ def _allocatable_ratio():
         return None
 
 
+# ── reservation ──────────────────────────────────────────────────────
+
+def reservation(args):
+    """What the kubelet has to be told to keep away from pods.
+
+    ONE NUMBER DECIDES TWO THINGS that used to be able to disagree, and
+    that is why it is derived rather than written anywhere:
+
+      · `system-reserved` lowers the node's `allocatable`, so the
+        SCHEDULER stops promising memory that is not there;
+      · with `enforce-node-allocatable=pods` — the default — the
+        kubelet writes `kubepods.slice`'s own `memory.max` from the
+        same subtraction, so the KERNEL stops letting the cluster reach
+        for the whole machine.
+
+    Measured 2026-09-09: `allocatable == capacity` and
+    `kubepods.slice/memory.max` was 32448565248, exactly the machine.
+    The enforcement was already wired; what was missing was anything
+    reserved. That is why there is no drop-in for kubepods.slice
+    anywhere in this product — the ceiling is a CONSEQUENCE of the
+    floor, not a second number that can drift away from it.
+    """
+    try:
+        anfitrion = hostlib.check_anfitrion(hostlib.load_plans())
+        r = hostlib.node_reservation(anfitrion, hostlib.read_facts())
+    except hostlib.Unusable as e:
+        print(f"{red}{e}{reset}", file=sys.stderr)
+        return 2
+
+    if args.json:
+        print(json.dumps(r, indent=2, sort_keys=True))
+        return 0
+    if args.for_ == "kubelet":
+        # The exact file the host bootstrap writes. Printing it is what
+        # makes a dry run possible: this is read by a human before
+        # anything restarts.
+        print(hostlib.kubelet_dropin_text(r))
+        return 0
+    print(f"{bold}what the kubelet keeps away from pods{reset}")
+    print(f"  system-reserved   {r['system_reserved']}"
+          f"   {gray}the human's floor plus the host's own daemons{reset}")
+    print(f"  eviction-hard     {r['eviction']}")
+    print(f"  allocatable       {_gib(r['allocatable_bytes'])}"
+          f"   {gray}of {_gib(r['ram_total_bytes'])}{reset}")
+    return 0
+
+
 # ── requires ─────────────────────────────────────────────────────────
 
 def requires(args):
@@ -975,6 +1023,13 @@ def main():
     p = sub.add_parser("metrics",
                        help="what only the host can see, in the exposition format")
     p.set_defaults(fn=metrics)
+
+    p = sub.add_parser("reservation",
+                       help="what the kubelet has to keep away from pods")
+    p.add_argument("--for", dest="for_", choices=["kubelet"],
+                   help="print the exact drop-in the host bootstrap writes")
+    p.add_argument("--json", action="store_true", help="print it as JSON")
+    p.set_defaults(fn=reservation)
 
     p = sub.add_parser("requires",
                        help="what aegis needs of a machine before installing")
