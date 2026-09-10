@@ -8,6 +8,7 @@
     aegis host show [--json]    # what was measured, and what could not be
     aegis host floor            # how much of it aegis leaves alone, and why
     aegis host floor --set <step>   # choose deliberately instead of deriving
+    aegis host floor --apply    # put it in the kernel's hands · --off lifts it
     aegis host budget           # what the cluster asks, against what is left
     aegis host metrics          # what only the host can see, for vmsingle
     aegis host requires         # what aegis needs of a machine, from plans.yaml
@@ -714,6 +715,11 @@ def floor(args):
         print(f"{red}{e}{reset}", file=sys.stderr)
         return 2
 
+    if args.apply or args.off:
+        rc = _floor_write(f, facts, off=args.off, force=args.force)
+        if rc or args.off:
+            return rc
+
     if args.json:
         print(json.dumps(f, indent=2, sort_keys=True))
         return 0
@@ -822,6 +828,97 @@ def budget(args):
     return rc
 
 
+def _floor_write(f, facts, off=False, force=False):
+    """Put the floor in the kernel's hands, or take it back out.
+
+    BOTH DIRECTIONS IN ONE PLACE and both one command, because a
+    protection that cannot be lifted quickly is one nobody dares turn
+    on. `--off` removes the drop-in and reloads; nothing restarts and
+    no workload notices.
+    """
+    dropin = pathlib.Path(hostlib.FLOOR_DROPIN)
+
+    if off:
+        if not dropin.exists():
+            print(f"{gray}there was no floor applied{reset}")
+        rc = _sudo(["rm", "-f", str(dropin)])
+        if rc:
+            return rc
+        _sudo(["systemctl", "daemon-reload"])
+        print(f"{green}the floor is lifted{reset} "
+              f"{gray}(the cluster may now reclaim from the session again){reset}")
+        return _floor_report(0)
+
+    # A floor bigger than the machine is not a protection, it is an
+    # outage with a friendly name: every pod would be reclaimed to hold
+    # memory for a desktop that is not asking for it.
+    ram = facts.get("ram_total_bytes")
+    if ram and f["ram_bytes"] > ram // 2 and not force:
+        print(f"{red}the floor is {_gib(f['ram_bytes'])} of a "
+              f"{_gib(ram)} machine{reset}", file=sys.stderr)
+        print("  Over half the machine held irreclaimable for the session would "
+              "starve the cluster,", file=sys.stderr)
+        print("  and the kernel would reclaim pods to honour it. Choose a thinner "
+              "step, or --force", file=sys.stderr)
+        print("  if that really is what this machine is for.", file=sys.stderr)
+        return 1
+
+    text = hostlib.floor_dropin_text(f, facts)
+    rc = _sudo(["mkdir", "-p", str(dropin.parent)])
+    if rc:
+        return rc
+    # tee and not a shell redirect: the redirect would be evaluated by
+    # THIS shell, without sudo, and fail on a directory root owns.
+    p = subprocess.run(["sudo", "tee", str(dropin)], input=text,
+                       capture_output=True, text=True)
+    if p.returncode:
+        print(f"{red}could not write {dropin}: {p.stderr.strip()}{reset}",
+              file=sys.stderr)
+        return 1
+    rc = _sudo(["systemctl", "daemon-reload"])
+    if rc:
+        return rc
+    print(f"{green}the floor is applied{reset} {gray}({dropin}){reset}")
+    return _floor_report(f["ram_bytes"])
+
+
+def _floor_report(expected):
+    """Read the floor back FROM THE KERNEL and say whether it took.
+
+    Not from the file that was just written. systemd accepts a drop-in
+    on a slice that is not managing memory and reports nothing wrong;
+    the difference only shows in /sys. An applied floor that is inert
+    is worse than no floor, because the panel says protected.
+    """
+    live = pathlib.Path(hostlib.FLOOR_LIVE)
+    try:
+        got = int(live.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        print(f"{yellow}the kernel could not be asked whether it took "
+              f"({live} is not readable){reset}", file=sys.stderr)
+        print("  It is not that the floor is fine: it is that nobody checked.",
+              file=sys.stderr)
+        return 2
+    if got == expected:
+        print(f"  {gray}the kernel confirms {live} = {got}{reset}")
+        return 0
+    print(f"{red}the drop-in was written and the kernel is holding "
+          f"{got}, not {expected}{reset}", file=sys.stderr)
+    print("  An applied floor that did not take effect is worse than none, "
+          "because it reads as protection.", file=sys.stderr)
+    print("  Check that this is cgroup v2 (`aegis host show`) and that "
+          "user.slice has memory accounting.", file=sys.stderr)
+    return 1
+
+
+def _sudo(argv):
+    p = subprocess.run(["sudo"] + argv, capture_output=True, text=True)
+    if p.returncode:
+        print(f"{red}sudo {' '.join(argv)} failed: {p.stderr.strip()}{reset}",
+              file=sys.stderr)
+    return p.returncode
+
+
 def _thinner(anfitrion, current):
     """The step that leaves the machine less than the current one.
 
@@ -861,6 +958,12 @@ def main():
                    help="choose a step from plans.yaml instead of deriving one")
     p.add_argument("--unset", action="store_true",
                    help="go back to deriving it from the measurement")
+    p.add_argument("--apply", action="store_true",
+                   help="put the floor in the kernel's hands (writes a systemd drop-in)")
+    p.add_argument("--off", action="store_true",
+                   help="lift the floor: removes the drop-in, restarts nothing")
+    p.add_argument("--force", action="store_true",
+                   help="apply a floor larger than half the machine")
     p.add_argument("--json", action="store_true", help="print the floor as JSON")
     p.set_defaults(fn=floor)
 

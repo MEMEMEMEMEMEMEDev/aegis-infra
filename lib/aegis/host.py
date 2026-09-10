@@ -153,6 +153,44 @@ def check_anfitrion(plans):
     return a
 
 
+# Where the kernel is told to hold the floor. A systemd drop-in on
+# `user.slice`, which is a REAL slice — unlike `kubepods.slice`, which
+# the kubelet creates as a transient unit stamped "Do not edit" and
+# regenerates on every start. Fighting that one with a drop-in would
+# make aegis the second author of a file somebody else owns, which is
+# the class of drift `bootstrap-host.yml` already refuses for
+# containerd's config.
+FLOOR_DROPIN = "/etc/systemd/system/user.slice.d/10-aegis-desktop-floor.conf"
+
+# The live answer, and it is deliberately NOT the file above. A
+# drop-in that did not take effect looks identical to one that did if
+# you only read your own writing.
+FLOOR_LIVE = "/sys/fs/cgroup/user.slice/memory.min"
+
+
+def floor_dropin_text(f, facts):
+    """The unit fragment, with its provenance in the first three lines.
+
+    Somebody finding this file on a machine months from now should be
+    able to tell what measured it and which step produced it, without
+    running anything.
+    """
+    return (
+        "# Written by `aegis host floor --apply`. Do not edit by hand:\n"
+        "# `--apply` overwrites it and `--off` removes it.\n"
+        f"#   step        {f['step']}  ({f['source']})\n"
+        f"#   measured    {facts.get('measured_at', 'unknown')}\n"
+        "#\n"
+        "# A FLOOR, NOT A CAP. memory.min is irreclaimable: under memory\n"
+        "# pressure the kernel reclaims from kubepods.slice before it\n"
+        "# touches this. Above the floor the desktop competes like\n"
+        "# anything else and may well be paged out — what this buys is\n"
+        "# that it never freezes, not that it is always comfortable.\n"
+        "[Slice]\n"
+        "MemoryAccounting=yes\n"
+        f"MemoryMin={f['ram_bytes']}\n")
+
+
 def requirements(anfitrion):
     """What a machine has to have before aegis will install on it.
 
