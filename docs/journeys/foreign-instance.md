@@ -19,6 +19,10 @@ machine taught. `platform/docs/failure-modes.md` has the classes
 
 - A throwaway Linux host (4 CPU / 16 GB is enough; a 4-CPU node is
   also where the reservations problem shows). Nothing on it but ssh.
+  `aegis host measure` writes down what it found and `aegis host budget`
+  says whether the platform fits — on a headless box like this one aegis
+  keeps almost nothing back, which is the right answer there and the
+  wrong one on a laptop somebody is using.
 - A fresh GitHub account: the init creates and OWNS the repos it
   needs (`aegis-platform`, `aegis-canary`), and every tenant repo of
   the rehearsal is a lab copy under that account.

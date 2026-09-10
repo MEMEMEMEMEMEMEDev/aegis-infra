@@ -5,6 +5,14 @@ without guessing. Every number here was **MEASURED** on 2026-08-16 on
 the instance's machine (Ryzen 9 5950X, 32 threads, RTX 5070 with
 12 GiB).
 
+**Read that sentence as a limit and not as a credential.** These are
+one machine's numbers, and for a long time the product had no way of
+telling whether yours resembled it: nothing measured the host at all.
+That is what `aegis host` is for — `measure` writes down what your
+machine is, and `budget` does this document's arithmetic against it
+instead of asking you to scale these figures by eye. Where the two
+disagree, your machine is right.
+
 Sibling document: [ai-gateway.md](ai-gateway.md), which covers the GPU
 lane. Here both lanes are covered and, above all, how they differ.
 
@@ -235,9 +243,16 @@ The mechanics of the cohabitation: the device plugin advertises the
 card as 2 units (time-slicing; no memory isolation — the real division
 is done by the `gpu-memory-utilization` values), the ai-system quota
 puts the ceiling at 2 so that a third pod is rejected loudly, the
-controller scales the whole fleet with the mode, and `VRAM_LIMIT_MIB`
-in `aegis ai` came down from 4390 to 2200 (the engines' budgets and the
-desktop's cushion are still one single decision). Adding a third model
+controller scales the whole fleet with the mode, and the threshold in
+`aegis ai` came down from 4390 to 2200 (the engines' budgets and the
+desktop's cushion are still one single decision).
+
+That last sentence has aged, and how it aged is the useful part.
+`VRAM_LIMIT_MIB` was a constant, and it is gone: `vram_limit_mib()`
+DERIVES the threshold from the engine profiles, so moving a fraction
+moves it in the same commit. Since 2026-09-09 the count of engines is
+derived from the same walk as the fractions — it used to come from a
+shell constant, which is the identical drift one term to the right. Adding a third model
 — the 4090 of the future — is: weights onto the PV, a Deployment traced
 from the last one, an entry in `AI_ENGINES` and a row in the routing.
 Zero code.

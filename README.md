@@ -60,7 +60,9 @@ en [Qué tener listo](#qué-tener-listo); cada paso, en
 | | |
 |---|---|
 | **Host** | Linux con `sudo`. Se ha corrido en Ubuntu; el playbook que prepara el host exige Ubuntu 24.04 o superior con systemd. El preflight configura `sudo` sin contraseña, instala con `apt` tmux, python3-yaml y jq (y `gh` si falta), y exige que curl, git y python3 ya estén. |
-| **Recursos** | 4 CPU y 8 GB de RAM alcanzan (el preflight avisa por debajo de 7 GB). 25 GB libres en `/` y `/dev/shm` escribible. |
+| **Recursos** | 4 CPU y 8 GB de RAM alcanzan (el preflight avisa por debajo de 7 GB). 25 GB libres en `/` y `/dev/shm` escribible. `aegis host measure` mide la máquina y la anota; `aegis host budget` dice si lo que la plataforma reserva entra en lo que esa máquina deja. |
+| **Si compartís la máquina** | Con sesión gráfica, aegis le deja un piso de memoria y no lo toca. Lo deriva solo, y `aegis host floor --set` lo cambia si querés exprimir tu propia máquina. Sin ese piso lo que se cuelga es el escritorio, no el clúster: los pods no mueren, el kernel los deja crecer y desaloja al humano. |
+| **GPU (opcional)** | El carril de GPU de la AI pide una NVIDIA con driver 570 o superior. La tarjeta se comparte con tu escritorio: los motores toman una fracción del TOTAL y no de lo libre, así que el compositor puede quedarse sin VRAM aunque la cuenta cierre. `aegis host show` dice cuánta hay. |
 | **Red** | Salida a internet por IPv4: el preflight sondea github.com, api.github.com, api.cloudflare.com, get.k3s.io, dl.k8s.io y Docker Hub. Reloj en hora (menos de 120 s de diferencia con GitHub) e IPv6 apagado; el preflight se encarga de las dos cosas. |
 | **GitHub** | Una cuenta con `gh auth login` hecho e identidad git configurada (`user.name`, `user.email`). Más abajo, lo que el init hace con ella. |
 | **Cloudflare (opcional)** | Una cuenta con una zona, para el perfil `cloudflare`: hostnames públicos, túnel y TLS de Let's Encrypt. Sin ella, el perfil `local` da la misma plataforma sobre nombres que resuelven al host, con TLS de la CA propia de la instancia. |
@@ -553,10 +555,23 @@ Dicho claro, porque los checks lo dirían igual.
   firma».
 - Un solo nodo. Sin HA ni multiclúster: es una plataforma para un
   equipo y sus proyectos, no para una flota. En reposo reserva unas
-  2,5 CPU; un nodo de 4 CPU admite un build a la vez.
+  2,5 CPU; un nodo de 4 CPU admite un build a la vez. En memoria, la
+  plataforma completa reserva del orden de 14 GB y puede pedir el doble
+  en sus techos: medido en UNA máquina el 2026-09-09, y por eso
+  `aegis host budget` lo vuelve a medir en la tuya en vez de que
+  confíes en esta línea.
 - Algunos identificadores dentro de la semilla siguen en español a
   propósito: cada uno se mueve con la instancia que lo lee, y el
   glosario lista los pendientes.
+- El vigía de VRAM sólo avisa. Cuando el escritorio y los motores se
+  quedan sin tarjeta, aegis lo dice y no baja nada: terminar la
+  inferencia de alguien para salvarle el compositor es una decisión de
+  quien está en el teclado. Y aegis no le pone freno a la GPU del
+  escritorio, que no es suya.
+- El presupuesto de memoria es un PISO de lo que se va a pedir, no un
+  techo. Lee los manifiestos de la semilla; los defaults propios de un
+  chart, para lo que la semilla no sobreescribe, viven dentro de un
+  tarball que ese recorrido no abre.
 - Exige leer. La capa más amigable es la próxima pieza de trabajo, y se
   construye encima de esta, no en su lugar.
 

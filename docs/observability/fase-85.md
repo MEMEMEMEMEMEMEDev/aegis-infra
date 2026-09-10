@@ -345,6 +345,14 @@ guard — on a fresh start they are no-ops. Budget per file:
 
 ## 10. Memory budget (honest, on a 16 GB node)
 
+This table is the observability stack's share, measured once on a
+hypothetical node. The whole-machine version is not a document any
+more: `aegis host budget` adds up what every subsystem reserves —
+including the tmpfs volumes no scheduler counts — against what YOUR
+machine leaves over once whoever else uses it has their floor. Where
+this table and that command disagree, the command is measuring and this
+is remembering.
+
 Expected RSS in steady state with this platform's load (dozens of
 targets, a handful of builds/day) — not the limits, which reserve
 nothing:
