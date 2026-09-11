@@ -36,6 +36,7 @@ Usage:
 
 Exit: 0 everything declared exists · 1 some are missing · 2 could not evaluate
 """
+import argparse
 import json
 import os
 import subprocess
@@ -50,7 +51,7 @@ import urllib.request
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
-from aegis import cli, paths             # noqa: E402
+from aegis import cli, outcomes, paths   # noqa: E402
 
 # PLATFORM is the INSTANCE (the live checkout of the platform), not the
 # product. In v2 this line was `dirname(dirname(__file__))` and it
@@ -159,11 +160,33 @@ def main():
     # round invokes.
     ap = cli.parser("edge", __doc__.split("\n")[0],
                     protocol="docs/protocols/edge.md")
+    # --json HAS TO BE ACCEPTED AFTER THE VERB TOO, and it is a contract
+    # and not a courtesy: `cli.run_json` appends `--json` at the END of
+    # whatever it was handed, so a delegating command always says
+    # `edge check --json`. Same shape as aegis-webhook, and for the same
+    # reason it was written there on 2026-09-03.
+    #
+    # default=SUPPRESS is the whole trick: without it the subparser
+    # would write its own False over a --json that arrived BEFORE the
+    # verb, and `edge --json check` would break while fixing
+    # `edge check --json`.
+    flags = argparse.ArgumentParser(add_help=False)
+    flags.add_argument("--json", action="store_true", dest="json_mode",
+                       default=argparse.SUPPRESS,
+                       help="the exit contract instead of the narration")
     sub = ap.add_subparsers(dest="verb")
-    sub.add_parser("check", help="compares the live hostnames against the ones derived from the contracts")
+    sub.add_parser("check", parents=[flags],
+                   help="compares the live hostnames against the ones derived from the contracts")
     ap.add_argument("--json", action="store_true", dest="json_mode",
                     help="the exit contract instead of the narration")
-    ap.parse_args()
+    # ASSIGNED. Until 2026-09-11 this line was a bare `ap.parse_args()`:
+    # the flag parsed and the value was thrown away on the same line, so
+    # `aegis edge --json` printed the very same coloured prose and a
+    # consumer that trusted the flag got ANSI escapes where it expected a
+    # document. Nothing failed; that is what made it last.
+    a = ap.parse_args()
+    steps = outcomes.Steps(json_mode=a.json_mode)
+    narrate = not a.json_mode
 
     g = generator()
     import yaml
@@ -178,12 +201,14 @@ def main():
     # send the operator hunting for a secret that by design does not
     # exist — a message that is technically true and practically a lie.
     if (from_conf("EDGE") or "cloudflare") == "local":
-        print(f"  {yellow}!{reset} edge NOT EVALUATED — EDGE=local: this instance "
-              f"has no Cloudflare zone")
-        print(f"    {gray}There are no CNAMEs to compare: the platform is reached\n"
-              f"    through the host bridge, not through a tunnel and a zone.\n"
-              f"    This is NOT approval: it is a check with no subject on this edge.{reset}")
-        return 2
+        if narrate:
+            print(f"  {yellow}!{reset} edge NOT EVALUATED — EDGE=local: this instance "
+                  f"has no Cloudflare zone")
+            print(f"    {gray}There are no CNAMEs to compare: the platform is reached\n"
+                  f"    through the host bridge, not through a tunnel and a zone.\n"
+                  f"    This is NOT approval: it is a check with no subject on this edge.{reset}")
+        steps.not_evaluable("edge", why="no-zone", edge="local")
+        steps.finish()
 
     token, zone = credentials()
     # It does NOT fall silent, and it does not give itself the benefit
@@ -192,18 +217,23 @@ def main():
     # (docs/failure-modes.md).
     if not token or not zone:
         missing_piece = "the Cloudflare token" if not token else "CF_ZONE_ID"
-        print(f"  {yellow}!{reset} edge NOT EVALUATED — {missing_piece} is missing")
-        print(f"    {gray}Export TF_VAR_cloudflare_api_token, or SOPS_AGE_KEY_FILE\n"
-              f"    so that it gets decrypted out of tofu/secrets/tokens.enc.yaml.\n"
-              f"    This is NOT approval: it is a check that did not run.{reset}")
-        return 2
+        if narrate:
+            print(f"  {yellow}!{reset} edge NOT EVALUATED — {missing_piece} is missing")
+            print(f"    {gray}Export TF_VAR_cloudflare_api_token, or SOPS_AGE_KEY_FILE\n"
+                  f"    so that it gets decrypted out of tofu/secrets/tokens.enc.yaml.\n"
+                  f"    This is NOT approval: it is a check that did not run.{reset}")
+        steps.not_evaluable("edge", why="no-credential",
+                            missing="token" if not token else "zone")
+        steps.finish()
 
     try:
         live = live_cnames(token, zone)
     except (urllib.error.URLError, RuntimeError, KeyError) as e:
-        print(f"  {yellow}!{reset} edge NOT EVALUATED — the Cloudflare API did not answer")
-        print(f"    {gray}{e}{reset}")
-        return 2
+        if narrate:
+            print(f"  {yellow}!{reset} edge NOT EVALUATED — the Cloudflare API did not answer")
+            print(f"    {gray}{e}{reset}")
+        steps.not_evaluable("edge", why="api-silent", detail=str(e))
+        steps.finish()
 
     missing = sorted(expected - live)
     # Only the CNAMEs of the root domain: the zone may hold records of
@@ -213,24 +243,40 @@ def main():
     extra = sorted(ours - expected)
 
     if missing:
-        print(f"  {red}✗{reset} {len(missing)} declared hostname(s) that DO NOT EXIST:")
+        if narrate:
+            print(f"  {red}✗{reset} {len(missing)} declared hostname(s) that DO NOT EXIST:")
+            for h in missing:
+                print(f"      {h}")
+            print(f"    {gray}Nobody reaches those sites and nothing else is going to say so.\n"
+                  f"    Apply the edge:  cd platform/tofu && \\\n"
+                  f"      SOPS_AGE_KEY_FILE=~/.config/sops/age/aegis.key \\\n"
+                  f"      ./tofu-apply.sh -chdir=envs/cloudflare-tunnel apply{reset}")
+        # One step per absent hostname: a consumer that wants to name
+        # them does not have to split a sentence to find out which.
         for h in missing:
-            print(f"      {h}")
-        print(f"    {gray}Nobody reaches those sites and nothing else is going to say so.\n"
-              f"    Apply the edge:  cd platform/tofu && \\\n"
-              f"      SOPS_AGE_KEY_FILE=~/.config/sops/age/aegis.key \\\n"
-              f"      ./tofu-apply.sh -chdir=envs/cloudflare-tunnel apply{reset}")
+            steps.wrong(f"hostname:{h}", why="absent-in-cloudflare")
     else:
-        print(f"  {green}✓{reset} the {len(expected)} hostnames of the contracts exist in Cloudflare")
+        if narrate:
+            print(f"  {green}✓{reset} the {len(expected)} hostnames of the contracts exist in Cloudflare")
+        steps.already("edge", hostnames=len(expected))
 
     if extra:
-        print(f"  {yellow}!{reset} {len(extra)} CNAME(s) that no contract asks for:")
-        for h in extra:
-            print(f"      {h}")
-        print(f"    {gray}What is left over at the edge is what is no longer in git. Deleting\n"
-              f"    them is an apply WITH destroy, so it goes by hand and with the plan read.{reset}")
+        if narrate:
+            print(f"  {yellow}!{reset} {len(extra)} CNAME(s) that no contract asks for:")
+            for h in extra:
+                print(f"      {h}")
+            print(f"    {gray}What is left over at the edge is what is no longer in git. Deleting\n"
+                  f"    them is an apply WITH destroy, so it goes by hand and with the plan read.{reset}")
+        # SURPLUS TRAVELS AS DATA, NEVER AS A STATE, and that is the
+        # whole point of this line. Before today a surplus CNAME did not
+        # move the rc — the narration mentioned it and the exit code
+        # stayed 0 — and the round already reads that rc. Filing it as
+        # `wrong` would silently turn every instance with one leftover
+        # record red. The state stays `already`; what is left over rides
+        # along as a field, visible to whoever asks and mute to the rc.
+        steps.already("surplus-cnames", count=len(extra), hostnames=extra)
 
-    return 1 if missing else 0
+    steps.finish()
 
 
 if __name__ == "__main__":
