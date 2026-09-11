@@ -1,0 +1,176 @@
+/* SERENO — the skin of the console.
+ *
+ * WHY IT IS CALLED THAT. «El sereno» was the night watchman who walked
+ * the streets calling out the hour and that all was well. That is the
+ * job: be the one awake, and say how things are, calmly.
+ *
+ * WHY THERE IS NO WEBFONT HERE, and it is not an oversight. Nothing in
+ * this product fetches anything from the internet — measured before
+ * writing this file: zero references to a CDN or a font host anywhere
+ * in the tree. A console served on loopback that phones out for a
+ * typeface would be the first, and it would do it on every load, from
+ * a machine whose whole point is that it is sovereign. The system
+ * stack costs nothing and is never unavailable. Shipping a WOFF2 with
+ * its licence is possible later; it is a decision, not a default.
+ *
+ * THE SEVEN RULES, and every one of them is a mechanism rather than a
+ * taste:
+ *   1. the order is the alarm — what needs attention rises and takes
+ *      more surface; a calm screen is calm because nothing rose
+ *   2. surface, never an outline — colour arrives by width, not by
+ *      saturation
+ *   3. the sentence is the alarm — if the text needs a colour to
+ *      frighten anybody, the text is badly written
+ *   4. what is clickable has no hue — so every hue is free to mean a
+ *      state
+ *   5. «I am working on it» is a state of its own (busy)
+ *   6. ONE warm family, in two intensities: `wrong` and `attention`
+ *      are the only things that ask something of a person, and they
+ *      are the only warm things on the page
+ *   7. what was measured emits light; `unseen` is the only thing with
+ *      no colour and no glow, and it carries a HATCH — so it survives
+ *      black and white, and colour blindness. That one is not taste:
+ *      it is the fourth outcome refusing to be a shade of the others.
+ */
+
+:root {
+  --paper:#EFF2F6; --panel:#FFFFFF; --sunken:#E9EDF2; --line:rgb(11 13 16 / .08);
+  --ink:#0B0D10; --mid:#41474E; --faint:#6C757E;
+
+  --fine-bg:#D6F4E8;      --fine-ink:#00684B;
+  --busy-bg:#E3E6FF;      --busy-ink:#3A44C7;
+  --attention-bg:#FFF1DC; --attention-ink:#8A5A12;
+  --wrong-bg:#FFE0D6;     --wrong-ink:#A8341B;
+  --unseen-bg:#E4E8ED;    --unseen-ink:#6C757E;
+  --danger:#BC2E25;
+
+  --glow:0 14px 34px -22px currentColor;
+  --shadow:0 2px 6px -4px rgb(11 13 16 / .10), 0 18px 46px -34px rgb(11 13 16 / .45);
+  --hatch:repeating-linear-gradient(-45deg, currentColor 0 1.4px, transparent 1.4px 4.6px);
+  --r:18px; --r-s:11px;
+  --ui:"Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme:light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:#08090B; --panel:#14171B; --sunken:#191D22; --line:rgb(255 255 255 / .08);
+    --ink:#F4F6F8; --mid:#AFB8C0; --faint:#79828B;
+    --fine-bg:#08291F;      --fine-ink:#4FDDB0;
+    --busy-bg:#14182F;      --busy-ink:#96A3FF;
+    --attention-bg:#2A1B0D; --attention-ink:#FFB067;
+    --wrong-bg:#2C160F;     --wrong-ink:#FF8A66;
+    --unseen-bg:#191D22;    --unseen-ink:#79828B;
+    --danger:#FF6A5A;
+    --glow:0 0 30px -12px currentColor;
+    --shadow:0 1px 0 rgb(255 255 255 / .04);
+  }
+}
+
+* { box-sizing:border-box; }
+body {
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--ui); font-size:14px; line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+
+.sereno { max-width:940px; margin:0 auto; padding:clamp(18px,4vw,34px); }
+.sereno h2, .sereno h3 { margin:0; letter-spacing:-.02em; }
+
+/* ── rule 3: the sentence is the alarm ───────────────────────────── */
+.verdict {
+  border-radius:26px; padding:clamp(22px,4vw,34px); margin-bottom:18px;
+  box-shadow:var(--glow);
+}
+.verdict .sentence {
+  margin:0; font-size:clamp(22px,4.2vw,34px); font-weight:800;
+  letter-spacing:-.035em; line-height:1.1;
+}
+
+/* ── one source: one command that was consulted ──────────────────── */
+.source {
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
+  box-shadow:var(--shadow); padding:18px 20px; margin-bottom:14px;
+}
+.source > h2 {
+  font-family:var(--mono); font-size:12.5px; font-weight:500;
+  color:var(--faint); letter-spacing:0; display:inline-block; margin-right:9px;
+}
+.source .why { margin:10px 0 0; font-size:13.5px; color:var(--mid); }
+
+/* ── a step, and its measures ─────────────────────────────────────── */
+.step { padding:12px 0; border-top:1px solid var(--line); }
+.step:first-of-type { border-top:0; margin-top:6px; }
+.step > h3 { font-size:14.5px; font-weight:700; display:inline-block; margin-right:9px; }
+.facts {
+  display:flex; flex-wrap:wrap; gap:4px 14px; margin:8px 0 0;
+  font-family:var(--mono); font-size:11.5px; color:var(--faint);
+}
+.facts dt { font-weight:500; }
+.facts dt::after { content:":"; }
+.facts dd { margin:0 0 0 -10px; color:var(--mid); }
+
+.measures { list-style:none; margin:10px 0 0; padding:0; display:flex; flex-direction:column; gap:7px; }
+.measure { display:flex; align-items:flex-start; gap:9px; flex-wrap:wrap; }
+.measure .what { font-size:13px; flex:1; min-width:12ch; }
+.measure .note { flex-basis:100%; margin:2px 0 0; font-size:12px; color:var(--faint); }
+.empty { margin:10px 0 0; font-size:13px; }
+
+/* ── rule 2: surface, never an outline ───────────────────────────── */
+.chip {
+  display:inline-flex; align-items:center; gap:6px; flex:none;
+  border-radius:999px; padding:4px 11px 4px 9px;
+  font-size:11.5px; font-weight:700; letter-spacing:.005em;
+  box-shadow:var(--glow);
+}
+.chip::before {
+  content:""; width:7px; height:7px; border-radius:50%;
+  background:currentColor; flex:none;
+}
+
+[data-state="fine"]      { background:var(--fine-bg);      color:var(--fine-ink); }
+[data-state="busy"]      { background:var(--busy-bg);      color:var(--busy-ink); }
+[data-state="attention"] { background:var(--attention-bg); color:var(--attention-ink); }
+[data-state="wrong"]     { background:var(--wrong-bg);     color:var(--wrong-ink); }
+
+/* Rule 7. The only state with no colour, no glow and a hatch instead of
+ * a dot — a SQUARE one, so it is told apart from the others with the
+ * screen in black and white. «Could not look» is not a paler shade of
+ * «it is fine»; it is a different kind of answer. */
+[data-state="unseen"] { background:var(--unseen-bg); color:var(--unseen-ink); }
+.chip[data-state="unseen"] { box-shadow:none; }
+.chip[data-state="unseen"]::before {
+  border-radius:2px; background:transparent;
+  background-image:var(--hatch); box-shadow:inset 0 0 0 1px currentColor;
+}
+
+/* Rule 5: busy is the one that moves, and only if the reader lets it. */
+@media (prefers-reduced-motion: no-preference) {
+  .chip[data-state="busy"]::before { animation:sereno-beat 2.4s ease-in-out infinite; }
+}
+@keyframes sereno-beat { 0%,100% { opacity:1; } 50% { opacity:.28; } }
+
+/* Rule 1: what needs attention rises. The states that ask something of
+ * a person come first inside their source; `fine` sinks to the bottom.
+ * A calm screen is calm because nothing rose, not because it is green. */
+.source { display:flex; flex-direction:column; }
+.source > h2, .source > .chip { order:0; }
+.step[data-state="unseen"]    { order:1; }
+.step[data-state="wrong"]     { order:2; }
+.step[data-state="attention"] { order:3; }
+.step[data-state="busy"]      { order:4; }
+.step[data-state="fine"]      { order:5; }
+
+/* Rule 4: what is clickable has no hue. Declared here even though the
+ * read-only console has no buttons yet, so that the day it does, the
+ * rule is already law and not a discussion. */
+.act {
+  font:inherit; font-weight:700; font-size:13px; cursor:pointer;
+  border-radius:11px; padding:9px 16px;
+  border:1px solid var(--ink); background:var(--ink); color:var(--paper);
+}
+.act--quiet { background:transparent; color:var(--ink); border-color:var(--line); }
+.act--danger { background:transparent; color:var(--danger); border-color:var(--danger); }
+
+:focus-visible { outline:2px solid var(--busy-ink); outline-offset:3px; border-radius:8px; }

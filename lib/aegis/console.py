@@ -189,3 +189,32 @@ def render(readings):
             f'<p class="sentence">{_e(SENTENCE[v])}</p></header>')
     return (f'<main class="sereno" data-veredicto="{v}">{head}'
             f'{"".join(bodies)}</main>')
+
+# ── the whole page ───────────────────────────────────────────────────
+# SKIN = share/console/sereno.css, and it is INLINED rather than linked.
+# One document, one request, no static path to get wrong and nothing
+# fetched from anywhere: the console is served on loopback and the file
+# is 6 KB. Reading it is the only I/O this module does besides loading a
+# case, and it is kept out of render() so that the pure function stays
+# pure and check 122 can keep calling it with no filesystem at all.
+SKIN = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "share", "console", "sereno.css")
+
+
+def skin():
+    try:
+        with open(SKIN, encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        # A console with no skin still has to draw: the states travel in
+        # the attributes, and the text is readable unstyled. Saying so
+        # is better than serving a blank page.
+        return "/* the skin could not be read; the states are in the data-state attributes */"
+
+
+def page(readings, title="aegis"):
+    return ("<!doctype html>\n"
+            '<html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            f"<title>{_e(title)}</title><style>{skin()}</style></head>"
+            f"<body>{render(readings)}</body></html>\n")
