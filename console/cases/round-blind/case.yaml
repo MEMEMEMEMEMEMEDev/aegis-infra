@@ -1,0 +1,21 @@
+version: 1
+caso: round-blind
+que: 'la ronda sin poder hablar con el cluster: muere en la seccion 1 y aun asi
+  emite documento'
+procedencia: medido
+producido_por:
+- comando: check
+  documento: check.json
+  rc: 1
+medido_en: '2026-09-11T14:42:49-03:00'
+aegis: 5d89b79c5cd2a60e58241d1d24208179f8f5fec3
+forma:
+  check.json:
+    claves:
+    - failures
+    - notices
+    - rc
+    - steps
+    estados:
+    - bad
+    - wrong

@@ -220,9 +220,16 @@ if [[ -n "$JSON_MODE" ]]; then
     _flush_json() {
         local rc=$?
         trap - EXIT
-        python3 - "$_REC" "$rc" "$failures" "$notices" >&3 <<'PYJ'
-import json, sys
+        python3 - "$_REC" "$rc" "$failures" "$notices" "$AEGIS_ROOT" >&3 <<'PYJ'
+import json, os, sys
 rec, rc, failures, notices = open(sys.argv[1], encoding="utf-8").read(), int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+# THE FOUR WORDS COME FROM THE ONE PLACE THAT DEFINES THEM. Written out
+# here they were a second definition, and check 125's tooth found it the
+# day it renamed the outcome in outcomes.py: this file kept emitting the
+# old word, so the corpus and the contract would have drifted with
+# nothing going red.
+sys.path.insert(0, os.path.join(sys.argv[5], "lib"))
+from aegis.outcomes import ALREADY, WRONG, NOT_EVALUABLE
 RANK = {"not-evaluated": 3, "bad": 2, "notice": 1, "good": 0}
 sections, cur = [], None
 def section(name):
@@ -243,7 +250,7 @@ for sec in sections:
     kinds = [m["state"] for m in sec["measures"]]
     worst = max(kinds, key=RANK.get) if kinds else "not-evaluated"
     # The house vocabulary for the step; the round's own for the measures.
-    sec["state"] = {"not-evaluated": "not-evaluable", "bad": "wrong"}.get(worst, "already")
+    sec["state"] = {"not-evaluated": NOT_EVALUABLE, "bad": WRONG}.get(worst, ALREADY)
     sec["counts"] = {k: kinds.count(k) for k in RANK if kinds.count(k)}
 json.dump({"steps": sections, "failures": failures, "notices": notices, "rc": rc},
           sys.stdout, ensure_ascii=False)

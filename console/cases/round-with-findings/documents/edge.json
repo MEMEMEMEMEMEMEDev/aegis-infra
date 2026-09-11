@@ -1,0 +1,18 @@
+{
+  "steps": [
+    {
+      "step": "edge",
+      "state": "already",
+      "hostnames": 8
+    },
+    {
+      "step": "surplus-cnames",
+      "state": "already",
+      "count": 1,
+      "hostnames": [
+        "ssh-lab.example.test"
+      ]
+    }
+  ],
+  "rc": 0
+}

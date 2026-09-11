@@ -1,0 +1,104 @@
+{
+  "steps": [
+    {
+      "step": "portafolio/apps.yaml",
+      "state": "done",
+      "change": "modified"
+    },
+    {
+      "step": "portafolio/bundle.yaml",
+      "state": "done",
+      "change": "modified"
+    },
+    {
+      "step": "portafolio/kustomization.yaml",
+      "state": "done",
+      "change": "modified"
+    },
+    {
+      "step": "portafolio/netpol.yaml",
+      "state": "done",
+      "change": "modified"
+    },
+    {
+      "step": "portafolio/routes.yaml",
+      "state": "done",
+      "change": "modified"
+    },
+    {
+      "step": "portafolio/secret-generator.yaml",
+      "state": "done",
+      "change": "modified"
+    },
+    {
+      "step": "contract:contrato-bueno.yaml",
+      "state": "done",
+      "valid": true,
+      "organization": "portafolio",
+      "changes": 6,
+      "secrets_missing": [],
+      "written": false
+    },
+    {
+      "step": "stage:edge",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:routes",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:ai-registry",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:projects",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:credentials",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:tenants",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:buckets",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:garage",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:jenkins",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:base-consumers",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:probes",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:jenkinsfiles",
+      "state": "done",
+      "rc": 0
+    }
+  ],
+  "rc": 0
+}

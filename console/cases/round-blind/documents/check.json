@@ -1,0 +1,22 @@
+{
+  "steps": [
+    {
+      "step": "node",
+      "state": "wrong",
+      "measures": [
+        {
+          "measure": "no contact with the apiserver — the rest of the check means nothing",
+          "state": "bad",
+          "notes": []
+        }
+      ],
+      "notes": [],
+      "counts": {
+        "bad": 1
+      }
+    }
+  ],
+  "failures": 1,
+  "notices": 0,
+  "rc": 1
+}

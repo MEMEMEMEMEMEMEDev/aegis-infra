@@ -1,0 +1,35 @@
+version: 1
+caso: round-with-findings
+que: 'la ronda de una instancia en marcha con tres fallos y un aviso: sin bundle
+  de estado, la cuota de CI no sostiene dos builds, y una admision rechazada que
+  no es por firma'
+procedencia: medido
+producido_por:
+- comando: check
+  documento: check.json
+  rc: 1
+- comando: edge check
+  documento: edge.json
+  rc: 0
+medido_en: '2026-09-11T14:42:43-03:00'
+aegis: 5d89b79c5cd2a60e58241d1d24208179f8f5fec3
+forma:
+  check.json:
+    claves:
+    - failures
+    - notices
+    - rc
+    - steps
+    estados:
+    - already
+    - bad
+    - good
+    - not-evaluable
+    - not-evaluated
+    - wrong
+  edge.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already

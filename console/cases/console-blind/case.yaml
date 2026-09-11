@@ -1,0 +1,15 @@
+version: 1
+caso: console-blind
+que: 'la consola no puede mirar: un comando que no existe, y otro que existe y todavia
+  no habla el contrato'
+procedencia: medido
+producido_por:
+- comando: nosuch
+  sin_documento: 'the command aegis nosuch does not exist in /home/operator/aegis-infra-trabajo/libexec
+    — this is not ''no failures'': it is ''could not look'''
+- comando: ci
+  sin_documento: aegis ci --json did not return a readable document (does it not
+    implement the exit contract yet?)
+medido_en: '2026-09-11T14:26:08-03:00'
+aegis: 5d89b79c5cd2a60e58241d1d24208179f8f5fec3
+forma: {}

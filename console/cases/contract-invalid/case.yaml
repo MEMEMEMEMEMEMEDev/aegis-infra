@@ -1,0 +1,18 @@
+version: 1
+caso: contract-invalid
+que: 'un contrato que el validador rechaza: nombre con mayusculas y una cuota que
+  no existe'
+procedencia: medido
+producido_por:
+- comando: org plan contrato.yaml
+  documento: org.json
+  rc: 1
+medido_en: '2026-09-11T14:25:45-03:00'
+aegis: 5d89b79c5cd2a60e58241d1d24208179f8f5fec3
+forma:
+  org.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - wrong

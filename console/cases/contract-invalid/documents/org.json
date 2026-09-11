@@ -1,0 +1,11 @@
+{
+  "steps": [
+    {
+      "step": "contract:contrato.yaml",
+      "state": "wrong",
+      "valid": false,
+      "error": "organizacion 'Mala-Org': it must be [a-z][a-z0-9-]{2,29}"
+    }
+  ],
+  "rc": 1
+}

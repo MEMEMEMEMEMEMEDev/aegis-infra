@@ -1,0 +1,18 @@
+version: 1
+caso: edge-surplus-cname
+que: 'un CNAME que ningun contrato pide: viaja como dato dentro de un paso already
+  y no mueve el rc'
+procedencia: medido
+producido_por:
+- comando: edge check
+  documento: edge.json
+  rc: 0
+medido_en: '2026-09-11T14:42:49-03:00'
+aegis: 5d89b79c5cd2a60e58241d1d24208179f8f5fec3
+forma:
+  edge.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already

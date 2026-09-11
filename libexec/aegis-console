@@ -1,0 +1,305 @@
+#!/usr/bin/env python3
+# aegis-summary: The visual console: capture the states of the world it has to draw
+# aegis-group:   operate
+# aegis-subcommands: capture list
+# aegis-help:
+# Usage: aegis console capture <name> --what "<one sentence>" --run "<command>" [--run ...]
+#        aegis console list
+#
+# capture  runs each <command> with --json, ANONYMISES the documents and
+#          writes them to console/cases/<name>/ together with a case.yaml
+#          declaring where they came from and what shape they had.
+# list     the corpus: name, provenance and what state of the world it is
+#
+"""aegis-console — the states of the world the console has to draw.
+
+WHY A CORPUS AND NOT SCREENSHOTS. The console's input is not the
+cluster: it is the JSON documents the CLI emits. So a «state of the
+world» is a set of documents, and that is something that can be stored,
+versioned and replayed. What it buys is the one thing no dashboard can
+prove about itself: that «I could not look» never gets flattened into
+«it is fine» on the way to the screen.
+
+WHY NOTHING IS INVENTED. On 2026-09-10 a whole session was measured
+with an impeccable method against a tree that was 172 commits old:
+every measurement was true of the artifact in front of it, and the
+artifact was not the product. A corpus written by hand would be that
+same failure, frozen. So every case declares its PROVENANCE:
+
+    medido      captured here, from the live instance
+    derivado    a RECORDED mutation of a measured case, replayable
+    sintetico   written by hand, only where the real state cannot be
+                reached, and it says why
+
+WHY THE VALUES MAY AGE AND THE SHAPE MAY NOT. This repo does not
+version fixtures, on purpose: a sample file ages in silence because
+nothing re-derives it. The way out is the one `images.txt` already
+uses — it freezes a digest and `image-watch` asks every morning whether
+the tag moved. Here the case freezes the VALUES and a check re-derives
+the SHAPE against the real command. A case says «this is how the world
+looked that day», which stays true forever; what cannot age quietly is
+the contract, and that is exactly what gets asked again.
+"""
+import datetime
+import json
+import os
+import re
+import subprocess
+import sys
+
+# ── canonical python preamble (V-102) ────────────────────────────────
+_AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
+    os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
+from aegis import cli, paths              # noqa: E402
+
+import yaml                               # noqa: E402
+
+CASES = os.path.join(_AEGIS_ROOT, "console", "cases")
+CONF_EXAMPLE = os.path.join(_AEGIS_ROOT, "init", "aegis-init.conf.example")
+
+
+# ── the anonymiser ───────────────────────────────────────────────────
+#
+# WHY THE RULE IS BLUNT, ON PURPOSE.
+#
+# Two cleverer versions were written first and both failed, in opposite
+# directions, and the second one is the reason this is blunt now:
+#
+#   «not identifying if the value appears in the product's source» —
+#   let the GitHub OWNER through, because the README legitimately
+#   prints the repository's own URL. It failed towards the leak.
+#
+#   «not identifying if the value appears in aegis-init.conf.example» —
+#   flagged AI_GATEWAY_REPO=ai-gateway, a name the product uses
+#   everywhere, because the example carries it empty. It failed towards
+#   noise.
+#
+# So there is no cleverness left: EVERY value of the live conf that
+# differs from the example is scrubbed. The cost was measured before
+# choosing — of the nine values that differ on this instance, exactly
+# one appears in the corpus at all. The hazard is that a common word
+# (`default` is a Kubernetes namespace) would mangle a document one
+# day; that fails towards an unreadable case, which is visible. The
+# clever versions failed towards a domain in a public git history,
+# which is not.
+
+# THE SUBSTITUTIONS ARE DERIVED FROM THIS MACHINE, never written down
+# here. A list of secrets to scrub is a list that goes stale the day
+# somebody adds a key, and the miss is invisible: the case looks fine
+# and carries the operator's domain into a public repo.
+#
+# The same shape as check 086, and for the same reason: only the values
+# that DIFFER from aegis-init.conf.example identify anybody. A value
+# equal to the default identifies nobody, and scrubbing it would only
+# make the case unreadable.
+def _too_short_to_mask(value):
+    """A value of three characters or less cannot be scrubbed without
+    mangling unrelated text, and cannot identify anybody either."""
+    return len(value) < 4
+
+
+def _substitutions():
+    # WHERE THE INSTANCE IS belongs to lib/aegis/paths.py and to nobody
+    # else (C1/C2, and check 102 rule 4 for the bash side).
+    conf = paths.aegis_home() / "aegis.conf"
+    generic = {
+        "GH_OWNER": "owner", "ROOT_DOMAIN": "example.test",
+        "ACME_EMAIL": "operator@example.test",
+        "CF_ACCOUNT_ID": "0" * 32, "CF_ZONE_ID": "0" * 32,
+        "REGISTRY_CLUSTER_IP": "10.43.0.1", "AI_GATEWAY_REPO": "ai-gateway",
+    }
+    def read(path):
+        out = {}
+        try:
+            for line in open(path, encoding="utf-8"):
+                m = re.match(r'^\s*([A-Z_]+)=(.*)$', line)
+                if m:
+                    out[m.group(1)] = m.group(2).strip().strip('"').strip("'")
+        except FileNotFoundError:
+            pass
+        return out
+    live, example = read(conf), read(CONF_EXAMPLE)
+    subs = []
+    for key, value in live.items():
+        if not value or value == example.get(key):
+            continue
+        # AND IT HAS TO IDENTIFY SOMEBODY. «Differs from the example» is
+        # check 086's rule and it is right for what 086 asks — is THIS
+        # instance's value baked into the seed — but it is too blunt
+        # here: `AI=gpu` and `KUBE_CONTEXT_EXPECTED=default` differ from
+        # the example and identify nobody. Masking them would mangle
+        # every document that says «gpu» for an unrelated reason, and a
+        # corpus nobody can read stops being checked.
+        #
+        if _too_short_to_mask(value):
+            continue
+        replacement = generic.get(key)
+        if replacement is None or replacement == value:
+            # A key nobody taught this function about — or one whose
+            # generic form happens to equal the live value, which would
+            # be a substitution that scrubs nothing. Neither is skipped
+            # quietly: an unknown identifying value is what this
+            # function exists to stop.
+            replacement = f"__{key.lower()}__"
+            print(f"  {key}: masked as {replacement} (no generic form declared for it)",
+                  file=sys.stderr)
+        subs.append((value, replacement))
+    # $HOME last and always: paths travel inside messages.
+    subs.append((os.path.expanduser("~"), "/home/operator"))
+    # Longest first, so that a value containing another is not left
+    # half-scrubbed (ROOT_DOMAIN inside an email, for instance).
+    return sorted(subs, key=lambda p: -len(p[0]))
+
+
+def anonymise(text, subs):
+    for value, replacement in subs:
+        text = text.replace(value, replacement)
+    return text
+
+
+def still_identifying(text, subs):
+    """What survived. Belt and braces: the caller refuses to write a
+    case this is not empty for."""
+    return [v for v, _ in subs if v and v in text]
+
+
+# ── the shape pin ────────────────────────────────────────────────────
+# What a check re-derives later against the real command. NOT the
+# values: the vocabulary. Which keys the document has at its top level,
+# and which `state` words appear anywhere inside it.
+def shape_of(doc):
+    states = set()
+    def walk(node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "state" and isinstance(v, str):
+                    states.add(v)
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+    walk(doc)
+    return {"claves": sorted(doc) if isinstance(doc, dict) else [],
+            "estados": sorted(states)}
+
+
+def _aegis_commit():
+    try:
+        return subprocess.run(["git", "-C", _AEGIS_ROOT, "rev-parse", "HEAD"],
+                              capture_output=True, text=True, check=True).stdout.strip()
+    except Exception:
+        return None
+
+
+def capture(name, what, runs):
+    if not re.match(r"^[a-z][a-z0-9-]{2,39}$", name):
+        print(f"the case name {name!r} must be [a-z][a-z0-9-]{{2,39}}", file=sys.stderr)
+        return 3
+    dest = os.path.join(CASES, name)
+    docs_dir = os.path.join(dest, "documents")
+    subs = _substitutions()
+    produced, shapes = [], {}
+
+    for line in runs:
+        parts = line.split()
+        if not parts:
+            continue
+        filename = f"{parts[0]}.json"
+        entry = {"comando": " ".join(parts), "documento": filename}
+        try:
+            rc, doc = cli.run_json(*parts)
+            entry["rc"] = rc
+        except cli.CouldNotEvaluate as e:
+            # THE CASE ZERO IS A CASE. A command that gives back no
+            # readable document is a state of the world the console has
+            # to draw — and the one almost nobody designs, because the
+            # easy answer is a spinner that never stops. It is recorded
+            # as what it is: the absence of a document, with the reason.
+            entry.pop("documento")
+            # THE REASON IS ALSO THE CASE, and it is also text of this
+            # machine: this message carries the absolute path of the
+            # libexec it looked in. Found the first time this ran — the
+            # anonymiser was guarding the documents and nobody was
+            # guarding the sentence beside them.
+            reason = anonymise(str(e), subs)
+            left = still_identifying(reason, subs)
+            if left:
+                print(f"the reason `{' '.join(parts)}` gave still carries {len(left)} "
+                      f"value(s) of this instance: nothing was written", file=sys.stderr)
+                return 1
+            entry["sin_documento"] = reason
+            produced.append(entry)
+            print(f"  {parts[0]}: NO DOCUMENT — {reason}")
+            continue
+        raw = json.dumps(doc, ensure_ascii=False, indent=2) + "\n"
+        text = anonymise(raw, subs)
+        # WHAT WAS MASKED, SAID OUT LOUD. The rule is blunt on purpose
+        # (see the note above), so the day it mangles a common word the
+        # operator finds out here and not by reading a case that makes
+        # no sense.
+        for value, replacement in subs:
+            n = raw.count(value)
+            if n:
+                print(f"    masked {n}x {replacement}")
+        left = still_identifying(text, subs)
+        if left:
+            print(f"the document of `{' '.join(parts)}` still carries {len(left)} value(s) "
+                  f"of this instance after anonymising: nothing was written", file=sys.stderr)
+            return 1
+        os.makedirs(docs_dir, exist_ok=True)
+        open(os.path.join(docs_dir, filename), "w", encoding="utf-8").write(text)
+        shapes[filename] = shape_of(json.loads(text))
+        produced.append(entry)
+        print(f"  {parts[0]}: rc {rc} · {filename}")
+
+    if not produced:
+        print("nothing was run: a case with no documents is not a case", file=sys.stderr)
+        return 3
+
+    case = {"version": 1, "caso": name, "que": what, "procedencia": "medido",
+            "producido_por": produced,
+            "medido_en": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+            "aegis": _aegis_commit(), "forma": shapes}
+    os.makedirs(dest, exist_ok=True)
+    with open(os.path.join(dest, "case.yaml"), "w", encoding="utf-8") as fh:
+        yaml.safe_dump(case, fh, sort_keys=False, allow_unicode=True, width=78)
+    print(f"\ncase {name}: {len(produced)} command(s), "
+          f"{os.path.relpath(dest, _AEGIS_ROOT)}/")
+    return 0
+
+
+def listing():
+    if not os.path.isdir(CASES):
+        print(f"there is no corpus yet ({os.path.relpath(CASES, _AEGIS_ROOT)}/)")
+        return 0
+    rows = 0
+    for name in sorted(os.listdir(CASES)):
+        path = os.path.join(CASES, name, "case.yaml")
+        if not os.path.isfile(path):
+            continue
+        case = yaml.safe_load(open(path, encoding="utf-8")) or {}
+        print(f"  {name:<28} {case.get('procedencia','?'):<10} {case.get('que','')}")
+        rows += 1
+    print(f"\n{rows} case(s)")
+    return 0
+
+
+def main():
+    ap = cli.parser("console", __doc__.split("\n")[0])
+    sub = ap.add_subparsers(dest="verb", required=True)
+    c = sub.add_parser("capture", help="run the commands and store the state of the world")
+    c.add_argument("name")
+    c.add_argument("--what", required=True, metavar="SENTENCE",
+                   help="what state of the world this is, in one sentence")
+    c.add_argument("--run", action="append", default=[], metavar="COMMAND",
+                   help="an aegis command WITHOUT --json (repeatable)")
+    sub.add_parser("list", help="the corpus")
+    a = ap.parse_args()
+    if a.verb == "list":
+        return listing()
+    return capture(a.name, a.what, a.run)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

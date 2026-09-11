@@ -1,0 +1,26 @@
+version: 1
+caso: cert-expiring
+que: 'un certificado a punto de vencer: el estado que el operador tiene que decidir,
+  y que no se puede producir a voluntad'
+procedencia: derivado
+derivado_de: round-with-findings
+por_que: 'un certificado tarda meses en acercarse a su vencimiento y aegis lo renueva
+  solo: el estado existe y no se puede fabricar sin mentirle a cert-manager'
+mutacion:
+- documento: check.json
+  de: '"measure": "5 certificates at True"'
+  a: '"measure": "4 certificates at True; 1 expires in 12 days"'
+forma:
+  check.json:
+    claves:
+    - failures
+    - notices
+    - rc
+    - steps
+    estados:
+    - already
+    - bad
+    - good
+    - not-evaluable
+    - not-evaluated
+    - wrong
