@@ -4,14 +4,20 @@
  * the streets calling out the hour and that all was well. That is the
  * job: be the one awake, and say how things are, calmly.
  *
- * WHY THERE IS NO WEBFONT HERE, and it is not an oversight. Nothing in
- * this product fetches anything from the internet — measured before
- * writing this file: zero references to a CDN or a font host anywhere
- * in the tree. A console served on loopback that phones out for a
- * typeface would be the first, and it would do it on every load, from
- * a machine whose whole point is that it is sovereign. The system
- * stack costs nothing and is never unavailable. Shipping a WOFF2 with
- * its licence is possible later; it is a decision, not a default.
+ * WHERE THE TYPEFACES COME FROM. Nothing in this product fetches
+ * anything from the internet, and a console on loopback is the last
+ * place to start: a font host would be phoned on every load, from a
+ * machine whose whole point is that it is sovereign, and the page
+ * would break the day that host does. So the two faces are MIRRORED
+ * the way this platform mirrors any third party — pulled once, pinned
+ * by digest, vendored with their OFL licences beside them. The
+ * manifest is fonts/fonts.txt and check 126 compares it against the
+ * bytes on disk. Only the latin subset travels: 58 KB for the two.
+ *
+ * The @font-face rules below name the files by their bare name, and
+ * console.skin() INLINES them as data: URIs when it serves the page —
+ * one document, one request, nothing fetched, and this file stays
+ * readable instead of being a wall of base64.
  *
  * THE SEVEN RULES, and every one of them is a mechanism rather than a
  * taste:
@@ -32,6 +38,21 @@
  *      black and white, and colour blindness. That one is not taste:
  *      it is the fourth outcome refusing to be a shade of the others.
  */
+
+@font-face {
+  font-family:"Plus Jakarta Sans"; font-style:normal; font-weight:400 800;
+  font-display:swap; src:url("plus-jakarta-sans-latin.woff2") format("woff2");
+  unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family:"JetBrains Mono"; font-style:normal; font-weight:400 500;
+  font-display:swap; src:url("jetbrains-mono-latin.woff2") format("woff2");
+  unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
 :root {
   --paper:#EFF2F6; --panel:#FFFFFF; --sunken:#E9EDF2; --line:rgb(11 13 16 / .08);

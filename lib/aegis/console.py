@@ -201,10 +201,42 @@ SKIN = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "share", "console", "sereno.css")
 
 
+FONTS = os.path.join(os.path.dirname(SKIN), "fonts")
+
+
+def _inline_fonts(css):
+    """Turn each `url("x.woff2")` into the bytes themselves.
+
+    The faces are vendored in share/console/fonts/ and pinned by digest
+    (see fonts.txt). Inlining them means the served page fetches
+    NOTHING — not from a CDN, which this product never does, and not
+    even from itself — so it renders identically over an SSH tunnel, on
+    a laptop with no route out, and saved to a file.
+
+    A face that cannot be read is left as it was: the stack in --ui
+    falls back to the system's, and a console with the wrong typeface
+    is still a console. Failing to draw over a font would be the page
+    lying about something it can actually see.
+    """
+    import base64
+    import re as _re
+
+    def one(match):
+        name = match.group(1)
+        try:
+            with open(os.path.join(FONTS, name), "rb") as fh:
+                b64 = base64.b64encode(fh.read()).decode("ascii")
+        except OSError:
+            return match.group(0)
+        return f'url(data:font/woff2;base64,{b64}) format("woff2")'
+
+    return _re.sub(r'url\("([a-z0-9.-]+\.woff2)"\)\s*format\("woff2"\)', one, css)
+
+
 def skin():
     try:
         with open(SKIN, encoding="utf-8") as fh:
-            return fh.read()
+            return _inline_fonts(fh.read())
     except OSError:
         # A console with no skin still has to draw: the states travel in
         # the attributes, and the text is readable unstyled. Saying so

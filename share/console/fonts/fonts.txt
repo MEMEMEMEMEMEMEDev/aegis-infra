@@ -1,0 +1,37 @@
+# fonts.txt — the TYPEFACES the console carries, mirrored the same way
+# this platform mirrors any other third party: pulled ONCE, pinned by
+# digest, and vendored into our own tree.
+#
+# WHY THEY LIVE HERE AND NOT AT A CDN. Nothing in this product fetches
+# anything from the internet, and a console served on loopback is the
+# last place to start: it would phone a font host on every load, from a
+# machine whose entire point is that it is sovereign, and it would stop
+# working the day that host does. The house rule was already written
+# for the design system — «self-hosted WOFF2 only, with its licence
+# travelling beside the file; never a Google CDN» — and this is the
+# same rule applied to the product.
+#
+# WHY THE DIGEST. Same reason as mirror-images/images.txt: a URL is a
+# promise somebody else can break. The bytes below are the ones that
+# were read, measured and reviewed; check 126 compares the file on disk
+# against this line, so a font swapped for another — by accident or
+# otherwise — cannot arrive quietly.
+#
+# ONLY THE LATIN SUBSET is carried. The console's own words are English
+# and the data it draws is hostnames, organisation names and numbers.
+# Carrying cyrillic, greek and vietnamese would triple the weight for
+# glyphs no screen of this product has ever drawn. If that stops being
+# true, the fix is another line here, not a CDN.
+#
+# FORMAT
+#   <file>  <sha256>  <source-url>
+#
+# HOW TO UPDATE ONE
+#   1. download the new file
+#   2. sha256sum it and edit the line here
+#   3. review the licence beside it: OFL is per-version
+# Steps are separate on purpose. Pulling a font and shipping it are two
+# different decisions.
+
+plus-jakarta-sans-latin.woff2	153fc85b70298beeb1d61a5f723331649e7f23bb77302a66e61cb3e2fbdb5e79	https://fonts.gstatic.com/s/plusjakartasans/v12/LDIoaomQNQcsA88c7O9yZ4KMCoOg4Ko20yw.woff2
+jetbrains-mono-latin.woff2	83c005d49d8a6a50474c73a5a36ac0468076e9c4a29da7bdb14995d80560a5be	https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxDcwg.woff2
