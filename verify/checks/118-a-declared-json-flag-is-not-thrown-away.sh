@@ -55,6 +55,20 @@ for f in $SUBJECTS118; do
         D118="$D118 $b declares --json and calls parse_args() without keeping the result: the flag is parsed and discarded on the same line, so the command accepts it, exits 0, and does exactly what it did before;"
     fi
 
+    # BASH DECLARES IT DIFFERENTLY, and so it is read differently: the
+    # `--json)` branch assigns a variable, and honouring the flag means
+    # that variable is consulted somewhere else in the file. The name
+    # is derived from the branch, never assumed.
+    if grep -qE '^[[:space:]]*--json\)' <<<"$code"; then
+        var="$(grep -oE '^[[:space:]]*--json\)[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=' <<<"$code" | head -1 | sed -E 's/.*\)[[:space:]]*//; s/=$//')"
+        if [[ -z "$var" ]]; then
+            D118="$D118 $b has a --json) branch that assigns nothing: the flag is accepted and nothing remembers it was given;"
+        elif [[ "$(grep -vE '^[[:space:]]*--json\)' <<<"$code" | grep -cE "\\$\{?${var}\b" || true)" -eq 0 ]]; then
+            D118="$D118 $b sets \`$var\` on --json and never reads \`$var\`: the flag is remembered and then ignored;"
+        fi
+        continue
+    fi
+
     # 2 · AND THE VALUE IS READ SOMEWHERE. Keeping the namespace is not
     #     enough: a command can assign it and still never look at the
     #     flag, which is the same lie one step later. The name to look

@@ -58,9 +58,11 @@ export AEGIS_ROOT
 source "$AEGIS_ROOT/lib/paths.sh"
 
 usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
+JSON_MODE=""
 for a in "$@"; do case "$a" in
     -h|--help) usage; exit 0 ;;
-    *) echo "${AEGIS_CMD:-aegis} check takes no arguments (got '$a'); try --help" >&2; exit 3 ;;
+    --json) JSON_MODE=1 ;;
+    *) echo "${AEGIS_CMD:-aegis} check takes only --json (got '$a'); try --help" >&2; exit 3 ;;
 esac; done
 # aegis_exec (rule 5.1) lives in common.sh. The round does not need the
 # rest of the init, but it does need to invoke other commands WITHOUT an
@@ -191,11 +193,74 @@ red=$'\033[31m'; green=$'\033[32m'; yellow=$'\033[33m'; gray=$'\033[90m'; reset=
 [[ -t 1 ]] || { red=""; green=""; yellow=""; gray=""; reset=""; }
 
 failures=0; notices=0
-ok()     { printf '  %s✓%s %s\n' "$green" "$reset" "$*"; }
-bad()    { printf '  %s✗%s %s\n' "$red"   "$reset" "$*"; failures=$((failures + 1)); }
-notice() { printf '  %s!%s %s\n' "$yellow" "$reset" "$*"; notices=$((notices + 1)); }
-note()   { printf '    %s%s%s\n' "$gray" "$*" "$reset"; }
-heading(){ printf '\n%s\n' "$*"; }
+
+# ── --json: the round, readable by a machine ───────────────────────
+# The narration below is for people and it stays exactly as it is. What
+# --json adds is a RECORD next to it: every primitive that prints a
+# verdict also files it, and at exit the record is rendered as the
+# document of the house — {"steps": [...], "rc": N} — one step per
+# section, with its measures inside.
+#
+# Two mechanics, and both exist so that the prose cannot pollute the
+# document (rule E-2, «no state is communicated through prose»):
+#   · stdout is closed onto /dev/null and the document leaves through
+#     fd 3, so every printf in the 1200 lines below keeps working and
+#     lands nowhere;
+#   · the document is written by an EXIT trap, because this file exits
+#     from the middle of section 1 when kubectl does not answer, and a
+#     round that says nothing when it could not look is the disease
+#     this whole command exists to treat.
+# THE rc DOES NOT CHANGE. The document carries the process rc — 0 or 1,
+# as always — and the trap reads it, it does not decide it.
+_rec() { :; }
+if [[ -n "$JSON_MODE" ]]; then
+    _REC="$(mktemp -t aegis-check-json.XXXXXX)"
+    exec 3>&1 1>/dev/null
+    _rec() { printf '%s\x1f%s\x1e' "$1" "$2" >> "$_REC"; }
+    _flush_json() {
+        local rc=$?
+        trap - EXIT
+        python3 - "$_REC" "$rc" "$failures" "$notices" >&3 <<'PYJ'
+import json, sys
+rec, rc, failures, notices = open(sys.argv[1], encoding="utf-8").read(), int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+RANK = {"not-evaluated": 3, "bad": 2, "notice": 1, "good": 0}
+sections, cur = [], None
+def section(name):
+    global cur
+    cur = {"step": name, "state": None, "measures": [], "notes": []}
+    sections.append(cur)
+for entry in filter(None, rec.split("\x1e")):
+    kind, text = entry.split("\x1f", 1)
+    if kind == "section":
+        section(text.strip()); continue
+    if cur is None:
+        section("(before the first section)")
+    if kind == "note":
+        (cur["measures"][-1]["notes"] if cur["measures"] else cur["notes"]).append(text)
+    else:
+        cur["measures"].append({"measure": text, "state": kind, "notes": []})
+for sec in sections:
+    kinds = [m["state"] for m in sec["measures"]]
+    worst = max(kinds, key=RANK.get) if kinds else "not-evaluated"
+    # The house vocabulary for the step; the round's own for the measures.
+    sec["state"] = {"not-evaluated": "not-evaluable", "bad": "wrong"}.get(worst, "already")
+    sec["counts"] = {k: kinds.count(k) for k in RANK if kinds.count(k)}
+json.dump({"steps": sections, "failures": failures, "notices": notices, "rc": rc},
+          sys.stdout, ensure_ascii=False)
+print()
+PYJ
+        rm -f "$_REC"
+    }
+    trap _flush_json EXIT
+fi
+
+ok()     { printf '  %s✓%s %s\n' "$green" "$reset" "$*"; _rec good "$*"; }
+bad()    { printf '  %s✗%s %s\n' "$red"   "$reset" "$*"; _rec bad "$*"; failures=$((failures + 1)); }
+# A notice that says it could not look is the fourth outcome, not a
+# warning; the record keeps the two apart even though the prose does not.
+notice() { printf '  %s!%s %s\n' "$yellow" "$reset" "$*"; case "$*" in "COULD NOT EVALUATE"*|"NOT EVALUATED"*|*"NOT EVALUATED"*) _rec not-evaluated "$*" ;; *) _rec notice "$*" ;; esac; notices=$((notices + 1)); }
+note()   { printf '    %s%s%s\n' "$gray" "$*" "$reset"; _rec note "$*"; }
+heading(){ printf '\n%s\n' "$*"; _rec section "$*"; }
 
 # ── a ✓ demands that something was measured ───────────────────────
 # The rule was already written in verify-static (check 55: «if evaluated
@@ -232,7 +297,7 @@ ok_if_measured() {
 #
 # `degraded()` prints just as discreetly and DOES count: the measurement
 # happened, but it is not the one the message says.
-degraded() { note "$*"; notices=$((notices + 1)); }
+degraded() { if [[ -n "$JSON_MODE" ]]; then printf '    %s%s%s\n' "$gray" "$*" "$reset"; _rec notice "$*"; else note "$*"; fi; notices=$((notices + 1)); }   # one line: check 093 reads it
 
 # ── the meters' protocol, in ONE single place ──────────────────────
 # The big python blocks do not return a number: they return LINES
@@ -265,6 +330,21 @@ dispatch() {
         esac
     done <<< "$output"
     (( said )) || notice "COULD NOT EVALUATE: $subject — the meter finished (rc $rc) without emitting a single verdict: it blew up, and the traceback went to stderr"
+}
+
+# ── a delegated command's rc, read once ───────────────────────────
+# `aegis edge` and `aegis webhook` speak the exit contract themselves;
+# the round only has to read the four outcomes and file them. The two
+# `case $?` blocks this replaces were identical, and identical blocks
+# drift.
+#   delegated "<what it measured>" <rc>
+delegated() {
+    local subject="$1" rc="$2"
+    case "$rc" in
+        0) _rec good "$subject" ;;
+        1) failures=$((failures + 1)); _rec bad "$subject" ;;
+        *) notices=$((notices + 1)); _rec not-evaluated "COULD NOT EVALUATE: $subject (rc $rc)" ;;   # aegis_exec already said WHY
+    esac
 }
 
 # ── 1. the node ───────────────────────────────────────────────────
@@ -834,11 +914,7 @@ heading "edge"
 # failures». Green out of blindness is the worst outcome for a
 # monitoring tool: nobody investigates a green.
 aegis_exec edge
-case $? in
-    0) : ;;
-    1) failures=$((failures + 1)) ;;
-    *) notices=$((notices + 1)) ;;   # aegis_exec already said WHY
-esac
+delegated "the hostnames the contracts declare exist at the edge" $?
 
 # ── 6c. that a push reaches Jenkins ───────────────────────────────
 # The same failure mode as the edge, which is why it is next to it:
@@ -853,11 +929,7 @@ esac
 # out (#32).
 heading "CI webhooks"
 aegis_exec webhook
-case $? in
-    0) : ;;
-    1) failures=$((failures + 1)) ;;
-    *) notices=$((notices + 1)) ;;
-esac
+delegated "every repo with a job in Jenkins has its webhook" $?
 
 # ── 6d. that the LAST push actually BUILT ─────────────────────────
 #

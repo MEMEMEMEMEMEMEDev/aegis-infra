@@ -29,6 +29,10 @@ P
 # proves nothing: somebody removing the flag's effect removes all six.
 red_3() { sed -i 's/^\([[:space:]]*\)if args\.json:$/\1if False:/' "$H118"; }
 
+# the bash shape of the same lie: aegis-check accepts --json, sets
+# JSON_MODE, and then nothing in the file ever asks for it
+red_4() { sed -i -E 's/^(if|.*\[\[) -n "\$JSON_MODE" \]\]/\1 -n "$NEVER_SET_118" ]]/' "$AEGIS_ROOT/libexec/aegis-check"; }
+
 # ── controls: real changes that must NOT move the verdict ────────────
 
 # somebody rewrites the explanation
