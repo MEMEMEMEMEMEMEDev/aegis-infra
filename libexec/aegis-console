@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 # aegis-summary: The visual console: capture the states of the world it has to draw
 # aegis-group:   operate
-# aegis-subcommands: capture list
+# aegis-subcommands: capture list serve
 # aegis-help:
 # Usage: aegis console capture <name> --what "<one sentence>" --run "<command>" [--run ...]
 #        aegis console list
+#        aegis console serve [--port N]
 #
 # capture  runs each <command> with --json, ANONYMISES the documents and
 #          writes them to console/cases/<name>/ together with a case.yaml
 #          declaring where they came from and what shape they had.
 # list     the corpus: name, provenance and what state of the world it is
+# serve    reads the instance and draws it, on 127.0.0.1 and nowhere else
 #
 """aegis-console — the states of the world the console has to draw.
 
@@ -285,6 +287,115 @@ def listing():
     return 0
 
 
+# ── serve ────────────────────────────────────────────────────────────
+# WHAT IT READS. Two commands, and they are named here rather than
+# derived because each one is a DECISION about what the first screen is
+# for, not a detail: the round says how the platform is, and the edge
+# says whether the hostnames anybody types actually exist. More arrive
+# with the panels that need them.
+SOURCES = ("check", "edge check")
+
+
+def _read_instance():
+    """One reading per source. A source that cannot answer is a reading
+    too — the case zero, live — and never an exception that empties the
+    page."""
+    import datetime
+    readings = []
+    for line in SOURCES:
+        parts = line.split()
+        when = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+        entry = {"comando": line, "rc": None, "documento": None,
+                 "sin_documento": None, "medido_en": when}
+        try:
+            entry["rc"], entry["documento"] = cli.run_json(*parts)
+        except cli.CouldNotEvaluate as e:
+            entry["sin_documento"] = str(e)
+        except Exception as e:                            # noqa: BLE001
+            # ANY failure is «I could not look», never a traceback and
+            # never a blank page. A console that dies because one of
+            # its sources did is a console that tells you nothing about
+            # the other one.
+            entry["sin_documento"] = f"{type(e).__name__}: {e}"
+        readings.append(entry)
+    return readings
+
+
+def serve(port):
+    import http.server
+    import threading
+
+    from aegis import console as drawing
+
+    state = {"readings": _read_instance()}
+    lock = threading.Lock()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        # The default logs one line per request to stderr, which on a
+        # console the operator leaves open is noise that hides anything
+        # worth reading.
+        def log_message(self, *_args):
+            pass
+
+        def _send(self, code, body, kind="text/html; charset=utf-8", head_only=False):
+            raw = body.encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(raw)))
+            # It draws only what it built: no third party, no inline
+            # handler, nothing fetched. The header says so out loud so
+            # that a future panel cannot quietly start reaching out.
+            self.send_header("Content-Security-Policy",
+                             "default-src 'none'; style-src 'unsafe-inline'; "
+                             "font-src data:; form-action 'none'; base-uri 'none'")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+            if not head_only:
+                self.wfile.write(raw)
+
+        def do_HEAD(self):                                # noqa: N802
+            # Without this, a HEAD answers 501 — and the first thing
+            # anybody points at a new URL is `curl -I`. Same headers,
+            # no body: it is cheap and it stops the console looking
+            # broken to the simplest probe there is.
+            self.do_GET(head_only=True)
+
+        def do_GET(self, head_only=False):                # noqa: N802
+            path = self.path.split("?")[0]
+            if path == "/measure":
+                with lock:
+                    state["readings"] = _read_instance()
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return
+            if path != "/":
+                self._send(404, "404\n", "text/plain; charset=utf-8", head_only)
+                return
+            with lock:
+                readings = list(state["readings"])
+            self._send(200, drawing.page(readings, "aegis"), head_only=head_only)
+
+    # 127.0.0.1 AND NOT 0.0.0.0, and there is no flag to change it. This
+    # page shows everything the round can see about the instance and it
+    # has no login of its own; the way it is reached from elsewhere is
+    # an SSH tunnel, or Cloudflare Access in front of it under the
+    # cloudflare profile — the same door Jenkins and ArgoCD go through.
+    # A bind address is one keystroke away from publishing all of that,
+    # so the keystroke does not exist.
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    print(f"the console is reading on http://127.0.0.1:{port}/  (ctrl-c to stop)")
+    print(f"  sources: {', '.join(SOURCES)}")
+    print(f"  /measure reads them again")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped")
+    finally:
+        server.server_close()
+    return 0
+
+
 def main():
     ap = cli.parser("console", __doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="verb", required=True)
@@ -295,9 +406,14 @@ def main():
     c.add_argument("--run", action="append", default=[], metavar="COMMAND",
                    help="an aegis command WITHOUT --json (repeatable)")
     sub.add_parser("list", help="the corpus")
+    sv = sub.add_parser("serve", help="read the instance and draw it, on loopback")
+    sv.add_argument("--port", type=int, default=7391,
+                    help="the loopback port (default 7391)")
     a = ap.parse_args()
     if a.verb == "list":
         return listing()
+    if a.verb == "serve":
+        return serve(a.port)
     return capture(a.name, a.what, a.run)
 
 

@@ -69,9 +69,17 @@ def readings_of_case(directory):
     import yaml
     case = yaml.safe_load(open(os.path.join(directory, "case.yaml"), encoding="utf-8")) or {}
     readings = []
+    when = case.get("medido_en")
     for entry in case.get("producido_por") or []:
         reading = {"comando": entry.get("comando", "?"), "rc": entry.get("rc"),
-                   "documento": None, "sin_documento": entry.get("sin_documento")}
+                   "documento": None, "sin_documento": entry.get("sin_documento"),
+                   # WHEN, and it travels with the reading rather than
+                   # being taken from a clock at draw time: render() has
+                   # no clock on purpose, and a measurement shown
+                   # without its age is the oldest lie a dashboard
+                   # tells — a number from forty minutes ago read as if
+                   # it were now.
+                   "medido_en": str(when) if when else None}
         name = entry.get("documento")
         if name:
             path = os.path.join(directory, "documents", name)
@@ -84,6 +92,22 @@ def readings_of_case(directory):
 # ── the drawing ──────────────────────────────────────────────────────
 def _e(text):
     return _html.escape(str(text), quote=True)
+
+
+def _when(reading):
+    w = reading.get("medido_en")
+    return f' data-measured-at="{_e(w)}"' if w else ' data-measured-at="unknown"'
+
+
+def _age(reading):
+    """When this reading was taken, on the page and not only in an
+    attribute. A console that shows a number without its age invites
+    somebody to act on a measurement from forty minutes ago as if it
+    were now — and unlike a wrong number, nothing about the screen
+    looks off while they do it."""
+    w = reading.get("medido_en")
+    return (f'<p class="age">measured {_e(w)}</p>' if w
+            else '<p class="age" data-state="unseen">nobody recorded when this was measured</p>')
 
 
 def _chip(state, label):
@@ -124,9 +148,10 @@ def _blind(reading):
     with its own name, and the reason travels with it.
     """
     return (f'<section class="source" data-state="{UNSEEN}" '
-            f'data-command="{_e(reading["comando"])}">'
+            f'data-command="{_e(reading["comando"])}"{_when(reading)}>'
             f'<h2>{_e(reading["comando"])}</h2>{_chip(UNSEEN, "could not look")}'
-            f'<p class="why">{_e(reading["sin_documento"])}</p></section>')
+            f'<p class="why">{_e(reading["sin_documento"])}</p>'
+            f'{_age(reading)}</section>')
 
 
 def _source(reading):
@@ -148,9 +173,10 @@ def _source(reading):
                     f'nothing was measured</p>')
     state = worst(states)
     return (f'<section class="source" data-state="{state}" '
-            f'data-command="{_e(reading["comando"])}" data-rc="{_e(reading.get("rc"))}">'
+            f'data-command="{_e(reading["comando"])}" data-rc="{_e(reading.get("rc"))}"'
+            f'{_when(reading)}>'
             f'<h2>{_e(reading["comando"])}</h2>{_chip(state, state)}'
-            f'{"".join(body)}</section>'), states
+            f'{_age(reading)}{"".join(body)}</section>'), states
 
 
 def verdict_of(readings):

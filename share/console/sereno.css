@@ -71,22 +71,15 @@
   --r:18px; --r-s:11px;
   --ui:"Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  color-scheme:light dark;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --paper:#08090B; --panel:#14171B; --sunken:#191D22; --line:rgb(255 255 255 / .08);
-    --ink:#F4F6F8; --mid:#AFB8C0; --faint:#79828B;
-    --fine-bg:#08291F;      --fine-ink:#4FDDB0;
-    --busy-bg:#14182F;      --busy-ink:#96A3FF;
-    --attention-bg:#2A1B0D; --attention-ink:#FFB067;
-    --wrong-bg:#2C160F;     --wrong-ink:#FF8A66;
-    --unseen-bg:#191D22;    --unseen-ink:#79828B;
-    --danger:#FF6A5A;
-    --glow:0 0 30px -12px currentColor;
-    --shadow:0 1px 0 rgb(255 255 255 / .04);
-  }
+  /* COMMITTED TO LIGHT, and it is a choice rather than an omission.
+   * A console that follows the reader's system theme is two designs,
+   * and the second one is always the one nobody checks: the hatch that
+   * survives grayscale, the glow that carries meaning, the warm family
+   * that is the only warm thing on the page — each has to be got right
+   * twice. One theme, painted explicitly, is one thing to get right.
+   * `color-scheme:light` tells the browser so: a reader on a dark
+   * system gets this page as it was drawn, not inverted by the host. */
+  color-scheme:light;
 }
 
 * { box-sizing:border-box; }
@@ -195,3 +188,5 @@ body {
 .act--danger { background:transparent; color:var(--danger); border-color:var(--danger); }
 
 :focus-visible { outline:2px solid var(--busy-ink); outline-offset:3px; border-radius:8px; }
+
+.age { margin:6px 0 0; font-family:var(--mono); font-size:11px; color:var(--faint); }
