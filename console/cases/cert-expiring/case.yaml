@@ -6,6 +6,10 @@ procedencia: derivado
 derivado_de: round-with-findings
 por_que: 'un certificado tarda meses en acercarse a su vencimiento y aegis lo renueva
   solo: el estado existe y no se puede fabricar sin mentirle a cert-manager'
+producido_por:
+- comando: check
+  documento: check.json
+  rc: 1
 mutacion:
 - documento: check.json
   de: '"measure": "5 certificates at True"'

@@ -53,6 +53,15 @@ for name in names:
             "a case with no provenance is indistinguishable from one somebody invented")
         continue
 
+    # EVERY case says how to READ it, whatever its provenance. A
+    # derived case that lists a mutation and no `producido_por` carries
+    # documents nobody can load: it renders as an empty screen, which
+    # is a state of the world it never claimed to be. Found by check
+    # 122 the first time it rendered the corpus.
+    if prov in ("medido", "derivado", "sintetico") and not case.get("producido_por"):
+        die(f"{where} declares no `producido_por`: nothing says which command each document "
+            "answers, so the case cannot be read back")
+
     if prov == "medido":
         # The three facts that make a measurement repeatable: what was
         # run, when, and against which product. Without them «medido» is
