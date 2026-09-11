@@ -1935,73 +1935,79 @@ def restore(bundle, org, force):
                         die(f"the mongorestore of {base['nombre']} failed: "
                             f"{(r.stderr or b'').decode(errors='replace')[:200]}")
                     step(f"mongodb {base['nombre']} restored ({len(archive)} bytes)")
+            # ── VERIFICATION, the part that was missing ─────────────────
+            #
+            # On 2026-08-09 a restore left the database DELETED and reported
+            # success, because it looked at psql's exit code and not at the
+            # result. Now the inventory is measured again and compared
+            # against the one stored at capture time. If it does not match,
+            # it is not restored, whatever psql says.
+            #
+            # And it runs INSIDE the window, before the consumers come back.
+            # Until 2026-09-11 it ran after them, on the argument that a
+            # returning application does not change the content of the
+            # tables. Measured that night on the live shop: its API seeds
+            # the catalogue at boot, so the count read 43 rows where 12 had
+            # been captured, over a database that WAS restored row by row —
+            # the verdict was «not good» about a restore that was good. What
+            # this compares is the state the restore LEFT, not the state the
+            # application makes of it a second later; the only place where
+            # the two are the same is with the consumers still down. The
+            # bucket was always measured in here, for the same reason.
+            for p in postgres:
+                pod = f"{p['servicio']}-0"
+                problems = []
+                alive_dbs = databases_of(p["ns"], pod)
+                for database in p["bases"]:
+                    if database["nombre"] not in alive_dbs:
+                        problems.append(f"the database {database['nombre']} DOES NOT EXIST")
+                        continue
+                    now = {t["tabla"]: t["filas"] for t in (inventory(p["ns"], pod, database["nombre"]) or [])}
+                    for t in database["tablas"] or []:
+                        if t["tabla"] not in now:
+                            problems.append(f"{database['nombre']}: the table {t['tabla']} is missing")
+                        elif now[t["tabla"]] != t["filas"]:
+                            problems.append(
+                                f"{database['nombre']}.{t['tabla']}: {now[t['tabla']]} rows, "
+                                f"{t['filas']} were expected")
+                if problems:
+                    for x in problems[:12]:
+                        print(f"  {red}✗{reset} {x}")
+                    die(f"{p['org']}/{p['servicio']}: the restore does NOT reproduce what "
+                        f"was captured — I do not call it good")
+                n_t = sum(len(b_["tablas"] or []) for b_ in p["bases"])
+                ok(f"{p['org']}/{p['servicio']} restored and VERIFIED "
+                   f"({len(p['bases'])} databases, {n_t} tables, the rows match)")
+            # The same measurement for mongodb: the collections and their
+            # document counts, read back and compared against capture. A
+            # mongorestore that returns 0 over a database it did not touch is
+            # exactly the 2026-08-09 lie in another engine.
+            for p in mongos:
+                problems = []
+                alive = mongo_databases(p)
+                for base in p["bases"]:
+                    if base["nombre"] not in alive:
+                        problems.append(f"the database {base['nombre']} DOES NOT EXIST")
+                        continue
+                    now = {c["coleccion"]: c["docs"] for c in (mongo_inventory(p, base["nombre"]) or [])}
+                    for c in base.get("colecciones") or []:
+                        if c["coleccion"] not in now:
+                            problems.append(f"{base['nombre']}: the collection {c['coleccion']} is missing")
+                        elif now[c["coleccion"]] != c["docs"]:
+                            problems.append(
+                                f"{base['nombre']}.{c['coleccion']}: {now[c['coleccion']]} docs, "
+                                f"{c['docs']} were expected")
+                if problems:
+                    for x in problems[:12]:
+                        print(f"  {red}✗{reset} {x}")
+                    die(f"{p['org']}/{p['servicio']}: the mongodb restore does NOT reproduce "
+                        f"what was captured — I do not call it good")
+                n_c = sum(len(b_.get("colecciones") or []) for b_ in p["bases"])
+                ok(f"{p['org']}/{p['servicio']} restored and VERIFIED "
+                   f"({len(p['bases'])} database(s), {n_c} collection(s), the counts match)")
         finally:
             scale_consumers_up(ns, consumers)
 
-        # ── VERIFICATION, the part that was missing ─────────────────
-        #
-        # On 2026-08-09 a restore left the database DELETED and reported
-        # success, because it looked at psql's exit code and not at the
-        # result. Now the inventory is measured again and compared
-        # against the one stored at capture time. If it does not match,
-        # it is not restored, whatever psql says.
-        #
-        # It runs with the consumers already back up, and that is not an
-        # oversight: what is measured here is the content of the tables,
-        # which a returning application does not change. The bucket
-        # measures itself inside the window, because its own listing —the
-        # only thing that can answer for it— is read there.
-        for p in postgres:
-            pod = f"{p['servicio']}-0"
-            problems = []
-            alive_dbs = databases_of(p["ns"], pod)
-            for database in p["bases"]:
-                if database["nombre"] not in alive_dbs:
-                    problems.append(f"the database {database['nombre']} DOES NOT EXIST")
-                    continue
-                now = {t["tabla"]: t["filas"] for t in (inventory(p["ns"], pod, database["nombre"]) or [])}
-                for t in database["tablas"] or []:
-                    if t["tabla"] not in now:
-                        problems.append(f"{database['nombre']}: the table {t['tabla']} is missing")
-                    elif now[t["tabla"]] != t["filas"]:
-                        problems.append(
-                            f"{database['nombre']}.{t['tabla']}: {now[t['tabla']]} rows, "
-                            f"{t['filas']} were expected")
-            if problems:
-                for x in problems[:12]:
-                    print(f"  {red}✗{reset} {x}")
-                die(f"{p['org']}/{p['servicio']}: the restore does NOT reproduce what "
-                    f"was captured — I do not call it good")
-            n_t = sum(len(b_["tablas"] or []) for b_ in p["bases"])
-            ok(f"{p['org']}/{p['servicio']} restored and VERIFIED "
-               f"({len(p['bases'])} databases, {n_t} tables, the rows match)")
-        # The same measurement for mongodb: the collections and their
-        # document counts, read back and compared against capture. A
-        # mongorestore that returns 0 over a database it did not touch is
-        # exactly the 2026-08-09 lie in another engine.
-        for p in mongos:
-            problems = []
-            alive = mongo_databases(p)
-            for base in p["bases"]:
-                if base["nombre"] not in alive:
-                    problems.append(f"the database {base['nombre']} DOES NOT EXIST")
-                    continue
-                now = {c["coleccion"]: c["docs"] for c in (mongo_inventory(p, base["nombre"]) or [])}
-                for c in base.get("colecciones") or []:
-                    if c["coleccion"] not in now:
-                        problems.append(f"{base['nombre']}: the collection {c['coleccion']} is missing")
-                    elif now[c["coleccion"]] != c["docs"]:
-                        problems.append(
-                            f"{base['nombre']}.{c['coleccion']}: {now[c['coleccion']]} docs, "
-                            f"{c['docs']} were expected")
-            if problems:
-                for x in problems[:12]:
-                    print(f"  {red}✗{reset} {x}")
-                die(f"{p['org']}/{p['servicio']}: the mongodb restore does NOT reproduce "
-                    f"what was captured — I do not call it good")
-            n_c = sum(len(b_.get("colecciones") or []) for b_ in p["bases"])
-            ok(f"{p['org']}/{p['servicio']} restored and VERIFIED "
-               f"({len(p['bases'])} database(s), {n_c} collection(s), the counts match)")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return 0

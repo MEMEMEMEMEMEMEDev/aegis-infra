@@ -192,6 +192,25 @@ open(p, "w").write(t[:start] + new + t[end:])
 PY
 }
 
+# the third order, measured on 2026-09-11: the count of the tables goes
+# back AFTER the consumers, where an application that seeds at boot
+# turns a good restore into «43 rows where 12 were expected»
+red_13() {
+    python3 - "$AEGIS_ROOT/$DATA" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+start = t.index("            # ── VERIFICATION, the part that was missing")
+fin = "        finally:\n            scale_consumers_up(ns, consumers)\n"
+end = t.index(fin, start)
+block = t[start:end]
+moved = "".join((l[4:] if l.startswith("    ") else l) for l in block.splitlines(True))
+t = t[:start] + t[end:]
+assert t.count(fin) == 1
+t = t.replace(fin, fin + moved, 1)
+open(p, "w").write(t)
+PY
+}
+
 # control: a comment may name the credential
 control_1() {
     printf '\n# The word password appears here on purpose: a comment explains,\n# it does not execute.\n' \

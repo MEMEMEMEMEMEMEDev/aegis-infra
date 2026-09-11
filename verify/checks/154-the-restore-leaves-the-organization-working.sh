@@ -170,6 +170,22 @@ want("restore_bucket" in window,
      "consumers down: the application returns over rows that point at "
      "objects that have not arrived, which is a 404 in front of a user")
 
+# And the MEASUREMENT stays inside it too. Until 2026-09-11 the tables
+# were counted after the consumers had returned, on the argument that a
+# returning application does not change what is in them. The live shop
+# falsified it: its API seeds the catalogue at boot, the count read 43
+# rows where 12 had been captured, and a restore that had put every row
+# back was declared not good. What is compared is the state the restore
+# LEFT; the only moment where that is what the tables hold is with the
+# consumers still down. Both engines, because both are counted.
+want("inventory(" in window,
+     "restore() counts the postgres tables AFTER the consumers are back: "
+     "an application that writes at boot —a seed, a migration— changes "
+     "the count, and the verdict is about the application, not the restore")
+want("mongo_inventory(" in window,
+     "restore() counts the mongodb collections AFTER the consumers are "
+     "back: the same measurement, the other engine")
+
 # A message that gives up. Docstrings are excluded on purpose: they
 # narrate the hole, and narrating it is not reopening it.
 docstrings = set()
@@ -328,5 +344,5 @@ for m in bad:
 sys.exit(1 if bad else 0)
 PY
 if [[ -n "$D154" ]]; then fail "the restore does not leave the organization working:$D154"
-else pass "restore realigns the role and proves it over the loopback, puts the objects back inside the window and after checking the whole bundle, no password travels in argv nor a database name raw into the shell, and the weight comes out as escaped aegis_ series"; fi
+else pass "restore realigns the role and proves it over the loopback, puts the objects back and measures the tables inside the window and after checking the whole bundle, no password travels in argv nor a database name raw into the shell, and the weight comes out as escaped aegis_ series"; fi
 }

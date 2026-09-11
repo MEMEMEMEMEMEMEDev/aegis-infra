@@ -58,8 +58,17 @@ objects — and refuses to call it good if they do not match.
    finding it with the password from the capture would give them a crash
    loop whose message —authentication failed— points at the application
    and not at the restore.
-7. It measures: the databases' tables and rows against the manifest, the
-   objects' size and count against the bucket's own listing.
+7. It measures, **still inside the window**: the databases' tables and
+   rows against the manifest, the objects' size and count against the
+   bucket's own listing. Until 2026-09-11 the tables were counted after
+   the consumers had returned, on the argument that a returning
+   application does not change what is in them. The live shop falsified
+   it: its API seeds the catalogue at boot, so the count read 43 rows
+   where 12 had been captured, over a database that WAS restored row by
+   row. What is compared is the state the restore left, not the state
+   the application makes of it a second later.
+8. The consumers come back. Whatever they write from here on —a seed, a
+   migration— is theirs, and it is after the capture on purpose.
 
 ### The objects, and what it does with what is already there
 
