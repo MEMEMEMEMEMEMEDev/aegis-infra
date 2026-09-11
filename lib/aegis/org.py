@@ -19,6 +19,7 @@ string"). python3 and not yq, by rule C7.
 import argparse
 import difflib
 import hashlib
+import io
 import json
 import os
 import re
@@ -2205,13 +2206,23 @@ def _without_hash(t):
     return markers.without_hash(t)
 
 
-def apply_contract(path, write):
+def apply_contract(path, write, record=None):
+    """Derive one contract. `record`, when given, is a dict this function
+    FILLS with the same facts the narration prints — one entry per file
+    with what happened to it, the secrets that are missing, the count —
+    so that `--json` never has to read the prose back (rule E-2)."""
     raw = open(path, encoding="utf-8").read()
     plans = yaml.safe_load(open(PLANS, encoding="utf-8"))
     c = validate(yaml.safe_load(raw), plans)
     org = c["organizacion"]
     dest = os.path.join(K8S_DIR, f"org-{org}")
     output, secrets = render(c, plans, raw)
+    if record is None:
+        record = {}
+    record.update({"organization": org, "version": c["version"], "cuota": c["cuota"],
+                   "ai": (c.get("ai") or {}).get("plan"), "files": [], "changes": 0,
+                   "secrets_missing": []})
+    files = record["files"]
 
     print(f"\norganization {green}{org}{off}  ·  contract v{c['version']}  ·  "
           f"cuota {c['cuota']}" + (f"  ·  ai {c['ai']['plan']}" if c.get("ai") else ""))
@@ -2224,6 +2235,7 @@ def apply_contract(path, write):
         new = output[name]
         if not os.path.exists(file_path):
             print(f"  {green}+{off} {name}  {grey}(new){off}")
+            files.append({"file": name, "change": "new"})
             changes += 1
             if write:
                 os.makedirs(dest, exist_ok=True)
@@ -2232,6 +2244,7 @@ def apply_contract(path, write):
         old = open(file_path, encoding="utf-8").read()
         if old == new:
             print(f"  {grey}={off} {name}")
+            files.append({"file": name, "change": "unchanged"})
             continue
         # I3: if the file was edited by hand, refuse and show what
         # changed. The truth is the contract, not the file — but
@@ -2248,9 +2261,11 @@ def apply_contract(path, write):
                         "on disk", "generated", lineterm=""))[:40]:
                     print(f"      {grey}{l}{off}")
                 print(f"      {yellow}not overwritten. Check whether the change belongs in the contract.{off}")
+                files.append({"file": name, "change": "hand-edited"})
                 changes += 1
                 continue
         print(f"  {yellow}~{off} {name}")
+        files.append({"file": name, "change": "modified"})
         changes += 1
         if write:
             open(file_path, "w", encoding="utf-8").write(new)
@@ -2261,12 +2276,15 @@ def apply_contract(path, write):
             if name in generated or name.endswith(".enc.yaml"):
                 continue
             print(f"  {red}-{off} {name}  {grey}(the contract no longer produces it){off}")
+            files.append({"file": name, "change": "surplus"})
             changes += 1
             if write:
                 os.remove(os.path.join(dest, name))
 
     missing = [s for s in secrets
                if not os.path.exists(os.path.join(dest, s))]
+    record["secrets_missing"] = list(missing)
+    record["changes"] = changes
     if missing:
         print(f"\n  {yellow}secrets that are missing{off}")
         for s in missing:
@@ -4239,54 +4257,130 @@ def apply_routes(write):
     return 0
 
 
+def _stage(stage, fn, write, steps):
+    """Run ONE derivation and file it as a step. Returns its rc.
+
+    The twelve-stage tuple stays written out inside main(), twice, on
+    purpose: check 173 reads main() with the AST and counts the places
+    where `apply_appprojects` is NAMED against the places where the
+    handover is printed. Moving the tuple into a constant made that
+    count zero and the check red — correctly: what it defends is that
+    every path that derives AppProjects says so at the end, and it can
+    only see that where the name is. The duplication is the price of
+    the guard being that simple; it is written down as debt, not as an
+    accident.
+    """
+    try:
+        rc = fn(write=write)
+        steps.append({"step": f"stage:{stage}", "state": "done" if rc == 0 else "wrong",
+                      "rc": rc})
+        return rc
+    except Invalid as e:
+        print(f"{red}✗ {stage}{off}\n  {e}", file=sys.stderr)
+        steps.append({"step": f"stage:{stage}", "state": "wrong", "error": str(e)})
+        return 1
+
+
 def main():
     p = argparse.ArgumentParser(prog=cli.cmd("org"), description=__doc__.split("\n")[0])
+    # --json HAS TO BE ACCEPTED AFTER THE VERB TOO: `cli.run_json`
+    # appends it at the END of whatever it was handed. Same shape as
+    # aegis-webhook and aegis-edge, for the same reason. SUPPRESS is
+    # the whole trick: without it a verb's own False would overwrite a
+    # --json that arrived BEFORE it.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--json", action="store_true", dest="json_mode",
+                        default=argparse.SUPPRESS,
+                        help="the document of states instead of the narration")
     sub = p.add_subparsers(dest="cmd", required=True)
     for name, help_text in (("plan", "show what would change, without writing"),
                             ("apply", "write the manifests"),
                             ("validate", "only validate the contract")):
-        s = sub.add_parser(name, help=help_text)
+        s = sub.add_parser(name, parents=[common], help=help_text)
         s.add_argument("contracts", nargs="+")
-    sub.add_parser("edge", help="derive public_hostnames from every contract")
-    sub.add_parser("routes", help="derive the ai-ruteo ConfigMap from every contract")
+    sub.add_parser("edge", parents=[common], help="derive public_hostnames from every contract")
+    sub.add_parser("routes", parents=[common], help="derive the ai-ruteo ConfigMap from every contract")
     # `plan-delete` first, and with that name: the order of the help
     # matters when the command next to it destroys things.
     for name, help_text in (("plan-delete", "show what it would delete, without touching anything"),
                             ("delete", "remove from git and SAY what to withdraw from the cluster")):
-        s = sub.add_parser(name, help=help_text)
+        s = sub.add_parser(name, parents=[common], help=help_text)
         s.add_argument("orgs", nargs="+", metavar="ORGANIZATION")
-    m = sub.add_parser("migrate", help="take a contract to a new version")
+    m = sub.add_parser("migrate", parents=[common], help="take a contract to a new version")
     m.add_argument("contracts", nargs="+")
     # `--to` and not `--a`: A5's friction 2 in its smallest form — a
     # loose preposition does not say what it refers to.
     m.add_argument("--to", type=int, required=True, metavar="VERSION",
                    dest="target_version")
+    p.add_argument("--json", action="store_true", dest="json_mode",
+                   help="the document of states instead of the narration")
     a = p.parse_args()
+
+    # THE DOCUMENT. `{"steps": [...], "rc": N}` — the same two keys every
+    # command of the house emits (lib/aegis/outcomes.py). Each step is a
+    # contract, a file of a contract, or a derivation stage, with the
+    # vocabulary of share/exit-codes.txt as its `state`.
+    #
+    # The rc is THE PROCESS RC, unchanged. This function does not use
+    # outcomes.Steps to derive it: a hand-edited file is filed as
+    # `wrong` — it is not right — and yet this command has always
+    # returned 0 for it, and the init and the operator read that 0. The
+    # document says both things and hides neither; changing what the rc
+    # means is a decision that is not taken here.
+    #
+    # In --json mode the narration is CAPTURED, not suppressed: every
+    # print below keeps working and lands in a buffer that is thrown
+    # away, so the document is the only thing on stdout. Errors still
+    # go to stderr, where run_json ignores them.
+    steps = []
+    real_stdout = None
+    if a.json_mode:
+        real_stdout, sys.stdout = sys.stdout, io.StringIO()
+
+    def _emit(rc):
+        if real_stdout is not None:
+            sys.stdout = real_stdout
+            print(json.dumps({"steps": steps, "rc": rc}, ensure_ascii=False))
+        return rc
 
     if a.cmd == "edge":
         try:
-            return apply_edge(write=True)
+            rc = apply_edge(write=True)
+            steps.append({"step": "stage:edge", "state": "done" if rc == 0 else "wrong", "rc": rc})
+            return _emit(rc)
         except Invalid as e:
             print(f"{red}✗{off} {e}", file=sys.stderr)
-            return 1
+            steps.append({"step": "stage:edge", "state": "wrong", "error": str(e)})
+            return _emit(1)
 
     if a.cmd == "routes":
         try:
-            return apply_routes(write=True)
+            rc = apply_routes(write=True)
+            steps.append({"step": "stage:routes", "state": "done" if rc == 0 else "wrong", "rc": rc})
+            return _emit(rc)
         except Invalid as e:
             print(f"{red}✗{off} {e}", file=sys.stderr)
-            return 1
+            steps.append({"step": "stage:routes", "state": "wrong", "error": str(e)})
+            return _emit(1)
 
     if a.cmd == "migrate":
-        return migrate(a.contracts, a.target_version)
+        rc = migrate(a.contracts, a.target_version)
+        steps.append({"step": "migrate", "state": "done" if rc == 0 else "wrong",
+                      "contracts": list(a.contracts), "to": a.target_version})
+        return _emit(rc)
 
     if a.cmd in ("delete", "plan-delete"):
         rc = 0
         for name in a.orgs:
             try:
-                rc |= delete_org(name, write=(a.cmd == "delete"))
+                one = delete_org(name, write=(a.cmd == "delete"))
+                rc |= one
+                steps.append({"step": f"organization:{name}", "state": "done" if one == 0 else "wrong",
+                              "action": a.cmd})
             except Invalid as e:
                 print(f"{red}✗ {name}{off}\n  {e}", file=sys.stderr)
+                steps.append({"step": f"organization:{name}", "state": "wrong",
+                              "action": a.cmd, "error": str(e)})
                 rc = 1
         # Re-derive ALWAYS, on delete too: the hostname and the plan of
         # the organization that left have to disappear in the same run.
@@ -4305,15 +4399,11 @@ def main():
                               ("base-consumers", apply_base_consumers),
                               ("probes", apply_probes),
                               ("jenkinsfiles", apply_jenkinsfiles)):
-                try:
-                    rc |= fn(write=(a.cmd == "delete"))
-                except Invalid as e:
-                    print(f"{red}✗ {stage}{off}\n  {e}", file=sys.stderr)
-                    rc = 1
+                rc |= _stage(stage, fn, write=(a.cmd == "delete"), steps=steps)
         # AFTER every stage, not inside one of them: what the run cannot
         # do itself is read last or it is not read at all.
         report_pending_cluster()
-        return rc
+        return _emit(rc)
 
     rc = 0
     for path in a.contracts:
@@ -4322,13 +4412,33 @@ def main():
                 plans = yaml.safe_load(open(PLANS, encoding="utf-8"))
                 validate(yaml.safe_load(open(path, encoding="utf-8")), plans)
                 print(f"{green}✓{off} {path}")
+                steps.append({"step": f"contract:{path}", "state": "already", "valid": True})
             else:
-                rc |= apply_contract(path, write=(a.cmd == "apply"))
+                rec = {}
+                rc |= apply_contract(path, write=(a.cmd == "apply"), record=rec)
+                # One step per file, then one for the contract itself.
+                # `hand-edited` is the one that is not right (it was
+                # not overwritten and somebody has to look); everything
+                # else converged, whether it had to be written or not.
+                for f in rec["files"]:
+                    state = {"unchanged": "already", "hand-edited": "wrong"}.get(f["change"], "done")
+                    steps.append({"step": f"{rec['organization']}/{f['file']}", "state": state,
+                                  "change": f["change"]})
+                steps.append({"step": f"contract:{path}", "state": "already" if rec["changes"] == 0 else "done",
+                              "valid": True, "organization": rec["organization"],
+                              "changes": rec["changes"], "secrets_missing": rec["secrets_missing"],
+                              "written": (a.cmd == "apply")})
         except Invalid as e:
             print(f"{red}✗ {path}{off}\n  {e}", file=sys.stderr)
+            # The validator's message VERBATIM: the console shows it as
+            # it is, and check 111's glossary already governs its words.
+            steps.append({"step": f"contract:{path}", "state": "wrong", "valid": False,
+                          "error": str(e)})
             rc = 1
         except FileNotFoundError as e:
             print(f"{red}✗{off} does not exist: {e.filename}", file=sys.stderr)
+            steps.append({"step": f"contract:{path}", "state": "wrong", "valid": False,
+                          "error": f"does not exist: {e.filename}"})
             rc = 1
 
     # The edge and the routes ALWAYS, after the organizations. They go
@@ -4352,13 +4462,8 @@ def main():
                           ("base-consumers", apply_base_consumers),
                           ("probes", apply_probes),
                           ("jenkinsfiles", apply_jenkinsfiles)):
-            try:
-                rc |= fn(write=(a.cmd == "apply"))
-            except Invalid as e:
-                print(f"{red}✗ {stage}{off}\n  {e}", file=sys.stderr)
-                rc = 1
+            rc |= _stage(stage, fn, write=(a.cmd == "apply"), steps=steps)
     # AFTER every stage, not inside one of them: what the run cannot do
     # itself is read last or it is not read at all.
     report_pending_cluster()
-    return rc
-
+    return _emit(rc)
