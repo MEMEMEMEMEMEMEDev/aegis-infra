@@ -12,4 +12,15 @@ red_1() {
 red_2() { printf '\nAEGIS_HOME="$HOME/aegis"\n' >> "$AEGIS_ROOT/libexec/aegis-destroy"; }
 # and the resolver has to be ONE
 red_3() { printf '\naegis_home() { echo /somewhere/else; }\n' >> "$AEGIS_ROOT/lib/common.sh"; }
+# a second root, the v2 fossil: the round's contracts hung off the product again
+red_4() { python3 - "$AEGIS_ROOT/libexec/aegis-check" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+s = s.replace('mapfile -t ORGS < <(python3 - "$PLATFORM_DIR/orgs"',
+              'ROOT_P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"\n    mapfile -t ORGS < <(python3 - "$ROOT_P/orgs"', 1)
+p.write_text(s)
+P
+}
 control_1() { printf '\n# legitimate comment\n' >> "$AEGIS_ROOT/lib/access.sh"; }
+# prose that names the fossil next to the fix must not bite
+control_2() { printf '\n# history: ROOT_P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" was the v2 shape\n' >> "$AEGIS_ROOT/libexec/aegis-check"; }

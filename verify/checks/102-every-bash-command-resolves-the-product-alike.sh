@@ -43,6 +43,19 @@ for f in "$LIBEXEC"/aegis-* "$LIBEXEC"/state/* "$LIBEXEC"/dev/*; do
         && D102="$D102 $b decides where the instance is on its own (that belongs to lib/paths.sh);"
     nc "$f" | grep -q '\$AEGIS_ROOT/platform' \
         && D102="$D102 $b hangs platform/ off the PRODUCT (the instance is \$AEGIS_HOME);"
+    # AND NO SECOND ROOT. The canonical preamble derives AEGIS_ROOT from
+    # BASH_SOURCE once, with readlink -f; anything else derived from
+    # BASH_SOURCE is a v2 fossil — a root computed when the command
+    # lived INSIDE the instance, still compiling now that it lives in
+    # the product, and pointing at the wrong tree. Measured 2026-09-11:
+    # aegis-check's ROOT_P hung orgs/ off it, so the daily round
+    # reported COULD NOT EVALUATE for every organization's backup and
+    # «no organization declares a domain» for the probes, and aegis-vps'
+    # ROOT hung tofu/ off it, a directory the product does not have.
+    # Both sounded honest. The two rules above could not see them:
+    # neither wrote $HOME/aegis nor $AEGIS_ROOT/platform.
+    nc "$f" | grep -E 'dirname[^;]*\$\{?BASH_SOURCE' | grep -vqE '^\s*_?AEGIS_ROOT=' \
+        && D102="$D102 $b derives a second root from BASH_SOURCE (only AEGIS_ROOT may; instance data comes from lib/paths.sh);"
 done
 # and the resolver has to be one and only one
 DEFS="$(grep -rl '^aegis_home()' "$LIBS" "$LIBEXEC" 2>/dev/null | wc -l)"

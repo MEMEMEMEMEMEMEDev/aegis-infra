@@ -33,15 +33,22 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WRAPPER="$ROOT/tofu/tofu-apply.sh"
-TPL="$ROOT/vps/clouding-lab.cloud-init.yaml.tpl"
 
 die() { printf '%s vps: %s\n' "${AEGIS_CMD:-aegis}" "$*" >&2; exit "${2:-1}"; }
 
 # --help answers BEFORE the wrapper precondition: asking what a command
 # does must not require standing inside the live checkout.
 AEGIS_ROOT="${AEGIS_ROOT:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)}"
+# shellcheck source=../lib/paths.sh
+source "$AEGIS_ROOT/lib/paths.sh"
+# tofu/ and vps/ are INSTANCE data: they live in the platform checkout
+# lib/paths.sh points at ($PLATFORM_DIR), not next to this file. Until
+# 2026-09-11 ROOT was derived from BASH_SOURCE — the v2 layout, where
+# this command lived inside the instance — and $ROOT/tofu named a
+# directory the product does not have. Same fossil as aegis-check's
+# ROOT_P, found the same day.
+WRAPPER="$PLATFORM_DIR/tofu/tofu-apply.sh"
+TPL="$PLATFORM_DIR/vps/clouding-lab.cloud-init.yaml.tpl"
 usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
 case "${1:-}" in -h|--help) usage; exit 0 ;; esac
 [[ -x "$WRAPPER" ]] || die "the wrapper $WRAPPER does not exist — are you in the live checkout (platform/)? The vps-lab env and its state live there, not in the seed" 2
@@ -55,7 +62,7 @@ read_token() {
     # "does not exist" and the token comes out empty (real bug, first
     # delivery 2026-08-23: an empty token travelled all the way to the
     # VPS).
-    (cd "$ROOT/tofu" && "$WRAPPER" -chdir=envs/vps-lab output -raw tunnel_token) \
+    (cd "$PLATFORM_DIR/tofu" && "$WRAPPER" -chdir=envs/vps-lab output -raw tunnel_token) \
         || die "I could not read tunnel_token from the vps-lab env (apply run? SOPS_AGE_KEY_FILE?)" 2
 }
 

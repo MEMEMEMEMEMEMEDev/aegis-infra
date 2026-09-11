@@ -1087,7 +1087,15 @@ fi
 heading "backups"
 BACKUPS="${AEGIS_BACKUPS:-$HOME/aegis-backups}"
 THRESHOLD_H=${AEGIS_BACKUP_HOURS:-48}
-ROOT_P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# THE CONTRACTS ARE INSTANCE DATA, and they live where lib/paths.sh
+# says ($PLATFORM_DIR), never next to this file. Until 2026-09-11 this
+# line was `ROOT_P="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"`
+# — right in v2, when the round lived INSIDE the instance, and wrong
+# from the day the code moved to the product: `$ROOT_P/orgs` pointed at
+# a directory that does not exist, and two sections of every daily
+# round reported COULD NOT EVALUATE for the backups of every
+# organization and «no organization declares a domain yet» for the
+# probes. Both sounded honest, which is why nobody read them twice.
 
 # bundle_age <glob-pattern> -> prints "<age_h> <bytes> <basename>" of the
 # newest one, or nothing if there is none.
@@ -1132,7 +1140,7 @@ else
     fi
 
     # (c) and one per organization, ENUMERATED from the contracts.
-    mapfile -t ORGS < <(python3 - "$ROOT_P/orgs" <<'PYEOF'
+    mapfile -t ORGS < <(python3 - "$PLATFORM_DIR/orgs" <<'PYEOF'
 import os, sys, yaml
 d = sys.argv[1]
 if not os.path.isdir(d):
@@ -1341,7 +1349,7 @@ except Exception:
   # (d) the probes aegis-org derives from the contracts. An
   #     organization with a domain and without a probe was born blind
   #     all over again.
-  with_domain=$(grep -lE '^dominio:' "$ROOT_P"/orgs/*.yaml 2>/dev/null | wc -l)
+  with_domain=$(grep -lE '^dominio:' "$PLATFORM_DIR"/orgs/*.yaml 2>/dev/null | wc -l)
   # `or vector(0)`: with no tenant declaring a domain there is no probe
   # series at all, count() of nothing is NO series, and the round used
   # to say "could not evaluate" about a measurement that is simply 0
