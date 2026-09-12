@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+# aegis-summary: What arrived at each organization, read from the metrics
+# aegis-group:   operate
+# aegis-subcommands: show
+# aegis-help:
+# Usage: aegis traffic [show] [--hours N] [--json]
+#
+# show  requests, errors, latency and bytes per ORGANIZATION, over the
+#       last N hours (24 by default), read from traefik through vmsingle
+#
+"""aegis-traffic — what actually arrived at each organization.
+
+WHY IT IS A COMMAND AND NOT A QUERY THE CONSOLE MAKES. The console never
+talks to the cluster on its own (plan/11 §rule 1): every panel is the
+face of a command, so that the screen cannot know something the CLI
+cannot tell you, and so that whatever the screen shows can be repeated
+by hand. Traffic was the first panel with no command behind it, and the
+cheap way out — letting the page query vmsingle directly — would have
+made it the first thing in the console nobody could check, capture as a
+case, or reproduce in a terminal.
+
+WHY IT IS NOT PART OF `aegis org`. That command derives files and does
+not talk to the cluster, on purpose and in capital letters in its own
+header. Traffic is the opposite: it is a measurement of the world.
+
+HOW THE TRAFFIC IS ATTRIBUTED, and why it is done the boring way.
+traefik labels each series with the CRD service it routed to, which for
+a tenant is the namespace and the IngressRoute joined:
+
+    org-<organization>-<organization>-ruteo-<hash>@kubernetescrd
+
+The clever version of this command pulled the organization out with one
+`label_replace` and a non-greedy group. It was wrong, and check 130
+caught it before it ever ran in anger: the name appears TWICE, so for an
+organization called `a-b-c` the label reads
+`org-a-b-c-a-b-c-ruteo-…` and no regular expression can split it —
+RE2 has no back-references, and greedy or lazy both guess. Traffic would
+have been credited to an organization called `a`, confidently, with
+nothing going red.
+
+So the names are not guessed: they are ASKED FOR. `aegis org list`
+already knows who exists, so this command asks it and then measures each
+one with an exact matcher. Two things fall out of that, both better than
+the clever version: an organization that received nothing is a measured
+ZERO instead of a missing row, and traffic can never be credited to a
+name no contract declares.
+
+Series that match no tenant are platform traffic (argocd, jenkins,
+grafana, the tunnel itself) and they are NOT summed into anybody: they
+are reported apart, because adding them to an organization would be
+inventing visitors it never had.
+"""
+import json
+import os
+import subprocess
+import sys
+import urllib.parse
+import urllib.request
+
+# ── canonical python preamble (V-102) ────────────────────────────────
+_AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
+    os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
+from aegis import cli, outcomes           # noqa: E402
+
+grey = "\033[90m"
+off = "\033[0m"
+
+# The exact matcher for ONE organization, built from the two names the
+# generator writes: the namespace `org-<org>` and the route
+# `<org>-ruteo`. Exact, so a name with hyphens in it cannot be misread.
+def matcher(org):
+    return f'service=~"org-{org}-{org}-ruteo.*"'
+
+
+# And everything that is NOT a tenant, for the platform's own line.
+NOT_MINE = 'service!~"org-.*-ruteo.*"'
+
+
+def _kubectl(args):
+    r = subprocess.run(["kubectl", *args], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _vmsingle():
+    """Where the metrics live. The Service's ClusterIP, or its endpoint
+    when the Service is headless — the same resolution the round does,
+    and for the same reason: vmsingle IS headless here, and a check that
+    assumed otherwise reported a blind instance as healthy once."""
+    ip = _kubectl(["get", "svc", "-n", "observability", "vmsingle",
+                   "-o", "jsonpath={.spec.clusterIP}"])
+    if not ip or ip == "None":
+        ip = _kubectl(["get", "endpoints", "-n", "observability", "vmsingle",
+                       "-o", "jsonpath={.subsets[0].addresses[0].ip}"])
+    port = _kubectl(["get", "svc", "-n", "observability", "vmsingle",
+                     "-o", "jsonpath={.spec.ports[0].port}"])
+    return (ip, port) if ip and port else (None, None)
+
+
+def _query(base, expression):
+    url = f"{base}/api/v1/query?" + urllib.parse.urlencode({"query": expression})
+    with urllib.request.urlopen(url, timeout=15) as r:
+        body = json.load(r)
+    if body.get("status") != "success":
+        raise RuntimeError(body.get("error") or "the query was not accepted")
+    return body["data"]["result"]
+
+
+def show(hours, steps, narrate):
+    # WHO EXISTS is not this command's business: `aegis org list` knows,
+    # and it is asked through the document contract like any other
+    # delegation in the house (cli.run_json). A tenant with no contract
+    # therefore cannot receive traffic here, and one whose contract is
+    # broken is still measured — it is serving all the same.
+    try:
+        _, listing = cli.run_json("org", "list")
+        orgs = [s["step"].split(":", 1)[1] for s in listing.get("steps") or []
+                if s.get("step", "").startswith("organization:")]
+    except cli.CouldNotEvaluate as e:
+        if narrate:
+            print(f"  {grey}I could not ask which organizations exist: {e}{off}")
+        steps.not_evaluable("traffic", why="no-organizations", detail=str(e))
+        steps.finish()
+
+    base_ip, base_port = _vmsingle()
+    if not base_ip:
+        # NOT a zero. Nobody could be asked.
+        if narrate:
+            print(f"  {grey}the vmsingle Service did not answer: there is no traffic to read, "
+                  f"and that is not the same as no traffic{off}")
+        steps.not_evaluable("traffic", why="no-vmsingle")
+        steps.finish()
+    base = f"http://{base_ip}:{base_port}"
+    w = f"{hours}h"
+
+    def one(expression):
+        rows = _query(base, expression)
+        return float(rows[0]["value"][1]) if rows else 0.0
+
+    if narrate:
+        print(f"\ntraffic  {grey}(last {hours}h, from traefik){off}")
+        if not orgs:
+            print(f"  {grey}no organization declares a contract{off}")
+
+    for org in orgs:
+        m = matcher(org)
+        try:
+            requests = one(f'sum(increase(traefik_service_requests_total{{{m}}}[{w}]))')
+            errors = one(f'sum(increase(traefik_service_requests_total{{{m},code=~"5.."}}[{w}]))')
+            bytes_out = one(f'sum(increase(traefik_service_responses_bytes_total{{{m}}}[{w}]))')
+            p95 = one(f'histogram_quantile(0.95, sum by (le) '
+                      f'(rate(traefik_service_request_duration_seconds_bucket{{{m}}}[{w}])))')
+        except Exception as e:                            # noqa: BLE001
+            if narrate:
+                print(f"  {org:<16} {grey}could not be measured: {e}{off}")
+            steps.not_evaluable(f"traffic:{org}", why="query-failed", detail=str(e))
+            continue
+        if narrate:
+            print(f"  {org:<16} {int(requests):>8} req  {int(errors):>4} 5xx  "
+                  f"{p95 * 1000:>6.0f} ms p95  {int(bytes_out):>12} bytes")
+        steps.already(f"traffic:{org}", requests=int(requests), errors=int(errors),
+                      p95_ms=round(p95 * 1000, 1), bytes=int(bytes_out), hours=hours)
+
+    # Platform traffic is reported and never attributed: adding argocd's
+    # requests to an organization would invent visitors it never had.
+    try:
+        platform = int(one(f'sum(increase(traefik_service_requests_total{{{NOT_MINE}}}[{w}]))'))
+        steps.already("traffic:platform", requests=platform, hours=hours,
+                      note="not attributed to any organization")
+        if narrate:
+            print(f"  {grey}platform (argocd, jenkins, grafana, the tunnel): "
+                  f"{platform} req — not attributed to anybody{off}")
+    except Exception as e:                                # noqa: BLE001
+        steps.not_evaluable("traffic:platform", why="query-failed", detail=str(e))
+        platform = None
+
+    # AND NOTHING IS ALLOWED TO DISAPPEAR. The two buckets above do not
+    # cover everything: the canary's route is tenant-SHAPED and belongs
+    # to no contract, so it fell out of both and 267 requests stopped
+    # existing — measured the first time this ran the honest way. A
+    # number that is neither attributed nor reported is the quietest
+    # kind of wrong, so the total is asked for and the remainder is
+    # named.
+    try:
+        total = int(one(f'sum(increase(traefik_service_requests_total[{w}]))'))
+    except Exception as e:                                # noqa: BLE001
+        steps.not_evaluable("traffic:total", why="query-failed", detail=str(e))
+        steps.finish()
+    counted = sum(st.get("requests", 0) for st in steps.steps
+                  if st["step"].startswith("traffic:") and "requests" in st)
+    rest = total - counted
+    if rest > 0:
+        steps.already("traffic:unattributed", requests=rest, hours=hours,
+                      note="tenant-shaped routes that belong to no contract (the canary, "
+                           "an organization mid-removal): counted, never credited")
+        if narrate:
+            print(f"  {grey}unattributed: {rest} req — routes with a tenant's shape and no "
+                  f"contract behind them{off}")
+    steps.already("traffic:total", requests=total, hours=hours)
+    if narrate:
+        print(f"  {grey}total {total} req in {hours}h{off}")
+    steps.finish()
+
+
+def main():
+    import argparse
+    ap = cli.parser("traffic", __doc__.split("\n")[0])
+    flags = argparse.ArgumentParser(add_help=False)
+    flags.add_argument("--json", action="store_true", dest="json_mode",
+                       default=argparse.SUPPRESS,
+                       help="the document of states instead of the narration")
+    flags.add_argument("--hours", type=int, default=argparse.SUPPRESS,
+                       help="the window to read (24 by default)")
+    sub = ap.add_subparsers(dest="verb")
+    sub.add_parser("show", parents=[flags], help="what arrived at each organization")
+    ap.add_argument("--json", action="store_true", dest="json_mode",
+                    help="the document of states instead of the narration")
+    ap.add_argument("--hours", type=int, default=24,
+                    help="the window to read (24 by default)")
+    a = ap.parse_args()
+    # Read straight off the namespace. The first version reached for
+    # both through `getattr(..., default)` out of caution about
+    # argparse.SUPPRESS, and check 118 was right to call it out: the
+    # top-level declarations carry real defaults, so the attributes
+    # always exist, and a flag read through a string is a flag no check
+    # can see being read.
+    steps = outcomes.Steps(json_mode=a.json_mode)
+    return show(a.hours, steps, not a.json_mode)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

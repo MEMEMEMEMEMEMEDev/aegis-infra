@@ -1,0 +1,52 @@
+version: 1
+caso: instance-with-traffic
+que: 'la instancia como la sirve la consola: las organizaciones de sus contratos,
+  lo que llego a cada una en 24 horas, la ronda y el borde'
+procedencia: medido
+producido_por:
+- comando: org list
+  documento: org.json
+  rc: 0
+- comando: traffic show
+  documento: traffic.json
+  rc: 0
+- comando: check
+  documento: check.json
+  rc: 1
+- comando: edge check
+  documento: edge.json
+  rc: 0
+medido_en: '2026-09-12T06:31:41-03:00'
+aegis: 6878caeaf4f95b557f20453d571704c8a72f51b4
+forma:
+  org.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  traffic.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  check.json:
+    claves:
+    - failures
+    - notices
+    - rc
+    - steps
+    estados:
+    - already
+    - bad
+    - good
+    - not-evaluable
+    - not-evaluated
+    - wrong
+  edge.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
