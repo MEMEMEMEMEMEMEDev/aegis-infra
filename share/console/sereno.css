@@ -190,3 +190,72 @@ body {
 :focus-visible { outline:2px solid var(--busy-ink); outline-offset:3px; border-radius:8px; }
 
 .age { margin:6px 0 0; font-family:var(--mono); font-size:11px; color:var(--faint); }
+
+/* ── panels ───────────────────────────────────────────────────────
+ * Everything above draws a document. What follows draws the THINGS the
+ * document is about: organisations as organisations, traffic as
+ * traffic, the round as a board. The generic drawing stays underneath
+ * for any source nobody has designed yet — a panel is an improvement
+ * over it, never a replacement, so a new command cannot make its own
+ * reading vanish while somebody gets around to it.
+ */
+.mono { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+
+.tiles {
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(248px, 1fr));
+  gap:12px; margin-top:12px;
+}
+.tile {
+  border-radius:var(--r-s); padding:15px 16px;
+  display:flex; flex-direction:column; gap:8px;
+}
+.tile > h3 { font-size:17px; font-weight:800; letter-spacing:-.03em; }
+.tile .host { margin:0; font-size:11.5px; opacity:.72; word-break:break-all; }
+.tile .meta { margin:0; font-size:12px; opacity:.8; }
+.tile .why { margin:0; font-size:12.5px; opacity:.9; }
+
+/* Rule 1 again, at the level of a tile: what is fine is a quiet
+ * surface, and the tile that asks something keeps its own colour. The
+ * chip carries the state; the tile carries the mood. */
+.tile .chip { align-self:flex-start; box-shadow:none; background:transparent; padding-left:0; }
+
+.srvs { display:flex; flex-wrap:wrap; gap:5px; }
+.srv {
+  display:inline-flex; align-items:baseline; gap:5px;
+  background:rgb(255 255 255 / .55); border-radius:7px; padding:3px 7px;
+  font-size:11.5px; font-weight:700;
+}
+.srv i { font-style:normal; font-weight:500; opacity:.62; font-size:10.5px; }
+
+.facts-row { display:flex; flex-wrap:wrap; gap:16px 22px; }
+.fact { display:flex; flex-direction:column; gap:2px; }
+.fact .figure { font-size:21px; font-weight:600; letter-spacing:-.04em; line-height:1; }
+.fact .label { font-size:10.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; opacity:.65; }
+
+/* The round: fourteen cells. One that is fine is a dot and a name —
+ * that is the whole point, a calm board is calm because nothing opened. */
+.grid {
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr));
+  gap:9px; margin-top:12px; align-items:start;
+}
+.cell {
+  border-radius:var(--r-s); padding:11px 13px;
+  display:flex; flex-wrap:wrap; align-items:baseline; gap:8px;
+}
+.cell > h3 { font-size:13px; font-weight:700; letter-spacing:-.01em; }
+.cell .chip { box-shadow:none; background:transparent; padding:0; font-size:0; }
+.cell .measures { flex-basis:100%; margin-top:6px; }
+.cell .rest { flex-basis:100%; margin:6px 0 0; font-size:11.5px; opacity:.62; }
+/* A cell that needs attention takes the whole row: the order is the
+ * alarm, and so is the space. */
+.cell:not([data-state="fine"]) { grid-column:1 / -1; }
+
+.tail { list-style:none; margin:12px 0 0; padding:0; display:flex; flex-direction:column; gap:7px; }
+.tail li { display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; font-size:12.5px; }
+.tail li .note { flex-basis:100%; margin-left:0; font-size:11.5px; color:var(--faint); }
+.tail li > .mono { opacity:.85; }
+
+@media (max-width: 520px) {
+  .tiles, .grid { grid-template-columns:1fr; }
+  .facts-row { gap:12px 18px; }
+}

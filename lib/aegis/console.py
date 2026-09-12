@@ -139,6 +139,171 @@ def _step(step):
             f'{facts}{inner}</article>')
 
 
+# ── panels ───────────────────────────────────────────────────────────
+# A panel KNOWS what a particular document means and draws it as the
+# thing it is: organisations as organisations, traffic as traffic. The
+# generic drawing below stays underneath all of them, and that is
+# deliberate — a source nobody has written a panel for yet still gets
+# rendered, step by step, with every state intact. Panels are an
+# improvement over the fallback, never a replacement for it, so a new
+# command cannot make its own reading disappear from the screen while
+# somebody gets around to designing it.
+#
+# What a panel may NOT do is quiet a state. It may collapse what is
+# FINE —that is rule 1: what needs attention rises, what is fine sinks—
+# and nothing else. Check 122 renders every case and compares what the
+# documents carry against what the screen shows, so a panel that
+# swallows something goes red in the same run that wrote it.
+def _bytes(n):
+    n = float(n)
+    for unit in ("B", "kB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+
+
+def _num(n):
+    return f"{int(n):,}".replace(",", "\u2009")   # thin space: 5 423
+
+
+def _fact(label, value, mono=True):
+    cls = "figure mono" if mono else "figure"
+    return (f'<div class="fact"><span class="{cls}">{_e(value)}</span>'
+            f'<span class="label">{_e(label)}</span></div>')
+
+
+def _window(step):
+    return f"last {step.get('hours', 24)}h"
+
+
+def _panel_organizations(doc, states):
+    tiles = []
+    for step in doc.get("steps") or []:
+        state = SCREEN.get(step.get("state"), UNSEEN)
+        states.add(state)
+        name = step.get("step", "").split(":", 1)[-1]
+        if not step.get("valid", True):
+            tiles.append(
+                f'<article class="tile" data-state="{state}">'
+                f'<h3>{_e(name)}</h3>{_chip(state, "contract refused")}'
+                f'<p class="why">{_e(step.get("error", ""))}</p></article>')
+            continue
+        services = step.get("servicios") or []
+        chips = "".join(
+            f'<span class="srv" data-kind="{_e(sv.get("tipo"))}">{_e(sv.get("nombre"))}'
+            f'<i>{_e(sv.get("tipo"))}</i></span>' for sv in services)
+        extras = []
+        if step.get("bucket"):
+            extras.append("bucket")
+        if step.get("ai"):
+            extras.append(f"ai {step['ai']}")
+        tiles.append(
+            f'<article class="tile" data-state="{state}">'
+            f'<h3>{_e(name)}</h3>{_chip(state, "contract")}'
+            f'<p class="host mono">{_e(step.get("dominio") or "no public domain")}</p>'
+            f'<div class="srvs">{chips}</div>'
+            f'<p class="meta">quota <b>{_e(step.get("cuota"))}</b>'
+            + (f' · {_e(" · ".join(extras))}' if extras else "")
+            + f' · {len(services)} service(s)</p></article>')
+    if not tiles:
+        states.add(UNSEEN)
+        tiles.append(f'<p class="empty" data-state="{UNSEEN}">no contract was read</p>')
+    return f'<div class="tiles">{"".join(tiles)}</div>'
+
+
+def _panel_traffic(doc, states):
+    rows, tail = [], []
+    for step in doc.get("steps") or []:
+        state = SCREEN.get(step.get("state"), UNSEEN)
+        states.add(state)
+        name = step.get("step", "").split(":", 1)[-1]
+        if name in ("platform", "unattributed", "total") or "requests" not in step:
+            note = step.get("note")
+            tail.append(f'<li data-state="{state}">{_chip(state, name)}'
+                        f'<span class="mono">{_e(_num(step.get("requests", 0)))} req</span>'
+                        + (f'<span class="note">{_e(note)}</span>' if note else "") + "</li>")
+            continue
+        errors = int(step.get("errors", 0))
+        rows.append(
+            f'<article class="tile" data-state="{state}">'
+            f'<h3>{_e(name)}</h3>{_chip(state, _window(step))}'
+            f'<div class="facts-row">'
+            f'{_fact("requests", _num(step.get("requests", 0)))}'
+            f'{_fact("5xx", _num(errors))}'
+            f'{_fact("p95", str(step.get("p95_ms", 0)) + " ms")}'
+            f'{_fact("served", _bytes(step.get("bytes", 0)))}'
+            f'</div></article>')
+    if not rows:
+        states.add(UNSEEN)
+        rows.append(f'<p class="empty" data-state="{UNSEEN}">nothing was measured</p>')
+    return (f'<div class="tiles">{"".join(rows)}</div>'
+            + (f'<ul class="tail">{"".join(tail)}</ul>' if tail else ""))
+
+
+def _panel_round(doc, states):
+    cells = []
+    for step in doc.get("steps") or []:
+        state = SCREEN.get(step.get("state"), UNSEEN)
+        states.add(state)
+        # Rule 1, mechanically: a section that is fine is a dot and a
+        # name. A section that is not opens itself, with only the
+        # measures that are not fine — and the fine ones are COUNTED so
+        # that the collapse never reads as «there was nothing else».
+        shown, hidden = [], 0
+        for m in step.get("measures") or []:
+            ms = SCREEN.get(m.get("state"), UNSEEN)
+            states.add(ms)
+            if ms == FINE and state != FINE:
+                hidden += 1
+                continue
+            if state == FINE:
+                hidden += 1
+                continue
+            notes = "".join(f'<p class="note">{_e(n)}</p>' for n in m.get("notes") or [])
+            shown.append(f'<li class="measure" data-state="{ms}">{_chip(ms, ms)}'
+                         f'<span class="what">{_e(m.get("measure", ""))}</span>{notes}</li>')
+        body = ""
+        if shown:
+            body = f'<ul class="measures">{"".join(shown)}</ul>'
+        if hidden:
+            body += f'<p class="rest">{hidden} more, all fine</p>'
+        cells.append(
+            f'<article class="cell" data-state="{state}" data-step="{_e(step.get("step",""))}">'
+            f'{_chip(state, state)}<h3>{_e(step.get("step", "?"))}</h3>{body}</article>')
+    if not cells:
+        states.add(UNSEEN)
+        cells.append(f'<p class="empty" data-state="{UNSEEN}">the round measured nothing</p>')
+    return f'<div class="grid">{"".join(cells)}</div>'
+
+
+def _panel_edge(doc, states):
+    good, bad_ = [], []
+    for step in doc.get("steps") or []:
+        state = SCREEN.get(step.get("state"), UNSEEN)
+        states.add(state)
+        name = step.get("step", "")
+        if name.startswith("hostname:"):
+            bad_.append(f'<li data-state="{state}">{_chip(state, "missing")}'
+                        f'<span class="mono">{_e(name.split(":", 1)[1])}</span></li>')
+        elif name == "surplus-cnames":
+            hosts = step.get("hostnames") or []
+            good.append(f'<li data-state="{state}">{_chip(state, "surplus")}'
+                        f'<span class="mono">{_e(", ".join(hosts))}</span>'
+                        f'<span class="note">no contract asks for these; they do not move the rc</span></li>')
+        else:
+            good.append(f'<li data-state="{state}">{_chip(state, "at the edge")}'
+                        f'<span class="mono">{_e(step.get("hostnames", "?"))} hostname(s) exist</span></li>')
+    return f'<ul class="tail">{"".join(bad_ + good)}</ul>'
+
+
+PANELS = {
+    "org list": _panel_organizations,
+    "traffic show": _panel_traffic,
+    "check": _panel_round,
+    "edge check": _panel_edge,
+}
+
+
 def _blind(reading):
     """A command that gave back no document. THE CASE ZERO.
 
@@ -160,12 +325,16 @@ def _source(reading):
     doc = reading["documento"]
     steps = doc.get("steps") or []
     states = set()
-    body = []
-    for step in steps:
-        states.add(SCREEN.get(step.get("state"), UNSEEN))
-        for m in step.get("measures") or []:
-            states.add(SCREEN.get(m.get("state"), UNSEEN))
-        body.append(_step(step))
+    panel = PANELS.get(reading.get("comando"))
+    if panel and steps:
+        body = [panel(doc, states)]
+    else:
+        body = []
+        for step in steps:
+            states.add(SCREEN.get(step.get("state"), UNSEEN))
+            for m in step.get("measures") or []:
+                states.add(SCREEN.get(m.get("state"), UNSEEN))
+            body.append(_step(step))
     if not steps:
         # Zero steps is not success: outcomes.py says so in its own rc.
         states.add(UNSEEN)
