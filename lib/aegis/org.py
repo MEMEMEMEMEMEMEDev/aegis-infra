@@ -30,7 +30,12 @@ try:
 except ImportError:
     sys.exit("pyyaml is missing (python3-yaml)")
 
-from . import cli, markers, paths, quantity
+from . import cli, markers, outcomes, paths, quantity
+# The four words of the house, IMPORTED and not spelled again here.
+# Tooth 125 found `aegis check` carrying its own copy of them, and a
+# second copy is a second answer to «what states exist» — the one
+# question the console reads to decide whether a screen is lying.
+from .outcomes import ALREADY, NOT_EVALUABLE, WRONG
 
 # ── Class E: not one command name written by hand ────────────────────
 # In v2 this file had 15 of them (and the whole tree ~155). Each one is
@@ -2261,6 +2266,157 @@ def list_organizations(steps):
     return rc
 
 
+def describe_contract(steps):
+    """WHAT A CONTRACT MAY CONTAIN, derived and never listed.
+
+    THE COMMAND THAT MAKES THE FORM POSSIBLE. The console is about to
+    grow a screen where somebody who does not write YAML describes an
+    organization, and a form is a list of choices. If that list is
+    written into the form, then the day a type is added here the form
+    goes on offering the old ones — and the failure is the quiet one:
+    the console cannot create something the platform supports, and
+    nothing anywhere says so. Every option below comes out of the very
+    constants `validate()` checks against, and out of the same
+    plans.yaml, ai/routes.yaml and services.yaml the generator reads.
+
+    AN EMPTY LIST IS NOT «there are none». If plans.yaml cannot be read,
+    the sizes are `not-evaluable` and not `[]` — a form that offered no
+    quota because a file was unreadable would look like a platform with
+    no plans, and somebody would go and invent one.
+
+    It reads files and describes them. It measures no cluster, writes
+    nothing, and is the one verb here that answers about the SHAPE of a
+    contract rather than about a contract.
+    """
+    def add(name, state, **data):
+        steps.append({"step": name, "state": state, **data})
+
+    print(f"\ncontract  {grey}(version {CONTRACT_VERSION}){off}")
+    add("contract", ALREADY, version=CONTRACT_VERSION,
+                  obligatorios=["version", "organizacion", "cuota", "servicios"],
+        opcionales=["dominio", "repo", "almacenamiento", "ai"],
+        nombre_patron=VALID_NAME.pattern,
+        dominio_si="some service declares `publico`")
+
+    # ── the words that only plans.yaml gives meaning to ──────────────
+    try:
+        plans = yaml.safe_load(open(PLANS, encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as e:
+        # NOT an empty catalogue. Nobody could read the table.
+        add("cuota", NOT_EVALUABLE, why="plans-unreadable", detail=str(e))
+        add("tamano", NOT_EVALUABLE, why="plans-unreadable", detail=str(e))
+        add("ai", NOT_EVALUABLE, why="plans-unreadable", detail=str(e))
+        plans = None
+    if plans is not None:
+        quotas = sorted(plans.get("cuota") or {})
+        sizes = sorted(plans.get("tamano") or {})
+        print(f"  cuota     {', '.join(quotas) or grey + 'none declared' + off}"
+              f"  {grey}(plans.yaml){off}")
+        print(f"  tamano    {', '.join(sizes) or grey + 'none declared' + off}"
+              f"  {grey}(plans.yaml, default {DEFAULT_SIZE}){off}")
+        add("cuota", ALREADY if quotas else WRONG, opciones=quotas, origen="plans.yaml",
+            nota="the contract names a plan and never a number")
+        add("tamano", ALREADY if sizes else WRONG, opciones=sizes, origen="plans.yaml", por_omision=DEFAULT_SIZE,
+            solo_para=sorted(TYPES - PROVIDED))
+        ai_plans = sorted(plans.get("ai") or {})
+        try:
+            caps = sorted(capabilities())
+        except (OSError, yaml.YAMLError) as e:
+            add("ai", NOT_EVALUABLE, why="routes-unreadable", detail=str(e),
+                planes=ai_plans)
+        else:
+            print(f"  ai        {', '.join(ai_plans) or grey + 'no plan' + off}"
+                  f"  {grey}capabilities: {', '.join(caps) or 'none served today'}{off}")
+            add("ai", ALREADY if ai_plans and caps else WRONG, planes=ai_plans, capacidades=caps, origen="plans.yaml + ai/routes.yaml",
+                nota="an organization names CAPABILITIES, never models nor providers")
+
+    # ── what each type is, and what it refuses ───────────────────────
+    # The rules are not repeated here: they are the ones _type_coherence
+    # raises on, written once as data so that the form can grey a field
+    # out for the same reason the validator would have rejected it.
+    try:
+        cat = (yaml.safe_load(open(SERVICES, encoding="utf-8")) or {}).get("tipos") or {}
+    except (OSError, yaml.YAMLError):
+        cat = None
+    print(f"\nservices  {grey}({len(TYPES)} types){off}")
+    for kind in sorted(TYPES):
+        own = kind in TYPES_WITH_IMAGE
+        data = {"provisto_por": "the tenant's repo" if own else "the platform",
+                "imagen_propia": own, "disponible": True,
+                "campos": None}   # filled below, once `prohibe` is known
+        if kind == "estatico":
+            data.update(requiere=["publico"], prohibe=["puerto", "usa"],
+                        puerto_fijo=STATIC_PORT,
+                        porque="a static front has nowhere to keep a credential")
+        elif kind == "http":
+            data.update(requiere=["puerto"], prohibe=[])
+        elif kind == "worker":
+            data.update(requiere=[], prohibe=["puerto", "publico"],
+                        porque="a worker does not listen: it processes")
+        else:
+            data.update(requiere=[], prohibe=["repo", "puerto", "publico", "usa", "tamano"],
+                        porque="image, disk, credential and policies come out of "
+                               "services.yaml, not out of a tenant's repo")
+        if own:
+            data["requiere"] = sorted(set(data["requiere"]) | {"repo"})
+        # WHAT THIS TYPE MAY DECLARE, and not the union of what any type
+        # may: a form that offered `puerto` on a worker would be
+        # offering the field the validator is about to reject.
+        data["campos"] = sorted({"nombre", "tipo", "repo", "puerto", "publico",
+                                 "usa", "tamano"} - set(data["prohibe"]))
+        if cat is None:
+            # The catalogue is what says whether a provided type owes a
+            # disk and how it is backed up. Unreadable is not «it does
+            # not»: the fields say nobody asked.
+            if not own:
+                data["catalogo"] = None
+                data["catalogo_no_medido"] = "services.yaml unreadable"
+        elif not own:
+            spec = cat.get(kind) or {}
+            data["disco"] = spec.get("disco")
+            data["respaldo"] = ((spec.get("backup") or {}).get("method"))
+            # AND WHETHER IT CAN BE DELIVERED TODAY. A provided type
+            # whose image has never been measured against the internal
+            # registry carries a `pending:` block instead of a digest,
+            # and the generator refuses it with a recipe. Offering it in
+            # a form anyway is the `capacidad` mistake in another
+            # vocabulary: a person is invited to ask for something the
+            # platform cannot give, and finds out at the end. Saying
+            # `disponible: false` WITH the reason is what lets the form
+            # grey it out and explain itself; dropping it from the list
+            # would hide a type this platform does support.
+            data["disponible"] = bool(spec.get("digest"))
+            if not data["disponible"]:
+                data["porque_no"] = ("its image has not been measured against this "
+                                     "instance's registry yet (services.yaml carries a "
+                                     "`pending:` block instead of a digest)")
+        state = ALREADY if own or cat is None or kind in cat else WRONG
+        extra = ("" if own else
+                 f"  {grey}{data.get('disco') or 'no disk'}"
+                 f"{', backup ' + data['respaldo'] if data.get('respaldo') else ''}{off}")
+        if data.get("disponible") is False:
+            extra += f"  {yellow}not offerable here yet{off}"
+        print(f"  {kind:<10} {grey}{data['provisto_por']}{off}{extra}")
+        add(f"tipo:{kind}", state, **data)
+
+    # ── what a service may declare it uses ───────────────────────────
+    # `usa` is the only vocabulary with CONDITIONS attached, and they are
+    # the reason it cannot be a plain list in a form: three of its words
+    # are only legal if the organization declared something else first.
+    conditions = {u: f"the organization has to declare a service of type {u}"
+                  for u in sorted(PROVIDED)}
+    conditions["bucket"] = "the organization has to ask for almacenamiento.bucket"
+    conditions["ai"] = "the organization has to carry an `ai` section"
+    print(f"\nusa       {', '.join(sorted(USES))}")
+    add("usa", ALREADY, opciones=sorted(USES), condiciones=conditions,
+        prohibido_en=["estatico"])
+    # The rc by the house rule, with the one part that is not obvious:
+    # «I could not read the table» outranks «the table is empty».
+    if any(x["state"] == NOT_EVALUABLE for x in steps):
+        return 2
+    return 1 if any(x["state"] == WRONG for x in steps) else 0
+
+
 def apply_contract(path, write, record=None):
     """Derive one contract. `record`, when given, is a dict this function
     FILLS with the same facts the narration prints — one entry per file
@@ -4354,6 +4510,11 @@ def main():
         s = sub.add_parser(name, parents=[common], help=help_text)
         s.add_argument("contracts", nargs="+")
     sub.add_parser("list", parents=[common], help="the organizations, as their contracts declare them")
+    # `schema` next to `list`, and not under `validate`: it answers about
+    # the SHAPE of a contract, not about a contract. It is what a form
+    # has to read before it can offer a single choice.
+    sub.add_parser("schema", parents=[common],
+                   help="what a contract may contain, derived from the validator")
     sub.add_parser("edge", parents=[common], help="derive public_hostnames from every contract")
     sub.add_parser("routes", parents=[common], help="derive the ai-ruteo ConfigMap from every contract")
     # `plan-delete` first, and with that name: the order of the help
@@ -4406,6 +4567,9 @@ def main():
             print(f"{red}✗{off} {e}", file=sys.stderr)
             steps.append({"step": "organizations", "state": "not-evaluable", "error": str(e)})
             return _emit(2)
+
+    if a.cmd == "schema":
+        return _emit(describe_contract(steps))
 
     if a.cmd == "edge":
         try:
