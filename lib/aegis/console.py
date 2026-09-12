@@ -649,6 +649,232 @@ def render(readings, subject=None):
             + (f' data-subject="{_e(subject)}"' if subject else "")
             + f'>{head}{"".join(bodies)}</main>')
 
+# ── the one screen that writes ───────────────────────────────────────
+# EVERY CHOICE ON IT COMES OUT OF `aegis org schema`. Nothing below
+# writes down a type, a quota plan or a field: a list typed into a form
+# is a list that stops being true the day somebody adds a type, and the
+# failure is the quiet one — the console cannot create something the
+# platform supports and nothing says so. Check 097 holds the schema and
+# the validator to each other; this function only has to refuse to
+# invent.
+#
+# AND NO SCRIPT. The console has never served one and this screen does
+# not change that: `default-src 'none'` with no `script-src` is a
+# promise the page cannot quietly stop keeping. What that costs is that
+# a field cannot be greyed out as the type changes, so the rules travel
+# as TEXT beside each type, and the validator —one validator, the same
+# one `aegis org apply` runs— is what refuses.
+SERVICE_ROWS = 3
+
+
+def _field(name, label, value="", kind="text", hint="", **attrs):
+    extra = "".join(f' {k}="{_e(v)}"' for k, v in attrs.items())
+    return (f'<label class="field"><span class="label">{_e(label)}</span>'
+            f'<input type="{kind}" name="{_e(name)}" id="{_e(name)}" '
+            f'value="{_e(value)}"{extra}></label>'
+            + (f'<p class="hint">{_e(hint)}</p>' if hint else ""))
+
+
+def _choice(name, label, options, value="", hint=""):
+    if not options:
+        # An empty list is NOT «there are none». The schema says so with
+        # a state; the form has to say it with words, or somebody
+        # invents a plan because the console showed none.
+        return (f'<div class="field" data-state="{UNSEEN}">'
+                f'<span class="label">{_e(label)}</span>'
+                f'<p class="hint">nobody could read the list of options, so none is '
+                f'offered. This is not a platform without them.</p></div>')
+    picks = "".join(
+        f'<label class="pick"><input type="radio" name="{_e(name)}" '
+        f'value="{_e(o)}"{" checked" if o == value or (not value and i == 0) else ""}>'
+        f'<span>{_e(o)}</span></label>' for i, o in enumerate(options))
+    return (f'<div class="field"><span class="label">{_e(label)}</span>'
+            f'<div class="picks">{picks}</div>'
+            + (f'<p class="hint">{_e(hint)}</p>' if hint else "") + "</div>")
+
+
+def _schema_of(doc):
+    return {s.get("step", ""): s for s in (doc or {}).get("steps") or []}
+
+
+def render_form(schema, token, filled=None, problem=None):
+    """The screen where an organization is described by somebody who
+    does not write YAML. It writes NOTHING: what it submits is a
+    proposal, and the next screen is the plan."""
+    by = _schema_of(schema)
+    filled = filled or {}
+    types = {k.split(":", 1)[1]: v for k, v in by.items() if k.startswith("tipo:")}
+    offerable = sorted(k for k, v in types.items() if v.get("disponible", True))
+    quotas = (by.get("cuota") or {}).get("opciones") or []
+    sizes = (by.get("tamano") or {}).get("opciones") or []
+
+    head = (f'<header class="verdict" data-state="{FINE}">'
+            f'<p class="subject"><a class="act act--quiet" href="/">all organizations'
+            f'</a><b>a new organization</b></p>'
+            f'<p class="sentence">Nothing here is created yet. The next screen is the '
+            f'plan, and even that writes nothing.</p></header>')
+    trouble = ""
+    if problem:
+        # THE VALIDATOR'S OWN WORDS, not a paraphrase. It explains which
+        # field and why, at length and on purpose, and shortening that
+        # here would be this console deciding it knows better than the
+        # one program that actually refused.
+        trouble = (f'<section class="source" data-state="{WRONG}">'
+                   f'<h2>this is not a contract yet</h2>{_chip(WRONG, "refused")}'
+                   f'<pre class="why">{_e(problem)}</pre></section>')
+
+    rows = []
+    for i in range(SERVICE_ROWS):
+        n = f"servicio{i}"
+        picked = filled.get(f"{n}.tipo", "")
+        options = "".join(
+            f'<option value="{_e(t)}"{" selected" if t == picked else ""}>{_e(t)}</option>'
+            for t in offerable)
+        rows.append(
+            f'<fieldset class="row"><legend>service {i + 1}'
+            + ("" if i else " <i>at least one</i>") + '</legend>'
+            f'{_field(n + ".nombre", "name", filled.get(n + ".nombre", ""))}'
+            f'<label class="field"><span class="label">type</span>'
+            f'<select name="{n}.tipo" id="{n}.tipo"><option value=""></option>'
+            f'{options}</select></label>'
+            f'{_field(n + ".puerto", "port", filled.get(n + ".puerto", ""))}'
+            f'{_field(n + ".publico", "public path", filled.get(n + ".publico", ""))}'
+            f'{_field(n + ".repo", "repository", filled.get(n + ".repo", ""))}'
+            + (f'{_field(n + ".tamano", "size", filled.get(n + ".tamano", ""))}'
+               if sizes else "")
+            + '</fieldset>')
+
+    # What each type is and what it refuses, as words, because there is
+    # no script to grey a field out with. Every line of it is the
+    # schema's, which is the validator's.
+    legend = []
+    for kind in sorted(types):
+        spec = types[kind]
+        if not spec.get("disponible", True):
+            legend.append(f'<li data-state="{UNSEEN}">{_chip(UNSEEN, kind)}'
+                          f'<span class="note">{_e(spec.get("porque_no", "not offerable here"))}'
+                          f'</span></li>')
+            continue
+        needs = ", ".join(spec.get("requiere") or []) or "nothing else"
+        refuses = ", ".join(spec.get("prohibe") or [])
+        note = f"needs {needs}" + (f" · refuses {refuses}" if refuses else "")
+        if spec.get("porque"):
+            note += f" — {spec['porque']}"
+        legend.append(f'<li data-state="{FINE}">{_chip(FINE, kind)}'
+                      f'<span class="note">{_e(note)}</span></li>')
+
+    body = (f'<section class="source" data-state="{FINE}">'
+            f'<h2>the organization</h2>'
+            f'<form method="post" action="/new">'
+            f'<input type="hidden" name="token" value="{_e(token)}">'
+            f'{_field("organizacion", "name", filled.get("organizacion", ""), hint=(by.get("contract") or {}).get("nombre_patron", ""))}'
+            f'{_field("dominio", "public hostname", filled.get("dominio", ""), hint=(by.get("contract") or {}).get("dominio_si", ""))}'
+            f'{_choice("cuota", "ceiling", quotas, filled.get("cuota", ""), "the contract names a plan and never a number")}'
+            f'<div class="rows">{"".join(rows)}</div>'
+            f'<ul class="tail legend">{"".join(legend)}</ul>'
+            f'<button class="act" type="submit">see the plan</button>'
+            f'</form></section>')
+    return f'<main class="sereno" data-veredicto="{FINE}">{head}{trouble}{body}</main>'
+
+
+def contract_from_form(fields, schema):
+    """The form's fields, as a contract. Pure, and deliberately dumb.
+
+    IT DROPS NOTHING THE PERSON FILLED IN. A `puerto` typed on a worker
+    travels into the contract and the validator refuses it, by name,
+    with its own paragraph. The alternative —quietly discarding a field
+    the type does not allow— would have the console silently disagree
+    with what somebody wrote, and they would go looking for a port they
+    are sure they set.
+
+    An empty field is not a value: it is absent. That is the difference
+    between «no public hostname» and «a hostname that is the empty
+    string», and only one of the two is a thing somebody meant.
+    """
+    import yaml
+
+    def value(name):
+        v = (fields.get(name) or "").strip()
+        return v or None
+
+    by = _schema_of(schema)
+    contract = {"version": (by.get("contract") or {}).get("version", 1)}
+    for key in ("organizacion", "dominio", "cuota"):
+        if value(key):
+            contract[key] = value(key)
+    services = []
+    for i in range(SERVICE_ROWS):
+        n = f"servicio{i}"
+        row = {k: value(f"{n}.{k}") for k in
+               ("nombre", "tipo", "puerto", "publico", "repo", "tamano")}
+        if not any(row.values()):
+            continue
+        service = {}
+        for key in ("nombre", "tipo"):
+            if row[key]:
+                service[key] = row[key]
+        if row["puerto"]:
+            # A port that is not a number stays a STRING and reaches the
+            # validator as one. Coercing it here would turn a typo into
+            # a different typo.
+            service["puerto"] = int(row["puerto"]) if row["puerto"].isdigit() else row["puerto"]
+        for key in ("publico", "repo", "tamano"):
+            if row[key]:
+                service[key] = row[key]
+        services.append(service)
+    if services:
+        contract["servicios"] = services
+    text = yaml.safe_dump(contract, allow_unicode=True, sort_keys=False, width=88)
+    return contract, text
+
+
+def render_plan(doc, contract_text, token, written=None):
+    """What would change, and the one button that writes.
+
+    THE SENTENCE MATTERS MORE THAN THE LIST. Writing the contract
+    changes nothing that is running: ArgoCD reads the remote, and a file
+    in a working tree is a file in a working tree. What makes an
+    organization exist is a commit, and that is the operator's to make.
+    """
+    states = set()
+    files, stages = [], []
+    for step in (doc or {}).get("steps") or []:
+        state = SCREEN.get(step.get("state"), UNSEEN)
+        states.add(state)
+        name = step.get("step", "")
+        if name.startswith("stage:") or name.startswith("contract:"):
+            stages.append(f'<li data-state="{state}">{_chip(state, name.split(":", 1)[0])}'
+                          f'<span class="mono">{_e(name.split(":", 1)[1])}</span></li>')
+            continue
+        files.append(f'<li data-state="{state}">{_chip(state, step.get("change", "?"))}'
+                     f'<span class="mono">{_e(name)}</span></li>')
+    v = worst(states) if states else UNSEEN
+    if written:
+        sentence = ("The contract is in your repository and nothing is running yet. "
+                    "Commit it, and ArgoCD does the rest.")
+        action = (f'<p class="host mono">{_e(written)}</p>'
+                  f'<a class="act act--quiet" href="/">all organizations</a>')
+    else:
+        sentence = "Nothing has been written. This is what would change."
+        action = (f'<form method="post" action="/new/write">'
+                  f'<input type="hidden" name="token" value="{_e(token)}">'
+                  f'<input type="hidden" name="contrato" value="{_e(contract_text)}">'
+                  f'<button class="act" type="submit">write the contract</button>'
+                  f'<a class="act act--quiet" href="/new">change something</a></form>')
+    head = (f'<header class="verdict" data-state="{v}">'
+            f'<p class="subject"><a class="act act--quiet" href="/">all organizations</a>'
+            f'<b>the plan</b></p><p class="sentence">{_e(sentence)}</p></header>')
+    return (f'<main class="sereno" data-veredicto="{v}">{head}'
+            f'<section class="source" data-state="{v}"><h2>what would change</h2>'
+            + (f'<ul class="tail">{"".join(files)}</ul>' if files else
+               f'<p class="empty" data-state="{UNSEEN}">nothing was planned</p>')
+            + (f'<ul class="tail">{"".join(stages)}</ul>' if stages else "")
+            + f'</section>'
+            f'<section class="source" data-state="{FINE}"><h2>the contract</h2>'
+            f'<pre class="contract mono">{_e(contract_text)}</pre>{action}</section>'
+            f'</main>')
+
+
 # ── the whole page ───────────────────────────────────────────────────
 # SKIN = share/console/sereno.css, and it is INLINED rather than linked.
 # One document, one request, no static path to get wrong and nothing
@@ -701,6 +927,18 @@ def skin():
         # the attributes, and the text is readable unstyled. Saying so
         # is better than serving a blank page.
         return "/* the skin could not be read; the states are in the data-state attributes */"
+
+
+def wrap(body, title="aegis"):
+    """A whole document around a body that is already drawn. `page`
+    renders readings; the screens that are not readings —the form, the
+    plan— come through here so that the skin is inlined in exactly one
+    place."""
+    return ("<!doctype html>\n"
+            '<html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            f"<title>{_e(title)}</title><style>{skin()}</style></head>"
+            f"<body>{body}</body></html>\n")
 
 
 def page(readings, title="aegis", subject=None):

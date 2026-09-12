@@ -46,8 +46,10 @@ import datetime
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 
 # ── canonical python preamble (V-102) ────────────────────────────────
@@ -310,6 +312,91 @@ ORG_SOURCES = ("tenant show {org}", "traffic show --org {org}",
                "data remote status --org {org}")
 
 
+# ── the only write this console does ─────────────────────────────────
+# AT MODULE LEVEL AND NOT INSIDE THE HANDLER, so that it can be run on
+# its own: check 099 calls it against a fixture tree and compares the
+# tree before and after. A rule about what a program writes that is only
+# ever read is a rule nobody has tried.
+def validate_contract(text):
+    """The validator's own words about this text, or None.
+
+    ONE validator, the same one `aegis org apply` runs. A second opinion
+    about what a contract is would be a second thing to keep in step,
+    and the first time they drifted the console would be blessing
+    something the generator refuses.
+    """
+    tmp = tempfile.mkdtemp(prefix="aegis-console-")
+    try:
+        probe = os.path.join(tmp, "contrato.yaml")
+        with open(probe, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        try:
+            _rc, doc = cli.run_json("org", "validate", probe)
+        except cli.CouldNotEvaluate as e:
+            # The validator is not there. Saying «refused» would be a
+            # lie in the safe direction, and the safe direction is not
+            # the honest one: nobody looked.
+            return f"the contract could not be validated: {e}"
+        # FROM THE DOCUMENT AND NOT FROM THE NARRATION. The validator's
+        # sentence is exactly what the person has to read —it names the
+        # field and explains why— but it travels as a value in the
+        # document, not as the prose beside it. Check 123 caught the
+        # first version of this reading stderr, and it was right: the
+        # day somebody rewords the message, prose breaks and a field
+        # does not.
+        for step in doc.get("steps") or []:
+            if step.get("valid") is False:
+                # The message names the temporary file this function
+                # just made, which the person never saw and cannot open.
+                return str(step.get("error") or "the contract was refused and said "
+                           "nothing").replace(probe, "the contract").strip()
+        if doc.get("rc"):
+            return (f"the contract was refused (rc {doc.get('rc')}) and the document "
+                    f"says nothing about which part")
+        return None
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def write_contract(text):
+    """Write ONE contract into orgs/, and nothing else, ever.
+
+    It does not commit, it does not push, it does not apply, and it does
+    not touch the cluster. `aegis org` already has that property —«the
+    worst that can happen is an ugly diff nobody commits»— and this
+    console inherits it verbatim: a file in a working tree changes
+    nothing, because ArgoCD reads the remote. What makes an organization
+    exist is a commit, and that is the operator's to make.
+
+    It refuses to overwrite. An organization that already exists is not
+    created by writing over its contract: that is an edit, it is a
+    different decision, and it is not this screen's.
+
+    Returns (path, None) or (None, why not).
+    """
+    bad = validate_contract(text)
+    if bad:
+        return None, bad
+    try:
+        name = (yaml.safe_load(text) or {}).get("organizacion")
+    except yaml.YAMLError as e:
+        return None, f"the contract is not readable YAML: {e}"
+    if not name:
+        return None, "the contract names no organization"
+    orgs = os.path.join(str(paths.platform_dir()), "orgs")
+    if not os.path.isdir(orgs):
+        return None, (f"there is no {orgs} to write into: this does not look like an "
+                      f"instance of aegis")
+    target = os.path.join(orgs, f"{name}.yaml")
+    if os.path.exists(target):
+        return None, (f"there is already a contract at {target}. Creating an "
+                      f"organization does not write over one that exists: that is an "
+                      f"edit, and it is a different decision.")
+    with open(target, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    return target, None
+
+
 def _organizations(readings):
     """Who the console will draw a page for: the names the contracts
     declare, taken from the reading already on the screen. Derived and
@@ -351,12 +438,36 @@ def _read_instance(sources=SOURCES):
 
 def serve(port):
     import http.server
+    import secrets
     import threading
 
     from aegis import console as drawing
+    from aegis import guard
+
+    # ONE TOKEN PER PROCESS, minted here and never written anywhere: not
+    # to a file, not to the log, not to the line printed on start. It
+    # travels in the page this server serves and comes back in what that
+    # page submits. A site on the internet can make the operator's
+    # browser POST here —same-origin policy has never stopped that— but
+    # it cannot READ the answer, so it never learns this string.
+    token = secrets.token_urlsafe(32)
 
     state = {"readings": _read_instance(), "orgs": {}}
     lock = threading.Lock()
+
+    def _schema():
+        """What a contract may contain. Asked of the command every time
+        rather than once at start-up: a platform that learns a new type
+        while this server is running should not need it restarted to
+        offer it."""
+        try:
+            _rc, doc = cli.run_json("org", "schema")
+            return doc
+        except cli.CouldNotEvaluate:
+            # An empty document, and the form says out loud that it
+            # could not read the options — never a form with no choices
+            # on it, which looks like a platform that has none.
+            return {"steps": [], "rc": 2}
 
     def read_org(name):
         return _read_instance(tuple(s.format(org=name) for s in ORG_SOURCES))
@@ -376,9 +487,15 @@ def serve(port):
             # It draws only what it built: no third party, no inline
             # handler, nothing fetched. The header says so out loud so
             # that a future panel cannot quietly start reaching out.
+            # `form-action 'self'` and not 'none' since the console
+            # grew a screen that writes. Everything else stands: no
+            # script, nothing fetched, no frame. The one thing this
+            # page may now do is submit back to itself, which is
+            # exactly the narrowest form of what it needs.
             self.send_header("Content-Security-Policy",
                              "default-src 'none'; style-src 'unsafe-inline'; "
-                             "font-src data:; form-action 'none'; base-uri 'none'")
+                             "font-src data:; form-action 'self'; base-uri 'none'; "
+                             "frame-ancestors 'none'")
             self.send_header("Referrer-Policy", "no-referrer")
             self.end_headers()
             if not head_only:
@@ -391,15 +508,122 @@ def serve(port):
             # broken to the simplest probe there is.
             self.do_GET(head_only=True)
 
+        def _refuse(self, why, head_only=False):
+            # The reason is said out loud, to the client and on the
+            # operator's terminal: a console that refuses silently is a
+            # console that looks broken. What is never said is the
+            # token.
+            print(f"refused: {why}", file=sys.stderr)
+            self._send(403, f"{why}\n", "text/plain; charset=utf-8", head_only)
+
+        def _form(self):
+            """The submitted fields. A body larger than a contract could
+            possibly be is refused rather than read: nothing here needs
+            to accept an upload, and a server that reads whatever it is
+            handed is a server somebody can keep busy."""
+            import urllib.parse as _u
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > 64 * 1024:
+                return None
+            raw = self.rfile.read(length).decode("utf-8", "replace")
+            return {k: v[0] for k, v in _u.parse_qs(raw, keep_blank_values=True).items()}
+
+        def do_POST(self):                                # noqa: N802
+            why = guard.why_not_read(self.headers, port)
+            if why:
+                self._refuse(why)
+                return
+            fields = self._form() or {}
+            why = guard.why_not_write("POST", self.headers, token, fields.get("token"))
+            if why:
+                self._refuse(why)
+                return
+            path = self.path.split("?")[0]
+            if path == "/new":
+                self._preview(fields)
+                return
+            if path == "/new/write":
+                self._write(fields)
+                return
+            self._send(404, "404\n", "text/plain; charset=utf-8")
+
+        def _preview(self, fields):
+            """Build it, validate it, and draw what would change. NOTHING
+            of the instance is touched: the contract goes to a temporary
+            file that is removed no matter how this ends, and `aegis org
+            plan` is the same command the operator would run by hand."""
+            schema = _schema()
+            _contract, text = drawing.contract_from_form(fields, schema)
+            bad = validate_contract(text)
+            if bad:
+                self._send(200, drawing.wrap(drawing.render_form(
+                    schema, token, fields, bad), "a new organization"))
+                return
+            tmp = tempfile.mkdtemp(prefix="aegis-console-")
+            try:
+                probe = os.path.join(tmp, "contrato.yaml")
+                with open(probe, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+                try:
+                    _rc, doc = cli.run_json("org", "plan", probe)
+                except cli.CouldNotEvaluate as e:
+                    self._send(200, drawing.wrap(drawing.render_form(
+                        schema, token, fields,
+                        f"the plan could not be run: {e}"), "a new organization"))
+                    return
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+            self._send(200, drawing.wrap(
+                drawing.render_plan(doc, text, token), "the plan"))
+
+        def _write(self, fields):
+            # VALIDATED AGAIN, on the way in. What comes back in a form
+            # is whatever the browser sent, and the fact that this
+            # server drew it a moment ago is not evidence that it is
+            # what came back.
+            text = fields.get("contrato") or ""
+            target, bad = write_contract(text)
+            if bad:
+                self._send(200, drawing.wrap(drawing.render_form(
+                    _schema(), token, {}, bad), "a new organization"))
+                return
+            doc = None
+            try:
+                _rc, doc = cli.run_json("org", "plan", target)
+            except cli.CouldNotEvaluate:
+                doc = None
+            with lock:
+                state["readings"] = _read_instance()
+                state["orgs"].clear()
+            self._send(200, drawing.wrap(
+                drawing.render_plan(doc, text, token, written=target), "the plan"))
+
         def do_GET(self, head_only=False):                # noqa: N802
+            # THE HOST CHECK APPLIES TO READS TOO, and it was missing
+            # while this console only read. A page on the internet whose
+            # name resolves to 127.0.0.1 reaches this port with its own
+            # origin intact, and what it finds is every hostname, every
+            # organization and every finding of the round.
+            why = guard.why_not_read(self.headers, port)
+            if why:
+                self._refuse(why, head_only)
+                return
             path = self.path.split("?")[0]
             if path == "/measure":
+                # Re-measuring is a GET today and it changes nothing but
+                # what is on the screen. The moment anything here writes,
+                # it moves to POST like the rest.
                 with lock:
                     state["readings"] = _read_instance()
                     state["orgs"].clear()
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()
+                return
+            if path == "/new":
+                self._send(200, drawing.wrap(
+                    drawing.render_form(_schema(), token), "a new organization"),
+                    head_only=head_only)
                 return
             if path.startswith("/org/"):
                 # The name comes off a URL anybody can type. It is
@@ -440,6 +664,8 @@ def serve(port):
     print(f"  sources: {', '.join(SOURCES)}")
     print(f"  /org/<name> reads one organization: "
           f"{', '.join(x.replace('{org}', '<name>') for x in ORG_SOURCES)}")
+    print(f"  /new         describes a new organization. It writes ONE file and "
+          f"nothing else: no commit, no push, no cluster")
     print(f"  /measure reads them again")
     try:
         server.serve_forever()
