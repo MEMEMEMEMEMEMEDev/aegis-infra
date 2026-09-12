@@ -1,0 +1,298 @@
+{
+  "steps": [
+    {
+      "step": "node",
+      "state": "already",
+      "measures": [
+        {
+          "measure": "aegis-node Ready",
+          "state": "good",
+          "notes": []
+        }
+      ],
+      "notes": [],
+      "counts": {
+        "good": 1
+      }
+    },
+    {
+      "step": "pods",
+      "state": "already",
+      "measures": [
+        {
+          "measure": "the 50 pods are running, none restarting",
+          "state": "good",
+          "notes": []
+        }
+      ],
+      "notes": [],
+      "counts": {
+        "good": 1
+      }
+    },
+    {
+      "step": "argocd",
+      "state": "already",
+      "measures": [
+        {
+          "measure": "the 41 apps Synced + Healthy",
+          "state": "good",
+          "notes": []
+        },
+        {
+          "measure": "nothing orphaned in the 11 apps with coverage",
+          "state": "good",
+          "notes": [
+            "30 without coverage ON PURPOSE (aegis-bootstrap aegis-platform): covering them gives ~146 permanent notices about resources that never came out of git — measured, not assumed"
+          ]
+        }
+      ],
+      "notes": [],
+      "counts": {
+        "good": 2
+      }
+    },
+    {
+      "step": "stuck syncs",
+      "state": "already",
+      "measures": [
+        {
+          "measure": "41 apps with no open operations and nothing in Terminating for more than 30 min",
+          "state": "good",
+          "notes": []
+        }
+      ],
+      "notes": [],
+      "counts": {
+        "good": 1
+      }
+    },
+    {
+      "step": "CI quota",
+      "state": "wrong",
+      "measures": [
+        {
+          "measure": "the CI quota does not hold two overlapping builds",
+          "state": "bad",
+          "notes": []
+        }
+      ],
+      "notes": [],
+      "counts": {
+        "bad": 1
+      }
+    },
+    {
+      "step": "supply chain",
+      "state": "already",
+      "measures": [
+        {
+          "measure": "unsigned image REJECTED in ai-system FOR LACK OF SIGNATURE (citing require-aegis-signature)",
+          "state": "good",
+          "notes": []
+        },
+        {
+          "measure": "the same image is ADMITTED in jenkins-system — the blast radius is bounded",
+          "state": "good",
+          "notes": []
+        }
+      ],
+      "notes": [
+        "probe: registry.registry-system.svc.cluster.local:5000/aegis-ci-cosign:v2.6.3 (internal, reachable — the rejection can be about the SIGNATURE)"
+      ],
+      "counts": {
+        "good": 2
+      }
+    },
+    {
+      "step": "certificates",
+      "state": "already",
+      "measures": [
+        {
+          "measure": "5 certificates at True",
+          "state": "good",
+          "notes": []
+        }
+      ],
+      "notes": [],
+      "counts": {
+        "good": 1
+      }
+    },
+    {
+      "step": "whose the routing is",
+      "state": "already",
+      "measures": [
+        {
+          "measure": "the 4 tenant projects have IngressRoute forbidden",
+          "state": "good",
+          "notes": []
+        },
+        {
+          "measure": "the 4 organization routes belong to the platform",
+          "state": "good",
+          "notes": []
+        }
+      ],
+      "notes": [],
+      "counts": {
+        "good": 2
+      }
+    },
+    {
+      "step": "edge",
+      "state": "already",
+      "measures": [
+        {
+          "measure": "the hostnames the contracts declare exist at the edge",
+          "state": "good",
+          "notes": []
+        }
+      ],
+      "notes": [],
+      "counts": {
+        "good": 1
+      }
+    },
+    {
+      "step": "CI webhooks",
+      "state": "already",
+      "measures": [
+        {
+          "measure": "every repo with a job in Jenkins has its webhook",
+          "state": "good",
+          "notes": []
+        }
+      ],
+      "notes": [],
+      "counts": {
+        "good": 1
+      }
+    },
+    {
+      "step": "every push built",
+      "state": "already",
+      "measures": [
+        {
+          "measure": "the 9 repos with a job have their last push on main built",
+          "state": "good",
+          "notes": []
+        }
+      ],
+      "notes": [
+        "hello-aegis-mb #6 = eca82f19",
+        "__ai_gateway_repo__-mb #2 = 9a217aa9",
+        "drop-app-mb #7 = 2d04d4d4",
+        "portafolio-mb #6 = 905bd2f4",
+        "shop-admin-mb #11 = 751a654d",
+        "shop-api-mb #15 = ab18f983",
+        "shop-stock-mb #4 = 01d88787",
+        "shop-web-mb #29 = c3f14574",
+        "shop-worker-mb #10 = ea5dcb9e"
+      ],
+      "counts": {
+        "good": 1
+      }
+    },
+    {
+      "step": "ai",
+      "state": "already",
+      "measures": [
+        {
+          "measure": "mode=cerrado · engine=0 replica(s) · \"closed by the operator\"",
+          "state": "good",
+          "notes": [
+            "VRAM: 667 MiB, 12227 MiB"
+          ]
+        }
+      ],
+      "notes": [],
+      "counts": {
+        "good": 1
+      }
+    },
+    {
+      "step": "backups",
+      "state": "wrong",
+      "measures": [
+        {
+          "measure": "destination on the disk that was noted down (fs 2e8e3db0-529f-44f9-ab6a-62656102cbf0)",
+          "state": "good",
+          "notes": []
+        },
+        {
+          "measure": "no STATE bundle in /home/operator/aegis-backups/platform/ — with only the data you have a dump nobody knows where to put",
+          "state": "bad",
+          "notes": []
+        },
+        {
+          "measure": "org-shop: 30h, 3089431 bytes · aegis-datos-org-shop-20260911-003442.age",
+          "state": "good",
+          "notes": []
+        },
+        {
+          "measure": "org-shop off-site: 31.0h (clock 24h)",
+          "state": "good",
+          "notes": []
+        }
+      ],
+      "notes": [],
+      "counts": {
+        "bad": 1,
+        "good": 3
+      }
+    },
+    {
+      "step": "observability",
+      "state": "not-evaluable",
+      "measures": [
+        {
+          "measure": "15 scrape jobs with fresh metrics",
+          "state": "good",
+          "notes": []
+        },
+        {
+          "measure": "the 32 alerts from git are loaded in vmalert",
+          "state": "good",
+          "notes": []
+        },
+        {
+          "measure": "the 3 public organizations have a probe",
+          "state": "good",
+          "notes": []
+        },
+        {
+          "measure": "the heartbeat reaches Alertmanager: the vmalert→AM chain is alive",
+          "state": "good",
+          "notes": []
+        },
+        {
+          "measure": "COULD NOT EVALUATE: no build measurement (an image older than the metric, or from a pipeline that does not push it?): aegis-base-node aegis-engine-cpu __ai_gateway_repo__ hello-aegis portafolio portafolio-bff",
+          "state": "not-evaluated",
+          "notes": []
+        },
+        {
+          "measure": "9 deployed image(s) with their last build scanned",
+          "state": "good",
+          "notes": []
+        },
+        {
+          "measure": "image-watch ran 4h ago and found fixable CVE(s) against today's DB: postgres=7 redis=6",
+          "state": "bad",
+          "notes": [
+            "for an aegis-base-* the loop already tried a rebuild; for a third party read UpstreamFixAvailable (crane digest on the upstream tag)"
+          ]
+        }
+      ],
+      "notes": [],
+      "counts": {
+        "not-evaluated": 1,
+        "bad": 1,
+        "good": 5
+      }
+    }
+  ],
+  "failures": 3,
+  "notices": 1,
+  "rc": 1
+}

@@ -296,11 +296,44 @@ def _panel_edge(doc, states):
     return f'<ul class="tail">{"".join(bad_ + good)}</ul>'
 
 
+def _panel_capacity(doc, states):
+    figures, fits = [], []
+    for step in doc.get("steps") or []:
+        state = SCREEN.get(step.get("state"), UNSEEN)
+        states.add(state)
+        name = step.get("step", "")
+        if name.startswith("fits:"):
+            plan = name.split(":", 1)[1]
+            room = step.get("room")
+            # «none» and «unknown» are different words on purpose: one is
+            # a measurement, the other is the absence of one, and this is
+            # the panel where confusing them costs an organization.
+            answer = ("unknown" if room is None
+                      else f"{room} more" if room else "none")
+            fits.append(
+                f'<li data-state="{state}">{_chip(state, plan)}'
+                f'<span class="mono">{_e(answer)}</span>'
+                + (f'<span class="note">{_e(step["binding"])} is what runs out first</span>'
+                   if step.get("binding") else "") + "</li>")
+        elif name in ("capacity:memory", "capacity:cpu"):
+            figures.append(_fact(name.split(":", 1)[1] + " free",
+                                 step.get("free_human", "?")))
+        elif name == "capacity:nodes":
+            figures.append(_fact("pods asking", _num(step.get("pods", 0))))
+        else:
+            figures.append(_fact(name.split(":", 1)[-1], step.get("why", "not measured")))
+    head = (f'<article class="tile" data-state="{worst(states)}">'
+            f'<div class="facts-row">{"".join(figures)}</div></article>'
+            if figures else "")
+    return f'<div class="tiles">{head}</div>' + (f'<ul class="tail">{"".join(fits)}</ul>' if fits else "")
+
+
 PANELS = {
     "org list": _panel_organizations,
     "traffic show": _panel_traffic,
     "check": _panel_round,
     "edge check": _panel_edge,
+    "capacity show": _panel_capacity,
 }
 
 

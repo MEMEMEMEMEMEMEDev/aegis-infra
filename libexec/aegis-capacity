@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+# aegis-summary: Does another organization fit? The node against what the plans cost
+# aegis-group:   operate
+# aegis-subcommands: show
+# aegis-help:
+# Usage: aegis capacity [show] [--json]
+#
+# show  what the node can allocate, what is already asked of it, and how
+#       many more organizations of each plan would fit
+#
+"""aegis-capacity — does another organization fit?
+
+THE QUESTION NOBODY ANSWERS. aegis runs on one node and says so in its
+README; what it has never said is how much of that node is left. The
+answer today is discovered the hard way — an organization is created,
+its pods are Pending, and `kubectl describe` explains why to whoever
+knows to run it. That is a measurement anybody could take and nobody
+does, which is the definition of a thing that belongs in a command.
+
+WHAT IT COMPARES. The node's ALLOCATABLE (what the kubelet will hand
+out, already minus what the host reserved for itself and for eviction)
+against the sum of every running pod's REQUESTS — requests and not
+limits, because requests are what the scheduler actually subtracts.
+Then plans.yaml says what one organization of each plan asks for, and
+the division is the answer.
+
+WHY IT SAYS «could not look» INSTEAD OF ZERO. If the apiserver does not
+answer, the honest output is not «zero fit»: it is that nobody could be
+asked. A console that drew a zero there would tell the operator the
+machine is full when the truth is that the instrument never reached it.
+"""
+import json
+import os
+import subprocess
+import sys
+
+# ── canonical python preamble (V-102) ────────────────────────────────
+_AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
+    os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
+from aegis import cli, outcomes, paths, quantity   # noqa: E402
+
+import yaml                                        # noqa: E402
+
+grey = "\033[90m"
+off = "\033[0m"
+PLANS = os.path.join(str(paths.aegis_home()), "platform", "plans.yaml")
+
+
+def _kubectl(args):
+    r = subprocess.run(["kubectl", *args], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or "kubectl did not answer").strip()[:200])
+    return r.stdout
+
+
+def _node():
+    """Allocatable, summed over every Ready node. One node today, and
+    the sum is written as a sum anyway: the day there are two, this
+    answers correctly instead of answering about the first one."""
+    doc = json.loads(_kubectl(["get", "nodes", "-o", "json"]))
+    cpu_m = mem_b = 0
+    names = []
+    for item in doc.get("items") or []:
+        ready = any(c.get("type") == "Ready" and c.get("status") == "True"
+                    for c in (item.get("status", {}).get("conditions") or []))
+        if not ready:
+            continue
+        alloc = item["status"]["allocatable"]
+        cpu_m += quantity.cpu(alloc["cpu"])
+        mem_b += quantity.mem(alloc["memory"])
+        names.append(item["metadata"]["name"])
+    return names, cpu_m, mem_b
+
+
+def _asked():
+    """What the scheduler has already subtracted: the REQUESTS of every
+    pod that is not finished. Succeeded and Failed pods hold nothing —
+    counting them would report a machine fuller than it is, and the
+    console would refuse an organization that fits."""
+    doc = json.loads(_kubectl(["get", "pods", "-A", "-o", "json"]))
+    cpu_m = mem_b = 0
+    pods = 0
+    for item in doc.get("items") or []:
+        if (item.get("status", {}).get("phase")) in ("Succeeded", "Failed"):
+            continue
+        pods += 1
+        spec = item.get("spec") or {}
+        for group in ("initContainers", "containers"):
+            for c in spec.get(group) or []:
+                req = ((c.get("resources") or {}).get("requests") or {})
+                if "cpu" in req:
+                    cpu_m += quantity.cpu(req["cpu"])
+                if "memory" in req:
+                    mem_b += quantity.mem(req["memory"])
+    return pods, cpu_m, mem_b
+
+
+def show(steps, narrate):
+    try:
+        names, alloc_cpu, alloc_mem = _node()
+        pods, used_cpu, used_mem = _asked()
+    except (RuntimeError, KeyError, ValueError) as e:
+        # NOT zero. Nobody could be asked.
+        if narrate:
+            print(f"  {grey}the apiserver did not answer: this is not a full machine, "
+                  f"it is a machine nobody could measure{off}")
+        steps.not_evaluable("capacity", why="apiserver-silent", detail=str(e))
+        steps.finish()
+    if not names:
+        if narrate:
+            print(f"  {grey}no node is Ready{off}")
+        steps.not_evaluable("capacity", why="no-ready-node")
+        steps.finish()
+
+    free_cpu, free_mem = alloc_cpu - used_cpu, alloc_mem - used_mem
+    if narrate:
+        print(f"\ncapacity  {grey}({len(names)} node(s), {pods} pod(s) asking){off}")
+        print(f"  memory   {quantity.mem_str(used_mem)} asked of "
+              f"{quantity.mem_str(alloc_mem)}  {grey}→ {quantity.mem_str(free_mem)} free{off}")
+        print(f"  cpu      {quantity.cpu_str(used_cpu)} asked of "
+              f"{quantity.cpu_str(alloc_cpu)}  {grey}→ {quantity.cpu_str(free_cpu)} free{off}")
+    steps.already("capacity:memory", allocatable=alloc_mem, asked=used_mem, free=free_mem,
+                  free_human=quantity.mem_str(free_mem))
+    steps.already("capacity:cpu", allocatable=alloc_cpu, asked=used_cpu, free=free_cpu,
+                  free_human=quantity.cpu_str(free_cpu))
+    steps.already("capacity:nodes", nodes=len(names), pods=pods)
+
+    try:
+        plans = (yaml.safe_load(open(PLANS, encoding="utf-8")) or {}).get("cuota") or {}
+    except OSError as e:
+        steps.not_evaluable("capacity:plans", why="no-plans-file", detail=str(e))
+        steps.finish()
+
+    if narrate:
+        print(f"  {grey}and one more organization of each plan:{off}")
+    for name in sorted(plans):
+        spec = plans[name]
+        want_cpu = quantity.cpu(str(spec.get("requests.cpu", "0")))
+        want_mem = quantity.mem(str(spec.get("requests.memory", "0")))
+        if want_cpu <= 0 or want_mem <= 0:
+            steps.not_evaluable(f"fits:{name}", why="plan-asks-nothing")
+            continue
+        by_cpu = free_cpu // want_cpu
+        by_mem = free_mem // want_mem
+        room = max(0, min(by_cpu, by_mem))
+        # WHICH ONE RUNS OUT FIRST is the useful half: «two more fit» is
+        # an answer, «memory is what stops you at two» is a decision.
+        binding = "memory" if by_mem <= by_cpu else "cpu"
+        state = "already" if room else "wrong"
+        getattr(steps, "already" if room else "wrong")(
+            f"fits:{name}", room=int(room), binding=binding,
+            wants_cpu=want_cpu, wants_memory=want_mem)
+        if narrate:
+            mark = f"{int(room)} more" if room else "none"
+            print(f"    {name:<10} {mark:<10} {grey}({binding} is the limit; asks "
+                  f"{quantity.cpu_str(want_cpu)} + {quantity.mem_str(want_mem)}){off}")
+    steps.finish()
+
+
+def main():
+    import argparse
+    ap = cli.parser("capacity", __doc__.split("\n")[0])
+    flags = argparse.ArgumentParser(add_help=False)
+    flags.add_argument("--json", action="store_true", dest="json_mode",
+                       default=argparse.SUPPRESS,
+                       help="the document of states instead of the narration")
+    sub = ap.add_subparsers(dest="verb")
+    sub.add_parser("show", parents=[flags], help="what is left, and what fits in it")
+    ap.add_argument("--json", action="store_true", dest="json_mode",
+                    help="the document of states instead of the narration")
+    a = ap.parse_args()
+    steps = outcomes.Steps(json_mode=a.json_mode)
+    return show(steps, not a.json_mode)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
