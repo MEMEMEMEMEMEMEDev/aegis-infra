@@ -1,0 +1,128 @@
+{
+  "steps": [
+    {
+      "step": "organization:drop",
+      "state": "already",
+      "valid": true,
+      "contract": "orgs/drop.yaml",
+      "version": 1,
+      "dominio": "drop.example.test",
+      "cuota": "deposito",
+      "ai": null,
+      "bucket": false,
+      "servicios": [
+        {
+          "nombre": "app",
+          "tipo": "http",
+          "publico": "/",
+          "puerto": 8080,
+          "usa": [
+            "internet"
+          ]
+        }
+      ]
+    },
+    {
+      "step": "organization:portafolio",
+      "state": "already",
+      "valid": true,
+      "contract": "orgs/portafolio.yaml",
+      "version": 1,
+      "dominio": "portafolio.example.test",
+      "cuota": "pequena",
+      "ai": "intensivo",
+      "bucket": false,
+      "servicios": [
+        {
+          "nombre": "front",
+          "tipo": "estatico",
+          "publico": "/",
+          "puerto": null,
+          "usa": []
+        },
+        {
+          "nombre": "bff",
+          "tipo": "http",
+          "publico": "/api",
+          "puerto": 8080,
+          "usa": [
+            "ai"
+          ]
+        }
+      ]
+    },
+    {
+      "step": "organization:shop",
+      "state": "already",
+      "valid": true,
+      "contract": "orgs/shop.yaml",
+      "version": 1,
+      "dominio": "shop.example.test",
+      "cuota": "mediana",
+      "ai": null,
+      "bucket": true,
+      "servicios": [
+        {
+          "nombre": "web",
+          "tipo": "estatico",
+          "publico": "/",
+          "puerto": null,
+          "usa": []
+        },
+        {
+          "nombre": "admin",
+          "tipo": "estatico",
+          "publico": "/admin",
+          "puerto": null,
+          "usa": []
+        },
+        {
+          "nombre": "api",
+          "tipo": "http",
+          "publico": "/api",
+          "puerto": 8080,
+          "usa": [
+            "postgres",
+            "redis",
+            "bucket",
+            "internet"
+          ]
+        },
+        {
+          "nombre": "stock",
+          "tipo": "http",
+          "publico": null,
+          "puerto": 8080,
+          "usa": [
+            "postgres"
+          ]
+        },
+        {
+          "nombre": "worker",
+          "tipo": "worker",
+          "publico": null,
+          "puerto": null,
+          "usa": [
+            "postgres",
+            "redis"
+          ]
+        },
+        {
+          "nombre": "datos",
+          "tipo": "postgres",
+          "publico": null,
+          "puerto": null,
+          "usa": []
+        },
+        {
+          "nombre": "cola",
+          "tipo": "redis",
+          "publico": null,
+          "puerto": null,
+          "usa": []
+        }
+      ]
+    }
+  ],
+  "rc": 0
+}

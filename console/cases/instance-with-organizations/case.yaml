@@ -1,0 +1,43 @@
+version: 1
+caso: instance-with-organizations
+que: 'la instancia entera como la ve la consola: las tres organizaciones de sus
+  contratos, la ronda y el borde'
+procedencia: medido
+producido_por:
+- comando: org list
+  documento: org.json
+  rc: 0
+- comando: check
+  documento: check.json
+  rc: 1
+- comando: edge check
+  documento: edge.json
+  rc: 0
+medido_en: '2026-09-11T22:31:44-03:00'
+aegis: b99595f4d3307274c45d05906187e4cd8b80662e
+forma:
+  org.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  check.json:
+    claves:
+    - failures
+    - notices
+    - rc
+    - steps
+    estados:
+    - already
+    - bad
+    - good
+    - not-evaluable
+    - not-evaluated
+    - wrong
+  edge.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already

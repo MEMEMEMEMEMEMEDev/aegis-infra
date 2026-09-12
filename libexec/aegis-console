@@ -288,12 +288,13 @@ def listing():
 
 
 # ── serve ────────────────────────────────────────────────────────────
-# WHAT IT READS. Two commands, and they are named here rather than
-# derived because each one is a DECISION about what the first screen is
-# for, not a detail: the round says how the platform is, and the edge
-# says whether the hostnames anybody types actually exist. More arrive
-# with the panels that need them.
-SOURCES = ("check", "edge check")
+# WHAT IT READS. Three commands, named here rather than derived because
+# each one is a DECISION about what the first screen is for, not a
+# detail: the organizations are the entry —the list the operator asked
+# for— the round says how the platform is, and the edge says whether the
+# hostnames anybody types actually exist. More arrive with the panels
+# that need them.
+SOURCES = ("org list", "check", "edge check")
 
 
 def _read_instance():

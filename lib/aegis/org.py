@@ -2206,6 +2206,61 @@ def _without_hash(t):
     return markers.without_hash(t)
 
 
+# ── the organizations, as the contracts declare them ──────────────────
+def list_organizations(steps):
+    """Every contract in orgs/, read and validated. Files only.
+
+    THE ENTRY SCREEN OF THE CONSOLE IS THIS LIST, and there was no
+    command that produced it: `plan` answers about the contracts you
+    name, and naming them means already knowing which ones there are.
+    It reads, validates and says; it derives nothing and writes nothing.
+
+    A contract that does NOT validate is listed anyway, as `wrong` and
+    with the validator's message. Dropping it would be the worst shape
+    of this command: an organization that exists in git, has a
+    namespace, serves traffic — and is not on the screen. Check 129
+    holds it to that.
+    """
+    plans = yaml.safe_load(open(PLANS, encoding="utf-8"))
+    rc = 0
+    names = sorted(n for n in os.listdir(ORGS_DIR) if n.endswith((".yaml", ".yml")))
+    print(f"\norganizations  {grey}({os.path.relpath(ORGS_DIR, PLATFORM_ROOT)}/){off}")
+    if not names:
+        print(f"  {grey}no contract yet{off}")
+        # Zero contracts is a MEASURED zero, not a blind one: the
+        # directory was read and it is empty.
+        steps.append({"step": "organizations", "state": "already", "count": 0})
+        return 0
+    for name in names:
+        path = os.path.join(ORGS_DIR, name)
+        try:
+            raw = yaml.safe_load(open(path, encoding="utf-8"))
+            c = validate(raw, plans)
+        except (Invalid, yaml.YAMLError) as e:
+            print(f"  {red}✗{off} {name}  {grey}{e}{off}")
+            steps.append({"step": f"organization:{name}", "state": "wrong",
+                          "valid": False, "error": str(e)})
+            rc = 1
+            continue
+        services = [{"nombre": sv["nombre"], "tipo": sv["tipo"],
+                     "publico": sv.get("publico"), "puerto": sv.get("puerto"),
+                     "usa": list(sv.get("usa") or [])}
+                    for sv in (c.get("servicios") or [])]
+        kinds = {}
+        for sv in services:
+            kinds[sv["tipo"]] = kinds.get(sv["tipo"], 0) + 1
+        shape = " ".join(f"{n}×{t}" for t, n in sorted(kinds.items()))
+        print(f"  {green}·{off} {c['organizacion']:<16} {c.get('dominio') or '-':<28} "
+              f"{grey}cuota {c['cuota']}  {shape}{off}")
+        steps.append({"step": f"organization:{c['organizacion']}", "state": "already",
+                      "valid": True, "contract": os.path.relpath(path, PLATFORM_ROOT),
+                      "version": c["version"], "dominio": c.get("dominio"),
+                      "cuota": c["cuota"], "ai": (c.get("ai") or {}).get("plan"),
+                      "bucket": bool((c.get("almacenamiento") or {}).get("bucket")),
+                      "servicios": services})
+    return rc
+
+
 def apply_contract(path, write, record=None):
     """Derive one contract. `record`, when given, is a dict this function
     FILLS with the same facts the narration prints — one entry per file
@@ -4298,6 +4353,7 @@ def main():
                             ("validate", "only validate the contract")):
         s = sub.add_parser(name, parents=[common], help=help_text)
         s.add_argument("contracts", nargs="+")
+    sub.add_parser("list", parents=[common], help="the organizations, as their contracts declare them")
     sub.add_parser("edge", parents=[common], help="derive public_hostnames from every contract")
     sub.add_parser("routes", parents=[common], help="derive the ai-ruteo ConfigMap from every contract")
     # `plan-delete` first, and with that name: the order of the help
@@ -4342,6 +4398,14 @@ def main():
             sys.stdout = real_stdout
             print(json.dumps({"steps": steps, "rc": rc}, ensure_ascii=False))
         return rc
+
+    if a.cmd == "list":
+        try:
+            return _emit(list_organizations(steps))
+        except Invalid as e:
+            print(f"{red}✗{off} {e}", file=sys.stderr)
+            steps.append({"step": "organizations", "state": "not-evaluable", "error": str(e)})
+            return _emit(2)
 
     if a.cmd == "edge":
         try:
