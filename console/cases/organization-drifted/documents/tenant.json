@@ -1,0 +1,72 @@
+{
+  "steps": [
+    {
+      "step": "namespace",
+      "state": "already",
+      "namespace": "org-drop",
+      "exists": true,
+      "phase": "Active"
+    },
+    {
+      "step": "service:app",
+      "state": "already",
+      "tipo": "http",
+      "publico": "/",
+      "kind": "Deployment",
+      "workload": "drop-app",
+      "ready": 1,
+      "desired": 1,
+      "image": "registry.registry-system.svc.cluster.local:5000/drop-app@sha256:31b98b8c1cd97716d7986d2f7eb390838b5089cdb19ed13926d77c2a0bc8a715",
+      "digest": "sha256:31b98b8c1cd97716d7986d2f7eb390838b5089cdb19ed13926d77c2a0bc8a715"
+    },
+    {
+      "step": "unclaimed-volume:drop-datos",
+      "state": "wrong",
+      "size": "100Gi",
+      "phase": "Bound",
+      "label": null
+    },
+    {
+      "step": "public:app",
+      "state": "already",
+      "publico": "/",
+      "service": "drop-app",
+      "routed": true,
+      "endpoints": 1
+    },
+    {
+      "step": "routing",
+      "state": "already",
+      "public": 1,
+      "hosts": [
+        "drop.example.test"
+      ]
+    },
+    {
+      "step": "quota",
+      "state": "already",
+      "quota": "org-drop-quota",
+      "used": {
+        "limits.cpu": "2",
+        "limits.memory": "2Gi",
+        "persistentvolumeclaims": "1",
+        "pods": "1",
+        "requests.cpu": "500m",
+        "requests.memory": "1Gi",
+        "requests.storage": "100Gi"
+      },
+      "hard": {
+        "limits.cpu": "4",
+        "limits.memory": "4Gi",
+        "persistentvolumeclaims": "2",
+        "pods": "20",
+        "requests.cpu": "2",
+        "requests.memory": "2Gi",
+        "requests.storage": "120Gi"
+      },
+      "tightest": "requests.storage",
+      "percent": 83.3
+    }
+  ],
+  "rc": 1
+}

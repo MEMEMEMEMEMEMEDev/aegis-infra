@@ -159,7 +159,7 @@ except ImportError:
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
-from aegis import cli, paths             # noqa: E402
+from aegis import cli, outcomes, paths   # noqa: E402
 
 # PLATFORM_DIR is the INSTANCE (the live checkout of the platform), not
 # the product. In v2 this line was `dirname(dirname(__file__))` and it
@@ -2677,6 +2677,101 @@ def cadence_gate(text, seconds):
     return cadence_record(text, seconds, f"ntfy/{NTFY_TOPIC}")
 
 
+def _owes_a_backup(org):
+    """What this organization holds that a backup would have to carry,
+    read from its CONTRACT and from the catalogue. Files only: no
+    cluster, because the question «does shop have a copy» has to be
+    answerable from a machine whose apiserver is down — that is when
+    somebody asks it.
+
+    A tenant that holds nothing is not a tenant missing a backup: an
+    organization of two stateless fronts has nothing to lose, and
+    drawing it red would teach the operator to ignore the colour.
+    """
+    path = os.path.join(ORGS_DIR, f"{org}.yaml")
+    if not os.path.isfile(path):
+        return None
+    d = yaml.safe_load(open(path, encoding="utf-8")) or {}
+    dump_types = _dump_types()
+    holds = [{"servicio": sv["nombre"], "tipo": sv["tipo"]}
+             for sv in d.get("servicios") or []
+             if sv.get("tipo") == "postgres" or sv.get("tipo") in dump_types]
+    return {"databases": holds,
+            "bucket": bool((d.get("almacenamiento") or {}).get("bucket"))}
+
+
+def remote_status_document(org, steps):
+    """The freshness of ONE organization's copy, as the document.
+
+    WHY THE CADENCE TRAVELS WITH THE AGE. «39 hours old» is not a
+    verdict: against a weekly clock it is fresh and against an hourly
+    one it is an incident. The threshold is not hard-coded here for the
+    same reason the metrics export it — the day somebody sets the
+    cadence to 6h, a number written into this file would go on judging
+    against a promise nobody made any more.
+    """
+    owed = _owes_a_backup(org)
+    if owed is None:
+        print(f"aegis: no organization named {org!r} in the contracts "
+              f"(`aegis org list`)", file=sys.stderr)
+        sys.exit(outcomes.RC_USAGE)
+
+    cad_text, _src = cadence_current()
+    cad_s = parse_duration(cad_text) or 0
+    holds = bool(owed["databases"]) or owed["bucket"]
+
+    try:
+        _cfg, bundles, orphans = remote_inventory()
+    except cli.CouldNotEvaluate as e:
+        # A destination that cannot be reached is NOT an organization
+        # with no backup. Reporting it as missing sends somebody to
+        # rebuild a copy that is probably right there, behind a network
+        # that is down.
+        steps.not_evaluable(f"backup:{org}", why="destination-unreachable",
+                            detail=str(e), holds=holds)
+        steps.finish()
+
+    items = bundles.get(org) or []
+    epochs = [e for e in (remote_epoch(o["modificado"]) for o in items) if e]
+    data = {"holds": holds, "databases": owed["databases"], "bucket": owed["bucket"],
+            "copies": len(items), "cadence_seconds": cad_s,
+            "bytes": sum(o["bytes"] for o in items if o["bytes"] >= 0)}
+
+    if not holds:
+        # «according to the CONTRACT», and the word is load-bearing: a
+        # claim that no service declares is invisible from here on
+        # purpose, because this command reads contracts and saying so
+        # is what makes the gap findable. `aegis tenant show` is the
+        # one holding the other instrument.
+        steps.already(f"backup:{org}", note="no service of the CONTRACT holds "
+                      "state: there is nothing a copy would carry", **data)
+        steps.finish()
+    if not items:
+        steps.wrong(f"backup:{org}", why="no-copy-at-the-destination", **data)
+        steps.finish()
+    if not epochs:
+        # There ARE objects and none of them has a readable date. That
+        # is not freshness: it is a copy whose age nobody can state.
+        steps.not_evaluable(f"backup:{org}", why="no-readable-date", **data)
+        steps.finish()
+
+    age = int(time.time()) - int(max(epochs))
+    data["age_seconds"] = age
+    data["age_hours"] = round(age / 3600.0, 1)
+    data["newest_timestamp_seconds"] = int(max(epochs))
+    mine = [c for c in orphans if c.split("/", 1)[0].lstrip("org-") == org
+            or c.startswith(f"org-{org}/")]
+    if mine:
+        data["without_manifest"] = mine
+    # LATE, and against the clock this instance actually keeps. One
+    # missed run is a machine that was off; two is a mechanism that
+    # stopped.
+    late = cad_s > 0 and age > 2 * cad_s
+    (steps.wrong if (late or mine) else steps.already)(
+        f"backup:{org}", late=late, **data)
+    steps.finish()
+
+
 def remote_cadence(set_to):
     """Shows the clock, or changes it — with the floor in the way.
 
@@ -2737,6 +2832,18 @@ def remote_main(a):
     if a.remote_verb == "list":
         return remote_list()
     if a.remote_verb == "status":
+        if a.org or a.json_mode:
+            # SCOPED, AND AS THE DOCUMENT. The metrics path stays
+            # exactly as it was —it feeds a scrape and a whole rewrite
+            # of it would be a change nobody asked for— and the question
+            # «how is THIS organization's copy» gets the shape every
+            # other command in the house answers in.
+            if not a.org:
+                print("aegis: `remote status --json` answers about ONE "
+                      "organization: add --org NAME", file=sys.stderr)
+                return outcomes.RC_USAGE
+            steps = outcomes.Steps(json_mode=a.json_mode)
+            return remote_status_document(a.org, steps)
         return remote_status()
     return remote_cadence(a.cadence)
 
@@ -2746,6 +2853,17 @@ def main():
     # `aegis state`, because they are the same operation over another
     # thing: `state` is the MACHINE, `data` is the tenants' DATA.
     ap = argparse.ArgumentParser(prog=cli.cmd("data"))
+    # The flag is declared on the ONE verb that speaks the document and
+    # on the top level, with SUPPRESS in between so that a `--json`
+    # typed before the verb is not overwritten by the subparser's own
+    # default. That is the house pattern (libexec/aegis-webhook) and the
+    # bug it exists to prevent was measured on 2026-09-03.
+    jsonflag = argparse.ArgumentParser(add_help=False)
+    jsonflag.add_argument("--json", action="store_true", dest="json_mode",
+                          default=argparse.SUPPRESS,
+                          help="the document of states instead of the metrics")
+    ap.add_argument("--json", action="store_true", dest="json_mode",
+                    help="the document of states instead of the metrics")
     sub = ap.add_subparsers(dest="verb", required=True)
     s = sub.add_parser("backup", help=f"one bundle per organization (default: {DEFAULT_DEST})")
     s.add_argument("directory", nargs="?", default="", metavar="DIRECTORY")
@@ -2790,7 +2908,10 @@ def main():
                    help="the folder at the destination (default: platform, "
                         "which is where the STATE bundle belongs)")
     rsub.add_parser("list", help="what is at the destination, and how old")
-    rsub.add_parser("status", help="the freshness of the destination, as metrics")
+    st = rsub.add_parser("status", parents=[jsonflag],
+                         help="the freshness of the destination, as metrics")
+    st.add_argument("--org", default=None, metavar="ORGANIZATION",
+                    help="only this organization, and as the document")
     r = rsub.add_parser("cadence", help="the clock: how often the backup runs")
     r.add_argument("--set", dest="cadence", metavar="DURATION", default=None,
                    help=f"{CADENCE_FLOOR_S // 3600}h..{CADENCE_CEILING_S // 3600}h "

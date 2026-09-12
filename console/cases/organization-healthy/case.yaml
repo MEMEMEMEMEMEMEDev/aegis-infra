@@ -1,0 +1,37 @@
+version: 1
+caso: organization-healthy
+que: 'una organizacion entera como el cluster la tiene: sus servicios, su base con
+  su volumen, sus rutas con quien contesta detras, su cuota y su copia fuera de
+  sitio'
+procedencia: medido
+producido_por:
+- comando: tenant show shop
+  documento: tenant.json
+  rc: 0
+- comando: traffic show --org shop
+  documento: traffic.json
+  rc: 0
+- comando: data remote status --org shop
+  documento: data.json
+  rc: 0
+medido_en: '2026-09-12T15:53:07-03:00'
+aegis: 3a110ea27e13431a2bebd4447beefa670cfa5afd
+forma:
+  tenant.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  traffic.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  data.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already

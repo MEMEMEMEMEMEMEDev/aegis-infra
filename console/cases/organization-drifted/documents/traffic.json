@@ -1,0 +1,14 @@
+{
+  "steps": [
+    {
+      "step": "traffic:drop",
+      "state": "already",
+      "requests": 5372,
+      "errors": 0,
+      "p95_ms": 292.6,
+      "bytes": 3580501,
+      "hours": 24
+    }
+  ],
+  "rc": 0
+}

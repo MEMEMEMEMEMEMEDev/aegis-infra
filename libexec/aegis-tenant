@@ -1,0 +1,432 @@
+#!/usr/bin/env python3
+# aegis-summary: One organization as the cluster has it, against what its contract declares
+# aegis-group:   operate
+# aegis-subcommands: show
+# aegis-help:
+# Usage: aegis tenant show ORGANIZATION [--json]
+#
+# show  the namespace, one line per declared service, the volume of each
+#       database, whether the public paths are routed, and how much of
+#       the quota is spent
+#
+"""aegis-tenant — the same organization, seen from the cluster.
+
+THE PAIR. `aegis org` is the CONTRACT side: it reads `orgs/<name>.yaml`,
+writes manifests, and never touches the cluster — a promise worth
+keeping, because it means running it is safe at any moment. This command
+is the other half: it only reads the cluster and never writes a file.
+Same subject, two sides, and THE WHOLE VALUE IS WHERE THEY DISAGREE.
+
+Until today nothing answered «is this organization actually running?».
+`aegis check` rounds on the PLATFORM —the node, ArgoCD, the supply
+chain— and its sections count tenants in aggregate: «the 41 apps Synced
++ Healthy». That sentence stays true while one organization's worker has
+been CrashLooping for a day, because 41 apps being healthy is a fact
+about the platform and not about anybody's shop.
+
+WHERE THE CONTRACT COMES FROM. From `aegis org list --json`, not from
+the file. The contract is read and validated in exactly ONE place, and
+if it does not validate, this command inherits that truth instead of
+carrying a second, slightly different opinion about what a contract is.
+
+WHAT A MISSING NAMESPACE IS. It is `wrong`, not «could not evaluate»:
+the apiserver answered, and what it answered is that there is nothing
+there. What is `not-evaluable` is the apiserver not answering at all —
+and then EVERY service is unmeasured, because a screen that draws seven
+absent services from one silent instrument would have the operator
+rebuilding an organization that was running the whole time.
+"""
+import json
+import os
+import subprocess
+import sys
+
+# ── canonical python preamble (V-102) ────────────────────────────────
+_AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
+    os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
+from aegis import cli, outcomes, paths, quantity   # noqa: E402
+
+import yaml                                        # noqa: E402
+
+grey = "\033[90m"
+green = "\033[32m"
+red = "\033[31m"
+yellow = "\033[33m"
+off = "\033[0m"
+
+# Which kind of workload fulfils each type of service. The two groups
+# come from the contract's own vocabulary (lib/aegis/org.py: the types
+# WITH an image are built from a tenant repo and land in a Deployment;
+# the PROVIDED ones are given by the platform out of services.yaml and
+# land in a StatefulSet with a volume). They are named here rather than
+# imported because this command has to keep answering when org.py is
+# mid-change — and check 121 re-derives them from org.py, so the day the
+# two disagree it says so instead of this file drifting quietly.
+OWN_IMAGE = {"estatico", "http", "worker"}
+
+# WHICH TYPES OWE A DISK is not a fact about this command: it is decided
+# in services.yaml, by the `disco:` of each provided type. A cache that
+# declares no disk and has no volume is CORRECT, and drawing it as a
+# database with no disk would be an alarm about a design decision.
+SERVICES = os.path.join(str(paths.platform_dir()), "services.yaml")
+
+
+def _owes_a_disk():
+    """The types with `disco:` in the platform's catalogue. Unreadable
+    is not «none»: it comes back as None and every volume then travels
+    as unmeasured rather than as absent."""
+    try:
+        cat = yaml.safe_load(open(SERVICES, encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    return {name for name, spec in (cat.get("tipos") or {}).items()
+            if isinstance(spec, dict) and spec.get("disco")}
+
+
+def _kubectl(args):
+    r = subprocess.run(["kubectl", *args], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or "kubectl did not answer").strip()[:200])
+    return r.stdout
+
+
+def _get(ns, kind):
+    """One kind of object in one namespace, as a list. A kind the
+    cluster does not know (`IngressRoute` with no traefik) is NOT an
+    empty list: it is a question that could not be asked, and it comes
+    back as None so the caller files it as unmeasured."""
+    try:
+        doc = json.loads(_kubectl(["-n", ns, "get", kind, "-o", "json"]))
+    except (RuntimeError, ValueError):
+        return None
+    return doc.get("items") or []
+
+
+def _endpoints(ns):
+    """How many READY addresses each Service has. None if the question
+    could not be asked — which is not the same as zero, and zero is the
+    whole point of asking."""
+    items = _get(ns, "endpoints")
+    if items is None:
+        return None
+    out = {}
+    for e in items:
+        n = 0
+        for subset in e.get("subsets") or []:
+            n += len(subset.get("addresses") or [])
+        out[(e.get("metadata") or {}).get("name")] = n
+    return out
+
+
+def _digest(image):
+    return image.split("@", 1)[1] if "@" in image else None
+
+
+def _contract(org):
+    """The contract side, asked of the one command that owns it."""
+    rc, doc = cli.run_json("org", "list")
+    for step in doc.get("steps") or []:
+        name = step.get("step", "")
+        if name == f"organization:{org}":
+            return step
+    return None
+
+
+def show(org, steps, narrate):
+    ns = f"org-{org}"
+
+    try:
+        contract = _contract(org)
+    except cli.CouldNotEvaluate as e:
+        if narrate:
+            print(f"  {yellow}!{off} the contract could not be read: {e}")
+        steps.not_evaluable(f"tenant:{org}", why="contract-unreadable", detail=str(e))
+        steps.finish()
+
+    if contract is None:
+        # No contract with that name. That is a usage error and not a
+        # finding: there is nothing to be right or wrong about.
+        print(f"aegis: no organization named {org!r} in the contracts "
+              f"(`aegis org list`)", file=sys.stderr)
+        sys.exit(outcomes.RC_USAGE)
+
+    if not contract.get("valid", True):
+        # The contract does not validate. Everything derived from it —
+        # which is every name below — would be derived from something
+        # the validator refused, so nothing below is measured.
+        if narrate:
+            print(f"  {red}✗{off} the contract does not validate: "
+                  f"{contract.get('error', '')}")
+        steps.wrong(f"tenant:{org}", why="contract-invalid",
+                    detail=contract.get("error", ""))
+        steps.finish()
+
+    services = contract.get("servicios") or []
+    declared = {f"{org}-{sv['nombre']}": sv for sv in services}
+
+    # ── the namespace ────────────────────────────────────────────────
+    try:
+        nsdoc = json.loads(_kubectl(["get", "namespace", ns, "-o", "json"]))
+        phase = (nsdoc.get("status") or {}).get("phase")
+        alive = True
+    except ValueError as e:
+        steps.not_evaluable(f"tenant:{org}", why="apiserver-unreadable", detail=str(e))
+        steps.finish()
+    except RuntimeError as e:
+        detail = str(e)
+        # «NotFound» is an ANSWER. Anything else — no route to the
+        # apiserver, no kubeconfig, forbidden — is silence, and silence
+        # about a namespace is silence about everything inside it.
+        if "NotFound" not in detail and "not found" not in detail:
+            if narrate:
+                print(f"  {yellow}!{off} the apiserver did not answer: "
+                      f"this is not an organization that is down, it is one "
+                      f"nobody could look at")
+            steps.not_evaluable(f"tenant:{org}", why="apiserver-silent", detail=detail)
+            steps.finish()
+        phase, alive = None, False
+
+    if narrate:
+        print(f"\n{org}  {grey}({ns} · {contract.get('dominio') or 'no public domain'} "
+              f"· quota {contract.get('cuota')}){off}")
+
+    if not alive:
+        if narrate:
+            print(f"  {red}✗{off} the namespace does not exist: the contract "
+                  f"is in git and nothing of it is running")
+        steps.wrong("namespace", namespace=ns, exists=False)
+        # Each declared service, absent and MEASURED absent. Listing
+        # them one by one rather than as a single «nothing is up» is
+        # what lets the console draw the shape of what is missing.
+        for sv in services:
+            steps.wrong(f"service:{sv['nombre']}", tipo=sv["tipo"],
+                        why="no-namespace", ready=0, desired=None)
+        steps.finish()
+
+    steps.already("namespace", namespace=ns, exists=True, phase=phase)
+
+    # ── the workloads ────────────────────────────────────────────────
+    live = {}
+    for kind in ("deployment", "statefulset"):
+        items = _get(ns, kind)
+        if items is None:
+            steps.not_evaluable(f"workloads:{kind}", why="unreadable", namespace=ns)
+            steps.finish()
+        for item in items:
+            meta = item.get("metadata") or {}
+            app = (meta.get("labels") or {}).get("app")
+            spec, status = item.get("spec") or {}, item.get("status") or {}
+            images = [c.get("image", "") for c in
+                      ((spec.get("template") or {}).get("spec") or {}).get("containers") or []]
+            live[app or meta.get("name")] = {
+                "kind": item.get("kind") or kind.capitalize(),
+                "name": meta.get("name"),
+                "ready": int(status.get("readyReplicas") or 0),
+                "desired": int(spec.get("replicas") or 0),
+                "image": images[0] if images else None,
+            }
+
+    with_disk = _owes_a_disk()
+    claimed = set()
+    volumes = _get(ns, "persistentvolumeclaim")
+    by_app = {}
+    if volumes is not None:
+        for v in volumes:
+            app = ((v.get("metadata") or {}).get("labels") or {}).get("app")
+            if not app:
+                continue
+            by_app.setdefault(app, []).append({
+                "claim": v["metadata"]["name"],
+                "phase": (v.get("status") or {}).get("phase"),
+                "size": ((v.get("status") or {}).get("capacity") or {}).get("storage"),
+            })
+
+    for sv in services:
+        app = f"{org}-{sv['nombre']}"
+        w = live.pop(app, None)
+        data = {"tipo": sv["tipo"]}
+        if sv.get("publico"):
+            data["publico"] = sv["publico"]
+        if w is None:
+            if narrate:
+                print(f"  {red}✗{off} {sv['nombre']:<12} {grey}declared, and there "
+                      f"is no workload with label app={app}{off}")
+            steps.wrong(f"service:{sv['nombre']}", why="no-workload",
+                        ready=0, desired=None, **data)
+            continue
+        data.update({"kind": w["kind"], "workload": w["name"],
+                     "ready": w["ready"], "desired": w["desired"],
+                     "image": w["image"], "digest": _digest(w["image"] or "")})
+        if with_disk is None:
+            # The catalogue could not be read, so whether this type owes
+            # a disk is unknown. Unknown is not «it does not», and it is
+            # not «it does»: the field says nobody asked.
+            data["volume"] = None
+            data["volume_unmeasured"] = "services.yaml unreadable"
+        elif sv["tipo"] in with_disk:
+            # A database with no volume is a database that loses
+            # everything on the next restart, and it looks exactly like
+            # a healthy one until then.
+            claims = by_app.get(app)
+            if volumes is None:
+                data["volume"] = None
+                data["volume_unmeasured"] = "the claims could not be listed"
+            elif claims:
+                data["volume"] = claims[0]["claim"]
+                data["volume_phase"] = claims[0]["phase"]
+                data["volume_size"] = claims[0]["size"]
+            else:
+                data["volume"] = None
+                data["volume_phase"] = "missing"
+        if data.get("volume"):
+            claimed.add(data["volume"])
+        ok = w["desired"] > 0 and w["ready"] == w["desired"]
+        bound = data.get("volume_phase", "Bound") == "Bound"
+        if narrate:
+            mark = f"{green}·{off}" if ok and bound else f"{red}✗{off}"
+            vol = (f" · {data['volume_size']} {data.get('volume_phase', '')}"
+                   if data.get("volume") else "")
+            print(f"  {mark} {sv['nombre']:<12} {sv['tipo']:<10} "
+                  f"{w['ready']}/{w['desired']} {grey}{w['kind'].lower()}{vol}{off}")
+        (steps.already if ok and bound else steps.wrong)(
+            f"service:{sv['nombre']}", **data)
+
+    # Whatever is left in `live` answers to no service of the contract.
+    for app, w in sorted(live.items()):
+        if narrate:
+            print(f"  {yellow}!{off} {w['name']:<12} {grey}running in {ns}, and no "
+                  f"service of the contract claims it{off}")
+        steps.wrong(f"unclaimed:{w['name']}", kind=w["kind"], ready=w["ready"],
+                    desired=w["desired"], label=app)
+
+    # A volume nobody claims. MEASURED ON THE FIRST RUN of this command
+    # against a real instance: an organization whose contract declares
+    # one stateless service was holding 100Gi on a bound claim that came
+    # from its own repo. Nothing was wrong with it — it was Bound, the
+    # pod was Running, the round was green — and `aegis data` had never
+    # heard of it, because `aegis data` reads contracts. A hundred
+    # gigabytes with no copy and nothing to say so.
+    if volumes is not None:
+        for v in volumes:
+            name = v["metadata"]["name"]
+            if name in claimed:
+                continue
+            size = ((v.get("status") or {}).get("capacity") or {}).get("storage")
+            if narrate:
+                print(f"  {yellow}!{off} {name:<12} {grey}{size or '?'} bound in {ns}, "
+                      f"and no service of the contract declares it — `aegis data` "
+                      f"reads contracts, so nothing copies this{off}")
+            steps.wrong(f"unclaimed-volume:{name}", size=size,
+                        phase=(v.get("status") or {}).get("phase"),
+                        label=((v.get("metadata") or {}).get("labels") or {}).get("app"))
+
+    # ── the routing ──────────────────────────────────────────────────
+    public = [sv for sv in services if sv.get("publico")]
+    routes = _get(ns, "ingressroute.traefik.io")
+    if routes is None:
+        steps.not_evaluable("routing", why="no-ingressroute-kind", namespace=ns)
+    elif not public:
+        steps.already("routing", public=0, note="no service asks to be public")
+    else:
+        served, hosts = set(), set()
+        for r in routes:
+            for rule in (r.get("spec") or {}).get("routes") or []:
+                for s in rule.get("services") or []:
+                    served.add(s.get("name"))
+                match = rule.get("match", "")
+                if "Host(`" in match:
+                    hosts.add(match.split("Host(`", 1)[1].split("`", 1)[0])
+        # AND WHETHER ANYBODY IS BEHIND IT. A route whose Service has no
+        # ready endpoint is a path that returns 502 while every other
+        # thing on this screen is green: the IngressRoute exists, the
+        # Service exists, ArgoCD is Synced. This is the same shape as
+        # the round's own debt —it counts that the probe EXISTS, not
+        # that the site answers— and it is the one measurement that
+        # tells an operator the page is dark.
+        ready_of = _endpoints(ns)
+        for sv in public:
+            target = f"{org}-{sv['nombre']}"
+            routed = target in served
+            live_eps = None if ready_of is None else ready_of.get(target, 0)
+            data = {"publico": sv["publico"], "service": target, "routed": routed}
+            if live_eps is None:
+                data["endpoints"] = None
+                data["endpoints_unmeasured"] = "the endpoints could not be listed"
+                state = "wrong" if not routed else "not_evaluable"
+            else:
+                data["endpoints"] = live_eps
+                state = "already" if routed and live_eps > 0 else "wrong"
+            if narrate:
+                mark = {"already": f"{green}·{off}", "wrong": f"{red}✗{off}"}.get(
+                    state, f"{yellow}!{off}")
+                why = ("" if state == "already" else
+                       ("  NOT ROUTED" if not routed else "  ROUTED AT NOBODY"))
+                print(f"  {mark} {sv['publico']:<12} {grey}\u2192 {target}"
+                      f"{why}{off}")
+            getattr(steps, state)(f"public:{sv['nombre']}", **data)
+        steps.already("routing", public=len(public), hosts=sorted(hosts))
+
+    # ── the quota ────────────────────────────────────────────────────
+    quotas = _get(ns, "resourcequota")
+    if quotas is None:
+        steps.not_evaluable("quota", why="unreadable", namespace=ns)
+    elif not quotas:
+        # A namespace with no ResourceQuota is not «plenty of room»: it
+        # is a tenant with no ceiling, which is what the quota exists to
+        # prevent.
+        steps.wrong("quota", why="no-resourcequota", namespace=ns)
+        if narrate:
+            print(f"  {red}✗{off} no ResourceQuota: this organization has no ceiling")
+    else:
+        status = quotas[0].get("status") or {}
+        used, hard = status.get("used") or {}, status.get("hard") or {}
+        tightest, pct = None, -1.0
+        for key, ceiling in hard.items():
+            spent = used.get(key)
+            if spent is None:
+                continue
+            conv = quantity.cpu if key.endswith("cpu") else (
+                quantity.mem if key.endswith(("memory", "storage")) else int)
+            try:
+                top, now = conv(str(ceiling)), conv(str(spent))
+            except (ValueError, TypeError):
+                continue
+            if top <= 0:
+                continue
+            share = 100.0 * now / top
+            if share > pct:
+                tightest, pct = key, share
+        if narrate and tightest:
+            print(f"  {grey}quota: {tightest} at {pct:.0f}% "
+                  f"({used.get(tightest)} of {hard.get(tightest)}){off}")
+        steps.already("quota", quota=quotas[0]["metadata"]["name"],
+                      used=used, hard=hard, tightest=tightest,
+                      percent=round(pct, 1) if tightest else None)
+
+    steps.finish()
+
+
+def main():
+    import argparse
+    ap = cli.parser("tenant", __doc__.split("\n")[0])
+    flags = argparse.ArgumentParser(add_help=False)
+    flags.add_argument("--json", action="store_true", dest="json_mode",
+                       default=argparse.SUPPRESS,
+                       help="the document of states instead of the narration")
+    sub = ap.add_subparsers(dest="verb", required=True)
+    s = sub.add_parser("show", parents=[flags],
+                       help="what this organization actually has running")
+    s.add_argument("organization", metavar="ORGANIZATION")
+    ap.add_argument("--json", action="store_true", dest="json_mode",
+                    help="the document of states instead of the narration")
+    a = ap.parse_args()
+    # Straight off the namespace: the top-level declaration carries a
+    # real default, so the attribute always exists, and a flag read
+    # through a string is a flag no check can see being read (118).
+    steps = outcomes.Steps(json_mode=a.json_mode)
+    return show(a.organization, steps, not a.json_mode)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

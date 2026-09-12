@@ -48,6 +48,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 
 # ── canonical python preamble (V-102) ────────────────────────────────
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
@@ -299,13 +300,37 @@ def listing():
 SOURCES = ("org list", "traffic show", "capacity show", "builds show", "check", "edge check")
 
 
-def _read_instance():
+# AND WHAT ONE ORGANIZATION'S SCREEN READS. Three commands, each one
+# ASKED ABOUT THAT ORGANIZATION rather than about the instance: the
+# living side of the contract, what arrived at it, and whether its data
+# has a copy somewhere else. Scoped at the source and not filtered here
+# on purpose — a screen that filtered a document would be dropping
+# measurements, and the console's one promise is that it does not.
+ORG_SOURCES = ("tenant show {org}", "traffic show --org {org}",
+               "data remote status --org {org}")
+
+
+def _organizations(readings):
+    """Who the console will draw a page for: the names the contracts
+    declare, taken from the reading already on the screen. Derived and
+    never a list kept here, so an organization created ten minutes ago
+    has a page as soon as the list does."""
+    for r in readings:
+        if r.get("comando") != "org list":
+            continue
+        return {s["step"].split(":", 1)[1]
+                for s in (r.get("documento") or {}).get("steps") or []
+                if s.get("step", "").startswith("organization:")}
+    return set()
+
+
+def _read_instance(sources=SOURCES):
     """One reading per source. A source that cannot answer is a reading
     too — the case zero, live — and never an exception that empties the
     page."""
     import datetime
     readings = []
-    for line in SOURCES:
+    for line in sources:
         parts = line.split()
         when = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
         entry = {"comando": line, "rc": None, "documento": None,
@@ -330,8 +355,11 @@ def serve(port):
 
     from aegis import console as drawing
 
-    state = {"readings": _read_instance()}
+    state = {"readings": _read_instance(), "orgs": {}}
     lock = threading.Lock()
+
+    def read_org(name):
+        return _read_instance(tuple(s.format(org=name) for s in ORG_SOURCES))
 
     class Handler(http.server.BaseHTTPRequestHandler):
         # The default logs one line per request to stderr, which on a
@@ -368,9 +396,30 @@ def serve(port):
             if path == "/measure":
                 with lock:
                     state["readings"] = _read_instance()
+                    state["orgs"].clear()
                 self.send_response(303)
                 self.send_header("Location", "/")
                 self.end_headers()
+                return
+            if path.startswith("/org/"):
+                # The name comes off a URL anybody can type. It is
+                # matched against the organizations the CONTRACTS
+                # declare and never passed along as typed: every one of
+                # these sources ends up as an argv, and an argv built
+                # out of a URL is the oldest hole there is.
+                name = urllib.parse.unquote(path[len("/org/"):]).strip("/")
+                if name not in _organizations(state["readings"]):
+                    self._send(404, "no organization by that name\n",
+                               "text/plain; charset=utf-8", head_only)
+                    return
+                with lock:
+                    readings = state["orgs"].get(name)
+                if readings is None:
+                    readings = read_org(name)
+                    with lock:
+                        state["orgs"][name] = readings
+                self._send(200, drawing.page(readings, f"{name} · aegis", subject=name),
+                           head_only=head_only)
                 return
             if path != "/":
                 self._send(404, "404\n", "text/plain; charset=utf-8", head_only)
@@ -389,6 +438,8 @@ def serve(port):
     server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"the console is reading on http://127.0.0.1:{port}/  (ctrl-c to stop)")
     print(f"  sources: {', '.join(SOURCES)}")
+    print(f"  /org/<name> reads one organization: "
+          f"{', '.join(x.replace('{org}', '<name>') for x in ORG_SOURCES)}")
     print(f"  /measure reads them again")
     try:
         server.serve_forever()

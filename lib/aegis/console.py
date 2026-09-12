@@ -199,7 +199,7 @@ def _panel_organizations(doc, states):
             extras.append(f"ai {step['ai']}")
         tiles.append(
             f'<article class="tile" data-state="{state}">'
-            f'<h3>{_e(name)}</h3>{_chip(state, "contract")}'
+            f'<h3><a href="/org/{_e(name)}">{_e(name)}</a></h3>{_chip(state, "contract")}'
             f'<p class="host mono">{_e(step.get("dominio") or "no public domain")}</p>'
             f'<div class="srvs">{chips}</div>'
             f'<p class="meta">quota <b>{_e(step.get("cuota"))}</b>'
@@ -369,6 +369,168 @@ def _panel_builds(doc, states):
             + (f'<ul class="tail">{"".join(gaps)}</ul>' if gaps else ""))
 
 
+
+def _bar(pct, state):
+    """One dimension of a quota, drawn. The number is beside it: a bar
+    on its own is a feeling, and the decision («can I add a service»)
+    is taken on the figure."""
+    width = max(0, min(100, pct))
+    return (f'<div class="bar" data-state="{state}">'
+            f'<span style="width:{width:.0f}%"></span></div>')
+
+
+def _panel_tenant(doc, states):
+    """One organization: what its contract declares, against what is
+    running. The tiles are the services; everything the contract does
+    NOT declare is drawn apart and never folded in, because an
+    unclaimed workload or an unclaimed volume is precisely the thing
+    that has been invisible until now."""
+    tiles, extra, head = [], [], []
+    for step in doc.get("steps") or []:
+        state = SCREEN.get(step.get("state"), UNSEEN)
+        states.add(state)
+        name = step.get("step", "")
+        kind, _, what = name.partition(":")
+
+        if kind == "namespace":
+            head.append(f'<div class="fact"><span class="figure mono">'
+                        f'{_e(step.get("namespace", "?"))}</span>'
+                        f'<span class="label">namespace</span></div>')
+            if not step.get("exists"):
+                extra.append(f'<li data-state="{state}">{_chip(state, "namespace")}'
+                             f'<span class="note">the contract is in git and '
+                             f'nothing of it is running</span></li>')
+            continue
+
+        if kind == "service":
+            ready, desired = step.get("ready"), step.get("desired")
+            count = (f'{ready}/{desired}' if desired is not None else "none")
+            bits = [f'<span class="srv">{_e(step.get("tipo", "?"))}</span>']
+            if step.get("publico"):
+                bits.append(f'<span class="srv mono">{_e(step["publico"])}</span>')
+            if step.get("volume"):
+                bits.append(f'<span class="srv">{_e(step.get("volume_size") or "disk")}'
+                            f'<i>{_e(step.get("volume_phase", ""))}</i></span>')
+            elif step.get("volume_phase") == "missing":
+                bits.append('<span class="srv" data-state="wrong">no volume</span>')
+            elif step.get("volume_unmeasured"):
+                bits.append(f'<span class="srv" data-state="unseen">disk not measured</span>')
+            why = step.get("why")
+            tiles.append(
+                f'<article class="tile" data-state="{state}">'
+                f'<h3>{_e(what)}</h3>{_chip(state, count)}'
+                f'<div class="srvs">{"".join(bits)}</div>'
+                + (f'<p class="why">{_e(_WHY.get(why, why))}</p>' if why else "")
+                + (f'<p class="host mono">{_e(step["digest"][:19])}\u2026</p>'
+                   if step.get("digest") else "")
+                + '</article>')
+            continue
+
+        if kind == "public":
+            eps = step.get("endpoints")
+            note = ("not routed" if not step.get("routed") else
+                    "routed at nobody" if eps == 0 else
+                    "nobody counted who is behind it" if eps is None else
+                    f'{eps} behind it')
+            extra.append(f'<li data-state="{state}">{_chip(state, step.get("publico", "/"))}'
+                         f'<span class="mono">{_e(step.get("service", ""))}</span>'
+                         f'<span class="note">{_e(note)}</span></li>')
+            continue
+
+        if kind == "routing":
+            for host in step.get("hosts") or []:
+                head.append(f'<div class="fact"><span class="figure mono">{_e(host)}</span>'
+                            f'<span class="label">host</span></div>')
+            continue
+
+        if kind == "quota":
+            pct = step.get("percent")
+            if pct is None:
+                extra.append(f'<li data-state="{state}">{_chip(state, "quota")}'
+                             f'<span class="note">{_e(step.get("why", "not measured"))}'
+                             f'</span></li>')
+                continue
+            tight = step.get("tightest", "")
+            used = (step.get("used") or {}).get(tight)
+            hard = (step.get("hard") or {}).get(tight)
+            head.append(
+                f'<div class="fact quota"><span class="figure">{pct:.0f}%</span>'
+                f'<span class="label">{_e(tight)}</span>'
+                f'{_bar(pct, state)}'
+                f'<span class="label mono">{_e(used)} of {_e(hard)}</span></div>')
+            continue
+
+        # unclaimed:<workload> and unclaimed-volume:<claim>, and
+        # anything a future version of the command learns to say. The
+        # default is to DRAW IT, never to drop it: a step this panel
+        # does not recognise is still a measurement, and the one thing
+        # the console may not do is lose one.
+        extra.append(
+            f'<li data-state="{state}">{_chip(state, kind)}'
+            f'<span class="mono">{_e(what)}</span>'
+            f'<span class="note">{_e(_WHY.get(kind, kind))}</span></li>')
+
+    if not tiles and not extra:
+        states.add(UNSEEN)
+        return f'<p class="empty" data-state="{UNSEEN}">nothing was measured</p>'
+    return ((f'<div class="facts-row head">{"".join(head)}</div>' if head else "")
+            + (f'<div class="tiles">{"".join(tiles)}</div>' if tiles else "")
+            + (f'<ul class="tail">{"".join(extra)}</ul>' if extra else ""))
+
+
+# The sentences the panel puts beside a machine word. They live here and
+# not in the command because they are for a person reading a screen; the
+# command's word is what travels, and check 123 makes sure the screen
+# never has to READ one of these back.
+_WHY = {
+    "no-workload": "declared in the contract, and nothing in the cluster answers to it",
+    "no-namespace": "the namespace does not exist",
+    "unclaimed": "running here, and no service of the contract claims it",
+    "unclaimed-volume": "bound here, and no service of the contract declares it \u2014 "
+                        "so nothing copies it",
+}
+
+
+def _panel_backup(doc, states):
+    cards = []
+    for step in doc.get("steps") or []:
+        state = SCREEN.get(step.get("state"), UNSEEN)
+        states.add(state)
+        org = step.get("step", "").split(":", 1)[-1]
+        age = step.get("age_hours")
+        cad = step.get("cadence_seconds") or 0
+        facts = []
+        if age is not None:
+            facts.append(_fact("hours old", f"{age:g}"))
+        if cad:
+            facts.append(_fact("every", f"{cad // 3600}h"))
+        facts.append(_fact("copies", str(step.get("copies", 0))))
+        if step.get("bytes"):
+            facts.append(_fact("stored", _bytes(step["bytes"])))
+        note = step.get("note") or _WHY_BACKUP.get(step.get("why"), step.get("why"))
+        if step.get("late"):
+            note = "later than two turns of its own clock"
+        cards.append(
+            f'<article class="tile" data-state="{state}">'
+            f'<h3>{_e(org)}</h3>{_chip(state, "off-site copy")}'
+            f'<div class="facts-row">{"".join(facts)}</div>'
+            + (f'<p class="why">{_e(note)}</p>' if note else "") + '</article>')
+    if not cards:
+        states.add(UNSEEN)
+        return f'<p class="empty" data-state="{UNSEEN}">nothing was measured</p>'
+    return f'<div class="tiles">{"".join(cards)}</div>'
+
+
+_WHY_BACKUP = {
+    "no-copy-at-the-destination": "this organization holds state and there is no copy "
+                                  "of it at the destination",
+    "destination-unreachable": "the destination did not answer \u2014 which is not the "
+                               "same as having no copy",
+    "no-readable-date": "there are objects there and none of them has a readable date: "
+                        "their age cannot be stated",
+}
+
+
 PANELS = {
     "org list": _panel_organizations,
     "traffic show": _panel_traffic,
@@ -376,7 +538,24 @@ PANELS = {
     "edge check": _panel_edge,
     "capacity show": _panel_capacity,
     "builds show": _panel_builds,
+    # Parameterised: the command carries the organization's name, so the
+    # panel is found by the longest key that starts the command.
+    "tenant show": _panel_tenant,
+    "data remote status": _panel_backup,
 }
+
+
+def panel_for(command):
+    """The panel for a command, by the longest declared prefix. A
+    command with no panel is not an error: `_source` falls back to the
+    generic dump, which shows every step and loses nothing. A panel is
+    an improvement over that, never a replacement for it."""
+    best = None
+    for key in PANELS:
+        if command == key or command.startswith(key + " "):
+            if best is None or len(key) > len(best):
+                best = key
+    return PANELS[best] if best else None
 
 
 def _blind(reading):
@@ -400,7 +579,7 @@ def _source(reading):
     doc = reading["documento"]
     steps = doc.get("steps") or []
     states = set()
-    panel = PANELS.get(reading.get("comando"))
+    panel = panel_for(reading.get("comando") or "")
     if panel and steps:
         body = [panel(doc, states)]
     else:
@@ -449,16 +628,26 @@ SENTENCE = {
 }
 
 
-def render(readings):
+def render(readings, subject=None):
+    """The page's body. `subject` names WHO this page is about — an
+    organization — and when it is given the verdict is about that
+    organization and nothing else, which is the whole reason the
+    readings behind it are scoped commands (`tenant show shop`,
+    `traffic show --org shop`) rather than the instance's documents
+    filtered here. A screen that filtered would drop measurements, and
+    dropping one is the one thing this console may not do."""
     bodies, _ = [], None
     for reading in readings:
         body, _ = _source(reading)
         bodies.append(body)
     v = verdict_of(readings)
-    head = (f'<header class="verdict" data-state="{v}">'
+    who = (f'<p class="subject"><a class="act act--quiet" href="/">all '
+           f'organizations</a><b>{_e(subject)}</b></p>' if subject else "")
+    head = (f'<header class="verdict" data-state="{v}">{who}'
             f'<p class="sentence">{_e(SENTENCE[v])}</p></header>')
-    return (f'<main class="sereno" data-veredicto="{v}">{head}'
-            f'{"".join(bodies)}</main>')
+    return (f'<main class="sereno" data-veredicto="{v}"'
+            + (f' data-subject="{_e(subject)}"' if subject else "")
+            + f'>{head}{"".join(bodies)}</main>')
 
 # ── the whole page ───────────────────────────────────────────────────
 # SKIN = share/console/sereno.css, and it is INLINED rather than linked.
@@ -514,9 +703,9 @@ def skin():
         return "/* the skin could not be read; the states are in the data-state attributes */"
 
 
-def page(readings, title="aegis"):
+def page(readings, title="aegis", subject=None):
     return ("<!doctype html>\n"
             '<html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             f"<title>{_e(title)}</title><style>{skin()}</style></head>"
-            f"<body>{render(readings)}</body></html>\n")
+            f"<body>{render(readings, subject)}</body></html>\n")

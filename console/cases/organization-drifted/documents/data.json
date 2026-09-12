@@ -1,0 +1,16 @@
+{
+  "steps": [
+    {
+      "step": "backup:drop",
+      "state": "already",
+      "note": "no service of the CONTRACT holds state: there is nothing a copy would carry",
+      "holds": false,
+      "databases": [],
+      "bucket": false,
+      "copies": 0,
+      "cadence_seconds": 86400,
+      "bytes": 0
+    }
+  ],
+  "rc": 0
+}

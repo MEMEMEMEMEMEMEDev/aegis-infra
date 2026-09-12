@@ -277,3 +277,35 @@ body {
   border-radius:6px; padding:3px 7px;
 }
 .link[data-state="unseen"] { background-image:var(--hatch); background-blend-mode:multiply; }
+
+/* ── one organization ──────────────────────────────────────────────
+ * The screen you reach by entering a name from the list. Its header
+ * carries the way back, because a page you can only leave with the
+ * browser's button is a page that feels like a dead end. */
+.subject {
+  margin:0 0 10px; display:flex; align-items:center; gap:11px; flex-wrap:wrap;
+}
+.subject b { font-size:25px; font-weight:800; letter-spacing:-.035em; }
+.tile > h3 > a { color:inherit; text-decoration:none; border-bottom:1.5px solid currentColor; }
+.tile > h3 > a:hover { border-bottom-color:transparent; }
+
+/* The facts that are true of the whole organization: its namespace, the
+ * hostname anybody types, and how much of its ceiling is spent. They sit
+ * above the services because they are what somebody came to read. */
+.facts-row.head {
+  gap:14px 28px; padding:14px 16px; margin:12px 0 2px;
+  border-radius:var(--r-s); background:var(--sunken);
+}
+.facts-row.head .figure { font-size:15px; }
+.fact.quota { min-width:190px; gap:5px; }
+.fact.quota .figure { font-size:25px; }
+
+/* The one drawing on this page. A bar alone is a feeling, so the figure
+ * and the two quantities stay beside it: the decision it is read for —
+ * does another service fit in here — is taken on the numbers. */
+.bar {
+  height:7px; border-radius:99px; background:rgb(11 13 16 / .09);
+  overflow:hidden; width:100%;
+}
+.bar > span { display:block; height:100%; background:currentColor; border-radius:99px; }
+.bar[data-state="unseen"] { background-image:var(--hatch); }
