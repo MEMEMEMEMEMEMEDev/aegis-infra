@@ -1,0 +1,18 @@
+{
+  "steps": [
+    {
+      "step": "hostname:fantasma.example.test",
+      "state": "wrong",
+      "why": "absent-in-cloudflare"
+    },
+    {
+      "step": "surplus-cnames",
+      "state": "already",
+      "count": 1,
+      "hostnames": [
+        "ssh-lab.example.test"
+      ]
+    }
+  ],
+  "rc": 1
+}

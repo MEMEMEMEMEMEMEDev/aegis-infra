@@ -1,0 +1,19 @@
+version: 1
+caso: edge-hostname-missing
+que: 'un contrato declara un hostname que no existe en Cloudflare: nadie llega a
+  ese sitio y nada mas lo va a decir'
+procedencia: medido
+producido_por:
+- comando: edge check
+  documento: edge.json
+  rc: 1
+medido_en: '2026-09-11T21:02:01-03:00'
+aegis: 8d3060e70916ae90221554bc0262b13dec1e4ca2
+forma:
+  edge.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+    - wrong

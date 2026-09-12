@@ -1,0 +1,18 @@
+version: 1
+caso: contract-missing-secrets
+que: 'un contrato valido cuyos secretos todavia no existen: el plan los enumera
+  y dice con que comando se crean'
+procedencia: medido
+producido_por:
+- comando: org plan sin-secretos.yaml
+  documento: org.json
+  rc: 0
+medido_en: '2026-09-11T21:01:04-03:00'
+aegis: 8d3060e70916ae90221554bc0262b13dec1e4ca2
+forma:
+  org.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - done

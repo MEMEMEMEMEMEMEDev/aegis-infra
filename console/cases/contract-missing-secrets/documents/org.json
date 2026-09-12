@@ -1,0 +1,112 @@
+{
+  "steps": [
+    {
+      "step": "probe-secretos/apps.yaml",
+      "state": "done",
+      "change": "new"
+    },
+    {
+      "step": "probe-secretos/bundle.yaml",
+      "state": "done",
+      "change": "new"
+    },
+    {
+      "step": "probe-secretos/datos.yaml",
+      "state": "done",
+      "change": "new"
+    },
+    {
+      "step": "probe-secretos/kustomization.yaml",
+      "state": "done",
+      "change": "new"
+    },
+    {
+      "step": "probe-secretos/netpol.yaml",
+      "state": "done",
+      "change": "new"
+    },
+    {
+      "step": "probe-secretos/routes.yaml",
+      "state": "done",
+      "change": "new"
+    },
+    {
+      "step": "probe-secretos/secret-generator.yaml",
+      "state": "done",
+      "change": "new"
+    },
+    {
+      "step": "contract:sin-secretos.yaml",
+      "state": "done",
+      "valid": true,
+      "organization": "probe-secretos",
+      "changes": 7,
+      "secrets_missing": [
+        "secret-regcred-internal.enc.yaml",
+        "secret-datos-credenciales.enc.yaml"
+      ],
+      "written": false
+    },
+    {
+      "step": "stage:edge",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:routes",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:ai-registry",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:projects",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:credentials",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:tenants",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:buckets",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:garage",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:jenkins",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:base-consumers",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:probes",
+      "state": "done",
+      "rc": 0
+    },
+    {
+      "step": "stage:jenkinsfiles",
+      "state": "done",
+      "rc": 0
+    }
+  ],
+  "rc": 0
+}
