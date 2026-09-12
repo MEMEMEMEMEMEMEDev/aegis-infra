@@ -12,19 +12,19 @@
     {
       "step": "traffic:portafolio",
       "state": "already",
-      "requests": 3043,
+      "requests": 3042,
       "errors": 0,
       "p95_ms": 95.1,
-      "bytes": 255655010,
+      "bytes": 255568552,
       "hours": 24
     },
     {
       "step": "traffic:shop",
       "state": "already",
-      "requests": 3900,
+      "requests": 3899,
       "errors": 0,
       "p95_ms": 96.2,
-      "bytes": 189384114,
+      "bytes": 189190463,
       "hours": 24
     },
     {
@@ -44,7 +44,7 @@
     {
       "step": "traffic:total",
       "state": "already",
-      "requests": 12435,
+      "requests": 12433,
       "hours": 24
     }
   ],

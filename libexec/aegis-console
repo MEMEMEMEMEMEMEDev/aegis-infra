@@ -288,7 +288,7 @@ def listing():
 
 
 # ── serve ────────────────────────────────────────────────────────────
-# WHAT IT READS. Five commands, named here rather than derived because
+# WHAT IT READS. Six commands, named here rather than derived because
 # each one is a DECISION about what the first screen is for, not a
 # detail: the organizations are the entry —the list the operator asked
 # for—, the traffic is what actually arrived at each of them, the round
@@ -296,7 +296,7 @@ def listing():
 # organization fits, and the edge says whether the hostnames anybody
 # types actually exist. More arrive with the panels that need
 # them.
-SOURCES = ("org list", "traffic show", "capacity show", "check", "edge check")
+SOURCES = ("org list", "traffic show", "capacity show", "builds show", "check", "edge check")
 
 
 def _read_instance():

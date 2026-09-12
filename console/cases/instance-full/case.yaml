@@ -1,7 +1,7 @@
 version: 1
 caso: instance-full
 que: 'la instancia entera como la sirve la consola: organizaciones, trafico, capacidad,
-  la ronda y el borde'
+  los ultimos builds, la ronda y el borde'
 procedencia: medido
 producido_por:
 - comando: org list
@@ -13,14 +13,17 @@ producido_por:
 - comando: capacity show
   documento: capacity.json
   rc: 0
+- comando: builds show
+  documento: builds.json
+  rc: 0
 - comando: check
   documento: check.json
   rc: 1
 - comando: edge check
   documento: edge.json
   rc: 0
-medido_en: '2026-09-12T07:33:54-03:00'
-aegis: 9eda971b9a46a6a73de6f1b998478a65fdb89e0e
+medido_en: '2026-09-12T07:45:33-03:00'
+aegis: a37c180ed2ccfee6d5803cdd5586e54461ba8dc8
 forma:
   org.json:
     claves:
@@ -35,6 +38,12 @@ forma:
     estados:
     - already
   capacity.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  builds.json:
     claves:
     - rc
     - steps

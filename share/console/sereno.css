@@ -259,3 +259,21 @@ body {
   .tiles, .grid { grid-template-columns:1fr; }
   .facts-row { gap:12px 18px; }
 }
+
+/* The chain of a push. Each link carries its own state, so one nobody
+ * measured is DRAWN as unmeasured — on a row of ticks, a missing link
+ * reads as fine, and these are the two links no other platform shows. */
+.builds { display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+.build {
+  border-radius:var(--r-s); padding:11px 13px;
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+}
+.build > h3 { font-size:13.5px; font-weight:700; }
+.build .build-n { font-size:11.5px; opacity:.62; }
+.build .note { flex-basis:100%; margin:2px 0 0; font-size:11.5px; opacity:.7; }
+.chain { display:flex; align-items:center; gap:4px; margin-left:auto; flex-wrap:wrap; }
+.link {
+  font-size:10.5px; font-weight:700; letter-spacing:.04em;
+  border-radius:6px; padding:3px 7px;
+}
+.link[data-state="unseen"] { background-image:var(--hatch); background-blend-mode:multiply; }

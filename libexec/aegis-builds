@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+# aegis-summary: What happened to each push: built, scanned, signed, written down
+# aegis-group:   operate
+# aegis-subcommands: show
+# aegis-help:
+# Usage: aegis builds [show] [--last N] [--json]
+#
+# show  the last N builds, link by link, as the pipeline reported them
+#
+"""aegis-builds — what actually happened to each push.
+
+WHY THIS IS THE PANEL THAT SELLS THE PRODUCT. Every hosting platform
+shows deployments. What none of them shows is the two links in the
+middle: whether anybody SCANNED the image, and whether anybody SIGNED
+it. aegis does both on every push and files an event saying so, and
+until now that event was written, kept for a year, and read by nobody.
+
+WHAT IT CAN MEASURE, AND WHAT IT CANNOT — which matters more here than
+anywhere else, because a chain drawn complete is a chain that lies. The
+pipeline's own event covers four links:
+
+    build → scan → sign → write the digest
+
+The last two of the six —ArgoCD syncing it and the cluster admitting
+it— are NOT in this event: they happen afterwards, in other components,
+and this command does not pretend to know them. They are reported as
+NOT EVALUATED, by name, with what would measure them. A screen that
+drew six green ticks from four measurements would be inventing the two
+that matter most to somebody debugging a deploy that never arrived.
+
+WHERE IT READS. vlogs-events, the same place phase 85 posts to, queried
+by ClusterIP exactly as the round does.
+"""
+import json
+import os
+import subprocess
+import sys
+import urllib.parse
+import urllib.request
+
+# ── canonical python preamble (V-102) ────────────────────────────────
+_AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
+    os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
+from aegis import cli, outcomes           # noqa: E402
+
+grey = "\033[90m"
+off = "\033[0m"
+
+# The four links this source can speak for, in the order they happen.
+# The two that follow are declared right beside them so that nobody has
+# to remember they exist: a chain is only honest if its gaps are named.
+LINKS = ("build", "scan", "sign", "digest")
+BEYOND = {"sync": "ArgoCD's Application status (aegis check, section 3)",
+          "admission": "Kyverno's rejections in the tenant namespaces"}
+
+
+def _kubectl(args):
+    r = subprocess.run(["kubectl", *args], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or "kubectl did not answer").strip()[:200])
+    return r.stdout.strip()
+
+
+def _events(last):
+    """vlogs-events is HEADLESS, so its ClusterIP is None and the address
+    is the endpoint's — the same resolution the round does, and for the
+    same reason: a reader that assumed a ClusterIP reported an empty
+    database as a quiet week."""
+    ip = _kubectl(["get", "endpoints", "-n", "observability", "vlogs-events",
+                   "-o", "jsonpath={.subsets[0].addresses[0].ip}"])
+    if not ip:
+        raise RuntimeError("vlogs-events has no endpoint")
+    query = f"source:jenkins-build event:supply-chain | sort by (_time) desc | limit {int(last)}"
+    url = f"http://{ip}:9428/select/logsql/query"
+    data = urllib.parse.urlencode({"query": query}).encode()
+    with urllib.request.urlopen(url, data=data, timeout=20) as r:
+        body = r.read().decode("utf-8", "replace")
+    out = []
+    for line in body.splitlines():
+        line = line.strip()
+        if line:
+            out.append(json.loads(line))
+    return out
+
+
+def _chain(event):
+    """One event into four measured links plus two named gaps.
+
+    `skip_build` is not a failure: the pipeline's anti-loop skips the
+    build when a commit touched only k8s/, which is the digest write-back
+    doing its job. It is its own answer — nothing was built, so nothing
+    was scanned or signed either, and saying «done» about any of them
+    would be inventing work.
+    """
+    skipped = event.get("skip_build") == "true"
+    if skipped:
+        return {link: "not-evaluable" for link in LINKS}, "no build (only manifests changed)"
+    chain = {"build": "done"}
+    chain["scan"] = "not-evaluable" if event.get("scan_skipped") == "true" else "done"
+    chain["sign"] = "not-evaluable" if event.get("sign_skipped") == "true" else "done"
+    chain["digest"] = "done" if event.get("digest") else "wrong"
+    return chain, None
+
+
+def show(last, steps, narrate):
+    try:
+        events = _events(last)
+    except Exception as e:                                # noqa: BLE001
+        if narrate:
+            print(f"  {grey}the events database did not answer: this is not «no builds», "
+                  f"it is nobody having been asked{off}")
+        steps.not_evaluable("builds", why="vlogs-silent", detail=str(e))
+        steps.finish()
+
+    if narrate:
+        print(f"\nbuilds  {grey}(the last {len(events)}, newest first){off}")
+    if not events:
+        # A measured zero: the database answered and it holds nothing.
+        steps.already("builds", count=0)
+        if narrate:
+            print(f"  {grey}the database answered and holds no build event{off}")
+        steps.finish()
+
+    for event in events:
+        image = event.get("_msg") or "?"
+        chain, why = _chain(event)
+        # THE STATE OF A BUILD, and the distinction that decides the rc.
+        #
+        # A build the anti-loop skipped is NOT «I could not look»: it is
+        # measured, and what was measured is that there was nothing to
+        # do — the commit touched only k8s/, which is the digest
+        # write-back doing its job. Filing it as unmeasured made this
+        # command exit 2 on a healthy instance, every time, and an rc
+        # that never changes is a signal nobody reads.
+        #
+        # What IS unmeasured is a build that RAN with the scan or the
+        # signature skipped. That is the bootstrap tolerance, and it is
+        # exactly the case worth a 2: an image went out and nobody
+        # looked at it.
+        if "wrong" in chain.values():
+            worst = "wrong"
+        elif why:
+            worst = "done"          # skipped by the anti-loop: measured
+        elif "not-evaluable" in chain.values():
+            worst = "not-evaluable"
+        else:
+            worst = "done"
+        if narrate:
+            drawn = "  ".join(
+                f"{link}{'' if chain[link] == 'done' else '?' if chain[link] == 'not-evaluable' else '!'}"
+                for link in LINKS)
+            print(f"  {image:<18} build {event.get('build', '?'):<4} {drawn}"
+                  + (f"   {grey}{why}{off}" if why else ""))
+        step = {"links": chain, "image": image, "build": event.get("build"),
+                "branch": event.get("branch"), "tag": event.get("tag"),
+                "digest": event.get("digest"), "when": event.get("_time")}
+        if why:
+            step["why"] = why
+        getattr(steps, {"done": "already", "wrong": "wrong"}.get(worst, "not_evaluable"))(
+            f"build:{image}:{event.get('build', '?')}", **step)
+
+    # THE TWO LINKS THIS SOURCE CANNOT SEE travel as DATA on the summary
+    # step, not as states of their own — and that distinction is the
+    # whole point of this block.
+    #
+    # The first version filed them as `not-evaluable` steps, which was
+    # honest about the gap and wrong about the rc: rc 2 dominates, so
+    # this command would have exited 2 FOREVER, by design, and a signal
+    # that never changes is a signal nobody reads. It is the same
+    # disease one layer up — a permanent warning says as much as no
+    # warning at all.
+    #
+    # The gap is not hidden by moving it: the summary step carries it,
+    # the console's panel draws it as unmeasured, and the narration
+    # prints it. What changes is that the rc now answers the question
+    # this command is actually asking — did I read the builds — instead
+    # of answering a question about somebody else's component.
+    steps.already("builds", count=len(events), links_measured=list(LINKS),
+                  links_elsewhere=BEYOND)
+    if narrate:
+        for link, who in BEYOND.items():
+            print(f"  {grey}{link}: not measured here — {who}{off}")
+    steps.finish()
+
+
+def main():
+    import argparse
+    ap = cli.parser("builds", __doc__.split("\n")[0])
+    flags = argparse.ArgumentParser(add_help=False)
+    flags.add_argument("--json", action="store_true", dest="json_mode",
+                       default=argparse.SUPPRESS,
+                       help="the document of states instead of the narration")
+    flags.add_argument("--last", type=int, default=argparse.SUPPRESS,
+                       help="how many builds to read (10 by default)")
+    sub = ap.add_subparsers(dest="verb")
+    sub.add_parser("show", parents=[flags], help="the last builds, link by link")
+    ap.add_argument("--json", action="store_true", dest="json_mode",
+                    help="the document of states instead of the narration")
+    ap.add_argument("--last", type=int, default=10,
+                    help="how many builds to read (10 by default)")
+    a = ap.parse_args()
+    steps = outcomes.Steps(json_mode=a.json_mode)
+    return show(a.last, steps, not a.json_mode)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

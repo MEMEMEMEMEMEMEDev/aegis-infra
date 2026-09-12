@@ -328,12 +328,54 @@ def _panel_capacity(doc, states):
     return f'<div class="tiles">{head}</div>' + (f'<ul class="tail">{"".join(fits)}</ul>' if fits else "")
 
 
+def _panel_builds(doc, states):
+    rows = []
+    gaps = []
+    for step in doc.get("steps") or []:
+        state = SCREEN.get(step.get("state"), UNSEEN)
+        states.add(state)
+        name = step.get("step", "")
+        if name == "builds" and step.get("links_elsewhere"):
+            # The gaps come as DATA on the summary step (see the comment
+            # in aegis-builds about the permanent rc 2). They are drawn
+            # as unmeasured all the same: on a chain, a link that is
+            # simply absent reads as fine.
+            for link, who in (step["links_elsewhere"] or {}).items():
+                states.add(UNSEEN)
+                gaps.append(f'<li data-state="{UNSEEN}">{_chip(UNSEEN, link)}'
+                            f'<span class="note">not measured here — {_e(who)}</span></li>')
+            continue
+        links = step.get("links") or {}
+        # THE CHAIN. Each link carries its own state, so a link nobody
+        # measured is drawn as unmeasured and not as a gap in a row of
+        # ticks — which on a chain reads as «fine».
+        drawn = "".join(
+            f'<span class="link" data-state="{SCREEN.get(v, UNSEEN)}" '
+            f'title="{_e(k)}">{_e(k)}</span>'
+            for k, v in links.items())
+        for v in links.values():
+            states.add(SCREEN.get(v, UNSEEN))
+        rows.append(
+            f'<article class="build" data-state="{state}">'
+            f'<h3>{_e(step.get("image", "?"))}</h3>'
+            f'<span class="mono build-n">build {_e(step.get("build", "?"))}</span>'
+            f'<div class="chain">{drawn}</div>'
+            + (f'<p class="note">{_e(step["why"])}</p>' if step.get("why") else "")
+            + '</article>')
+    if not rows:
+        states.add(UNSEEN)
+        rows.append(f'<p class="empty" data-state="{UNSEEN}">no build was read</p>')
+    return (f'<div class="builds">{"".join(rows)}</div>'
+            + (f'<ul class="tail">{"".join(gaps)}</ul>' if gaps else ""))
+
+
 PANELS = {
     "org list": _panel_organizations,
     "traffic show": _panel_traffic,
     "check": _panel_round,
     "edge check": _panel_edge,
     "capacity show": _panel_capacity,
+    "builds show": _panel_builds,
 }
 
 
