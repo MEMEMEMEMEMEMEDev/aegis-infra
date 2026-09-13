@@ -142,7 +142,6 @@ RUN addgroup -g 65532 -S nonroot \
  && adduser -u 65532 -D -S -H -h /nonexistent -s /sbin/nologin -G nonroot -g nonroot nonroot \
  && apk upgrade --no-cache \
  && apk add --no-cache \
-      nginx \
       php84 php84-fpm php84-common \
       php84-ctype php84-curl php84-dom php84-fileinfo php84-iconv \
       php84-mbstring php84-openssl php84-pdo php84-pdo_pgsql \
@@ -150,9 +149,34 @@ RUN addgroup -g 65532 -S nonroot \
       php84-tokenizer php84-xml php84-xmlwriter \
  && [ "$(id -u nonroot)" = 65532 ] && [ "$(id -g nonroot)" = 65532 ] \
  && ln -sf /usr/bin/php84 /usr/bin/php \
- && mkdir -p /app/public /etc/nginx/conf.d /var/lib/nginx /var/log/nginx /run/nginx \
- && ln -sf /dev/stdout /var/log/nginx/access.log && ln -sf /dev/stderr /var/log/nginx/error.log \
- && chown -R 65532:65532 /app /etc/nginx/conf.d /var/lib/nginx /var/log/nginx /run/nginx
+ && mkdir -p /app/public \
+ && chown -R 65532:65532 /app
+
+# NGINX EN SU PROPIO `RUN`, Y ESTÁ MEDIDO.
+#
+# Instalado junto a los veinte paquetes de php en un solo `apk add`, el
+# paquete se instalaba («(2/39) Installing nginx»), `nginx -t` pasaba, y en la
+# imagen publicada NO QUEDABA NI UNO de sus archivos: ni /usr/sbin/nginx ni
+# nada de /etc/nginx. El pod arrancaba, php-fpm levantaba, y el entrypoint
+# moría con «nginx: not found». Comprobado recorriendo `apk info -L` de cada
+# paquete instalado contra el sistema de archivos real de un pod: los ÚNICOS
+# archivos ausentes eran los de nginx; los de php84, en el mismo directorio y
+# del mismo `apk add`, estaban todos.
+#
+# Su propia capa lo arregla. Y la lección es más grande que el arreglo, porque
+# es la segunda vez en este mismo archivo:
+#
+#   UN ASSERT QUE CORRE DENTRO DE KANIKO NO ES UN ASSERT SOBRE LA IMAGEN.
+#
+# `nginx -t` decía que sí sobre una imagen que no tenía nginx. Lo único que lo
+# vio fue arrancar un pod. Por eso la verificación de esta base incluye correr
+# la imagen, y no sólo construirla.
+RUN apk add --no-cache nginx \
+ && test -x /usr/sbin/nginx \
+ && mkdir -p /etc/nginx/conf.d /var/lib/nginx /var/log/nginx /run/nginx \
+ && ln -sf /dev/stdout /var/log/nginx/access.log \
+ && ln -sf /dev/stderr /var/log/nginx/error.log \
+ && chown -R 65532:65532 /etc/nginx/conf.d /var/lib/nginx /var/log/nginx /run/nginx
 
 # OUR OWN nginx.conf, for the same reason aegis-base-nginx has one:
 # alpine's stock file includes conf.d in the ROOT context, where a
