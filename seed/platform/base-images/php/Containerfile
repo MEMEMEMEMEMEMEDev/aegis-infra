@@ -90,6 +90,11 @@
 # the RESULT, which is scanned with NO exceptions and signed by the job.
 # The minor here is the single source of the image's tag: the job
 # derives `<minor>-<build>` from this line.
+# De acá sale el nginx. Es la base que esta plataforma ya construye, escanea y
+# firma —la que sirve los fronts estáticos—, así que no agrega ningún eslabón
+# nuevo a la cadena de suministro: es un eslabón que ya estaba, reutilizado.
+FROM registry.registry-system.svc.cluster.local:5000/aegis-base-nginx:3.22-000009@sha256:4329e17592baeeb173fdf06802cdde953a5ed8204bc20435e0c8ddd69d8e50c6 AS nginxbin
+
 FROM public.ecr.aws/docker/library/alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
 
 # ORDER MATTERS, and every step below has a reason:
@@ -171,21 +176,45 @@ RUN addgroup -g 65532 -S nonroot \
 # `nginx -t` decía que sí sobre una imagen que no tenía nginx. Lo único que lo
 # vio fue arrancar un pod. Por eso la verificación de esta base incluye correr
 # la imagen, y no sólo construirla.
-# EL USUARIO `nginx` SE CREA ANTES DEL PAQUETE, igual que en
-# base-images/nginx. Es la única diferencia estructural que quedaba entre
-# aegis-base-nginx —que SÍ tiene su binario en la imagen— y este miembro, que
-# lo perdía: allá el uid 101 existe antes, así que el script de pre-install del
-# paquete no crea ningún usuario; acá lo creaba él, y los archivos del paquete
-# no llegaban a la imagen. No pretendo explicar el mecanismo de kaniko; sí
-# medir cuál de las dos formas produce una imagen con nginx adentro.
+# NGINX NO SE INSTALA ACÁ: SE COPIA DE aegis-base-nginx.
 #
-# El uid 101 NO es el que corre: los procesos corren como 65532 (ver el USER de
-# más abajo). Existe para que el paquete se instale exactamente como se instala
-# en el miembro que funciona.
+# Cuatro intentos con apk y los cuatro produjeron una imagen SIN un solo
+# archivo del paquete nginx —ni /usr/sbin/nginx ni nada de /etc/nginx—,
+# mientras los veinte paquetes de php, del mismo `apk add` y en los mismos
+# directorios, llegaban completos. Se probó: instalarlo junto a php, en su
+# propia capa, creando antes el usuario que su script de pre-install crea, y
+# con `--no-scripts`. Las cuatro veces el build pasó —incluido un `nginx -t`
+# que valida la configuración— y la imagen publicada no tenía nginx. Medido
+# recorriendo `apk info -L` de cada paquete instalado contra el sistema de
+# archivos de un pod.
+#
+#   UN ASSERT QUE CORRE DENTRO DE KANIKO NO ES UN ASSERT SOBRE LA IMAGEN.
+#   `nginx -t` dijo que sí cuatro veces sobre imágenes que no tenían nginx.
+#   Lo único que lo vio fue arrancar un pod.
+#
+# Así que el binario viene de donde ya está y ya funciona: aegis-base-nginx,
+# la base que esta misma plataforma construye, escanea y firma, y sobre la que
+# corren los fronts estáticos. Y eso no es un parche — es mejor: en esta
+# instalación hay UN solo nginx, construido una vez, y el día que image-watch
+# encuentre una CVE en él se reconstruye en un lugar y llega a los dos.
+#
+# El `COPY --from` de una imagen del registro interno es un camino distinto del
+# de apk, y ya está probado en este archivo: todo lo que se copia llega.
+#
+# LO QUE HAY QUE COPIAR, y por qué cada cosa:
+#   /usr/sbin/nginx     el binario;
+#   /etc/nginx          mime.types, fastcgi_params y compañía. Sin fastcgi_params
+#                       el `include` de default.conf falla y nginx no arranca;
+#   /usr/lib/nginx      los módulos que el binario espera encontrar.
+# Las bibliotecas contra las que enlaza —pcre2, openssl, zlib— ya están acá:
+# las trae php. Que eso sea cierto lo prueba el `nginx -v` de abajo... dentro
+# del builder, así que la prueba de verdad es arrancar la imagen.
+COPY --from=nginxbin /usr/sbin/nginx /usr/sbin/nginx
+COPY --from=nginxbin /etc/nginx /etc/nginx
+COPY --from=nginxbin /usr/lib/nginx /usr/lib/nginx
+
 RUN addgroup -g 101 -S nginx \
  && adduser -u 101 -D -S -H -h /var/cache/nginx -s /sbin/nologin -G nginx -g nginx nginx \
- && apk add --no-cache nginx \
- && [ "$(id -u nginx)" = 101 ] \
  && test -x /usr/sbin/nginx \
  && mkdir -p /etc/nginx/conf.d /var/lib/nginx /var/log/nginx /run/nginx \
  && ln -sf /dev/stdout /var/log/nginx/access.log \
