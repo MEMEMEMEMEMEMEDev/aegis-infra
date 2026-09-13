@@ -172,7 +172,7 @@ RUN set -eux; \
     done; \
     php -r 'new DateTimeImmutable("now", new DateTimeZone("America/Santiago"));'; \
     php -r 'if (class_exists("IntlDateFormatter")) { fwrite(STDERR, "intl is installed: see the note about icu-data-en at the top of this file\n"); exit(1); }'; \
-    chmod 0755 /usr/local/bin/aegis-php-entrypoint
+    sh -n /usr/local/bin/aegis-php-entrypoint
 
 # The two servers, each run once at build time, ON THEIR OWN LINES.
 # The shape is not cosmetic: it is what aegis-base-nginx does and what
@@ -192,4 +192,20 @@ STOPSIGNAL SIGQUIT
 # Numeric on purpose (see the contract above). The job reads this line
 # to know which uid to assert on the built image.
 USER 65532:65532
-ENTRYPOINT ["/usr/local/bin/aegis-php-entrypoint"]
+# THE INTERPRETER IS NAMED EXPLICITLY, and the entrypoint file is NOT
+# executable — which is deliberate and was measured, not assumed.
+#
+# Build ci-images#2 (2026-09-12) died with kaniko answering «failed to
+# execute command: permission denied» on a `chmod 0755` in a RUN, in a
+# stage whose download and checksum had both already succeeded. The
+# control is aegis-ci-tofu: same directory, same download-and-verify
+# shape, builds fine — and it never chmods, because tar restores the
+# mode out of the archive.
+#
+# Naming /bin/sh here removes the need for the execute bit AND for the
+# shebang: sh reads the file, which is mode 0644 and world readable, and
+# becomes PID 1 exactly as it would have through the shebang. It also
+# means this image cannot be broken by the file arriving without its
+# mode — which is the same reason check 134 wants no executables in the
+# artifact in the first place.
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/aegis-php-entrypoint"]

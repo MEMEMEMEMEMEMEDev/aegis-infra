@@ -69,20 +69,48 @@ RUN set -eux; \
       php84-tokenizer php84-xml php84-xmlwriter php84-zip; \
     ln -sf /usr/bin/php84 /usr/bin/php
 
-# The phar, verified before it is trusted. `sha256sum -c` fails the
-# build on a mismatch; the file is only made executable afterwards, so a
-# tampered download is never an executable in this image.
+# THE PHAR, verified before it is trusted, and left WITHOUT an execute
+# bit — which is not laziness, it is the shape that builds here.
 #
-# `wget` in a RUN and not `ADD <url>`: ADD-from-URL is a kaniko feature
-# and this build runs in kaniko, which is one more thing that has to be
-# true. busybox wget speaks https on plain alpine (ssl_client and
-# ca-certificates-bundle are both in the base), so the RUN depends on
-# nothing the builder has to provide.
+# MEASURED, build ci-images#2 (2026-09-12): this RUN ended in
+# `chmod 0755 /usr/local/bin/composer` and kaniko answered
+# «error building stage: failed to execute command: permission denied».
+# The download and the checksum had both succeeded in the same RUN, so
+# what the builder refused was the mode change and nothing else.
+# aegis-ci-tofu is the control: it downloads a release to /tmp, verifies
+# its sha256 and lands a binary in this very directory — and it never
+# runs chmod, because tar restores the mode out of the archive. A lone
+# phar has no archive to restore a mode from.
+#
+# So the phar keeps mode 0644 and lives under /usr/local/lib. Nothing is
+# lost: every caller goes through the interpreter anyway, and a pipeline
+# that writes `php /usr/local/lib/composer.phar install` says out loud
+# WHICH php is resolving the dependencies — which is the entire point of
+# this image (see the php83 note above).
+#
+# curl and not busybox wget, and --virtual so it leaves with the build:
+# it is the same pattern aegis-ci-tofu uses, and using the one that is
+# known to work here is worth more than shaving a package.
 RUN set -eux; \
-    wget -q -O /usr/local/bin/composer \
+    apk add --no-cache --virtual .build-deps curl; \
+    curl -fsSL -o /tmp/composer.phar \
       "https://github.com/composer/composer/releases/download/${COMPOSER_VERSION}/composer.phar"; \
-    echo "${COMPOSER_SHA256}  /usr/local/bin/composer" | sha256sum -c -; \
-    chmod 0755 /usr/local/bin/composer
+    echo "${COMPOSER_SHA256}  /tmp/composer.phar" | sha256sum -c -; \
+    mkdir -p /usr/local/lib; \
+    cp /tmp/composer.phar /usr/local/lib/composer.phar; \
+    rm -f /tmp/composer.phar; \
+    apk del .build-deps
+
+# DIAGNOSTIC, and deliberately unable to fail the build: it writes down
+# in the log whether this builder accepts a chmod at all. If it prints
+# `chmod: ACEPTADO`, the conclusion above is wrong and the comment has
+# to be corrected; if it prints `chmod: RECHAZADO`, the reason this
+# image is shaped the way it is stays measured instead of remembered.
+RUN touch /tmp/prueba-chmod \
+ && { chmod 0755 /tmp/prueba-chmod 2>/dev/null \
+      && echo "chmod: ACEPTADO por este builder" \
+      || echo "chmod: RECHAZADO por este builder"; } \
+ ; rm -f /tmp/prueba-chmod ; true
 
 # The `--version` calls are not decoration: if an apk leaves the image
 # without one of these, the build of THIS image fails right here and not
@@ -92,7 +120,7 @@ RUN set -eux; \
     php -v; \
     git --version; \
     unzip -v > /dev/null; \
-    composer --version --no-interaction; \
+    php /usr/local/lib/composer.phar --version --no-interaction; \
     for ext in ctype curl dom fileinfo iconv mbstring openssl pdo pdo_pgsql \
                Phar session SimpleXML sodium tokenizer xml xmlwriter zip; do \
       php -m | grep -qix "$ext" || { echo "MISSING PHP EXTENSION: $ext"; php -m; exit 1; }; \
