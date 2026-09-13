@@ -171,7 +171,21 @@ RUN addgroup -g 65532 -S nonroot \
 # `nginx -t` decía que sí sobre una imagen que no tenía nginx. Lo único que lo
 # vio fue arrancar un pod. Por eso la verificación de esta base incluye correr
 # la imagen, y no sólo construirla.
-RUN apk add --no-cache nginx \
+# EL USUARIO `nginx` SE CREA ANTES DEL PAQUETE, igual que en
+# base-images/nginx. Es la única diferencia estructural que quedaba entre
+# aegis-base-nginx —que SÍ tiene su binario en la imagen— y este miembro, que
+# lo perdía: allá el uid 101 existe antes, así que el script de pre-install del
+# paquete no crea ningún usuario; acá lo creaba él, y los archivos del paquete
+# no llegaban a la imagen. No pretendo explicar el mecanismo de kaniko; sí
+# medir cuál de las dos formas produce una imagen con nginx adentro.
+#
+# El uid 101 NO es el que corre: los procesos corren como 65532 (ver el USER de
+# más abajo). Existe para que el paquete se instale exactamente como se instala
+# en el miembro que funciona.
+RUN addgroup -g 101 -S nginx \
+ && adduser -u 101 -D -S -H -h /var/cache/nginx -s /sbin/nologin -G nginx -g nginx nginx \
+ && apk add --no-cache nginx \
+ && [ "$(id -u nginx)" = 101 ] \
  && test -x /usr/sbin/nginx \
  && mkdir -p /etc/nginx/conf.d /var/lib/nginx /var/log/nginx /run/nginx \
  && ln -sf /dev/stdout /var/log/nginx/access.log \
