@@ -261,7 +261,15 @@ RUN set -eux; \
 # does not answer it. nginx proves that nginx.conf includes conf.d in
 # the http context (a `server{}` in the wrong context fails HERE instead
 # of in the consumer's pod); php-fpm proves the pool file above parses.
-RUN nginx -t
+# `nginx -t` Y DESPUÉS LIMPIAR /tmp, que no es cosmética: el test corre como
+# root y deja /tmp/nginx.pid y los directorios temporales creados POR ROOT
+# dentro de la imagen. En el pod eso queda tapado por el emptyDir que se monta
+# en /tmp, así que no muerde ahí — pero cualquiera que corra esta imagen sin
+# ese montaje se encuentra con que nginx no arranca por «Permission denied»
+# sobre un archivo que la imagen traía. Una imagen no debe llevar los restos
+# de su propio build.
+RUN nginx -t \
+ && find /tmp -mindepth 1 -delete
 
 # EL CAMBIO DE USUARIO VA ANTES DEL TEST DE php-fpm, Y ESO ES EL TEST.
 #
