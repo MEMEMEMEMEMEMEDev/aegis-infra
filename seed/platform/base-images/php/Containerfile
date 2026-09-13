@@ -114,6 +114,16 @@ FROM public.ecr.aws/docker/library/alpine:3.22@sha256:14358309a308569c32bdc37e2e
 #    one of them only to die later, in a request, in a stack trace that
 #    names a class and not a package. `filter` and `hash` are compiled
 #    into the core in PHP 8 and have no package of their own.
+#
+#    NO php84-opcache, Y ES UN HALLAZGO MEDIDO. Enlaza contra libgcc_s.so.1
+#    y no la declara; agregar el paquete `libgcc` no alcanza, porque en la
+#    imagen publicada ese archivo NO EXISTE aunque apk diga que el paquete
+#    está — ni siquiera alcanza crearlo a mano. Y el build pasaba igual,
+#    porque el assert corre DENTRO de kaniko, donde el archivo sí está: un
+#    assert que corre dentro del builder no es un assert sobre la imagen.
+#    Lo que quedaba era una advertencia por stderr en cada invocación de
+#    php, que es la forma exacta en que un problema se vuelve invisible.
+#    Es una optimización, no una funcionalidad. Ver ci-images/php.
 # 4. THE SYMLINK, and it is the trap of this whole file. The package
 #    installs /usr/bin/php84 and PROVIDES the virtual name `php` — but
 #    provides is apk's dependency vocabulary, not a file. There is no
@@ -135,7 +145,7 @@ RUN addgroup -g 65532 -S nonroot \
       nginx \
       php84 php84-fpm php84-common \
       php84-ctype php84-curl php84-dom php84-fileinfo php84-iconv \
-      php84-mbstring php84-opcache php84-openssl php84-pdo php84-pdo_pgsql \
+      php84-mbstring php84-openssl php84-pdo php84-pdo_pgsql \
       php84-phar php84-session php84-simplexml php84-sodium \
       php84-tokenizer php84-xml php84-xmlwriter \
  && [ "$(id -u nonroot)" = 65532 ] && [ "$(id -g nonroot)" = 65532 ] \
@@ -167,11 +177,14 @@ RUN set -eux; \
     php -v; \
     php-fpm84 --version; \
     for ext in ctype curl dom fileinfo iconv mbstring openssl pdo pdo_pgsql \
-               Phar session SimpleXML sodium tokenizer xml xmlwriter Zend\ OPcache; do \
+               Phar session SimpleXML sodium tokenizer xml xmlwriter; do \
       php -m | grep -qix "$ext" || { echo "MISSING PHP EXTENSION: $ext"; php -m; exit 1; }; \
     done; \
     php -r 'new DateTimeImmutable("now", new DateTimeZone("America/Santiago"));'; \
     php -r 'if (class_exists("IntlDateFormatter")) { fwrite(STDERR, "intl is installed: see the note about icu-data-en at the top of this file\n"); exit(1); }'; \
+    if php -r 'exit(0);' 2>&1 | grep -q 'Failed loading'; then \
+      echo "PHP AVISA QUE UNA EXTENSIÓN NO CARGA:"; php -r 'exit(0);'; exit 1; \
+    fi; \
     sh -n /usr/local/bin/aegis-php-entrypoint
 
 # The two servers, each run once at build time, ON THEIR OWN LINES.

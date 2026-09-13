@@ -54,17 +54,28 @@ ARG COMPOSER_SHA256=28dbb6bd8bef31479c7985b774c130a8bda37dbe63c35b56f6cb6bc37742
 #                      pipeline instead would pull an UNPINNED package
 #                      on every build, against a network that can go
 #                      down — the aegis-ci-node lesson, verbatim.
-#   libgcc             MEASURED, and it is the whole reason this image
-#                      exists. php84-opcache links against libgcc_s.so.1
-#                      and does NOT declare it, so without this package
-#                      every single `php` invocation here printed
-#                      «Failed loading Zend extension 'opcache'» and ran
-#                      WITHOUT opcache. The base image gets libgcc for
-#                      free because nginx pulls it in; this one has no
-#                      nginx. That is exactly the build/runtime
-#                      divergence this image is supposed to prevent —
-#                      and it arrived as a warning on stderr, which is
-#                      the shape that gets scrolled past.
+# NO HAY php84-opcache ACÁ NI EN LA BASE, Y ES UN HALLAZGO MEDIDO, no una
+# preferencia. Se intentó tres veces y las tres fallaron de la misma forma:
+#
+#   php84-opcache enlaza contra libgcc_s.so.1 y no la declara. Agregar el
+#   paquete `libgcc` no alcanza: en la imagen PUBLICADA el archivo
+#   /usr/lib/libgcc_s.so.1 NO EXISTE, aunque `apk info -e libgcc` diga que
+#   el paquete está y `apk info -L libgcc` jure que lo contiene. Ni
+#   siquiera alcanza crearlo a mano con cp+mv, que produce un archivo nuevo
+#   con otro inodo: este builder no lo deja llegar a la imagen. Otros .so
+#   instalados por apk en el mismo RUN sí sobreviven.
+#
+# LO PEOR NO FUE ESO, SINO CÓMO SE VEÍA. El build pasaba: el assert
+# `php -m | grep "Zend OPcache"` corre DENTRO de kaniko, donde el archivo sí
+# está, así que decía que sí. La imagen publicada corría sin opcache y lo
+# avisaba una vez por stderr, en medio de la salida de composer. Un assert que
+# corre dentro del builder NO ES UN ASSERT SOBRE LA IMAGEN.
+#
+# Así que la extensión se saca. Es una optimización, no una funcionalidad:
+# sin ella PHP recompila cada script en cada petición y se comporta igual. Una
+# extensión que avisa que no carga en cada invocación es peor que una ausente:
+# enseña a ignorar advertencias, que es como se pasan por alto las que
+# importan.
 #
 # NO php84-intl here either, and for the same reason as the base: what
 # builds and what runs must agree. An `intl` present at build and absent
@@ -73,10 +84,9 @@ RUN set -eux; \
     apk upgrade --no-cache; \
     apk add --no-cache \
       git unzip curl \
-      libgcc \
       php84 php84-common \
       php84-ctype php84-curl php84-dom php84-fileinfo php84-iconv \
-      php84-mbstring php84-opcache php84-openssl php84-pdo php84-pdo_pgsql \
+      php84-mbstring php84-openssl php84-pdo php84-pdo_pgsql \
       php84-phar php84-session php84-simplexml php84-sodium \
       php84-tokenizer php84-xml php84-xmlwriter php84-zip; \
     ln -sf /usr/bin/php84 /usr/bin/php
@@ -151,12 +161,9 @@ RUN set -eux; \
                Phar session SimpleXML sodium tokenizer xml xmlwriter zip; do \
       php -m | grep -qix "$ext" || { echo "MISSING PHP EXTENSION: $ext"; php -m; exit 1; }; \
     done; \
-    php -m | grep -qix "Zend OPcache" || { \
-      echo "OPCACHE NO CARGA. Suele ser libgcc_s.so.1 ausente: php84-opcache"; \
-      echo "enlaza contra ella y NO la declara. php -v lo dice en stderr y"; \
-      echo "sigue andando, que es la forma en que esto pasa desapercibido."; \
-      php -v; exit 1; }; \
-    php -r 'exit(ini_get("opcache.enable") === false ? 1 : 0);'
+    if php -r 'exit(0);' 2>&1 | grep -q 'Failed loading'; then \
+      echo "PHP AVISA QUE UNA EXTENSIÓN NO CARGA:"; php -r 'exit(0);'; exit 1; \
+    fi
 
 # Composer must never phone home from the pipeline for anything but the
 # packages it was asked for, and must never write outside the workspace.
