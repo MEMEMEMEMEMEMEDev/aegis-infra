@@ -54,6 +54,17 @@ ARG COMPOSER_SHA256=28dbb6bd8bef31479c7985b774c130a8bda37dbe63c35b56f6cb6bc37742
 #                      pipeline instead would pull an UNPINNED package
 #                      on every build, against a network that can go
 #                      down — the aegis-ci-node lesson, verbatim.
+#   libgcc             MEASURED, and it is the whole reason this image
+#                      exists. php84-opcache links against libgcc_s.so.1
+#                      and does NOT declare it, so without this package
+#                      every single `php` invocation here printed
+#                      «Failed loading Zend extension 'opcache'» and ran
+#                      WITHOUT opcache. The base image gets libgcc for
+#                      free because nginx pulls it in; this one has no
+#                      nginx. That is exactly the build/runtime
+#                      divergence this image is supposed to prevent —
+#                      and it arrived as a warning on stderr, which is
+#                      the shape that gets scrolled past.
 #
 # NO php84-intl here either, and for the same reason as the base: what
 # builds and what runs must agree. An `intl` present at build and absent
@@ -62,6 +73,7 @@ RUN set -eux; \
     apk upgrade --no-cache; \
     apk add --no-cache \
       git unzip \
+      libgcc \
       php84 php84-common \
       php84-ctype php84-curl php84-dom php84-fileinfo php84-iconv \
       php84-mbstring php84-opcache php84-openssl php84-pdo php84-pdo_pgsql \
