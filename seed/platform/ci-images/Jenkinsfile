@@ -100,6 +100,14 @@ spec:
           build_push node   aegis-ci-node   node
           build_push tofu   aegis-ci-tofu   tofu \
             's|^ARG TOFU_VERSION=\\(.*\\)|\\1|p'
+          # php, like tofu, takes the 4th argument: its FROM is alpine
+          # (see ci-images/php/Containerfile for why it is not the
+          # official php image), so the version cannot be read from
+          # there. ARG PHP_VERSION is the single source of the pin and
+          # `-alpine` is appended so the tag says what the image is —
+          # the shape aegis-ci-node's tag has.
+          build_push php    aegis-ci-php    php \
+            's|^ARG PHP_VERSION=\\(.*\\)|\\1-alpine|p'
         '''
       }
     }

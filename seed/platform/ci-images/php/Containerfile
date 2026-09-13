@@ -1,0 +1,106 @@
+# aegis-ci-php — PHP 8.4 with composer and git, for building PHP
+# applications in the pipeline. It BUILDS; it never runs in a tenant
+# namespace, which is aegis-base-php's job.
+#
+# BEWARE THE EASY CONFUSION, the same one mirror-images/images.txt warns
+# about for node: aegis-ci-php does NOT serve aegis-base-php's purpose
+# and the other way round. This one needs composer and git in order to
+# resolve dependencies; the base must not have them anywhere near a
+# tenant pod. Two images for two jobs: one builds, the other runs.
+#
+# WHY alpine + apk AND NOT `FROM php:8.4-cli-alpine`
+# ──────────────────────────────────────────────────
+# The official image would be one line shorter and would bring a
+# DIFFERENT PHP than the one that runs in production: a different build,
+# a different extension set, different compile flags. That is the same
+# argument base-images/node/Containerfile makes for node and musl, and
+# it weighs more here, because a PHP extension missing or differing
+# between build and runtime does not fail at `composer install` — it
+# fails in a request, months later, in a stack trace that names a class.
+# Same alpine, same php84 packages, same extensions: what builds the
+# application is the runtime the application will have.
+#
+# WHY composer COMES AS A PINNED PHAR AND NOT FROM apk
+# ────────────────────────────────────────────────────
+# MEASURED, because it is not obvious: alpine's `composer` package
+# declares `D:php83 php83-phar php83-curl php83-iconv php83-mbstring
+# php83-openssl php83-zip p7zip`. Installing it would pull a SECOND PHP
+# — 8.3 — into this image, and composer would then run under a
+# different interpreter than the one it is resolving dependencies for.
+# That defeats the entire paragraph above.
+#
+# So the phar, pinned BY VERSION AND BY SHA-256, verified before it is
+# allowed to exist. A download in a build is only acceptable when it is
+# pinned to content; this one is. The ARG is the single source of the
+# pin and the tag of this image is derived from it, the same shape
+# aegis-ci-tofu uses.
+FROM public.ecr.aws/docker/library/alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+
+ARG PHP_VERSION=8.4.16
+ARG COMPOSER_VERSION=2.8.10
+# sha256 of composer.phar 2.8.10, measured 2026-09-12 from
+# github.com/composer/composer/releases. If upstream ever replaces the
+# artifact under the same version, this build fails instead of
+# installing whatever is there now.
+ARG COMPOSER_SHA256=28dbb6bd8bef31479c7985b774c130a8bda37dbe63c35b56f6cb6bc377427573
+
+# The php84 set is aegis-base-php's, PLUS what only a build needs:
+#   php84-zip + unzip  composer extracts dist packages with these; with
+#                      neither it silently falls back to cloning every
+#                      package from source, which is slower and needs
+#                      network to places the pipeline should not go.
+#   git                composer resolves `dev-` branches and any
+#                      repository entry through it. Adding it in the
+#                      pipeline instead would pull an UNPINNED package
+#                      on every build, against a network that can go
+#                      down — the aegis-ci-node lesson, verbatim.
+#
+# NO php84-intl here either, and for the same reason as the base: what
+# builds and what runs must agree. An `intl` present at build and absent
+# at runtime is a class that exists in CI and not in the pod.
+RUN set -eux; \
+    apk upgrade --no-cache; \
+    apk add --no-cache \
+      git unzip \
+      php84 php84-common \
+      php84-ctype php84-curl php84-dom php84-fileinfo php84-iconv \
+      php84-mbstring php84-opcache php84-openssl php84-pdo php84-pdo_pgsql \
+      php84-phar php84-session php84-simplexml php84-sodium \
+      php84-tokenizer php84-xml php84-xmlwriter php84-zip; \
+    ln -sf /usr/bin/php84 /usr/bin/php
+
+# The phar, verified before it is trusted. `sha256sum -c` fails the
+# build on a mismatch; the file is only made executable afterwards, so a
+# tampered download is never an executable in this image.
+#
+# `wget` in a RUN and not `ADD <url>`: ADD-from-URL is a kaniko feature
+# and this build runs in kaniko, which is one more thing that has to be
+# true. busybox wget speaks https on plain alpine (ssl_client and
+# ca-certificates-bundle are both in the base), so the RUN depends on
+# nothing the builder has to provide.
+RUN set -eux; \
+    wget -q -O /usr/local/bin/composer \
+      "https://github.com/composer/composer/releases/download/${COMPOSER_VERSION}/composer.phar"; \
+    echo "${COMPOSER_SHA256}  /usr/local/bin/composer" | sha256sum -c -; \
+    chmod 0755 /usr/local/bin/composer
+
+# The `--version` calls are not decoration: if an apk leaves the image
+# without one of these, the build of THIS image fails right here and not
+# six months later inside some app pipeline, which is where the error
+# comes out in disguise. The extension loop names the missing one.
+RUN set -eux; \
+    php -v; \
+    git --version; \
+    unzip -v > /dev/null; \
+    composer --version --no-interaction; \
+    for ext in ctype curl dom fileinfo iconv mbstring openssl pdo pdo_pgsql \
+               Phar session SimpleXML sodium tokenizer xml xmlwriter zip; do \
+      php -m | grep -qix "$ext" || { echo "MISSING PHP EXTENSION: $ext"; php -m; exit 1; }; \
+    done
+
+# Composer must never phone home from the pipeline for anything but the
+# packages it was asked for, and must never write outside the workspace.
+ENV COMPOSER_ALLOW_SUPERUSER=1 \
+    COMPOSER_NO_INTERACTION=1 \
+    COMPOSER_CACHE_DIR=/tmp/composer-cache \
+    COMPOSER_HOME=/tmp/composer-home

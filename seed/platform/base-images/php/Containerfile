@@ -1,0 +1,195 @@
+# aegis-base-php — the THIRD base image aegis OWNS: alpine + the
+# distribution's PHP 8.4 and nginx, listening on 8080, running as UID
+# 65532. It is what an organization's `http` services written in PHP put
+# in their FROM.
+#
+# WHY IT EXISTS AT ALL
+# ────────────────────
+# Until today this installation could not run PHP. Not "it was not
+# convenient": the require-aegis-signature ClusterPolicy demands our own
+# signature for every Pod in a tenant namespace, so a public php image
+# cannot be admitted, and there was no php in mirror-images/ either. The
+# first contract that asks for Laravel is the one that makes this file
+# necessary.
+#
+# It is an OWNED base and not a mirrored third party, and that choice is
+# the whole lesson nginx/Containerfile tells in full: a mirror pins
+# somebody else's bytes and CANNOT PATCH THEM. On 2026-08-26 that cost
+# every static front several days of blocked deploys over an openssl the
+# fronts never call, because upstream had not rebuilt its image. An
+# owned base is `alpine + apk upgrade + apk add`: the distribution's
+# packages with the distribution's patch cadence, rebuilt by the
+# base-images job the morning image-watch finds a fixable CVE, and
+# propagated by digest to every consumer.
+#
+# TWO PROCESSES IN ONE CONTAINER, AND IT IS THE FIRST TIME HERE
+# ─────────────────────────────────────────────────────────────
+# php-fpm does not speak HTTP; it speaks FastCGI. Something has to
+# terminate HTTP on 8080, and the options were three:
+#   · nginx + php-fpm in this one container  ← this file
+#   · two containers in the Pod: nginx would need the app's public/,
+#     which lives in the consumer's image, so an initContainer would
+#     have to copy it across. More pieces, more to get wrong;
+#   · FrankenPHP, one binary that speaks HTTP directly. Ruled OUT by
+#     the base-images job itself, which requires the FROM to name
+#     alpine:<major>.<minor> — so it could only enter as a mirrored
+#     third party, i.e. the exact disease described above.
+# So: two processes, and the honest cost of that is that a supervisor
+# has to exist and has to be RIGHT. entrypoint.sh dies when either of
+# them dies, because a container that stays Running while nginx serves
+# 502 is the silent failure this platform keeps paying for. Nothing
+# asserts that at build time — it is verified by killing each process in
+# the live pod and watching the restart.
+#
+# WHAT A CONSUMER MAY ASSUME (the contract, asserted by the job before
+# the image is pushed):
+#   - it listens on 8080 (a tenant's NetworkPolicy admits only
+#     edge → 8080; a server on any other port starts fine and NEVER
+#     receives traffic — the silent failure);
+#   - it runs as UID/GID 65532, non-root (tenant namespaces are PSS
+#     `restricted`: root is rejected at admission and a non-numeric
+#     USER fails runAsNonRoot because the kubelet cannot prove it);
+#   - /app exists, is owned by 65532, and is the WORKDIR. nginx serves
+#     /app/public and passes .php to php-fpm on 127.0.0.1:9000;
+#   - `php` is on the PATH (see the symlink below — it is NOT there by
+#     default and that is a trap);
+#   - it writes NOTHING outside /tmp. The pid, every nginx temp path
+#     and the php session path live there, because tenant pods run with
+#     a read-only root filesystem.
+#
+# WHY UID 65532 AND NOT nginx's 101. This base runs an application, not
+# a web server that happens to have files: the number that matters is
+# the one the consumer's `COPY --chown` uses, and every repo in this
+# installation already carries 65532 (it is aegis-base-node's, which is
+# distroless's `nonroot`). A PHP repo then looks like every other repo.
+# The cost is that nginx does not run as its package's own user, so
+# everything it touches is chowned to 65532 below.
+#
+# WHAT IS NOT HERE, ON PURPOSE
+#   - composer. Production runs PHP; the consumer installs its vendor/
+#     in the CI agent (aegis-ci-php) and copies it in. A dependency
+#     manager inside a tenant pod has nothing to do there — the same
+#     criterion that keeps npm out of aegis-base-node.
+#   - php84-intl, AND THIS ONE IS A LESSON PAID FOR ELSEWHERE. Alpine's
+#     intl links against icu-libs, which brings `icu-data-en`: REDUCED
+#     locale data. That is failure nº 2 of the field notes exactly —
+#     a container whose ICU silently falls back to `en` and formats
+#     dates in an order the code did not expect. Without intl the
+#     temptation does not exist: dates are formatted with explicit
+#     format strings and an explicit timezone, which is locale
+#     independent, and PHP carries its own timezone database so no
+#     tzdata package is needed either.
+#   - php84-zip. composer wants it, and composer is not here.
+
+# The FROM is the SAME public digest nginx/Containerfile and
+# node/Containerfile pin, for the reasons told there in full: pulled
+# from the PUBLIC registry, by DIGEST, and not from the internal mirror
+# (whose blocking scan would refuse the stale alpine underneath, so this
+# base could never be built from it). The alpine's own packages never
+# run: `apk upgrade` replaces them on the next line, and what runs is
+# the RESULT, which is scanned with NO exceptions and signed by the job.
+# The minor here is the single source of the image's tag: the job
+# derives `<minor>-<build>` from this line.
+FROM public.ecr.aws/docker/library/alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+
+# ORDER MATTERS, and every step below has a reason:
+#
+# 1. uid/gid 65532 first, by number, under the name distroless gave
+#    them: `nonroot`. The nginx package creates a user of its own at the
+#    first free system uid; creating ours first keeps the two from
+#    racing for a number, and the assertion below breaks the BUILD, with
+#    this line in the log, if that assumption is ever wrong — instead of
+#    a tenant pod failing with EACCES on a file every `--chown=65532`
+#    had promised it.
+# 2. `apk upgrade` BEFORE `apk add`. The alpine above is frozen by
+#    digest: its packages are whatever they were the day it was built
+#    upstream. The upgrade is where today's patched packages come in,
+#    and it is the line image-watch rebuilds this image to run.
+# 3. The extension list is Laravel's documented requirement and nothing
+#    more, plus pdo_pgsql because every organization's database here is
+#    postgres, and opcache because the code in an image never changes
+#    (see conf.d/zz-aegis.ini, which turns timestamp validation off).
+#    ctype/fileinfo/dom/xml/simplexml/xmlwriter/tokenizer/mbstring/
+#    openssl/session/phar/iconv/curl/sodium: Laravel boots without any
+#    one of them only to die later, in a request, in a stack trace that
+#    names a class and not a package. `filter` and `hash` are compiled
+#    into the core in PHP 8 and have no package of their own.
+# 4. THE SYMLINK, and it is the trap of this whole file. The package
+#    installs /usr/bin/php84 and PROVIDES the virtual name `php` — but
+#    provides is apk's dependency vocabulary, not a file. There is no
+#    /usr/bin/php. Every artisan invocation, every composer script and
+#    every shebang in vendor/bin says `php`. Without this line the image
+#    builds clean, passes the contract, passes the scan, gets signed,
+#    deploys — and the first `php artisan` in an entrypoint says
+#    "not found".
+# 5. Logs to stdout/stderr through symlinks, as the official images do:
+#    the pod's log is what Vector reads; a file in the container is read
+#    by nobody.
+# 6. Everything nginx and php touch at runtime is chowned to 65532. The
+#    temp paths are NOT here — they live under /tmp (see nginx.conf),
+#    because tenant pods run with a read-only root filesystem.
+RUN addgroup -g 65532 -S nonroot \
+ && adduser -u 65532 -D -S -H -h /nonexistent -s /sbin/nologin -G nonroot -g nonroot nonroot \
+ && apk upgrade --no-cache \
+ && apk add --no-cache \
+      nginx \
+      php84 php84-fpm php84-common \
+      php84-ctype php84-curl php84-dom php84-fileinfo php84-iconv \
+      php84-mbstring php84-opcache php84-openssl php84-pdo php84-pdo_pgsql \
+      php84-phar php84-session php84-simplexml php84-sodium \
+      php84-tokenizer php84-xml php84-xmlwriter \
+ && [ "$(id -u nonroot)" = 65532 ] && [ "$(id -g nonroot)" = 65532 ] \
+ && ln -sf /usr/bin/php84 /usr/bin/php \
+ && mkdir -p /app/public /etc/nginx/conf.d /var/lib/nginx /var/log/nginx /run/nginx \
+ && ln -sf /dev/stdout /var/log/nginx/access.log && ln -sf /dev/stderr /var/log/nginx/error.log \
+ && chown -R 65532:65532 /app /etc/nginx/conf.d /var/lib/nginx /var/log/nginx /run/nginx
+
+# OUR OWN nginx.conf, for the same reason aegis-base-nginx has one:
+# alpine's stock file includes conf.d in the ROOT context, where a
+# `server{}` is "not allowed here" and nginx refuses to start.
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY default.conf /etc/nginx/conf.d/default.conf
+COPY php-fpm.conf /etc/php84/php-fpm.conf
+COPY zz-aegis.ini /etc/php84/conf.d/zz-aegis.ini
+COPY entrypoint.sh /usr/local/bin/aegis-php-entrypoint
+
+# THE BUILD-TIME CONTRACT, sibling of nginx's `nginx -t` and node's
+# `require("http")`. Every line here is a fact a consumer's pod depends
+# on, checked where the failure is cheap. If a future package drops an
+# extension, renames a binary or ships a config this layout cannot
+# parse, the build dies HERE, with this line in the log — not six weeks
+# later in somebody's pod, in a stack trace that names a class.
+#
+# The extension check is a LOOP over the list rather than a grep per
+# line so that the missing one is NAMED. `php -m` and not `php84 -m`:
+# it exercises the symlink from step 4 at the same time.
+RUN set -eux; \
+    php -v; \
+    php-fpm84 --version; \
+    for ext in ctype curl dom fileinfo iconv mbstring openssl pdo pdo_pgsql \
+               Phar session SimpleXML sodium tokenizer xml xmlwriter Zend\ OPcache; do \
+      php -m | grep -qix "$ext" || { echo "MISSING PHP EXTENSION: $ext"; php -m; exit 1; }; \
+    done; \
+    php -r 'new DateTimeImmutable("now", new DateTimeZone("America/Santiago"));'; \
+    php -r 'if (class_exists("IntlDateFormatter")) { fwrite(STDERR, "intl is installed: see the note about icu-data-en at the top of this file\n"); exit(1); }'; \
+    chmod 0755 /usr/local/bin/aegis-php-entrypoint
+
+# The two servers, each run once at build time, ON THEIR OWN LINES.
+# The shape is not cosmetic: it is what aegis-base-nginx does and what
+# check 138 reads — the rule is "if the image installs a server, it RUNS
+# it once at build time", and a `nginx -t;` buried in a longer chain
+# does not answer it. nginx proves that nginx.conf includes conf.d in
+# the http context (a `server{}` in the wrong context fails HERE instead
+# of in the consumer's pod); php-fpm proves the pool file above parses.
+RUN nginx -t
+RUN php-fpm84 -t
+
+WORKDIR /app
+EXPOSE 8080
+# SIGQUIT is nginx's graceful stop, and entrypoint.sh forwards it to
+# both children: in-flight requests finish, then everything exits.
+STOPSIGNAL SIGQUIT
+# Numeric on purpose (see the contract above). The job reads this line
+# to know which uid to assert on the built image.
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/aegis-php-entrypoint"]
