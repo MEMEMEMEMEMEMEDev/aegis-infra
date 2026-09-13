@@ -263,10 +263,12 @@ tiene**, contra lo que su contrato declara — incluido lo que el contrato
 **no** declara, que es justo lo que ninguna otra herramienta de la casa
 puede ver, porque todas derivan del contrato.
 
-Y escribe una sola cosa: **un contrato en `orgs/`**. No commitea, no
-empuja, no aplica y no toca el clúster. Eso es lo que hace inofensivo el
-fichero: ArgoCD lee el remoto, así que nada corre hasta que tú
-commitees.
+Y escribe una sola cosa: **un contrato en `orgs/`** — da de alta una
+organización nueva, y cambia una que ya existe mostrándote el diff del
+contrato antes de pisarlo. No commitea, no empuja, no aplica y no toca
+el clúster. Eso es lo que hace inofensivo el fichero: ArgoCD lee el
+remoto, así que nada corre hasta que tú commitees. Y no quita nada:
+borrar un servicio es `aegis org` a mano.
 
 No se publica por el túnel —se entra con `ssh -L 7391:127.0.0.1:7391`—
 y el porqué, junto con el modelo de seguridad y lo que falta, está en
@@ -621,15 +623,15 @@ Dicho claro, porque los checks lo dirían igual.
   y se entra por un túnel SSH; la del inquilino —una persona no técnica
   mirando su propia organización— necesita Cloudflare Access y un túnel
   propio, y hoy Access admite un solo correo.
-- La consola **da de alta** una organización y todavía no **edita** una
-  que existe: agregarle una base es una edición, y se niega
-  explícitamente a escribir encima de un contrato.
+- La consola **agrega y cambia**, y nunca **quita**: no borra un
+  servicio ni una organización. Eso es `aegis org` a mano, que dice qué
+  va a hacer antes de hacerlo.
 - Fuera de la consola, sigue exigiendo leer.
 
 Lo próximo, en este orden y sin fechas: la consola del inquilino, con
-Access admitiendo a más de una persona; la edición desde la consola; el
-perfil `cloudflare` en una máquina ajena, con sus puertas pasando de no
-evaluables a medidas; el monorepo como caso de primera clase.
+Access admitiendo a más de una persona; el perfil `cloudflare` en una
+máquina ajena, con sus puertas pasando de no evaluables a medidas; el
+monorepo como caso de primera clase.
 
 ## Sobre el idioma y el historial
 

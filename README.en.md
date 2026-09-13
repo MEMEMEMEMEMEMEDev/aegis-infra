@@ -271,9 +271,9 @@ Said plainly, because the checks would say it anyway.
   non-technical person looking at their own organization — needs
   Cloudflare Access and a tunnel of its own, and today Access admits a
   single email address.
-- The console **creates** an organization and does not yet **edit** one
-  that exists: adding a database to it is an edit, and it explicitly
-  refuses to write over a contract.
+- The console **adds and changes**, and never **removes**: it deletes
+  neither a service nor an organization. That is `aegis org` by hand,
+  which says what it is about to do first.
 - Outside the console, it still expects you to read.
 
 ## About this history

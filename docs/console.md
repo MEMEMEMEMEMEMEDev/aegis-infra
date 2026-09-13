@@ -87,7 +87,35 @@ nobody commits — and the console inherits it verbatim.
 
 It refuses to write over a contract that exists. Creating an
 organization that is already there is an edit, and an edit is a
-different decision.
+different decision — it has its own door.
+
+### Changing one
+
+`edit the contract`, from an organization's own screen. The form opens
+filled in with what is there, the plan shows the **diff of the contract
+itself** before the list of generated files, and the button says it will
+write over it.
+
+Three things it will not do, and they are the whole reason it is a
+separate door:
+
+- **It does not remove a service.** A form with fewer rows than the
+  contract has services would delete the rest, silently, at the moment
+  somebody pressed save — and a database being removed takes its volume
+  with it. Removing one is `aegis org` by hand, which says what it is
+  about to do first.
+- **It does not rename.** That would write a second contract and leave
+  the first one where it is: two files, one namespace, and a screen that
+  says it saved.
+- **It does not create.** A create arriving disguised as an edit skips
+  every question the create screen asks.
+
+And what it changes is **only what it shows**. The form has six fields
+per service; a contract carries more — `usa`, the storage block, the
+whole `ai` section with its tasks — and all of it comes out the other
+side exactly as it went in. The current contract is the floor and the
+form is applied on top of it, rather than the contract being rebuilt
+from the form.
 
 Every choice the form offers is derived from `aegis org schema`, which
 derives from the validator itself; and the validator is what refuses,
@@ -153,9 +181,8 @@ readings**.
 
 ## What is not there yet
 
-- **Editing.** The console creates; it does not yet change an
-  organization that exists. Adding a database to one is an edit and it
-  needs to show the diff against what is there.
+- **Removing.** The console adds and changes; it never takes anything
+  away. Removing a service, or an organization, is `aegis org` by hand.
 - **Somebody else's console.** A person who is not the operator looking
   at their own organization needs Cloudflare Access and a tunnel of its
   own, and today Access admits a single email address. That is the

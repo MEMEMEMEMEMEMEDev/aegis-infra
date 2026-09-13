@@ -362,3 +362,21 @@ button.act { font:inherit; font-weight:700; cursor:pointer; align-self:flex-star
 }
 pre.why { margin:10px 0 0; font-family:var(--mono); font-size:12px;
           white-space:pre-wrap; color:inherit; }
+
+/* What the person actually changed, before the machinery's own list of
+ * derived files. Two lines of YAML is what they did; which of six
+ * generated manifests that touches is true and second. */
+.diff { margin:12px 0 0; border-radius:var(--r-s); overflow-x:auto;
+        background:var(--sunken); padding:10px 0; font-size:12.5px; line-height:1.6; }
+.dl { padding:0 16px; white-space:pre; }
+.dl[data-d="add"]  { background:var(--fine-bg);  color:var(--fine-ink); }
+.dl[data-d="del"]  { background:var(--wrong-bg); color:var(--wrong-ink); }
+.dl[data-d="at"]   { color:var(--faint); font-size:11px; padding-top:5px; }
+.dl[data-d="same"] { color:var(--mid); }
+/* A row already in the contract reads as given, not as blank space to
+ * fill: on this screen the rows that are shown are the ones that live. */
+.row[data-existing] { background:var(--sunken); }
+/* The way in to the edit sits on the organization's own screen, pushed
+ * to the end of the line: it is available, and it is not the thing you
+ * came to read. */
+.subject .edit { margin-left:auto; }

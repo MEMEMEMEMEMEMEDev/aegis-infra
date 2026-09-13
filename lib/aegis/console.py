@@ -641,8 +641,14 @@ def render(readings, subject=None):
         body, _ = _source(reading)
         bodies.append(body)
     v = verdict_of(readings)
+    # The way in to the edit lives HERE and not on a screen of its own,
+    # because the moment to change an organization is the moment you are
+    # looking at it. It says «contract» and not «settings»: what this
+    # button opens is the one file everything else is derived from.
     who = (f'<p class="subject"><a class="act act--quiet" href="/">all '
-           f'organizations</a><b>{_e(subject)}</b></p>' if subject else "")
+           f'organizations</a><b>{_e(subject)}</b>'
+           f'<a class="act act--quiet edit" href="/org/{_e(subject)}/edit">'
+           f'edit the contract</a></p>' if subject else "")
     head = (f'<header class="verdict" data-state="{v}">{who}'
             f'<p class="sentence">{_e(SENTENCE[v])}</p></header>')
     return (f'<main class="sereno" data-veredicto="{v}"'
@@ -697,10 +703,16 @@ def _schema_of(doc):
     return {s.get("step", ""): s for s in (doc or {}).get("steps") or []}
 
 
-def render_form(schema, token, filled=None, problem=None):
+def render_form(schema, token, filled=None, problem=None, action="/new",
+                existing=0, subject=None):
     """The screen where an organization is described by somebody who
     does not write YAML. It writes NOTHING: what it submits is a
-    proposal, and the next screen is the plan."""
+    proposal, and the next screen is the plan.
+
+    `existing` is how many of the service rows are already in the
+    contract. They are drawn first and marked, because on an edit the
+    rows that are on the screen are the ones that survive — see
+    `contract_from_edit`."""
     by = _schema_of(schema)
     filled = filled or {}
     types = {k.split(":", 1)[1]: v for k, v in by.items() if k.startswith("tipo:")}
@@ -708,11 +720,17 @@ def render_form(schema, token, filled=None, problem=None):
     quotas = (by.get("cuota") or {}).get("opciones") or []
     sizes = (by.get("tamano") or {}).get("opciones") or []
 
+    back = f'/org/{_e(subject)}' if subject else '/'
+    where = f'back to {_e(subject)}' if subject else 'all organizations'
     head = (f'<header class="verdict" data-state="{FINE}">'
-            f'<p class="subject"><a class="act act--quiet" href="/">all organizations'
-            f'</a><b>a new organization</b></p>'
-            f'<p class="sentence">Nothing here is created yet. The next screen is the '
-            f'plan, and even that writes nothing.</p></header>')
+            f'<p class="subject"><a class="act act--quiet" href="{back}">{where}'
+            f'</a><b>{_e(subject) if subject else "a new organization"}</b></p>'
+            f'<p class="sentence">'
+            + ('Nothing is changed yet. The next screen is the plan, and even that '
+               'writes nothing.' if subject else
+               'Nothing here is created yet. The next screen is the plan, and even '
+               'that writes nothing.')
+            + '</p></header>')
     trouble = ""
     if problem:
         # THE VALIDATOR'S OWN WORDS, not a paraphrase. It explains which
@@ -724,15 +742,18 @@ def render_form(schema, token, filled=None, problem=None):
                    f'<pre class="why">{_e(problem)}</pre></section>')
 
     rows = []
-    for i in range(SERVICE_ROWS):
+    for i in range(max(SERVICE_ROWS, existing + 1)):
         n = f"servicio{i}"
         picked = filled.get(f"{n}.tipo", "")
         options = "".join(
             f'<option value="{_e(t)}"{" selected" if t == picked else ""}>{_e(t)}</option>'
             for t in offerable)
         rows.append(
-            f'<fieldset class="row"><legend>service {i + 1}'
-            + ("" if i else " <i>at least one</i>") + '</legend>'
+            f'<fieldset class="row"{" data-existing=\"1\"" if i < existing else ""}>'
+            f'<legend>service {i + 1}'
+            + (" <i>already in the contract</i>" if i < existing else
+               (" <i>at least one</i>" if not i and not existing else ""))
+            + '</legend>'
             f'{_field(n + ".nombre", "name", filled.get(n + ".nombre", ""))}'
             f'<label class="field"><span class="label">type</span>'
             f'<select name="{n}.tipo" id="{n}.tipo"><option value=""></option>'
@@ -763,9 +784,12 @@ def render_form(schema, token, filled=None, problem=None):
         legend.append(f'<li data-state="{FINE}">{_chip(FINE, kind)}'
                       f'<span class="note">{_e(note)}</span></li>')
 
+    keep = ('<p class="hint">The services already in the contract stay: this screen '
+            'adds and changes, it does not remove. Removing one is `aegis org` by '
+            'hand, which says what it is about to do.</p>' if existing else "")
     body = (f'<section class="source" data-state="{FINE}">'
-            f'<h2>the organization</h2>'
-            f'<form method="post" action="/new">'
+            f'<h2>{"the organization" if not subject else "what it is"}</h2>{keep}'
+            f'<form method="post" action="{_e(action)}">'
             f'<input type="hidden" name="token" value="{_e(token)}">'
             f'{_field("organizacion", "name", filled.get("organizacion", ""), hint=(by.get("contract") or {}).get("nombre_patron", ""))}'
             f'{_field("dominio", "public hostname", filled.get("dominio", ""), hint=(by.get("contract") or {}).get("dominio_si", ""))}'
@@ -828,7 +852,187 @@ def contract_from_form(fields, schema):
     return contract, text
 
 
-def render_plan(doc, contract_text, token, written=None):
+# The fields the form actually shows. Everything else a contract can
+# carry — `usa`, `almacenamiento`, `ai` and its whole list of tasks —
+# is NOT on this screen, and that is exactly why the edit is built by
+# CHANGING the contract rather than by rebuilding it from the form.
+SHOWN = ("nombre", "tipo", "puerto", "publico", "repo", "tamano")
+
+
+def fields_of_contract(contract):
+    """A contract, as the form's fields. It exists so that the edit
+    screen opens showing what is actually there rather than an empty
+    form somebody has to retype."""
+    contract = contract or {}
+    filled = {"organizacion": contract.get("organizacion") or "",
+              "dominio": contract.get("dominio") or "",
+              "cuota": contract.get("cuota") or ""}
+    for i, sv in enumerate(contract.get("servicios") or []):
+        n = f"servicio{i}"
+        for key in SHOWN:
+            v = sv.get(key)
+            filled[f"{n}.{key}"] = "" if v is None else str(v)
+    return filled
+
+
+def refuse_edit(contract, current):
+    """Why this edit may not be saved over that organization, or None.
+
+    THE ONE THING AN EDIT WILL NOT DO IS DROP A SERVICE. A form that
+    renders three rows over an organization with five services deletes
+    two of them, silently, at the moment somebody pressed a button that
+    said «save». That is not an edit anybody asked for. So the services
+    that exist are the floor: every one of them comes out the other
+    side, and a name field somebody cleared is a REFUSAL rather than a
+    removal.
+
+    Removing a service is `aegis org` by hand, reading what it says. It
+    is a different decision — a database being removed takes its volume
+    with it — and this screen does not offer it at all.
+
+    It is a function of the CONTRACT and not of the form, so that the
+    same rule can be applied twice: once to what the form built, and
+    again to whatever body comes back on the way in. The second time is
+    not paranoia — a body can be replayed, edited by hand, or posted
+    from a page drawn ten minutes ago over an organization that has
+    changed since.
+    """
+    contract = contract or {}
+    current = current or {}
+    have = [sv.get("nombre") for sv in current.get("servicios") or []]
+    kept = [sv.get("nombre") for sv in contract.get("servicios") or []]
+    lost = [n for n in have if n and n not in kept]
+    if lost:
+        return (f"this would remove {', '.join(lost)} from the contract, and removing "
+                f"a service is not an edit: a database takes its volume with it. Every "
+                f"service that is already there has to still be there when you save. "
+                f"To remove one, `aegis org` does it by hand and says what it is about "
+                f"to do first.")
+    was = current.get("organizacion")
+    if was and contract.get("organizacion") != was:
+        # Renaming would write a DIFFERENT file and leave the old one
+        # in place: two contracts, one namespace, and a screen that
+        # says it saved.
+        return ("an organization cannot be renamed from here: this would write a "
+                "second contract and leave the first one where it is. The name is the "
+                "identity.")
+    return None
+
+
+def contract_from_edit(fields, schema, current):
+    """The edited contract: THE CURRENT ONE, CHANGED. Never rebuilt.
+
+    THE BUG THIS SHAPE EXISTS TO PREVENT, and it was measured on
+    2026-09-13 by opening this screen over a real contract. The form
+    shows six fields per service. A contract carries more: `usa`, the
+    `almacenamiento` block, the whole `ai` section with its list of
+    tasks. Rebuilding the contract from the form dropped every one of
+    them — and `usa` is OPTIONAL, so the validator had nothing to say.
+    Somebody adding a database to their shop would have silently deleted
+    the four capabilities its API declares, and found out when the
+    NetworkPolicies stopped letting it reach any of them.
+
+    So the current contract is the floor. The form's fields are applied
+    ON TOP of it, service by service and only for what it shows; new
+    rows are appended; and anything this screen does not display comes
+    out the other side exactly as it went in.
+    """
+    import copy
+    import yaml
+
+    current = current or {}
+    contract = copy.deepcopy(current)
+    for key in ("organizacion", "dominio", "cuota"):
+        v = (fields.get(key) or "").strip()
+        if v:
+            contract[key] = v
+        elif key in contract and key != "organizacion":
+            # A hostname somebody cleared is a hostname removed, and
+            # that is a legitimate edit: an organization with nothing
+            # public has nobody to expose.
+            del contract[key]
+
+    services = list(contract.get("servicios") or [])
+    out, i = [], 0
+    while True:
+        n = f"servicio{i}"
+        if not any(f"{n}.{k}" in fields for k in SHOWN):
+            break
+        row = {k: (fields.get(f"{n}.{k}") or "").strip() for k in SHOWN}
+        base = copy.deepcopy(services[i]) if i < len(services) else {}
+        if not any(row.values()) and not base:
+            i += 1
+            continue
+        for key in SHOWN:
+            if row[key]:
+                base[key] = (int(row[key]) if key == "puerto" and row[key].isdigit()
+                             else row[key])
+            elif key in base and i >= len(services):
+                del base[key]
+            elif key in base and not row[key]:
+                # A field cleared on a service that EXISTS removes it.
+                # That is a change to a service, not a removal of one,
+                # and `refuse_edit` is what guards the removal.
+                del base[key]
+        if base:
+            out.append(base)
+        i += 1
+    # Any service the form did not reach at all stays. The rows are
+    # grown to fit in `render_form`, so this is the belt to that brace.
+    for j in range(i, len(services)):
+        out.append(copy.deepcopy(services[j]))
+    if out:
+        contract["servicios"] = out
+
+    refused = refuse_edit(contract, current)
+    if refused:
+        return None, None, refused
+    text = yaml.safe_dump(contract, allow_unicode=True, sort_keys=False, width=88)
+    return contract, text, None
+
+
+def render_edit(schema, current, token, filled=None, problem=None):
+    """The same form, opened over an organization that exists.
+
+    It shows every service it has, because the ones on the screen are
+    the ones that survive: this screen adds and changes, and it does
+    not remove.
+    """
+    org = (current or {}).get("organizacion") or ""
+    filled = filled or fields_of_contract(current or {})
+    body = render_form(schema, token, filled, problem,
+                       action=f"/org/{org}/edit", existing=len(
+                           (current or {}).get("servicios") or []),
+                       subject=org)
+    return body
+
+
+def _diff(before, after):
+    """What changes in the contract itself, line by line.
+
+    THE MOST USEFUL THING ON AN EDIT'S SCREEN. The plan below says which
+    generated files would change, and that is a fact about the
+    machinery. This says what the person actually did — two lines added,
+    a word replaced — and it is the thing they can check against what
+    they meant.
+    """
+    import difflib
+    rows = []
+    for line in difflib.unified_diff(before.splitlines(), after.splitlines(),
+                                     lineterm="", n=2):
+        if line.startswith("---") or line.startswith("+++"):
+            continue
+        mark = ("add" if line.startswith("+") else
+                "del" if line.startswith("-") else
+                "at" if line.startswith("@@") else "same")
+        rows.append(f'<div class="dl" data-d="{mark}">{_e(line)}</div>')
+    if not rows:
+        return ('<p class="empty" data-state="fine">the contract is exactly as it '
+                'was: nothing to change</p>')
+    return f'<div class="diff mono">{"".join(rows)}</div>'
+
+
+def render_plan(doc, contract_text, token, written=None, before=None, org=None):
     """What would change, and the one button that writes.
 
     THE SENTENCE MATTERS MORE THAN THE LIST. Writing the contract
@@ -849,6 +1053,7 @@ def render_plan(doc, contract_text, token, written=None):
         files.append(f'<li data-state="{state}">{_chip(state, step.get("change", "?"))}'
                      f'<span class="mono">{_e(name)}</span></li>')
     v = worst(states) if states else UNSEEN
+    editing = before is not None
     if written:
         sentence = ("The contract is in your repository and nothing is running yet. "
                     "Commit it, and ArgoCD does the rest.")
@@ -856,21 +1061,32 @@ def render_plan(doc, contract_text, token, written=None):
                   f'<a class="act act--quiet" href="/">all organizations</a>')
     else:
         sentence = "Nothing has been written. This is what would change."
-        action = (f'<form method="post" action="/new/write">'
+        back = f"/org/{_e(org)}/edit" if editing and org else "/new"
+        where = f"/org/{_e(org)}/write" if editing and org else "/new/write"
+        action = (f'<form method="post" action="{where}">'
                   f'<input type="hidden" name="token" value="{_e(token)}">'
                   f'<input type="hidden" name="contrato" value="{_e(contract_text)}">'
-                  f'<button class="act" type="submit">write the contract</button>'
-                  f'<a class="act act--quiet" href="/new">change something</a></form>')
+                  f'<button class="act" type="submit">'
+                  + ("write it over the contract" if editing else "write the contract")
+                  + f'</button>'
+                  f'<a class="act act--quiet" href="{back}">change something</a></form>')
     head = (f'<header class="verdict" data-state="{v}">'
             f'<p class="subject"><a class="act act--quiet" href="/">all organizations</a>'
             f'<b>the plan</b></p><p class="sentence">{_e(sentence)}</p></header>')
-    return (f'<main class="sereno" data-veredicto="{v}">{head}'
+    # THE DIFF FIRST, and the generated files after. What the person did
+    # is two lines of YAML; which of the six derived manifests that
+    # touches is a fact about the machinery, true and second.
+    change = (f'<section class="source" data-state="{FINE}">'
+              f'<h2>what you changed</h2>{_diff(before, contract_text)}</section>'
+              if editing else "")
+    return (f'<main class="sereno" data-veredicto="{v}">{head}{change}'
             f'<section class="source" data-state="{v}"><h2>what would change</h2>'
             + (f'<ul class="tail">{"".join(files)}</ul>' if files else
                f'<p class="empty" data-state="{UNSEEN}">nothing was planned</p>')
             + (f'<ul class="tail">{"".join(stages)}</ul>' if stages else "")
             + f'</section>'
-            f'<section class="source" data-state="{FINE}"><h2>the contract</h2>'
+            f'<section class="source" data-state="{FINE}">'
+            f'<h2>the contract{" as it would be" if editing else ""}</h2>'
             f'<pre class="contract mono">{_e(contract_text)}</pre>{action}</section>'
             f'</main>')
 

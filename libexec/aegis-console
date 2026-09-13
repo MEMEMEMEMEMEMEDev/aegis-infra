@@ -397,6 +397,70 @@ def write_contract(text):
     return target, None
 
 
+def read_contract(org):
+    """The contract of one organization, as it is on disk.
+
+    READ FROM THE FILE THIS SCREEN IS ABOUT TO REWRITE, and not from
+    `aegis org list`'s document, which carries a SUMMARY of each service
+    — no `usa`, no `almacenamiento`, no `ai` block. Editing from a
+    summary means writing back a contract that lost everything the
+    summary left out, and `usa` is optional so nothing would refuse it.
+    Rewriting a file you have not read is the mistake; this is the fix.
+    """
+    path = os.path.join(str(paths.platform_dir()), "orgs", f"{org}.yaml")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return yaml.safe_load(fh) or None
+    except (OSError, yaml.YAMLError):
+        return None
+
+
+def replace_contract(text):
+    """Write over a contract that EXISTS. The other write, and the one
+    that needed its own door.
+
+    `write_contract` refuses to overwrite on purpose: an organization
+    that is already there is not created by writing over its contract.
+    This is the operation that is allowed to, and everything it checks
+    is a way of making sure it is the same organization:
+
+      · the contract has to validate, before anything is touched;
+      · a file for that organization has to already be there — this
+        does not create, and a create that arrives disguised as an edit
+        would skip every question the create screen asks;
+      · the name may not change. Renaming would write a SECOND contract
+        and leave the first where it is: two files, one namespace, and
+        a screen that says it saved.
+
+    What it does NOT do is keep a copy of the old one. git already has
+    it, and a `.anterior` beside the real file is a second place a
+    tenant's contract lives — which is exactly the state the checks
+    over this screen refuse.
+
+    Returns (path, None) or (None, why not).
+    """
+    bad = validate_contract(text)
+    if bad:
+        return None, bad
+    try:
+        name = (yaml.safe_load(text) or {}).get("organizacion")
+    except yaml.YAMLError as e:
+        return None, f"the contract is not readable YAML: {e}"
+    if not name:
+        return None, "the contract names no organization"
+    orgs = os.path.join(str(paths.platform_dir()), "orgs")
+    target = os.path.join(orgs, f"{name}.yaml")
+    if not os.path.exists(target):
+        return None, (f"there is no contract at {target} to change. This screen edits "
+                      f"an organization that exists; creating one is another screen, "
+                      f"and it asks other questions.")
+    with open(target, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    return target, None
+
+
 def _organizations(readings):
     """Who the console will draw a page for: the names the contracts
     declare, taken from the reading already on the screen. Derived and
@@ -545,19 +609,57 @@ def serve(port):
             if path == "/new/write":
                 self._write(fields)
                 return
+            m = re.fullmatch(r"/org/([^/]+)/(edit|write)", path)
+            if m:
+                # The name off a URL is matched against the contracts
+                # and never passed along as typed: every source here
+                # ends up as an argv.
+                name = urllib.parse.unquote(m.group(1))
+                if name not in _organizations(state["readings"]):
+                    self._send(404, "no organization by that name\n",
+                               "text/plain; charset=utf-8")
+                    return
+                if m.group(2) == "edit":
+                    self._preview(fields, org=name)
+                else:
+                    self._write(fields, org=name)
+                return
             self._send(404, "404\n", "text/plain; charset=utf-8")
 
-        def _preview(self, fields):
+        def _current(self, org):
+            """The contract this screen is about to change, whole."""
+            return read_contract(org)
+
+        def _preview(self, fields, org=None):
             """Build it, validate it, and draw what would change. NOTHING
             of the instance is touched: the contract goes to a temporary
             file that is removed no matter how this ends, and `aegis org
             plan` is the same command the operator would run by hand."""
             schema = _schema()
-            _contract, text = drawing.contract_from_form(fields, schema)
+            current = self._current(org) if org else None
+            before = None
+            if org:
+                if current is None:
+                    self._send(404, "no organization by that name\n",
+                               "text/plain; charset=utf-8")
+                    return
+                before = yaml.safe_dump(current, allow_unicode=True,
+                                        sort_keys=False, width=88)
+                _contract, text, refused = drawing.contract_from_edit(
+                    fields, schema, current)
+                if refused:
+                    self._send(200, drawing.wrap(drawing.render_edit(
+                        schema, current, token, fields, refused), f"{org} · edit"))
+                    return
+            else:
+                _contract, text = drawing.contract_from_form(fields, schema)
             bad = validate_contract(text)
             if bad:
-                self._send(200, drawing.wrap(drawing.render_form(
-                    schema, token, fields, bad), "a new organization"))
+                page = (drawing.render_edit(schema, current, token, fields, bad)
+                        if org else
+                        drawing.render_form(schema, token, fields, bad))
+                self._send(200, drawing.wrap(page, f"{org} · edit" if org
+                                             else "a new organization"))
                 return
             tmp = tempfile.mkdtemp(prefix="aegis-console-")
             try:
@@ -567,25 +669,50 @@ def serve(port):
                 try:
                     _rc, doc = cli.run_json("org", "plan", probe)
                 except cli.CouldNotEvaluate as e:
-                    self._send(200, drawing.wrap(drawing.render_form(
-                        schema, token, fields,
-                        f"the plan could not be run: {e}"), "a new organization"))
+                    page = (drawing.render_edit(schema, current, token, fields,
+                                                f"the plan could not be run: {e}")
+                            if org else
+                            drawing.render_form(schema, token, fields,
+                                                f"the plan could not be run: {e}"))
+                    self._send(200, drawing.wrap(page, "the plan"))
                     return
             finally:
                 shutil.rmtree(tmp, ignore_errors=True)
             self._send(200, drawing.wrap(
-                drawing.render_plan(doc, text, token), "the plan"))
+                drawing.render_plan(doc, text, token, before=before, org=org),
+                "the plan"))
 
-        def _write(self, fields):
+        def _write(self, fields, org=None):
             # VALIDATED AGAIN, on the way in. What comes back in a form
             # is whatever the browser sent, and the fact that this
             # server drew it a moment ago is not evidence that it is
             # what came back.
             text = fields.get("contrato") or ""
-            target, bad = write_contract(text)
+            if org:
+                current = self._current(org)
+                # AND THE SAME REFUSALS AS THE PREVIEW, applied again on
+                # the way in. The preview's answer is not evidence about
+                # what came back: a body can be replayed, edited, or
+                # posted from a page that was drawn ten minutes ago over
+                # an organization that has changed since.
+                try:
+                    submitted = yaml.safe_load(text) or {}
+                except yaml.YAMLError as e:
+                    submitted, refused = {}, f"the contract is not readable YAML: {e}"
+                else:
+                    refused = drawing.refuse_edit(submitted, current)
+                if refused:
+                    self._send(200, drawing.wrap(drawing.render_edit(
+                        _schema(), current, token, None, refused), f"{org} · edit"))
+                    return
+                target, bad = replace_contract(text)
+            else:
+                target, bad = write_contract(text)
             if bad:
-                self._send(200, drawing.wrap(drawing.render_form(
-                    _schema(), token, {}, bad), "a new organization"))
+                page = (drawing.render_edit(_schema(), self._current(org), token,
+                                            None, bad) if org else
+                        drawing.render_form(_schema(), token, {}, bad))
+                self._send(200, drawing.wrap(page, "a new organization"))
                 return
             doc = None
             try:
@@ -623,6 +750,18 @@ def serve(port):
             if path == "/new":
                 self._send(200, drawing.wrap(
                     drawing.render_form(_schema(), token), "a new organization"),
+                    head_only=head_only)
+                return
+            m = re.fullmatch(r"/org/([^/]+)/edit", path)
+            if m:
+                name = urllib.parse.unquote(m.group(1))
+                current = self._current(name)
+                if current is None:
+                    self._send(404, "no organization by that name\n",
+                               "text/plain; charset=utf-8", head_only)
+                    return
+                self._send(200, drawing.wrap(drawing.render_edit(
+                    _schema(), current, token), f"{name} · edit"),
                     head_only=head_only)
                 return
             if path.startswith("/org/"):
