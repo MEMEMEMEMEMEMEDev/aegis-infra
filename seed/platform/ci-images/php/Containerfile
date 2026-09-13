@@ -72,7 +72,7 @@ ARG COMPOSER_SHA256=28dbb6bd8bef31479c7985b774c130a8bda37dbe63c35b56f6cb6bc37742
 RUN set -eux; \
     apk upgrade --no-cache; \
     apk add --no-cache \
-      git unzip \
+      git unzip curl \
       libgcc \
       php84 php84-common \
       php84-ctype php84-curl php84-dom php84-fileinfo php84-iconv \
@@ -116,18 +116,27 @@ RUN set -eux; \
 # out loud WHICH php is resolving the dependencies — which is the entire
 # point of this image (see the php83 note above).
 #
-# curl and not busybox wget, --virtual so it leaves with the build: same
-# reason. It is what aegis-ci-tofu does, and using the tool that is
-# known to work here is worth more than saving a package.
+# curl viene en la lista de arriba Y SE QUEDA. La forma habitual —instalarlo
+# como `--virtual .build-deps` y borrarlo con `apk del` al terminar— se probó y
+# ROMPIÓ LA IMAGEN de una manera que vale la pena dejar escrita:
+#
+#   Con el `apk del` al final de este RUN, la imagen resultante decía
+#   `apk info -e libgcc` → instalado, y `find / -name 'libgcc_s.so*'` → nada.
+#   El log del propio apk muestra que sólo purgó curl («Purging curl»), o sea
+#   que el paquete no lo borró apk: se perdió en el snapshot que kaniko toma
+#   después de un borrado. Y el efecto no era un error: php seguía arrancando,
+#   sin opcache, avisando una vez por stderr.
+#
+# No hay `apk del`, no hay snapshot sobre un borrado, no hay problema. Un
+# paquete de más en una imagen que ni se escanea ni corre en un tenant vale
+# infinitamente menos que un build que produce algo distinto de lo que dice.
 RUN set -eux; \
-    apk add --no-cache --virtual .build-deps curl; \
     curl -fsSL -o /tmp/composer.phar \
       "https://github.com/composer/composer/releases/download/${COMPOSER_VERSION}/composer.phar"; \
     echo "${COMPOSER_SHA256}  /tmp/composer.phar" | sha256sum -c -; \
     mkdir -p /usr/local/lib; \
     cp /tmp/composer.phar /usr/local/lib/composer.phar; \
-    rm -f /tmp/composer.phar; \
-    apk del .build-deps
+    rm -f /tmp/composer.phar
 
 # The `--version` calls are not decoration: if an apk leaves the image
 # without one of these, the build of THIS image fails right here and not
@@ -141,7 +150,13 @@ RUN set -eux; \
     for ext in ctype curl dom fileinfo iconv mbstring openssl pdo pdo_pgsql \
                Phar session SimpleXML sodium tokenizer xml xmlwriter zip; do \
       php -m | grep -qix "$ext" || { echo "MISSING PHP EXTENSION: $ext"; php -m; exit 1; }; \
-    done
+    done; \
+    php -m | grep -qix "Zend OPcache" || { \
+      echo "OPCACHE NO CARGA. Suele ser libgcc_s.so.1 ausente: php84-opcache"; \
+      echo "enlaza contra ella y NO la declara. php -v lo dice en stderr y"; \
+      echo "sigue andando, que es la forma en que esto pasa desapercibido."; \
+      php -v; exit 1; }; \
+    php -r 'exit(ini_get("opcache.enable") === false ? 1 : 0);'
 
 # Composer must never phone home from the pipeline for anything but the
 # packages it was asked for, and must never write outside the workspace.
