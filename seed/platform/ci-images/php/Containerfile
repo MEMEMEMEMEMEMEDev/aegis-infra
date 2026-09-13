@@ -69,28 +69,44 @@ RUN set -eux; \
       php84-tokenizer php84-xml php84-xmlwriter php84-zip; \
     ln -sf /usr/bin/php84 /usr/bin/php
 
-# THE PHAR, verified before it is trusted, and left WITHOUT an execute
-# bit — which is not laziness, it is the shape that builds here.
+# THE PHAR, verified before it is trusted, staged through /tmp and left
+# WITHOUT an execute bit. The shape is aegis-ci-tofu's, and it is not a
+# preference: it is the one that builds here. What follows is what was
+# MEASURED, because the first explanation written in this file was wrong
+# and a diagnostic put in to check it said so.
 #
-# MEASURED, build ci-images#2 (2026-09-12): this RUN ended in
-# `chmod 0755 /usr/local/bin/composer` and kaniko answered
-# «error building stage: failed to execute command: permission denied».
-# The download and the checksum had both succeeded in the same RUN, so
-# what the builder refused was the mode change and nothing else.
-# aegis-ci-tofu is the control: it downloads a release to /tmp, verifies
-# its sha256 and lands a binary in this very directory — and it never
-# runs chmod, because tar restores the mode out of the archive. A lone
-# phar has no archive to restore a mode from.
+#   build #2  the phar went straight into /usr/local/bin/composer with
+#             busybox wget and was then chmod'ed 0755. kaniko answered
+#             «error building stage: failed to execute command:
+#             permission denied». The obvious reading — "the builder
+#             refuses chmod" — went into this comment, and was WRONG.
+#   build #3  a non-fatal probe printed `chmod: ACEPTADO por este
+#             builder`. So chmod is fine, and the comment was folklore.
+#   build #4  two isolated probes, each ending in `true` so neither
+#             could fail the build:
+#               · touch + chmod + rm inside /usr/local/bin  → passes
+#               · wget of the 3 MB phar into /usr/local/bin, chmod, rm
+#                 → every command runs and echoes, and THEN the stage
+#                 dies with the same message, before kaniko even prints
+#                 "Taking snapshot". The shell had already exited 0.
 #
-# So the phar keeps mode 0644 and lives under /usr/local/lib. Nothing is
-# lost: every caller goes through the interpreter anyway, and a pipeline
-# that writes `php /usr/local/lib/composer.phar install` says out loud
-# WHICH php is resolving the dependencies — which is the entire point of
-# this image (see the php83 note above).
+# So the failure is not the chmod and not the shell: it is kaniko's own
+# work at the end of a stage that pulled a multi-megabyte file into
+# /usr/local/bin. The mechanism is not established — and it does not
+# need to be, because the shape that does build is already the house
+# pattern: download to /tmp, verify the checksum, put the file in its
+# final home. What IS established is which shapes fail and which works,
+# and that is what a comment should carry.
 #
-# curl and not busybox wget, and --virtual so it leaves with the build:
-# it is the same pattern aegis-ci-tofu uses, and using the one that is
-# known to work here is worth more than shaving a package.
+# The phar therefore keeps mode 0644 and lives under /usr/local/lib.
+# Nothing is lost: every caller goes through the interpreter anyway, and
+# a pipeline that writes `php /usr/local/lib/composer.phar install` says
+# out loud WHICH php is resolving the dependencies — which is the entire
+# point of this image (see the php83 note above).
+#
+# curl and not busybox wget, --virtual so it leaves with the build: same
+# reason. It is what aegis-ci-tofu does, and using the tool that is
+# known to work here is worth more than saving a package.
 RUN set -eux; \
     apk add --no-cache --virtual .build-deps curl; \
     curl -fsSL -o /tmp/composer.phar \
@@ -100,17 +116,6 @@ RUN set -eux; \
     cp /tmp/composer.phar /usr/local/lib/composer.phar; \
     rm -f /tmp/composer.phar; \
     apk del .build-deps
-
-# DIAGNOSTIC, and deliberately unable to fail the build: it writes down
-# in the log whether this builder accepts a chmod at all. If it prints
-# `chmod: ACEPTADO`, the conclusion above is wrong and the comment has
-# to be corrected; if it prints `chmod: RECHAZADO`, the reason this
-# image is shaped the way it is stays measured instead of remembered.
-RUN touch /tmp/prueba-chmod \
- && { chmod 0755 /tmp/prueba-chmod 2>/dev/null \
-      && echo "chmod: ACEPTADO por este builder" \
-      || echo "chmod: RECHAZADO por este builder"; } \
- ; rm -f /tmp/prueba-chmod ; true
 
 # The `--version` calls are not decoration: if an apk leaves the image
 # without one of these, the build of THIS image fails right here and not
@@ -132,3 +137,4 @@ ENV COMPOSER_ALLOW_SUPERUSER=1 \
     COMPOSER_NO_INTERACTION=1 \
     COMPOSER_CACHE_DIR=/tmp/composer-cache \
     COMPOSER_HOME=/tmp/composer-home
+

@@ -193,19 +193,15 @@ STOPSIGNAL SIGQUIT
 # to know which uid to assert on the built image.
 USER 65532:65532
 # THE INTERPRETER IS NAMED EXPLICITLY, and the entrypoint file is NOT
-# executable — which is deliberate and was measured, not assumed.
+# executable. sh reads the file — mode 0644, world readable — and becomes
+# PID 1 exactly as it would have through a shebang, so nothing is lost.
 #
-# Build ci-images#2 (2026-09-12) died with kaniko answering «failed to
-# execute command: permission denied» on a `chmod 0755` in a RUN, in a
-# stage whose download and checksum had both already succeeded. The
-# control is aegis-ci-tofu: same directory, same download-and-verify
-# shape, builds fine — and it never chmods, because tar restores the
-# mode out of the archive.
-#
-# Naming /bin/sh here removes the need for the execute bit AND for the
-# shebang: sh reads the file, which is mode 0644 and world readable, and
-# becomes PID 1 exactly as it would have through the shebang. It also
-# means this image cannot be broken by the file arriving without its
-# mode — which is the same reason check 134 wants no executables in the
-# artifact in the first place.
+# What is gained is that this image cannot break because the file
+# arrived without its mode. That is not hypothetical here: check 134
+# forbids executables in the artifact, so entrypoint.sh is 0644 in the
+# repository by rule, and an image that needed `chmod +x` at build time
+# would be one RUN away from the class of failure that ci-images#2, #3
+# and #4 spent three builds pinning down (ci-images/php/Containerfile
+# tells that story). Not needing the bit at all is shorter than needing
+# it and getting it right.
 ENTRYPOINT ["/bin/sh", "/usr/local/bin/aegis-php-entrypoint"]
