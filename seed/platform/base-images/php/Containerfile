@@ -182,16 +182,34 @@ RUN set -eux; \
 # the http context (a `server{}` in the wrong context fails HERE instead
 # of in the consumer's pod); php-fpm proves the pool file above parses.
 RUN nginx -t
-RUN php-fpm84 -t
+
+# EL CAMBIO DE USUARIO VA ANTES DEL TEST DE php-fpm, Y ESO ES EL TEST.
+#
+# php-fpm arrancado como root EXIGE `user`/`group` en el pool y aborta sin
+# ellos; arrancado como cualquier otro uid los ignora y avisa si están.
+# O sea: la configuración correcta para root es la incorrecta para este
+# contenedor y viceversa. Build base-images#2 lo cobró — `php-fpm84 -t`
+# corría como root y murió con «failed to post process the
+# configuration», por un pool que en producción está bien.
+#
+# Así que el test corre con el uid que la imagen va a usar de verdad, que
+# además es lo único que prueba algo: validar la configuración como un
+# usuario que nunca va a ejecutarla no es validarla.
+USER 65532:65532
+
+# stderr capturado y volcado a mano si falla. kaniko escribe sus propios
+# errores en el mismo descriptor y en #2 se comió la línea que decía el
+# motivo, dejando media palabra («…cess the configuration») y una hora de
+# adivinanzas. Un mensaje de error que se pierde es un mensaje de error
+# que no existe.
+RUN php-fpm84 -t 2>/tmp/fpm-test.log \
+ || { echo '=== php-fpm84 -t falló; esto dijo: ==='; cat /tmp/fpm-test.log; exit 1; }
 
 WORKDIR /app
 EXPOSE 8080
 # SIGQUIT is nginx's graceful stop, and entrypoint.sh forwards it to
 # both children: in-flight requests finish, then everything exits.
 STOPSIGNAL SIGQUIT
-# Numeric on purpose (see the contract above). The job reads this line
-# to know which uid to assert on the built image.
-USER 65532:65532
 # THE INTERPRETER IS NAMED EXPLICITLY, and the entrypoint file is NOT
 # executable. sh reads the file — mode 0644, world readable — and becomes
 # PID 1 exactly as it would have through a shebang, so nothing is lost.
