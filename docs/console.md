@@ -1,0 +1,162 @@
+# The console
+
+A visual layer over the CLI, built **on top of it and not instead of
+it**. Every screen is drawn from the documents the commands already
+emit; the console measures nothing of its own, and there is no command
+it can run that you cannot.
+
+It has **no AI agent**, and that is a decision rather than an omission.
+A platform whose job is to say what is true about your machine does not
+get to guess.
+
+```bash
+aegis console serve            # http://127.0.0.1:7391
+```
+
+## The four states, which is the whole point
+
+Every reading on every screen carries one of four states, and the
+fourth is the reason the console exists:
+
+| on the screen | what it means |
+|---|---|
+| **fine** | measured, and nothing is being asked of anybody |
+| **wrong** | measured, and something is off |
+| **attention** | measured, and somebody has a decision to make |
+| **unseen** | **nobody could look** |
+
+Almost every dashboard has two states and paints the third and fourth
+green. «No failures found» and «I could not reach the thing» look
+identical, and only one of them gets investigated. Here `unseen` is the
+only state with no colour of its own: it is hatched, and it is drawn
+first.
+
+The state travels in a `data-state` attribute and never in a word, so
+the text on screen can be reworded or translated without any check
+noticing — and what may never change quietly is which state a thing IS.
+
+## What it reads
+
+Six commands, each one asked for its document (`--json`), and a source
+that cannot answer is a **reading too** — never a spinner, never a blank
+panel:
+
+| source | the question it answers |
+|---|---|
+| `aegis org list` | which organizations exist, as their contracts declare them |
+| `aegis traffic show` | what actually arrived at each one |
+| `aegis capacity show` | does another organization fit, and what runs out first |
+| `aegis builds show` | what happened to each push, link by link |
+| `aegis check` | the round: the cluster against what is declared |
+| `aegis edge check` | do the hostnames anybody types exist and answer |
+
+## One organization
+
+`/org/<name>` is that organization and nothing else — its sources are
+scoped at the command (`aegis tenant show <name>`,
+`aegis traffic show --org <name>`, `aegis data remote status --org
+<name> --json`) rather than filtered from the instance's documents,
+because a screen that filtered would be dropping measurements.
+
+It shows its namespace, one line per declared service against the
+workload actually running, the volume of each database, whether each
+public path is routed **and has anybody behind it**, how much of the
+quota is spent, and how old the off-site copy is against the cadence
+this instance actually keeps.
+
+And it names **what the contract does not declare**: a workload nobody
+claims, a volume nobody claims. That matters more than it sounds. The
+contract is what every tool here derives from, so anything the contract
+does not name is invisible to all of them at once — including
+`aegis data`, which is why a claim created outside the generator can
+hold a hundred gigabytes that nothing copies.
+
+## What it writes
+
+One thing, in one place: **a contract in `orgs/`**.
+
+`/new` describes an organization and writes nothing. What it submits is
+a proposal; the next screen is `aegis org plan`, and that writes nothing
+either. Only then is there a button.
+
+It does not commit, it does not push, it does not apply, and it does not
+touch the cluster. That is what makes the file harmless: **ArgoCD reads
+the remote**, so nothing runs until you commit. It is the property
+`aegis org` already has — the worst that can happen is an ugly diff
+nobody commits — and the console inherits it verbatim.
+
+It refuses to write over a contract that exists. Creating an
+organization that is already there is an edit, and an edit is a
+different decision.
+
+Every choice the form offers is derived from `aegis org schema`, which
+derives from the validator itself; and the validator is what refuses,
+**in its own words**, at whatever length it takes. There is no
+JavaScript anywhere in the console, so a field cannot be greyed out as
+you change a type: the rules travel as text beside each type instead.
+
+## Reaching it, and why it is not published
+
+The console binds `127.0.0.1` and there is no flag to change it. From
+another machine:
+
+```bash
+ssh -L 7391:127.0.0.1:7391 you@your-server
+```
+
+It is **not published through the tunnel**, and not for lack of trying:
+the tunnel has a single `ingress_service` pointing at traefik inside the
+cluster, cloudflared runs inside the cluster, and the console runs on
+the host because it needs the age key, the `gh` session and kubectl. A
+second connector does not help — the connectors of one tunnel are
+interchangeable and Cloudflare spreads traffic across them. Publishing
+it is a tunnel of its own with a connector on the host.
+
+## What the guard does, and what it is not
+
+It is **not authentication and does not pretend to be**. Anything already
+running as your user can read the age key and the kubeconfig directly
+and has no need of a console. What the rules stop is a **remote page**
+borrowing your browser as a way in, which is a different and entirely
+real thing:
+
+- **Every request** must be addressed to a loopback name. A page whose
+  domain starts resolving to `127.0.0.1` keeps its own origin — the
+  same-origin policy is not violated, it simply does not apply — and the
+  `Host` header is the only thing that gives it away.
+- **Every write** must carry an `Origin` of this console's own, a
+  `Sec-Fetch-Site` that is not cross-site, and a token this process
+  minted at start-up. Cross-origin form POSTs have never been blocked by
+  the same-origin policy; the defence is that an attacking page can send
+  a request and cannot read the answer, so it never learns the token.
+
+The page itself is served under `default-src 'none'` with no
+`script-src`, `form-action 'self'` and `frame-ancestors 'none'`. It
+fetches nothing, not even its own typefaces, which are inlined.
+
+## The corpus
+
+`console/cases/` holds states of the world as the commands really
+emitted them, and the console is built until they render correctly.
+Every case declares its provenance — `medido`, `derivado` from a
+recorded mutation, or `sintetico` saying why — and none of them carries
+anything that identifies the instance it came from.
+
+```bash
+aegis console list                        # the corpus
+aegis console capture NAME --what "..." --run "check" --run "edge check"
+```
+
+The checks over it hold two invariants for every case: **no state is
+lost and none is invented**, and **the verdict is never kinder than its
+readings**.
+
+## What is not there yet
+
+- **Editing.** The console creates; it does not yet change an
+  organization that exists. Adding a database to one is an edit and it
+  needs to show the diff against what is there.
+- **Somebody else's console.** A person who is not the operator looking
+  at their own organization needs Cloudflare Access and a tunnel of its
+  own, and today Access admits a single email address. That is the
+  original mission and it is still ahead.

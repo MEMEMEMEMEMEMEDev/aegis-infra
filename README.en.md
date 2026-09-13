@@ -204,6 +204,34 @@ is the page to hand to the team that will push to it.
   placeholders, never values; two checks keep addresses and identities
   out, so that what installs here installs anywhere.
 
+## The console
+
+```bash
+aegis console serve            # http://127.0.0.1:7391
+```
+
+A visual layer **on top of** the CLI, not instead of it: every screen is
+drawn from the documents the commands already emit. It measures nothing
+of its own and can run nothing you cannot. It has **no AI agent**, and
+that is a decision — a platform whose job is to say what is true about
+your machine does not get to guess.
+
+What separates it from any other dashboard is **four states instead of
+two**. Almost every one of them paints «no failures found» and «I could
+not reach it» the same green, and only one of those gets investigated.
+Here **«nobody could look» is a state with a name**, the only one with
+no colour of its own, and the first one drawn.
+
+It reads six commands, it shows one organization **as the cluster has
+it** against what its contract declares — including what the contract
+does **not** declare, which is exactly what no other tool here can see,
+because they all derive from the contract — and it writes one thing: a
+contract in `orgs/`. No commit, no push, no apply, no cluster.
+
+It is not published through the tunnel; you reach it with
+`ssh -L 7391:127.0.0.1:7391`. The reasons, the security model and what
+is still missing are in [The console](docs/console.md).
+
 ## The map
 
 ```
@@ -214,7 +242,7 @@ init/         the orchestrator and its fifteen phases
 verify/       the checks, their teeth, the harnesses
 seed/         what ships: the platform repo, the canary, the templates
 docs/         AGENTS.md (how to change this), OPERATE.md (how to run it),
-              the glossary, the design journeys
+              console.md (the visual layer), the glossary, the journeys
 ```
 
 Start with `docs/AGENTS.md` if you are going to change it, and
@@ -238,9 +266,15 @@ Said plainly, because the checks would say it anyway.
 - Some identifiers inside the seed are still in Spanish, on purpose:
   each one moves with the instance that reads it, and the glossary
   lists every one that is pending.
-- It expects you to read. The friendlier layer is the next piece of
-  work, and it is being built on top of this one rather than instead
-  of it.
+- The console is the **operator's**, and only theirs. It runs on
+  loopback and is reached over an SSH tunnel; the tenant's console — a
+  non-technical person looking at their own organization — needs
+  Cloudflare Access and a tunnel of its own, and today Access admits a
+  single email address.
+- The console **creates** an organization and does not yet **edit** one
+  that exists: adding a database to it is an edit, and it explicitly
+  refuses to write over a contract.
+- Outside the console, it still expects you to read.
 
 ## About this history
 

@@ -57,6 +57,14 @@ failure).
 
 ## 3. Diagnosis: where to start (in order)
 
+Everything below is also on one screen: `aegis console serve` reads the
+round, the edge, the organizations, the traffic, the capacity and the
+last builds, and draws them with **four states** rather than two — a
+source that could not be reached is `unseen`, never green. It is on
+loopback (`ssh -L 7391:127.0.0.1:7391` from elsewhere) and it is the
+fastest way to see which of the commands below is worth running. See
+[the console](console.md).
+
 ```bash
 # 1) The black box of the last run — ALWAYS first:
 jq -r 'select(.result!="pass") | "\(.phase) \(.gate) \(.result)"' \

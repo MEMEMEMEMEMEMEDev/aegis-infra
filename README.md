@@ -24,9 +24,10 @@ desarrolladores y gente de plataforma. La instalación completa ya
 corrió de principio a fin en una máquina que no era la del autor (ver
 [Dónde se probó](#dónde-se-probó)), y cada afirmación de este
 documento sale de una comprobación que se puede volver a ejecutar.
-Falta pulirlo, y falta una capa más amigable para quien no quiere
-leer un Jenkinsfile. Esa capa es lo próximo, y se construye encima de
-esta.
+Falta pulirlo. La capa visual ya empezó —hay una consola sobre el CLI,
+en loopback, que lee y que sabe dar de alta una organización— y lo que
+todavía no existe es la consola del inquilino: alguien que no sea quien
+administra la máquina mirando lo suyo.
 
 ---
 
@@ -237,6 +238,40 @@ aegis secret create orgs/shop.yaml   # si aparecieron secretos nuevos
 equipo que va a hacer push: qué pasa con cada push y qué reglas lo
 rechazan.
 
+## La consola
+
+```bash
+aegis console serve            # http://127.0.0.1:7391
+```
+
+Una capa visual **encima** del CLI, no en su lugar: cada pantalla se
+dibuja con los documentos que los comandos ya emiten. No mide nada por
+su cuenta y no puede correr nada que tú no puedas. **No tiene agente de
+IA**, y eso es una decisión: una plataforma cuyo trabajo es decir qué es
+verdad sobre tu máquina no se pone a adivinar.
+
+Lo que la separa de un tablero cualquiera son **cuatro estados** en vez
+de dos. Casi todos pintan de verde tanto «no encontré fallas» como «no
+pude llegar a mirar», y sólo uno de los dos se investiga. Acá **«nadie
+pudo mirar» es un estado con nombre**, es el único sin color propio —va
+tramado— y es el primero que se dibuja.
+
+Lee seis comandos: las organizaciones, el tráfico que de verdad llegó a
+cada una, si entra otra, qué le pasó a cada push eslabón por eslabón, la
+ronda y el borde. Entrando a una organización la ve **como el clúster la
+tiene**, contra lo que su contrato declara — incluido lo que el contrato
+**no** declara, que es justo lo que ninguna otra herramienta de la casa
+puede ver, porque todas derivan del contrato.
+
+Y escribe una sola cosa: **un contrato en `orgs/`**. No commitea, no
+empuja, no aplica y no toca el clúster. Eso es lo que hace inofensivo el
+fichero: ArgoCD lee el remoto, así que nada corre hasta que tú
+commitees.
+
+No se publica por el túnel —se entra con `ssh -L 7391:127.0.0.1:7391`—
+y el porqué, junto con el modelo de seguridad y lo que falta, está en
+[La consola](docs/console.md).
+
 ## Cómo funciona
 
 ### Las dieciséis fases, en cuatro etapas
@@ -395,8 +430,8 @@ verificador).
 | grupo | comandos |
 |---|---|
 | setup | `aegis preflight`, `aegis init`, `aegis init-log`, `aegis verify`, `aegis destroy` |
-| apps | `aegis app`, `aegis org`, `aegis secret` |
-| operate | `aegis check`, `aegis sync`, `aegis ai` |
+| apps | `aegis app`, `aegis org`, `aegis image`, `aegis secret` |
+| operate | `aegis check`, `aegis console`, `aegis tenant`, `aegis traffic`, `aegis capacity`, `aegis builds`, `aegis host`, `aegis sync`, `aegis ai` |
 | infra | `aegis ci`, `aegis edge`, `aegis registry`, `aegis rotate`, `aegis webhook` |
 | backup | `aegis data`, `aegis state` |
 
@@ -418,7 +453,8 @@ verificador).
 | comando | qué hace |
 |---|---|
 | `aegis app new` / `apply` | `new` escribe el alta entera en archivos (contrato desde una plantilla con `--template`, esqueleto, derivaciones, secretos) sin tocar nada fuera; `apply` ejecuta los pasos de GitHub de cada contrato: repo, esqueleto, deploy key, webhook (`--check` para verlo sin tocar nada). |
-| `aegis org plan` / `apply` / `validate` / `edge` / `routes` / `plan-delete` / `delete` / `migrate` | `plan` muestra qué cambiaría; `apply` escribe los manifiestos; `validate` solo valida el contrato; `edge` deriva los hostnames públicos de todos los contratos; `routes` deriva el ConfigMap de rutas de IA (`ai-ruteo`); `plan-delete` muestra qué borraría; `delete` borra del repo y dice qué retirar del clúster; `migrate` lleva un contrato a una versión nueva. |
+| `aegis org plan` / `apply` / `validate` / `list` / `schema` / `edge` / `routes` / `plan-delete` / `delete` / `migrate` | `plan` muestra qué cambiaría; `apply` escribe los manifiestos; `validate` solo valida el contrato; `edge` deriva los hostnames públicos de todos los contratos; `routes` deriva el ConfigMap de rutas de IA (`ai-ruteo`); `plan-delete` muestra qué borraría; `delete` borra del repo y dice qué retirar del clúster; `migrate` lleva un contrato a una versión nueva; `list` lista las organizaciones que los contratos declaran, incluidas las que no validan; `schema` dice **qué puede contener un contrato**, derivado del propio validador, que es lo que lee el formulario de la consola. |
+| `aegis image request` / `list` / `from` / `check` / `gc` | Las imágenes base que la plataforma fabrica y firma. `request` mide el digest al que apunta un tag hoy y lo declara en `images.txt` (con `--allow CVE --until --reason` para una excepción que firma un humano); `from` imprime la línea `FROM` que se pega en un Dockerfile; `check` mide que lo declarado sea lo que hay; `gc` limpia versiones viejas. |
 | `aegis secret create` / `rotate` / `move` | Crea los secretos cifrados que faltan (nunca regenera los que existen), reemplaza el material, o copia un secreto a otro namespace (`move` necesita la clave age). |
 
 **operate**
@@ -426,6 +462,12 @@ verificador).
 | comando | qué hace |
 |---|---|
 | `aegis check` | La ronda rutinaria. Sin argumentos y sin escribir nada: mide el clúster vivo contra lo declarado (firma en Enforce, respaldos por organización, desincronías). |
+| `aegis console serve` / `capture` / `list` | La consola visual, en loopback y sobre el CLI: dibuja los documentos que los comandos ya emiten. `capture` guarda un estado del mundo como caso; `list` muestra el corpus. Ver [La consola](docs/console.md). |
+| `aegis tenant show` | Una organización **como el clúster la tiene**, contra lo que su contrato declara: sus servicios, el volumen de cada base, si cada camino público tiene a alguien detrás, su cuota, y lo que el contrato no declara. `aegis org` es el lado contrato y no toca el clúster; éste no escribe un fichero. |
+| `aegis traffic show` | Lo que de verdad llegó a cada organización, leído de las métricas de traefik. Atribuye por organización, reporta lo de la plataforma aparte, y **reconcilia contra el total** para que nada desaparezca. `--org` lo acota a una. |
+| `aegis capacity show` | ¿Entra otra organización? El allocatable del nodo contra la suma de los requests vivos, y cuántas de cada plan caben — diciendo **qué se acaba primero**. Si el apiserver no contesta dice que no pudo mirar, nunca cero. |
+| `aegis builds show` | Qué le pasó a cada push, eslabón por eslabón: construir, escanear, firmar, anotar el digest. Los dos que pasan después y en otros componentes (el sync y la admisión) viajan marcados como **no medidos acá**. |
+| `aegis host measure` / `show` / `floor` / `budget` / `metrics` / `reservation` / `requires` | Mide la máquina en la que aegis aterrizó y lo anota. `floor` es el piso de memoria que le deja al escritorio si compartís la máquina (`--set` para elegirlo, `--apply` para ponerlo en manos del kernel); `budget` dice si lo que la plataforma reserva entra en lo que esa máquina deja; `metrics` exporta lo que sólo el anfitrión puede ver. |
 | `aegis sync` | Dispara un sync de ArgoCD de las apps nombradas sin pasar `syncOptions`; `--drifted` sincroniza todo lo que no esté Synced. |
 | `aegis ai` | El control del operador sobre el sustrato de IA; queda fuera de este documento. |
 
@@ -443,7 +485,7 @@ verificador).
 
 | comando | qué hace |
 |---|---|
-| `aegis data backup` / `list` / `restore` | Los datos de los tenants: un bundle por organización. `list` mira dentro sin restaurar; `restore` exige `--org` y, si la credencial rotó desde la captura, `--force`. |
+| `aegis data backup` / `list` / `restore` / `size` / `remote` | Los datos de los tenants: un bundle por organización. `list` mira dentro sin restaurar; `restore` exige `--org` y, si la credencial rotó desde la captura, `--force`; `size` mide lo que pesan los datos; `remote` es el destino fuera de sitio (`bucket`, `adopt`, `push`, `list`, `status`, `cadence`), y `remote status --org X --json` contesta por una sola organización con la **cadencia al lado de la edad**. |
 | `aegis state backup` / `restore` | Los tres estados que viven solo en esta máquina y que ningún git guarda: el almacén cifrado, los marcadores de fase y el tfstate del borde. Perder cualquiera obliga a rehacer la instalación a mano. |
 
 `state` es la máquina: lo que hace falta para reconstruir la
@@ -504,7 +546,7 @@ verify/       los checks, sus dientes, los arneses
 seed/         lo que se distribuye: el repo de plataforma, el canario, las plantillas
 share/        los códigos de salida y las unidades de systemd
 docs/         AGENTS.md (cómo cambiar esto), OPERATE.md (cómo operarlo),
-              el glosario, los journeys de diseño
+              console.md (la capa visual), el glosario, los journeys
 ```
 
 Lo que corre en el clúster: k3s v1.35.4+k3s1 (sin el Traefik ni el
@@ -527,6 +569,9 @@ Por dónde empezar a leer:
 - `docs/OPERATE.md`, si vas a operar una instancia: estado esperado,
   diagnóstico, qué desincronías son inofensivas, herramientas de
   recuperación.
+- `docs/console.md`, si vas a usar la consola: sus cuatro estados, qué
+  lee, qué escribe y qué nunca hace, cómo se llega a ella y por qué no
+  se publica.
 - `docs/glossary.md` es el vocabulario, y `aegis verify` lo hace
   cumplir.
 - `docs/journeys/foreign-instance.md` es el ensayo en máquina ajena,
@@ -572,12 +617,18 @@ Dicho claro, porque los checks lo dirían igual.
   techo. Lee los manifiestos de la semilla; los defaults propios de un
   chart, para lo que la semilla no sobreescribe, viven dentro de un
   tarball que ese recorrido no abre.
-- Exige leer. La capa más amigable es la próxima pieza de trabajo, y se
-  construye encima de esta, no en su lugar.
+- La consola es la del **operador**, y sólo la de él. Corre en loopback
+  y se entra por un túnel SSH; la del inquilino —una persona no técnica
+  mirando su propia organización— necesita Cloudflare Access y un túnel
+  propio, y hoy Access admite un solo correo.
+- La consola **da de alta** una organización y todavía no **edita** una
+  que existe: agregarle una base es una edición, y se niega
+  explícitamente a escribir encima de un contrato.
+- Fuera de la consola, sigue exigiendo leer.
 
-Lo próximo, en este orden y sin fechas: la capa amigable para personas
-no técnicas y para desarrolladores que recién empiezan; el perfil
-`cloudflare` en una máquina ajena, con sus puertas pasando de no
+Lo próximo, en este orden y sin fechas: la consola del inquilino, con
+Access admitiendo a más de una persona; la edición desde la consola; el
+perfil `cloudflare` en una máquina ajena, con sus puertas pasando de no
 evaluables a medidas; el monorepo como caso de primera clase.
 
 ## Sobre el idioma y el historial
