@@ -7,13 +7,24 @@
 R127="$AEGIS_ROOT/lib/aegis/console.py"
 
 # «the timestamp is clutter» — and every number on the page starts
-# looking like it was taken just now
+# THE AGE STOPS BEING DRAWN, wherever it is drawn from. This named the
+# two call sites `_source` had and went quiet on 2026-09-14, when the
+# panel started emitting the age from the indicator's summary line and
+# from the projects section instead — the check was right to stay green,
+# because the age was still on the page, and the tooth was measuring a
+# call site rather than the promise.
+#
+# The promise is that a measurement reaches the screen WITH ITS AGE. So
+# the function that draws it is made to draw nothing, which is the only
+# mutation that means exactly that wherever it is called from.
 red_1() { python3 - "$R127" <<'P'
-import sys, pathlib
+import sys, pathlib, re
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-s = s.replace("f'{_age(reading)}{\"\".join(body)}</section>'", "f'{\"\".join(body)}</section>'")
-s = s.replace("f'{_age(reading)}</section>')", "f'</section>')")
-p.write_text(s)
+start = s.index("def _age(reading):")
+body = s.index("\n\n\n", start)
+head = s.index('"""', s.index('"""', start) + 3) + 3
+assert start < head < body, "re-aim this tooth"
+p.write_text(s[:head] + '\n    return ""\n' + s[body:])
 P
 }
 
