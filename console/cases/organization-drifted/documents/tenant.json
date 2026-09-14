@@ -16,13 +16,15 @@
       "workload": "drop-app",
       "ready": 1,
       "desired": 1,
-      "image": "registry.registry-system.svc.cluster.local:5000/drop-app@sha256:31b98b8c1cd97716d7986d2f7eb390838b5089cdb19ed13926d77c2a0bc8a715",
-      "digest": "sha256:31b98b8c1cd97716d7986d2f7eb390838b5089cdb19ed13926d77c2a0bc8a715"
+      "image": "registry.registry-system.svc.cluster.local:5000/drop-app@sha256:e0651ed4ce98bae65bbdbeab24a9c2876d1eadb3dfdf67f089f5a5736ea99c91",
+      "digest": "sha256:e0651ed4ce98bae65bbdbeab24a9c2876d1eadb3dfdf67f089f5a5736ea99c91"
     },
     {
       "step": "unclaimed-volume:drop-datos",
-      "state": "wrong",
+      "state": "already",
       "size": "100Gi",
+      "copiado": false,
+      "nota": "no service of the contract declares it, so aegis does not back it up",
       "phase": "Bound",
       "label": null
     },
@@ -68,5 +70,5 @@
       "percent": 83.3
     }
   ],
-  "rc": 1
+  "rc": 0
 }

@@ -142,6 +142,17 @@ try:
                         "the generator, which is precisely what is at risk")
 
     unclaimed = [s for s in steps if s.get("step", "").startswith("unclaimed")]
+    # A WORKLOAD AND A VOLUME ARE NOT THE SAME FINDING, and the
+    # difference took a correction from the operator to get right.
+    # aegis governs what RUNS: an undeclared workload escapes the size
+    # policy, the NetworkPolicies and the quota's intent. A volume is
+    # different — whether what is inside it matters is something only
+    # its owner knows, and the first one this ever found was a
+    # deliberate disk of a project that is not aegis's business.
+    #
+    # So the volume has to be NAMED and it may not be red: the sentence
+    # is the alarm, which is this product's own rule. What is checked
+    # here is the naming, and the state only for the workloads.
     # AND THE SWEEP HAS TO DISCRIMINATE. A loop that called everything a
     # stranger would satisfy every line above and make the screen
     # useless in the other direction: an operator who is told that the
@@ -151,11 +162,28 @@ try:
         findings.append("the one service the contract DOES declare is also reported as "
                         "unclaimed: a sweep that names everything names nothing")
     for s in unclaimed:
+        if s.get("step", "").startswith("unclaimed-volume:"):
+            # It has to carry, as DATA, that nothing copies it. That
+            # sentence is the whole value of drawing it at all, and it
+            # is what a state cannot say.
+            if s.get("copiado") is not False:
+                findings.append(f"{s['step']} does not say that aegis does not back it "
+                                f"up: naming a volume without saying that is naming it "
+                                f"for nothing")
+            if s.get("state") in ("wrong", "not-evaluable"):
+                findings.append(f"{s['step']} is filed as `{s.get('state')}`: a volume the "
+                                f"contract does not declare may be a deliberate disk of a "
+                                f"project that is not aegis's, and insisting in red about a "
+                                f"decision somebody already made teaches them to stop "
+                                f"reading the colour")
+            continue
         if s.get("state") not in ("wrong", "not-evaluable"):
-            findings.append(f"{s['step']} is filed as `{s.get('state')}`: something the "
-                            f"contract does not declare is being reported as being in order")
+            findings.append(f"{s['step']} is filed as `{s.get('state')}`: a workload the "
+                            f"contract does not declare escapes the size policy, the "
+                            f"NetworkPolicies and the quota's intent, and is being reported "
+                            f"as being in order")
     if doc.get("rc") == 0:
-        findings.append("the document reports rc 0 with three things in the namespace that "
+        findings.append("the document reports rc 0 with a workload in the namespace that "
                         "no contract declares: the command says this organization is exactly "
                         "what it promised to be")
 

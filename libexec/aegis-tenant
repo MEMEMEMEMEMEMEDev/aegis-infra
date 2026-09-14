@@ -303,10 +303,23 @@ def show(org, steps, narrate):
     # A volume nobody claims. MEASURED ON THE FIRST RUN of this command
     # against a real instance: an organization whose contract declares
     # one stateless service was holding 100Gi on a bound claim that came
-    # from its own repo. Nothing was wrong with it — it was Bound, the
-    # pod was Running, the round was green — and `aegis data` had never
-    # heard of it, because `aegis data` reads contracts. A hundred
-    # gigabytes with no copy and nothing to say so.
+    # from its own repo. `aegis data` had never heard of it, because
+    # `aegis data` reads contracts — so nothing on the machine said the
+    # volume existed at all.
+    #
+    # IT IS NAMED AND IT IS NOT A FINDING, and the difference took a
+    # correction from the operator to get right. aegis governs what
+    # RUNS: an undeclared workload escapes the size policy, the
+    # NetworkPolicies and the quota's intent, and that is wrong. A
+    # volume is different — whether what is inside it matters is
+    # something only its owner knows, and the first one this ever found
+    # was a deliberate disk of a project that is not aegis's business.
+    # Painting it red forever would be this console insisting about a
+    # decision somebody already made.
+    #
+    # So the sentence is the alarm and the colour is not, which is this
+    # product's own rule: the screen says the volume is there and that
+    # nothing copies it, and the person decides.
     if volumes is not None:
         for v in volumes:
             name = v["metadata"]["name"]
@@ -314,12 +327,15 @@ def show(org, steps, narrate):
                 continue
             size = ((v.get("status") or {}).get("capacity") or {}).get("storage")
             if narrate:
-                print(f"  {yellow}!{off} {name:<12} {grey}{size or '?'} bound in {ns}, "
+                print(f"  {grey}·{off} {name:<12} {grey}{size or '?'} bound in {ns}, "
                       f"and no service of the contract declares it — `aegis data` "
                       f"reads contracts, so nothing copies this{off}")
-            steps.wrong(f"unclaimed-volume:{name}", size=size,
-                        phase=(v.get("status") or {}).get("phase"),
-                        label=((v.get("metadata") or {}).get("labels") or {}).get("app"))
+            steps.already(f"unclaimed-volume:{name}", size=size,
+                          copiado=False,
+                          nota="no service of the contract declares it, so aegis does "
+                               "not back it up",
+                          phase=(v.get("status") or {}).get("phase"),
+                          label=((v.get("metadata") or {}).get("labels") or {}).get("app"))
 
     # ── the routing ──────────────────────────────────────────────────
     public = [sv for sv in services if sv.get("publico")]

@@ -75,8 +75,16 @@ And it names **what the contract does not declare**: a workload nobody
 claims, a volume nobody claims. That matters more than it sounds. The
 contract is what every tool here derives from, so anything the contract
 does not name is invisible to all of them at once — including
-`aegis data`, which is why a claim created outside the generator can
-hold a hundred gigabytes that nothing copies.
+`aegis data`, which reads contracts.
+
+The two are not the same finding. aegis governs what **runs**, so an
+undeclared workload escapes the size policy, the NetworkPolicies and the
+quota's intent, and it is reported as wrong. An undeclared **volume** is
+named and is not: whether what is inside it matters is something only
+its owner knows, and a disk deliberately kept outside a contract is a
+decision somebody already made. The row says the volume is there and
+that nothing copies it, and the person decides. The sentence is the
+alarm, not the colour.
 
 ## What it writes
 

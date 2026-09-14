@@ -3,10 +3,10 @@
     {
       "step": "traffic:drop",
       "state": "already",
-      "requests": 5372,
+      "requests": 20,
       "errors": 0,
-      "p95_ms": 292.6,
-      "bytes": 3580501,
+      "p95_ms": 100.0,
+      "bytes": 10843822,
       "hours": 24
     }
   ],

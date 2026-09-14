@@ -1,4 +1,4 @@
-# title: nothing inside a tenant's namespace goes unnamed
+# title: nothing inside a tenant's namespace goes unnamed, and a volume is not a workload
 # origin: new in v3 — 2026-09-12, measured on a live instance the first time `aegis tenant show` ran (plan/15 §11)
 check() {
 # MEASURED, NOT IMAGINED. The first run of `aegis tenant show` against
@@ -16,8 +16,21 @@ check() {
 #
 # The exercise puts a stranger workload and two unclaimed claims —one
 # with no `app` label at all, like the real one— in front of the command
-# and demands they be NAMED and counted. Drawing them quietly at the
-# bottom of a screen is fine; not knowing about them is not.
+# and demands they be NAMED. Drawing them quietly at the bottom of a
+# screen is fine; not knowing about them is not.
+#
+# AND A VOLUME IS NOT A WORKLOAD, which took a correction from the
+# operator to get right. aegis governs what RUNS: an undeclared workload
+# escapes the size policy, the NetworkPolicies and the quota's intent,
+# and that is a finding. A volume is different — whether what is inside
+# it matters is something only its owner knows, and the first one this
+# ever found was a deliberate disk of a project that is not aegis's
+# business. Insisting in red about a decision somebody already made
+# teaches them to stop reading the colour.
+#
+# So the volume is named, it is not red, and it carries as DATA the one
+# thing that makes naming it worth anything: that nothing copies it.
+# The sentence is the alarm, which is this product's own rule.
 D133=""
 [[ -f "$LIBEXEC/aegis-tenant" ]] || { skip "there is no \`aegis tenant\`: this check has no subject"; return; }
 [[ -f "$AEGIS_ROOT/verify/checks/133.py" ]] || { fail "check 133 has no sidecar: the exercise cannot run"; return; }
@@ -41,6 +54,6 @@ printf '    %s\n' "${SCOPE133:-the scope was not reported}"
 if [[ -n "$D133" ]]; then
     fail "something lives in a tenant's namespace and no command on this machine knows:$D133"
 else
-    pass "every workload and every volume in the namespace is either a declared service or is named as unclaimed ($SCOPE133)"
+    pass "every workload and every volume in the namespace is either a declared service or is named as unclaimed, the workload as a finding and the volume with the sentence that nothing copies it ($SCOPE133)"
 fi
 }

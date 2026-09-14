@@ -1,20 +1,20 @@
 version: 1
 caso: organization-drifted
-que: 'una organizacion cuyo contrato y cuyo cluster no coinciden: un volumen de
-  100Gi que ningun servicio del contrato declara, y por eso nada lo copia'
+que: 'una organizacion con un volumen que su contrato no declara: se nombra, dice
+  que nadie lo copia, y no se pinta de rojo porque es una decision de su dueno'
 procedencia: medido
 producido_por:
 - comando: tenant show drop
   documento: tenant.json
-  rc: 1
+  rc: 0
 - comando: traffic show --org drop
   documento: traffic.json
   rc: 0
 - comando: data remote status --org drop
   documento: data.json
   rc: 0
-medido_en: '2026-09-12T15:53:15-03:00'
-aegis: 3a110ea27e13431a2bebd4447beefa670cfa5afd
+medido_en: '2026-09-14T01:15:36-03:00'
+aegis: 72ec55cbf710b12dab3883f04d0a0a5d7f9aaca8
 forma:
   tenant.json:
     claves:
@@ -22,7 +22,6 @@ forma:
     - steps
     estados:
     - already
-    - wrong
   traffic.json:
     claves:
     - rc

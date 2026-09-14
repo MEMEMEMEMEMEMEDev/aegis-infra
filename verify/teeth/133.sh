@@ -53,14 +53,28 @@ p.write_text(s.replace(old, '''    for app, w in sorted({}.items()):''', 1))
 P
 }
 
-# it is named and filed as fine. Naming a thing and then saying it is in
-# order is worse than silence: the reader is told and reassured at once
+# the volume is named and the ONE THING that makes naming it worth
+# anything is dropped: that nothing copies it. A row that says a disk
+# exists, without saying it is not backed up, is a row nobody acts on.
 red_4() { python3 - "$C133" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-old = '''            steps.wrong(f"unclaimed-volume:{name}", size=size,'''
-assert s.count(old) == 1
-p.write_text(s.replace(old, '''            steps.already(f"unclaimed-volume:{name}", size=size,''', 1))
+old = "                          copiado=False,"
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, "                          copiado=True,", 1))
+P
+}
+
+# the other direction, and it is the one the operator corrected: the
+# volume goes back to being red. A deliberate disk of a project that is
+# not aegis's paints an organization's screen red for ever, and the
+# reader learns to ignore the colour.
+red_6() { python3 - "$C133" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = '''            steps.already(f"unclaimed-volume:{name}", size=size,'''
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, '''            steps.wrong(f"unclaimed-volume:{name}", size=size,''', 1))
 P
 }
 
