@@ -95,3 +95,50 @@ control_2() { sed -i 's/suggested from the language: change it if it is /suggest
 
 # a comment recording the URL that was invented once
 control_3() { printf '\n# note: the first version of import_fields wrote `owner` into the\n# repository URL because the owner was not to hand. It validated.\n' >> "$C203"; }
+
+# ── the colour that arrives from somebody else's API (2026-09-14) ────
+
+# THE ONE. What GitHub answers is painted into an inline style. Stop
+# checking it and the page has stopped being a page that only draws what
+# it built — from a string this console did not write.
+red_7() { python3 - "$C203" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = '    return bool(value and _re.fullmatch(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})", str(value)))'
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, '    return bool(value)', 1))
+P
+}
+
+# it stops being anchored, so a colour with something after it is taken
+# for a colour
+red_8() { python3 - "$C203" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = '_re.fullmatch(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})", str(value))'
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, '_re.match(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})", str(value))', 1))
+P
+}
+
+# the other direction: nothing is ever a colour, so the dot that stands
+# in for a logo is never drawn and the screen quietly loses it
+red_9() { python3 - "$C203" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = '    return bool(value and _re.fullmatch(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})", str(value)))'
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, '    return False', 1))
+P
+}
+
+# a fourth hexadecimal spelling would be legitimate to accept: widening
+# what counts as a colour is not widening what counts as safe
+control_4() { python3 - "$C203" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = 'r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})"'
+assert s.count(old) == 1
+p.write_text(s.replace(old, 'r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})"', 1))
+P
+}

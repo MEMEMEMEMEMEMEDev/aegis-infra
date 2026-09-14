@@ -53,13 +53,57 @@ green = "\033[32m"
 off = "\033[0m"
 
 ORGS = os.path.join(str(paths.platform_dir()), "orgs")
-# How many to ask for. A ceiling and not «all», because a page of a
-# thousand is a page nobody reads and a request nobody meant to make.
-LIMIT = 200
+
+
+# THE QUERY, and why it is GraphQL and not `gh repo list`.
+#
+# `gh repo list --json primaryLanguage` gives the language's NAME and
+# nothing else. GitHub also knows its COLOUR — it is what paints the dot
+# beside every repository on its own pages — and that colour is the
+# honest answer to «put the logos of postgres, node and php on the
+# screen».
+#
+# The dishonest answer would have been to vendor the logos. Every one of
+# them is a TRADEMARK with a usage policy: the elephant, the gopher, the
+# elePHPant. The typefaces this console ships could be mirrored because
+# the OFL says so out loud; a trademark says the opposite, and a
+# platform whose whole argument is «measured, and it says where it got
+# it» does not get to be sloppy about somebody else's mark.
+#
+# So the colour is MEASURED like everything else here, it arrives in the
+# same call as the name, and there is nothing to keep in step.
+QUERY = """
+query($endCursor: String) {
+  viewer {
+    repositories(first: 100, after: $endCursor, ownerAffiliations: OWNER,
+                 orderBy: {field: PUSHED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes { name isPrivate pushedAt url primaryLanguage { name color } }
+    }
+  }
+}
+"""
 
 
 def _gh(*args):
     return subprocess.run(["gh", *args], capture_output=True, text=True)
+
+
+def _pages(body):
+    """`gh api graphql --paginate` prints one JSON document per page, one
+    after another with nothing between them. Read them all rather than
+    the first: an account with more than a hundred repositories would
+    otherwise lose everything after the hundredth, silently."""
+    out, at = [], 0
+    decoder = json.JSONDecoder()
+    while at < len(body):
+        while at < len(body) and body[at] in " \t\r\n":
+            at += 1
+        if at >= len(body):
+            break
+        doc, at = decoder.raw_decode(body, at)
+        out.append(doc)
+    return out
 
 
 def _name_of(url):
@@ -104,8 +148,7 @@ def claimed():
 
 
 def show(steps, narrate):
-    r = _gh("repo", "list", "--limit", str(LIMIT), "--json",
-            "name,primaryLanguage,isPrivate,pushedAt,url")
+    r = _gh("api", "graphql", "--paginate", "-f", f"query={QUERY}")
     if r.returncode != 0:
         # NOT an empty account. Nobody could be asked.
         why = (r.stderr or "gh did not answer").strip().splitlines()
@@ -116,7 +159,9 @@ def show(steps, narrate):
                             detail=why[0][:200] if why else "gh did not answer")
         steps.finish()
     try:
-        repos = json.loads(r.stdout)
+        repos = [node for page in _pages(r.stdout)
+                 for node in (((page.get("data") or {}).get("viewer") or {})
+                              .get("repositories") or {}).get("nodes") or []]
     except ValueError as e:
         steps.not_evaluable("repos", why="unreadable-answer", detail=str(e))
         steps.finish()
@@ -130,13 +175,15 @@ def show(steps, narrate):
 
     for x in sorted(repos, key=lambda x: x.get("pushedAt") or "", reverse=True):
         lang = (x.get("primaryLanguage") or {}).get("name")
+        colour = (x.get("primaryLanguage") or {}).get("color")
         uses = mine.get(x["name"]) or []
         # THE URL TRAVELS TOO. A contract names its repository as
         # `git@github.com:<owner>/<name>.git`, and the owner is not this
         # command's to invent: it comes back from GitHub with the answer
         # and whoever fills a form from this document does not have to
         # guess it.
-        data = {"lenguaje": lang, "privado": bool(x.get("isPrivate")),
+        data = {"lenguaje": lang, "color": colour,
+                "privado": bool(x.get("isPrivate")),
                 "empujado": x.get("pushedAt"), "url": x.get("url"),
                 "sirve": uses}
         if narrate:

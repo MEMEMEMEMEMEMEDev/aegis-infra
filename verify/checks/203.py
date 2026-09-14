@@ -120,7 +120,25 @@ if "suggested" in plain:
     findings.append("a form nobody imported into says something was suggested: the label "
                     "has to mean this value came from a guess, or it means nothing")
 
+# ── what goes into a style attribute ─────────────────────────────────
+# The language's colour arrives from somebody else's API and is painted
+# into an inline `style`. GitHub answering today is not a reason to hand
+# its answer to a browser unread: a page that trusts a remote string
+# with where it puts it has stopped being a page that only draws what it
+# built.
+for hostile in ("red; background:url(https://algun-lado/x)", "javascript:alert(1)",
+                "#abc; position:fixed; inset:0", "expression(x)", "  #fff  ",
+                "var(--ink)", "#12345", "rgb(1,2,3)"):
+    if console._is_colour(hostile):
+        findings.append(f"{hostile!r} is accepted as a colour and goes into a style "
+                        f"attribute: what arrives from an API is not what this page may "
+                        f"paint with unread")
+for fine in ("#3178c6", "#f1e05a", "#ABC", "#dea584"):
+    if not console._is_colour(fine):
+        findings.append(f"{fine!r} is refused as a colour, so the dot this screen shows "
+                        f"instead of a logo would never be drawn")
+
 for f in findings:
     print(f)
-print(f"SCOPE: 4 imports exercised, {len(('Go', 'Python', 'PHP', 'Java', None, 'x'))} "
-      f"languages fallen through, and the form read for its own label")
+print(f"SCOPE: 4 imports exercised, 6 languages fallen through, 8 hostile colours "
+      f"refused, and the form read for its own label")

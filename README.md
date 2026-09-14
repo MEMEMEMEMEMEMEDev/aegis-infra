@@ -257,9 +257,12 @@ pudo mirar» es un estado con nombre**, es el único sin color propio —va
 tramado— y es el primero que se dibuja.
 
 Abre con **tus organizaciones**, y cada servicio lleva el lenguaje que
-GitHub ya midió para su repositorio: el contrato dice `http`, que es lo
-que un servicio es para la plataforma, y nunca en qué está escrito.
-Debajo, los repositorios que **todavía no corre nadie**. Después el
+GitHub ya midió para su repositorio, con un punto del color que GitHub
+mismo le pone: el contrato dice `http`, que es lo que un servicio es
+para la plataforma, y nunca en qué está escrito. Un punto y no un logo a
+propósito, porque cada uno de esos es una marca registrada con su
+política de uso. Debajo, los repositorios que **todavía no corre nadie**,
+y cada uno abre el formulario de alta ya lleno. Después el
 tráfico que de verdad llegó a cada una, si entra otra organización, qué
 le pasó a cada push eslabón por eslabón, la ronda y el borde. Entrando a
 una la ve **como el clúster la tiene**, contra lo que su contrato

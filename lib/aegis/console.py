@@ -110,6 +110,18 @@ def _age(reading):
             else '<p class="age" data-state="unseen">nobody recorded when this was measured</p>')
 
 
+def _is_colour(value):
+    """A colour this page will paint with, or nothing.
+
+    IT GOES INTO A `style` ATTRIBUTE, and what arrives here came from
+    somebody else's API. `#c0ffee` is a colour; `red; background:url(…)`
+    is an injection, and the fact that GitHub is the one answering today
+    is not a reason to hand its answer to a browser unread. Six or three
+    hexadecimal digits after a hash, and nothing else gets drawn."""
+    import re as _re
+    return bool(value and _re.fullmatch(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})", str(value)))
+
+
 def _chip(state, label):
     return f'<span class="chip" data-state="{state}">{_e(label)}</span>'
 
@@ -192,6 +204,7 @@ def languages_of(readings):
                 for u in step.get("sirve") or []:
                     by[(u.get("organizacion"), u.get("servicio"))] = {
                         "lenguaje": step.get("lenguaje"),
+                        "color": step.get("color"),
                         "repo": name.split(":", 1)[1]}
     return by
 
@@ -210,10 +223,24 @@ def _panel_organizations(doc, states, ctx=None):
             continue
         services = step.get("servicios") or []
         langs = (ctx or {}).get('langs') or {}
-        chips = "".join(
-            f'<span class="srv" data-kind="{_e(sv.get("tipo"))}">{_e(sv.get("nombre"))}'
-            f'<i>{_e((langs.get((name, sv.get("nombre"))) or {}).get("lenguaje") or sv.get("tipo"))}</i>'
-            f'</span>' for sv in services)
+        # THE COLOUR IS GITHUB'S OWN, measured in the same answer as the
+        # language's name. It is what this screen shows instead of a
+        # logo: every one of those is a trademark with a usage policy,
+        # and a platform whose argument is «measured, and it says where
+        # it got it» does not redistribute somebody else's mark.
+        #
+        # A language nobody could measure gets NO dot, rather than a
+        # grey one — an absent mark reads as «no language», and a grey
+        # one reads as a language that happens to be grey.
+        def _srv(sv):
+            known = langs.get((name, sv.get("nombre"))) or {}
+            colour = known.get("color")
+            dot = (f'<i class="dot" style="background:{_e(colour)}"></i>'
+                   if _is_colour(colour) else "")
+            return (f'<span class="srv" data-kind="{_e(sv.get("tipo"))}">{dot}'
+                    f'{_e(sv.get("nombre"))}'
+                    f'<i>{_e(known.get("lenguaje") or sv.get("tipo"))}</i></span>')
+        chips = "".join(_srv(sv) for sv in services)
         extras = []
         if step.get("bucket"):
             extras.append("bucket")
@@ -583,7 +610,7 @@ def _panel_repos(doc, states, ctx=None):
         if not name.startswith("repo:") or step.get("sirve"):
             continue
         free.append((step.get("empujado") or "", name.split(":", 1)[1],
-                     step.get("lenguaje")))
+                     step.get("lenguaje"), step.get("color")))
     if not (doc.get("steps") or []):
         states.add(UNSEEN)
         return (f'<p class="empty" data-state="{UNSEEN}">GitHub could not be asked, '
@@ -596,8 +623,11 @@ def _panel_repos(doc, states, ctx=None):
     rows = "".join(
         f'<li data-state="{FINE}">'
         f'<a class="mono" href="/new?repo={_e(name)}">{_e(name)}</a>'
-        + (f'<span class="srv">{_e(lang)}</span>' if lang else "")
-        + '</li>' for _when, name, lang in shown)
+        + (f'<span class="srv">'
+           + (f'<i class="dot" style="background:{_e(colour)}"></i>'
+              if _is_colour(colour) else "")
+           + f'{_e(lang)}</span>' if lang else "")
+        + '</li>' for _when, name, lang, colour in shown)
     rest = (f'<li class="rest" data-state="{FINE}">and {len(free) - len(shown)} more '
             f'that nothing is running</li>' if len(free) > len(shown) else "")
     return (f'<div class="facts-row">{_fact("repositories", _num(total))}'

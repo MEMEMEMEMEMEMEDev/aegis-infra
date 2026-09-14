@@ -401,3 +401,12 @@ code.cmd{ display:block; background:var(--sunken); border-radius:var(--r-s);
           padding:10px 13px; font-size:12.5px; overflow-x:auto; white-space:pre;
           margin-bottom:5px; }
 ol.left .note{ color:var(--mid); font-size:12.5px; }
+
+/* The language's own colour, the one GitHub paints its dots with. Not a
+ * logo: every one of those is a trademark with a usage policy, and this
+ * product does not redistribute somebody else's mark. A language nobody
+ * could measure gets no dot at all — an absent mark reads as «no
+ * language», a grey one reads as a language that happens to be grey. */
+.srv .dot{ width:8px; height:8px; border-radius:99px; display:inline-block;
+           margin-right:5px; vertical-align:baseline;
+           box-shadow:0 0 0 1px rgb(11 13 16 / .12) inset; }

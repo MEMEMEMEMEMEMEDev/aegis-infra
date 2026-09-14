@@ -48,15 +48,24 @@ scene = json.load(open(os.environ["STUB_GH"]))
 if scene.get("silent"):
     sys.stderr.write("gh: To get started with GitHub CLI, please run: gh auth login\n")
     sys.exit(4)
-print(json.dumps(scene.get("repos", [])))
+# TWO PAGES, always, and the second one carries the tail. `gh api
+# graphql --paginate` prints one document per page with nothing between
+# them, and a reader that took only the first would lose everything past
+# the hundredth repository without a word.
+repos = scene.get("repos", [])
+half = (len(repos) + 1) // 2
+for chunk in (repos[:half], repos[half:]):
+    print(json.dumps({"data": {"viewer": {"repositories": {
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+        "nodes": chunk}}}}))
 '''
 
 REPOS = [
-    {"name": "tienda-web", "primaryLanguage": {"name": "TypeScript"},
+    {"name": "tienda-web", "primaryLanguage": {"name": "TypeScript", "color": "#3178c6"},
      "isPrivate": True, "pushedAt": "2026-09-13T05:00:00Z", "url": "u"},
-    {"name": "tienda-todo", "primaryLanguage": {"name": "Astro"},
+    {"name": "tienda-todo", "primaryLanguage": {"name": "Astro", "color": "#ff5a03"},
      "isPrivate": True, "pushedAt": "2026-09-12T05:00:00Z", "url": "u"},
-    {"name": "algo-mio", "primaryLanguage": {"name": "Rust"},
+    {"name": "algo-mio", "primaryLanguage": {"name": "Rust", "color": "#dea584"},
      "isPrivate": True, "pushedAt": "2026-09-11T05:00:00Z", "url": "u"},
     {"name": "sin-lenguaje", "primaryLanguage": None,
      "isPrivate": False, "pushedAt": "2026-09-10T05:00:00Z", "url": "u"},
@@ -161,6 +170,15 @@ try:
                             f"`{free.get('state')}`: it is an option, not a finding, and "
                             f"painting it red teaches somebody to ignore the colour on the "
                             f"one screen where it has to mean something")
+        # THE COLOUR IS MEASURED TOO, and it is the honest answer to
+        # «put the logos on the screen»: every one of those is a
+        # trademark with a usage policy, and GitHub already publishes
+        # the colour it paints its own dots with.
+        if free.get("color") != "#dea584":
+            findings.append(f"the colour GitHub measured for the language is not carried "
+                            f"through ({free.get('color')!r}): it arrives in the same "
+                            f"answer as the name, and it is what a screen can show "
+                            f"without redistributing somebody else's mark")
         if free.get("lenguaje") != "Rust":
             findings.append(f"the language GitHub measured is not carried through "
                             f"({free.get('lenguaje')!r}): it is the one thing this command "
@@ -173,6 +191,20 @@ try:
 
     for f in findings:
         print(f)
+    # AND NOTHING FALLS OFF THE SECOND PAGE. The stub always answers in
+    # two, because an account of more than a hundred repositories is
+    # answered in pages and a reader that took the first would lose the
+    # rest in silence.
+    if full is not None:
+        got = {s.get("step", "").split(":", 1)[-1] for s in full.get("steps") or []
+               if s.get("step", "").startswith("repo:")}
+        lost = sorted({r["name"] for r in REPOS} - got)
+        if lost:
+            findings.append(f"{lost} arrived on the second page of the answer and did not "
+                            f"reach the document: an account is read in pages, and a "
+                            f"reader that takes only the first loses everything past the "
+                            f"hundredth repository without a word")
+
     print(f"SCOPE: 3 accounts in front of the command — silent rc "
           f"{(blind or {}).get('rc')}, empty rc {(empty or {}).get('rc')}, "
           f"{len(REPOS)} repositories rc {(full or {}).get('rc')}")

@@ -55,7 +55,18 @@ The first screen leads with **your organizations**, each service carrying
 the language GitHub already measured for its repository — the contract
 says `http`, which is what a service is to the platform, and never what
 it is written in. Below them, the repositories **nothing is running
-yet**, which is the list somebody needs in front of them to take one on.
+yet**, which is the list somebody needs in front of them to take one on,
+and every one of them opens the new-organization form already filled in.
+
+Beside each language is a dot in **GitHub's own colour for it**, which
+arrives in the same answer as the name. It is a dot and not a logo on
+purpose: the elephant, the gopher and the elePHPant are trademarks with
+usage policies, and a platform whose whole argument is «measured, and it
+says where it got it» does not redistribute somebody else's mark. The
+typefaces this console ships could be mirrored because the OFL says so
+out loud. A language nobody could measure gets **no dot at all** rather
+than a grey one — an absent mark reads as «no language», and a grey one
+reads as a language that happens to be grey.
 
 ## One organization
 
