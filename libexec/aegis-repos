@@ -131,8 +131,14 @@ def show(steps, narrate):
     for x in sorted(repos, key=lambda x: x.get("pushedAt") or "", reverse=True):
         lang = (x.get("primaryLanguage") or {}).get("name")
         uses = mine.get(x["name"]) or []
+        # THE URL TRAVELS TOO. A contract names its repository as
+        # `git@github.com:<owner>/<name>.git`, and the owner is not this
+        # command's to invent: it comes back from GitHub with the answer
+        # and whoever fills a form from this document does not have to
+        # guess it.
         data = {"lenguaje": lang, "privado": bool(x.get("isPrivate")),
-                "empujado": x.get("pushedAt"), "sirve": uses}
+                "empujado": x.get("pushedAt"), "url": x.get("url"),
+                "sirve": uses}
         if narrate:
             where = (", ".join(f"{u['organizacion']}/{u['servicio']}" for u in uses)
                      or f"{grey}nothing claims it{off}")

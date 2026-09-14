@@ -84,10 +84,11 @@ control_1() { sed -i 's/it is one nobody could look at/it is one that nobody was
 control_2() { python3 - "$C202" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-old = '''        data = {"lenguaje": lang, "privado": bool(x.get("isPrivate")),'''
+old = '                "empujado": x.get("pushedAt"), "url": x.get("url"),'
 assert s.count(old) == 1
-p.write_text(s.replace(old, '''        data = {"lenguaje": lang, "url": x.get("url"),
-                "privado": bool(x.get("isPrivate")),''', 1))
+new = ('                "empujado": x.get("pushedAt"), "url": x.get("url"),\n'
+       '                "descrito": True,')
+p.write_text(s.replace(old, new, 1))
 P
 }
 

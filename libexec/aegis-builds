@@ -103,9 +103,47 @@ def _chain(event):
     return chain, None
 
 
-def show(last, steps, narrate):
+def images_of(org):
+    """Which images belong to one organization, out of its contract.
+
+    AN IMAGE'S NAME IS NOT A CONVENTION TO GUESS AT. A tenant's image is
+    named after the repository its service is built from, and one
+    organization can serve two services out of one tree — so the set
+    comes from the contract, the same way `aegis traffic` learned to ask
+    `org list` instead of matching a prefix. A prefix match gave that
+    command three requests where there were three thousand, and this is
+    the same mistake waiting in another file.
+    """
+    import yaml
+    from aegis import paths as _paths
+    path = os.path.join(str(_paths.platform_dir()), "orgs", f"{org}.yaml")
+    if not os.path.isfile(path):
+        return None
     try:
-        events = _events(last)
+        d = yaml.safe_load(open(path, encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return None
+    top = d.get("repo")
+    out = set()
+    for sv in d.get("servicios") or []:
+        url = sv.get("repo") or top
+        if not url:
+            continue
+        out.add(url.rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1].removesuffix(".git"))
+    return out
+
+
+def show(last, steps, narrate, only=None):
+    # SCOPED, THE WINDOW IS WIDENED BEFORE IT IS NARROWED. Asking for the
+    # last ten events and then keeping one organization's gives whatever
+    # share of ten it happens to own — measured: `--org shop` came back
+    # with ONE build on an instance where shop had pushed all week,
+    # because the other nine belonged to its neighbours. The question is
+    # «the last N of THIS organization», so more are read and the trim
+    # happens after. The ceiling is there because a query with no bound
+    # is a query somebody's database has to answer.
+    try:
+        events = _events(min(last * 20, 400) if only else last)
     except Exception as e:                                # noqa: BLE001
         if narrate:
             print(f"  {grey}the events database did not answer: this is not «no builds», "
@@ -113,8 +151,19 @@ def show(last, steps, narrate):
         steps.not_evaluable("builds", why="vlogs-silent", detail=str(e))
         steps.finish()
 
+    # SCOPED TO ONE ORGANIZATION, for its own screen. The images come
+    # from its contract and never from the shape of a name.
+    mine = None
+    if only is not None:
+        mine = images_of(only)
+        if mine is None:
+            print(f"aegis: no organization named {only!r} in the contracts "
+                  f"(`aegis org list`)", file=sys.stderr)
+            sys.exit(outcomes.RC_USAGE)
+        events = [e for e in events if (e.get("_msg") or "") in mine][:last]
     if narrate:
-        print(f"\nbuilds  {grey}(the last {len(events)}, newest first){off}")
+        print(f"\nbuilds  {grey}(the last {len(events)}, newest first"
+              + (f", of {only}" if only else "") + f"){off}")
     if not events:
         # A measured zero: the database answered and it holds nothing.
         steps.already("builds", count=0)
@@ -193,15 +242,19 @@ def main():
                        help="the document of states instead of the narration")
     flags.add_argument("--last", type=int, default=argparse.SUPPRESS,
                        help="how many builds to read (10 by default)")
+    flags.add_argument("--org", default=argparse.SUPPRESS, metavar="ORGANIZATION",
+                       help="only the images this organization is built from")
     sub = ap.add_subparsers(dest="verb")
     sub.add_parser("show", parents=[flags], help="the last builds, link by link")
     ap.add_argument("--json", action="store_true", dest="json_mode",
                     help="the document of states instead of the narration")
     ap.add_argument("--last", type=int, default=10,
                     help="how many builds to read (10 by default)")
+    ap.add_argument("--org", default=None, metavar="ORGANIZATION",
+                    help="only the images this organization is built from")
     a = ap.parse_args()
     steps = outcomes.Steps(json_mode=a.json_mode)
-    return show(a.last, steps, not a.json_mode)
+    return show(a.last, steps, not a.json_mode, a.org)
 
 
 if __name__ == "__main__":

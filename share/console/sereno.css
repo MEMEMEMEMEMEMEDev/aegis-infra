@@ -390,3 +390,14 @@ pre.why { margin:10px 0 0; font-family:var(--mono); font-size:12px;
              font-weight:700; }
 .tail.repos li{ gap:10px; }
 .tail.repos .rest{ color:var(--faint); font-size:12px; }
+
+/* What is left for a person, as commands ready to paste. Numbered
+ * because they are a sequence and the order is load-bearing: the commit
+ * before the sync, the sync before the repository exists. */
+ol.left{ margin:12px 0 0; padding-left:22px; display:flex; flex-direction:column; gap:12px; }
+ol.left li{ font-size:13px; }
+ol.left li::marker{ font-weight:700; color:var(--faint); font-size:11px; }
+code.cmd{ display:block; background:var(--sunken); border-radius:var(--r-s);
+          padding:10px 13px; font-size:12.5px; overflow-x:auto; white-space:pre;
+          margin-bottom:5px; }
+ol.left .note{ color:var(--mid); font-size:12.5px; }

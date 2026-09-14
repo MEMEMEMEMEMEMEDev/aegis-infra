@@ -26,6 +26,7 @@ import importlib.machinery
 import importlib.util
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -41,11 +42,36 @@ if not os.path.isfile(SERVER):
 # the policy the program is held to. Every one of them reads; none of
 # them changes anything. `org plan` is the interesting entry — its whole
 # job is to say what `apply` WOULD do, without doing it.
+# What the console is allowed to invoke, and it is TWO lists now.
+#
+# The first only reads. The second WRITES FILES IN THIS INSTANCE and
+# nothing else — `aegis org` promises it in its own module and
+# `aegis secret` never invokes kubectl at all — which is the same
+# property the console already had, so taking them on changes no
+# promise. They are what turns «here is a file, now run five commands»
+# into three.
 READ_ONLY = {
     "org list", "org schema", "org plan", "org validate", "repos list",
     "tenant show", "traffic show", "capacity show", "builds show",
-    "check", "edge check", "data remote status",
+    "check", "edge check", "data remote status", "builds show --org",
 }
+WRITES_FILES_HERE = {"org apply", "secret create"}
+ALLOWED = READ_ONLY | WRITES_FILES_HERE
+
+# Words that name a change this console may never make, wherever they
+# appear as CODE. The list above cannot catch a call built out of
+# variables —`cli.run_json(verb, *args)` hands the AST nothing to read—
+# and that hole was open the day `finish_contract` was written. This is
+# the blunt half, and blunt is what works here: a console that never
+# spells `delete`, `destroy`, `restore`, `rotate` or `sync` cannot do
+# any of them by accident.
+#
+# `init` is deliberately NOT here: it is a directory of this product
+# (`init/aegis-init.conf.example`) and a blunt rule has to say where it
+# stops. `aegis init` from a console would be caught by the list above
+# anyway, which sees every literal invocation.
+FORBIDDEN_WORDS = {"delete", "destroy", "restore", "rotate", "sync", "move",
+                   "app", "backup"}
 # Programs that change something outside this process. They are looked
 # for in CALLS and never in the text: the first version of this check
 # grepped the source for the words and went red on its own comment,
@@ -145,6 +171,55 @@ try:
     if set(after) - set(before):
         findings.append(f"a refused contract still left {sorted(set(after) - set(before))} "
                         f"behind: it is validated after being written, not before")
+
+    # ── THE CONSOLE'S PATH IS THE CLI'S PATH ─────────────────────────
+    # The strongest thing this check can say, now that the console does
+    # more than write one file: what it leaves behind has to be exactly
+    # what somebody doing it by hand leaves behind. Not «it wrote
+    # something reasonable» — the SAME tree. A console that is a second
+    # way of producing a platform repo is a second thing to keep in
+    # step; one that is the same way with fewer keystrokes is not.
+    if hasattr(console, "finish_contract"):
+        target = os.path.join(home, "platform", "orgs", "probando.yaml")
+        before = tree()
+        console.finish_contract(target)
+        by_console = set(tree()) - set(before)
+
+        # And now the same, by hand, on a copy of the tree as it was.
+        twin = tempfile.mkdtemp(prefix="aegis-099-twin-")
+        try:
+            shutil.copytree(os.path.join(ROOT, "seed", "platform"),
+                            os.path.join(twin, "platform"))
+            for extra in ("aegis.conf",):
+                src = os.path.join(home, extra)
+                if os.path.isfile(src):
+                    shutil.copy(src, os.path.join(twin, extra))
+            twin_contract = os.path.join(twin, "platform", "orgs", "probando.yaml")
+            with open(twin_contract, "w", encoding="utf-8") as fh:
+                fh.write(GOOD)
+            env = {k: v for k, v in os.environ.items()
+                   if not (k.startswith("AEGIS_") or k == "PLATFORM_DIR")}
+            env.update({"AEGIS_HOME": twin, "AEGIS_ROOT": ROOT})
+            base = {os.path.relpath(os.path.join(dp, f), twin)
+                    for dp, _d, fn in os.walk(twin) for f in fn}
+            subprocess.run([os.path.join(ROOT, "bin", "aegis"), "org", "apply",
+                            twin_contract], capture_output=True, text=True,
+                           env=env, cwd=twin)
+            by_hand = {os.path.relpath(os.path.join(dp, f), twin)
+                       for dp, _d, fn in os.walk(twin) for f in fn} - base
+        finally:
+            shutil.rmtree(twin, ignore_errors=True)
+
+        only_console = sorted(by_console - by_hand)
+        only_hand = sorted(by_hand - by_console)
+        if only_console:
+            findings.append(f"the console left {only_console}, which doing it by hand does "
+                            f"not: it is a second way of producing a platform repository, "
+                            f"and a second way is a second thing to keep in step")
+        if only_hand:
+            findings.append(f"doing it by hand leaves {only_hand} and the console does not: "
+                            f"whoever used the screen has an organization that is missing "
+                            f"something, and nothing told them")
 finally:
     shutil.rmtree(home, ignore_errors=True)
     os.environ.clear()
@@ -179,11 +254,32 @@ for node in ast.walk(tree_ast):
 
 unknown = sorted(v for v in invoked
                  if v and not any(v == r or r.startswith(v) or v.startswith(r)
-                                  for r in READ_ONLY))
+                                  for r in ALLOWED))
 if unknown:
-    findings.append(f"the console invokes {unknown}, which is not on the list of commands "
-                    f"that only read: a console that changes something outside this "
-                    f"process is no longer a thing you can run at any moment")
+    findings.append(f"the console invokes {unknown}, which is neither a command that only "
+                    f"reads nor one of the two that write files in this instance: a "
+                    f"console that changes something outside this process is no longer a "
+                    f"thing you can run at any moment")
+
+# THE BLUNT HALF, over every string the source uses as code. Docstrings
+# are skipped, because a check that reads prose as code is the mistake
+# this repository has filed seven times — the seventh being this very
+# file, on 2026-09-12.
+docstrings = set()
+for node in ast.walk(tree_ast):
+    if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        body = getattr(node, "body", None) or []
+        if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+                and isinstance(body[0].value.value, str):
+            docstrings.add(id(body[0].value))
+said = {n.value for n in ast.walk(tree_ast)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str)
+        and id(n) not in docstrings}
+spoken = sorted(FORBIDDEN_WORDS & said)
+if spoken:
+    findings.append(f"the console's code carries {spoken} as a string: every one of them "
+                    f"names a change this screen may never make, and a call built out of "
+                    f"variables is a call no list of invocations can see")
 # Anything spawned directly, as opposed to through cli.run. The console
 # has no business starting a program of its own: `git commit` is one
 # line away from here and it is the line that would make this screen
@@ -225,6 +321,6 @@ for node in ast.walk(tree_ast):
 
 for f in findings:
     print(f)
-print(f"SCOPE: one contract written against a fixture tree and the whole tree compared, "
-      f"{len(invoked)} aegis command(s) invoked and {len(spawned)} program(s) spawned, "
-      f"none of them able to change anything outside this process")
+print(f"SCOPE: one contract written and finished against a fixture tree, the whole tree "
+      f"compared against doing it by hand, {len(invoked)} aegis command(s) invoked and "
+      f"{len(spawned)} program(s) spawned, none able to change anything outside this machine")

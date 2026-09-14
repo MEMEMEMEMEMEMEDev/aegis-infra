@@ -363,7 +363,13 @@ def _panel_builds(doc, states, ctx=None):
             # as unmeasured all the same: on a chain, a link that is
             # simply absent reads as fine.
             for link, who in (step["links_elsewhere"] or {}).items():
-                states.add(UNSEEN)
+                # Drawn unmeasured, and NOT counted towards the
+                # section's verdict for the same reason the links above
+                # are not: these two are measured elsewhere ALWAYS, by
+                # design, so letting them decide would make this panel
+                # say «nobody looked» on every instance for ever. A
+                # signal that never changes is a signal nobody reads,
+                # which is this project's own line about `degraded`.
                 gaps.append(f'<li data-state="{UNSEEN}">{_chip(UNSEEN, link)}'
                             f'<span class="note">not measured here — {_e(who)}</span></li>')
             continue
@@ -375,8 +381,16 @@ def _panel_builds(doc, states, ctx=None):
             f'<span class="link" data-state="{SCREEN.get(v, UNSEEN)}" '
             f'title="{_e(k)}">{_e(k)}</span>'
             for k, v in links.items())
-        for v in links.values():
-            states.add(SCREEN.get(v, UNSEEN))
+        # THE LINKS ARE DRAWN WITH THEIR OWN STATE AND DO NOT DECIDE THE
+        # SECTION'S. A build the anti-loop skipped has four unmeasured
+        # links because nothing ran, and letting those colour the whole
+        # panel made a healthy instance's deployments read «nobody
+        # looked» next to a page that said everything was in order. Two
+        # verdicts about the same thing, and the louder one was wrong.
+        #
+        # Nothing is lost by it: each link carries its own `data-state`
+        # in the HTML, which is where check 122 reads them, and the
+        # step's own state is already in `states` above.
         rows.append(
             f'<article class="build" data-state="{state}">'
             f'<h3>{_e(step.get("image", "?"))}</h3>'
@@ -580,7 +594,8 @@ def _panel_repos(doc, states, ctx=None):
     # that what is collapsed is COUNTED and not hidden.
     shown = free[:8]
     rows = "".join(
-        f'<li data-state="{FINE}"><span class="mono">{_e(name)}</span>'
+        f'<li data-state="{FINE}">'
+        f'<a class="mono" href="/new?repo={_e(name)}">{_e(name)}</a>'
         + (f'<span class="srv">{_e(lang)}</span>' if lang else "")
         + '</li>' for _when, name, lang in shown)
     rest = (f'<li class="rest" data-state="{FINE}">and {len(free) - len(shown)} more '
@@ -777,6 +792,68 @@ def _schema_of(doc):
     return {s.get("step", ""): s for s in (doc or {}).get("steps") or []}
 
 
+# WHAT A LANGUAGE SUGGESTS A SERVICE IS. A SUGGESTION AND NOTHING MORE:
+# it is written on the form as a suggestion, the person changes it in one
+# click, and nothing downstream reads it. The measured half is the repo
+# and its language; this table is the courtesy of not making somebody
+# pick from six words when five of them are obviously wrong.
+#
+# It errs towards `http`, which is the type that refuses least: a static
+# front declared as http starts and serves, while an http service
+# declared static has nowhere to run. Wrong in the direction that fails
+# loudly is the only acceptable direction for a guess.
+SUGGESTS = {
+    "astro": "estatico", "html": "estatico", "css": "estatico",
+    "svelte": "estatico", "vue": "estatico", "mdx": "estatico",
+}
+
+
+def suggestion_for(language):
+    return SUGGESTS.get((language or "").lower(), "http")
+
+
+def repo_in(readings, name):
+    """One repository, out of `aegis repos list`'s document. Returns the
+    step or None — and None is what a name that is not there gets, which
+    is the only safe answer to a name that came off a URL."""
+    for r in readings or []:
+        if (r.get("comando") or "").startswith("repos list"):
+            for step in (r.get("documento") or {}).get("steps") or []:
+                if step.get("step") == f"repo:{name}":
+                    return step
+    return None
+
+
+def import_fields(repo, language, url=None):
+    """A repository, as the beginning of a contract.
+
+    ONLY THE NAME AND THE REPOSITORY ARE MEASURED. The organization's
+    name is the repository's, trimmed to what the validator accepts; the
+    service's is the repository's too; the type is a SUGGESTION and the
+    form says so. Everything else is left empty on purpose — a hostname
+    invented from a repository name is a CNAME nobody later knows why is
+    there, and this screen has been careful about that from the start.
+    """
+    import re as _re
+    base = _re.sub(r"[^a-z0-9-]", "-", (repo or "").lower()).strip("-")
+    base = _re.sub(r"-+", "-", base)[:30]
+    if not _re.match(r"^[a-z][a-z0-9-]{2,29}$", base):
+        base = ""
+    # The contract names a repository the way git clones it over ssh, and
+    # the owner is not this screen's to invent: it comes out of the URL
+    # GitHub itself returned. With no URL the field is left EMPTY rather
+    # than filled with a guessed owner — a form with a wrong value in it
+    # is worse than a form with a blank, because a blank asks.
+    ssh = ""
+    if url:
+        tail = url.split("github.com", 1)[-1].lstrip("/:").removesuffix(".git")
+        if "/" in tail:
+            ssh = f"git@github.com:{tail}.git"
+    return {"organizacion": base, "dominio": "", "cuota": "",
+            "servicio0.nombre": "web", "servicio0.tipo": suggestion_for(language),
+            "servicio0.publico": "/", "servicio0.repo": ssh}
+
+
 def render_form(schema, token, filled=None, problem=None, action="/new",
                 existing=0, subject=None):
     """The screen where an organization is described by somebody who
@@ -815,6 +892,10 @@ def render_form(schema, token, filled=None, problem=None, action="/new",
                    f'<h2>this is not a contract yet</h2>{_chip(WRONG, "refused")}'
                    f'<pre class="why">{_e(problem)}</pre></section>')
 
+    # A form filled from a repository carries ONE guess —the type— and
+    # it has to be legible as a guess. Everything else on the screen was
+    # measured or typed by a person.
+    suggested = bool((filled or {}).get("servicio0.repo")) and not existing
     rows = []
     for i in range(max(SERVICE_ROWS, existing + 1)):
         n = f"servicio{i}"
@@ -832,7 +913,9 @@ def render_form(schema, token, filled=None, problem=None, action="/new",
             f'<label class="field"><span class="label">type</span>'
             f'<select name="{n}.tipo" id="{n}.tipo"><option value=""></option>'
             f'{options}</select></label>'
-            f'{_field(n + ".puerto", "port", filled.get(n + ".puerto", ""))}'
+            + ('<p class="hint">suggested from the language: change it if it is '
+               'wrong</p>' if suggested and not i else "")
+            + f'{_field(n + ".puerto", "port", filled.get(n + ".puerto", ""))}'
             f'{_field(n + ".publico", "public path", filled.get(n + ".publico", ""))}'
             f'{_field(n + ".repo", "repository", filled.get(n + ".repo", ""))}'
             + (f'{_field(n + ".tamano", "size", filled.get(n + ".tamano", ""))}'
@@ -1106,7 +1189,51 @@ def _diff(before, after):
     return f'<div class="diff mono">{"".join(rows)}</div>'
 
 
-def render_plan(doc, contract_text, token, written=None, before=None, org=None):
+def _errand(after, org, platform):
+    """What the console did after writing, and what is left for a
+    person. THE THREE THAT ARE LEFT ARE SHOWN AS COMMANDS, literally and
+    ready to paste, because each one is left for a reason somebody
+    should be able to read: the commit is what makes a file in a working
+    tree harmless, `sync` speaks to the cluster, and `app apply` creates
+    things on GitHub, which is somebody else's machine."""
+    rows = []
+    for step in after or []:
+        if step.get("sin_documento"):
+            state, said = UNSEEN, step["sin_documento"]
+        elif step.get("rc") == 0:
+            doc = step.get("documento") or {}
+            n = len(doc.get("steps") or [])
+            state, said = FINE, f"{n} file(s) written"
+        else:
+            state = WRONG
+            doc = step.get("documento") or {}
+            bad = [x.get("step") for x in doc.get("steps") or []
+                   if x.get("state") in ("wrong", "not-evaluable")]
+            said = ", ".join(bad[:3]) or f"rc {step.get('rc')}"
+        rows.append(f'<li data-state="{state}">{_chip(state, step.get("que", "?"))}'
+                    f'<span class="mono">{_e(step.get("paso"))}</span>'
+                    f'<span class="note">{_e(said)}</span></li>')
+    left = [
+        (f"cd {platform} && git add -A && git commit -m 'org: {org}' && git push",
+         "the commit is yours: it is what makes a file in a working tree harmless, "
+         "because ArgoCD reads the remote"),
+        ("aegis sync root", "this one speaks to the cluster"),
+        (f"aegis app apply {org}",
+         "this one creates the repository, the deploy key and the webhook ON GITHUB"),
+    ]
+    steps_left = "".join(
+        f'<li><code class="cmd mono">{_e(c)}</code>'
+        f'<span class="note">{_e(why)}</span></li>' for c, why in left)
+    return (f'<section class="source" data-state="{FINE}">'
+            f'<h2>what the console did</h2>'
+            f'<ul class="tail">{"".join(rows)}</ul></section>'
+            f'<section class="source" data-state="{ATTENTION}">'
+            f'<h2>what is left for you, and why</h2>'
+            f'<ol class="left">{steps_left}</ol></section>')
+
+
+def render_plan(doc, contract_text, token, written=None, before=None, org=None,
+                after=None, platform=None):
     """What would change, and the one button that writes.
 
     THE SENTENCE MATTERS MORE THAN THE LIST. Writing the contract
@@ -1129,8 +1256,9 @@ def render_plan(doc, contract_text, token, written=None, before=None, org=None):
     v = worst(states) if states else UNSEEN
     editing = before is not None
     if written:
-        sentence = ("The contract is in your repository and nothing is running yet. "
-                    "Commit it, and ArgoCD does the rest.")
+        sentence = ("The contract and everything derived from it are in your "
+                    "repository, and nothing is running yet. Three things are left "
+                    "and each one is left for a reason.")
         action = (f'<p class="host mono">{_e(written)}</p>'
                   f'<a class="act act--quiet" href="/">all organizations</a>')
     else:
@@ -1153,7 +1281,8 @@ def render_plan(doc, contract_text, token, written=None, before=None, org=None):
     change = (f'<section class="source" data-state="{FINE}">'
               f'<h2>what you changed</h2>{_diff(before, contract_text)}</section>'
               if editing else "")
-    return (f'<main class="sereno" data-veredicto="{v}">{head}{change}'
+    errand = (_errand(after, org, platform) if written and after else "")
+    return (f'<main class="sereno" data-veredicto="{v}">{head}{change}{errand}'
             f'<section class="source" data-state="{v}"><h2>what would change</h2>'
             + (f'<ul class="tail">{"".join(files)}</ul>' if files else
                f'<p class="empty" data-state="{UNSEEN}">nothing was planned</p>')

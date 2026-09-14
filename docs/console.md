@@ -88,11 +88,28 @@ alarm, not the colour.
 
 ## What it writes
 
-One thing, in one place: **a contract in `orgs/`**.
+Files in this instance, and nothing else, ever.
 
-`/new` describes an organization and writes nothing. What it submits is
-a proposal; the next screen is `aegis org plan`, and that writes nothing
-either. Only then is there a button.
+`/new` describes an organization and writes nothing. You can start from
+one of your own repositories — the list of the ones nothing is running
+is right there, and picking one fills the form with what was measured
+about it, its name and the URL GitHub itself returned, plus **one
+suggestion** for the type that the form says is a suggestion. What the
+form submits is a proposal; the next screen is `aegis org plan`, and
+that writes nothing either. Only then is there a button.
+
+The button does three things, and all three only write files here: the
+contract into `orgs/`, the manifests (`aegis org apply`) and the
+encrypted secrets that are missing (`aegis secret create`). `aegis org`
+promises it does not talk to the cluster in its own module, and
+`aegis secret` never invokes kubectl at all, so taking them on changes
+no promise this console had already made.
+
+Then it shows the **three steps that are left, and why each one is
+left**: your commit, because that is what makes a file in a working tree
+harmless; `aegis sync root`, because it speaks to the cluster; and
+`aegis app apply`, because it creates a repository, a deploy key and a
+webhook on GitHub, which is somebody else's machine.
 
 It does not commit, it does not push, it does not apply, and it does not
 touch the cluster. That is what makes the file harmless: **ArgoCD reads

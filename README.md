@@ -267,12 +267,19 @@ declara — incluido lo que el contrato **no** declara, que es justo lo
 que ninguna otra herramienta de la casa puede ver, porque todas derivan
 del contrato.
 
-Y escribe una sola cosa: **un contrato en `orgs/`** — da de alta una
-organización nueva, y cambia una que ya existe mostrándote el diff del
-contrato antes de pisarlo. No commitea, no empuja, no aplica y no toca
-el clúster. Eso es lo que hace inofensivo el fichero: ArgoCD lee el
-remoto, así que nada corre hasta que tú commitees. Y no quita nada:
-borrar un servicio es `aegis org` a mano.
+Y **da de alta una organización**: podés partir de uno de tus
+repositorios —la consola ya sabe en qué está escrito— o describirla a
+mano, y también cambiar una que ya existe mostrándote el diff del
+contrato antes de pisarlo. Escribe el contrato, deriva los manifiestos
+y crea los secretos que falten, que son las tres cosas que **sólo
+escriben ficheros en esta máquina**. Después te muestra los tres pasos
+que quedan y por qué queda cada uno: **tu commit**, el sync, y
+`aegis app apply`, que es el que sale a GitHub.
+
+No commitea, no empuja, no aplica y no toca el clúster. Eso es lo que
+hace inofensivo el fichero: ArgoCD lee el remoto, así que nada corre
+hasta que tú commitees. Y no quita nada: borrar un servicio es
+`aegis org` a mano.
 
 No se publica por el túnel —se entra con `ssh -L 7391:127.0.0.1:7391`—
 y el porqué, junto con el modelo de seguridad y lo que falta, está en

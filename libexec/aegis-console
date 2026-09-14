@@ -345,12 +345,12 @@ SOURCES = ("org list", "repos list", "traffic show", "capacity show",
 
 # AND WHAT ONE ORGANIZATION'S SCREEN READS. Three commands, each one
 # ASKED ABOUT THAT ORGANIZATION rather than about the instance: the
-# living side of the contract, what arrived at it, and whether its data
-# has a copy somewhere else. Scoped at the source and not filtered here
+# living side of the contract, what happened to its last pushes, what
+# arrived at it, and whether its data has a copy somewhere else. Scoped at the source and not filtered here
 # on purpose — a screen that filtered a document would be dropping
 # measurements, and the console's one promise is that it does not.
-ORG_SOURCES = ("tenant show {org}", "traffic show --org {org}",
-               "data remote status --org {org}")
+ORG_SOURCES = ("tenant show {org}", "builds show --org {org}",
+               "traffic show --org {org}", "data remote status --org {org}")
 
 
 # ── the only write this console does ─────────────────────────────────
@@ -500,6 +500,46 @@ def replace_contract(text):
     with open(target, "w", encoding="utf-8") as fh:
         fh.write(text)
     return target, None
+
+
+def finish_contract(path):
+    """Derive the manifests and the secrets. The rest of the errand.
+
+    WHY THIS IS HERE AT ALL. Writing the contract was one sixth of
+    signing an organization up. The other five were left in a terminal:
+    `aegis org apply`, `aegis secret create`, the commit, `aegis sync
+    root`, and `aegis app apply`. A console that walks somebody to the
+    first file and then hands them five commands is not a console, it is
+    a form with a nice font.
+
+    WHY IT IS ONLY THESE TWO. They write FILES IN THIS INSTANCE and
+    nothing else — `aegis org` promises it in its own module and
+    `aegis secret` never invokes kubectl at all. That is the same
+    property this console already had, so taking them on costs nothing
+    and changes no promise.
+
+    The three that are left are left ON PURPOSE and each for its own
+    reason: the commit is the operator's, because that is what makes a
+    file in a working tree harmless; `aegis sync root` speaks to the
+    cluster; and `aegis app apply` creates a repository, a deploy key
+    and a webhook ON GITHUB, which is somebody else's machine.
+
+    A step that fails does not abort the others: an instance with no age
+    key can still have its manifests derived, and being told which half
+    happened is worth more than being told nothing did.
+    """
+    done = []
+    for verb, args, what in (("org", ("apply", path), "manifests"),
+                             ("secret", ("create", path), "secrets")):
+        try:
+            rc, doc = cli.run_json(verb, *args)
+        except cli.CouldNotEvaluate as e:
+            done.append({"paso": f"{verb} {args[0]}", "que": what,
+                         "rc": None, "documento": None, "sin_documento": str(e)})
+            continue
+        done.append({"paso": f"{verb} {args[0]}", "que": what,
+                     "rc": rc, "documento": doc, "sin_documento": None})
+    return done
 
 
 def _organizations(readings):
@@ -755,6 +795,11 @@ def serve(port):
                         drawing.render_form(_schema(), token, {}, bad))
                 self._send(200, drawing.wrap(page, "a new organization"))
                 return
+            # AND THE REST OF THE ERRAND. The manifests and the secrets
+            # come from the two commands that write files and nothing
+            # else; what is left after them is shown as the three
+            # commands they are.
+            after = finish_contract(target)
             doc = None
             try:
                 _rc, doc = cli.run_json("org", "plan", target)
@@ -763,8 +808,11 @@ def serve(port):
             with lock:
                 state["readings"] = _read_instance()
                 state["orgs"].clear()
+            name = os.path.basename(target).removesuffix(".yaml")
             self._send(200, drawing.wrap(
-                drawing.render_plan(doc, text, token, written=target), "the plan"))
+                drawing.render_plan(doc, text, token, written=target,
+                                    after=after, org=name,
+                                    platform=str(paths.platform_dir())), "the plan"))
 
         def do_GET(self, head_only=False):                # noqa: N802
             # THE HOST CHECK APPLIES TO READS TOO, and it was missing
@@ -789,9 +837,24 @@ def serve(port):
                 self.end_headers()
                 return
             if path == "/new":
+                # `?repo=<name>` is the import: the form opens already
+                # holding what was MEASURED about that repository — its
+                # name and the URL GitHub itself returned — and a
+                # suggestion for the type that the form says is a
+                # suggestion. A name that is not in the reading fills
+                # nothing, which is the only safe answer to a name that
+                # came off a URL.
+                filled = None
+                asked = urllib.parse.parse_qs(
+                    self.path.partition("?")[2]).get("repo", [""])[0]
+                if asked:
+                    step = drawing.repo_in(state["readings"], asked)
+                    if step is not None:
+                        filled = drawing.import_fields(
+                            asked, step.get("lenguaje"), step.get("url"))
                 self._send(200, drawing.wrap(
-                    drawing.render_form(_schema(), token), "a new organization"),
-                    head_only=head_only)
+                    drawing.render_form(_schema(), token, filled),
+                    "a new organization"), head_only=head_only)
                 return
             m = re.fullmatch(r"/org/([^/]+)/edit", path)
             if m:
