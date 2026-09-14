@@ -339,8 +339,12 @@ def listing():
 # organization fits, and the edge says whether the hostnames anybody
 # types actually exist. More arrive with the panels that need
 # them.
+# `builds show --last 60` and not its default of ten: the panel draws
+# each project's last push on its own card, and ten events across five
+# organizations is a window one busy tenant fills by itself. Sixty is
+# about a week here, and what a card cannot find it says out loud.
 SOURCES = ("org list", "repos list", "traffic show", "capacity show",
-           "builds show", "check", "edge check")
+           "builds show --last 60", "check", "edge check")
 
 
 # AND WHAT ONE ORGANIZATION'S SCREEN READS. Three commands, each one

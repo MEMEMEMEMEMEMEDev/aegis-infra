@@ -734,45 +734,310 @@ SENTENCE = {
 }
 
 
-def render(readings, subject=None):
-    """The page's body. `subject` names WHO this page is about — an
-    organization — and when it is given the verdict is about that
-    organization and nothing else, which is the whole reason the
-    readings behind it are scoped commands (`tenant show shop`,
-    `traffic show --org shop`) rather than the instance's documents
-    filtered here. A screen that filtered would drop measurements, and
-    dropping one is the one thing this console may not do."""
-    # PROJECTS FIRST, and the rest after. Until 2026-09-13 this drew the
-    # sources in the order they were written, which is the shape of the
-    # DOCUMENT and not the shape of a screen: what somebody opens this
-    # for is their organizations, and they were one panel among six.
-    ctx = {"langs": languages_of(readings)}
-    lead, rest = [], []
-    for reading in readings:
+# ── the panel ────────────────────────────────────────────────────────
+# WHAT THIS SCREEN WAS UNTIL 2026-09-14, and it took the operator saying
+# it plainly: «estamos buscando un panel, no un scroll hacia abajo con
+# info». It was one section per command, stacked, in the order the
+# commands were written. That is the shape of the DOCUMENT. A panel has
+# a shape of its own: what you came to see fills it, and everything else
+# is an indicator you open when it asks you to.
+#
+# So the body is the PROJECTS, assembled across readings — the contract
+# says which exist, the traffic says what reached them, the builds say
+# what happened to their last push — and every source keeps its whole
+# panel one click away inside a `<details>`. Nothing is lost by
+# summarising, because the summary is not a replacement: the document is
+# still there, underneath, and check 122 renders every case to make sure
+# no state fell out on the way.
+#
+# `<details>` and not a script: this console has never served one, and a
+# fold that works with JavaScript disabled is a fold that works.
+
+# One short figure per source, for the line you read without opening it.
+# A panel whose indicators all say the same word is a panel nobody reads
+# twice, so each one says the number it is actually about.
+def _headline(command, doc):
+    steps = (doc or {}).get("steps") or []
+    def count(pred):
+        return sum(1 for st in steps if pred(st))
+    if command == "check":
+        bad = count(lambda st: SCREEN.get(st.get("state")) != FINE)
+        return f"{len(steps)} sections" + (f" · {bad} asking" if bad else "")
+    if command.startswith("edge"):
+        bad = count(lambda st: SCREEN.get(st.get("state")) != FINE)
+        return f"{len(steps)} hostnames" + (f" · {bad} asking" if bad else "")
+    if command.startswith("capacity"):
+        for st in steps:
+            if st.get("step") == "capacity:memory" and st.get("free_human"):
+                return f"{st['free_human']} free"
+        return f"{len(steps)} readings"
+    if command.startswith("traffic"):
+        for st in steps:
+            if st.get("step") == "traffic:total":
+                return f"{_num(st.get('requests', 0))} req · {_window(st)}"
+        got = sum(st.get("requests", 0) for st in steps if "requests" in st)
+        return f"{_num(got)} req" if got else f"{len(steps)} readings"
+    if command.startswith("builds"):
+        return f"{count(lambda st: st.get('step','').startswith('build:'))} pushes"
+    if command.startswith("repos"):
+        for st in steps:
+            if st.get("step") == "repos":
+                return (f"{_num(st.get('total', 0))} repos · "
+                        f"{_num(st.get('unclaimed', 0))} free")
+        return f"{len(steps)} repos"
+    if command.startswith("tenant"):
+        return f"{count(lambda st: st.get('step','').startswith('service:'))} services"
+    if command.startswith("data remote"):
+        for st in steps:
+            if st.get("age_hours") is not None:
+                return f"{st['age_hours']:g} h old"
+        return "off-site copy"
+    if command.startswith("org"):
+        return f"{len(steps)} contracts"
+    return f"{len(steps)} readings"
+
+
+def _vital(reading, ctx=None):
+    """One source, folded. The line says what it is, how it is and one
+    number; opening it gives the panel that was there before.
+
+    IT OPENS BY ITSELF WHEN IT IS NOT FINE. That is «the order is the
+    alarm» made structural: what needs somebody is already open when the
+    page loads, and what does not is a line."""
+    body, states = _source(reading, ctx)
+    inner = body.split(">", 1)[1].rsplit("</section>", 1)[0]
+    doc = reading.get("documento")
+    state = worst(states) if states else UNSEEN
+    command = reading.get("comando") or ""
+    figure = (_headline(command, doc) if doc is not None
+              else "could not be looked at")
+    # THE AGE COMES OUT TO THE SUMMARY LINE. It was inside the fold, and
+    # a measurement whose age you have to click to see is a measurement
+    # read as if it were now — which is the oldest lie a dashboard
+    # tells, and the one check 127 exists for.
+    inner = inner.replace(_age(reading), "", 1)
+    return (f'<section class="source vital" data-state="{state}" '
+            f'data-command="{_e(command)}" data-rc="{_e(reading.get("rc"))}"'
+            f'{_when(reading)}>'
+            f'<details{" open" if state != FINE else ""}>'
+            f'<summary><b>{_e(command)}</b>'
+            f'<span class="fig">{_e(figure)}</span>'
+            f'{_age(reading)}{_chip(state, state)}</summary>'
+            f'<div class="vital-body">{inner}</div></details></section>')
+
+
+def _per_org(readings, key):
+    """What each organization's own step says, out of a source that
+    reports per organization. Used to put the traffic on a project's
+    card without the traffic panel losing it: the same measure drawn in
+    two places loses nothing, and the card is where somebody looks."""
+    out = {}
+    for r in readings or []:
+        for st in (r.get("documento") or {}).get("steps") or []:
+            name = st.get("step", "")
+            if name.startswith(key):
+                out[name.split(":", 1)[1]] = st
+    return out
+
+
+def _window_read(readings):
+    """How many builds the reading covers. A card that shows no push has
+    to say «none among the last N»: «nothing» on a screen reads as «this
+    never deployed», and those are different facts."""
+    for r in readings or []:
+        for st in (r.get("documento") or {}).get("steps") or []:
+            if st.get("step") == "builds" and st.get("leidos"):
+                return st["leidos"]
+    return None
+
+
+def _last_push(readings, org, services):
+    """The most recent build of any image this organization is built
+    from. It is the one fact a person looks for on a project card and it
+    lived in a panel of its own until today."""
+    mine = {sv.get("nombre") for sv in services or []}
+    best = None
+    for r in readings or []:
+        if not (r.get("comando") or "").startswith("builds"):
+            continue
+        for st in (r.get("documento") or {}).get("steps") or []:
+            if not st.get("step", "").startswith("build:"):
+                continue
+            image = st.get("image") or ""
+            # `<org>-<service>` is how a tenant's image is named, and the
+            # organization's own name is how a one-repo tenant's is.
+            tail = image[len(org) + 1:] if image.startswith(org + "-") else None
+            if image != org and (tail is None or tail not in mine):
+                continue
+            when = st.get("when") or ""
+            if best is None or when > (best.get("when") or ""):
+                best = st
+    return best
+
+
+def _project_card(step, readings, langs):
+    org = step.get("step", "").split(":", 1)[-1]
+    state = SCREEN.get(step.get("state"), UNSEEN)
+    if not step.get("valid", True):
+        return (f'<article class="proj" data-state="{state}">'
+                f'<h3>{_e(org)}</h3>{_chip(state, "contract refused")}'
+                f'<p class="why">{_e(step.get("error", ""))}</p></article>')
+    services = step.get("servicios") or []
+    dots = "".join(
+        (lambda k: f'<i class="dot" title="{_e(k.get("lenguaje") or sv.get("tipo"))}"'
+                   + (f' style="background:{_e(k.get("color"))}"'
+                      if _is_colour(k.get("color")) else ' data-plain="1"')
+                   + '></i>')(langs.get((org, sv.get("nombre"))) or {})
+        for sv in services)
+    figs = []
+    t = _per_org(readings, "traffic:").get(org)
+    if t and "requests" in t:
+        figs.append(_fact("requests", _num(t.get("requests", 0))))
+        figs.append(_fact("5xx", _num(t.get("errors", 0))))
+    push = _last_push(readings, org, services)
+    window = _window_read(readings)
+    chain = ""
+    if push:
+        chain = ('<p class="push"><span class="mono">'
+                 + _e(f'{push.get("image", "?")} #{push.get("build", "?")}')
+                 + '</span>'
+                 + "".join(f'<span class="link" data-state="{SCREEN.get(v, UNSEEN)}">'
+                           f'{_e(k[0])}</span>'
+                           for k, v in (push.get("links") or {}).items())
+                 + '</p>')
+    elif window:
+        chain = (f'<p class="push none">no push among the last {_e(window)} read</p>')
+    extras = []
+    if step.get("bucket"):
+        extras.append("bucket")
+    if step.get("ai"):
+        extras.append(f"ai {step['ai']}")
+    return (f'<article class="proj" data-state="{state}">'
+            f'<h3><a href="/org/{_e(org)}">{_e(org)}</a></h3>'
+            f'<p class="host mono">{_e(step.get("dominio") or "no public domain")}</p>'
+            f'<div class="dots">{dots}<span class="n">{len(services)}</span></div>'
+            + (f'<div class="facts-row">{"".join(figs)}</div>' if figs else "")
+            + chain
+            + f'<p class="meta">quota <b>{_e(step.get("cuota"))}</b>'
+            + (f' · {_e(" · ".join(extras))}' if extras else "") + '</p></article>')
+
+
+def _projects(reading, readings, ctx):
+    """The body of the panel: one card per organization, assembled
+    ACROSS readings. The contract says which exist, the traffic says what
+    reached them, the builds say what happened to their last push — and
+    until today those were three sections a screen apart."""
+    doc = reading.get("documento")
+    if doc is None:
         body, _ = _source(reading, ctx)
-        (lead if reading.get("comando") == "org list" else rest).append(body)
+        return body
+    langs = (ctx or {}).get("langs") or {}
+    cards, states = [], set()
+    for step in doc.get("steps") or []:
+        states.add(SCREEN.get(step.get("state"), UNSEEN))
+        if not step.get("step", "").startswith("organization:"):
+            continue
+        cards.append(_project_card(step, readings, langs))
+    if not cards:
+        states.add(UNSEEN)
+        cards.append(f'<p class="empty" data-state="{UNSEEN}">no contract was read</p>')
+    state = worst(states) if states else UNSEEN
+    return (f'<section class="source projects" data-state="{state}" '
+            f'data-command="{_e(reading.get("comando"))}" '
+            f'data-rc="{_e(reading.get("rc"))}"{_when(reading)}>'
+            f'<h2>projects</h2>{_age(reading)}'
+            f'<div class="grid">{"".join(cards)}</div></section>')
+
+
+def _services_of(reading, ctx):
+    """The body of ONE organization's panel: its services as cards."""
+    doc = reading.get("documento")
+    if doc is None:
+        body, _ = _source(reading, ctx)
+        return body
+    states = set()
+    cards, rest = [], []
+    for step in doc.get("steps") or []:
+        state = SCREEN.get(step.get("state"), UNSEEN)
+        states.add(state)
+        kind, _, what = step.get("step", "").partition(":")
+        if kind != "service":
+            continue
+        ready, desired = step.get("ready"), step.get("desired")
+        count = f"{ready}/{desired}" if desired is not None else "none"
+        bits = [f'<span class="srv">{_e(step.get("tipo", "?"))}</span>']
+        if step.get("publico"):
+            bits.append(f'<span class="srv mono">{_e(step["publico"])}</span>')
+        if step.get("volume"):
+            bits.append(f'<span class="srv">{_e(step.get("volume_size") or "disk")}</span>')
+        cards.append(
+            f'<article class="proj" data-state="{state}">'
+            f'<h3>{_e(what)}</h3>{_chip(state, count)}'
+            f'<div class="dots">{"".join(bits)}</div>'
+            + (f'<p class="why">{_e(_WHY.get(step.get("why"), step.get("why")))}</p>'
+               if step.get("why") else "")
+            + '</article>')
+    if not cards:
+        states.add(UNSEEN)
+        cards.append(f'<p class="empty" data-state="{UNSEEN}">nothing was measured</p>')
+    state = worst(states) if states else UNSEEN
+    # Everything the tenant document says that is NOT a service — the
+    # namespace, the routing, the quota, what nothing claims — still has
+    # to reach the screen, so the whole panel goes underneath.
+    body, _ = _source(reading, ctx)
+    inner = body.split(">", 1)[1].rsplit("</section>", 1)[0]
+    # The whole panel goes underneath, MINUS its own age line: the age
+    # belongs to the reading and the reading is drawn once. Two ages for
+    # one measurement is two chances to read the wrong one.
+    inner = inner.replace(_age(reading), "", 1)
+    return (f'<section class="source projects" data-state="{state}" '
+            f'data-command="{_e(reading.get("comando"))}" '
+            f'data-rc="{_e(reading.get("rc"))}"{_when(reading)}>'
+            f'<h2>services</h2>{_age(reading)}'
+            f'<div class="grid">{"".join(cards)}</div>'
+            f'<details class="fold"><summary><b>everything it measured</b>'
+            f'</summary><div class="vital-body">{inner}</div></details></section>')
+
+
+def render(readings, subject=None):
+    """The panel. `subject` names WHO it is about — an organization — and
+    when it is given the verdict is about that organization and nothing
+    else, which is why the readings behind it are scoped commands rather
+    than the instance's documents filtered here. A screen that filtered
+    would drop measurements, and dropping one is the one thing this
+    console may not do."""
+    ctx = {"langs": languages_of(readings)}
     v = verdict_of(readings)
-    # The way in to the edit lives HERE and not on a screen of its own,
-    # because the moment to change an organization is the moment you are
-    # looking at it. It says «contract» and not «settings»: what this
-    # button opens is the one file everything else is derived from.
-    who = (f'<p class="subject"><a class="act act--quiet" href="/">all '
-           f'organizations</a><b>{_e(subject)}</b>'
-           f'<a class="act act--quiet edit" href="/org/{_e(subject)}/edit">'
-           f'edit the contract</a></p>' if subject else "")
-    head = (f'<header class="verdict" data-state="{v}">{who}'
-            f'<p class="sentence">{_e(SENTENCE[v])}</p></header>')
-    # AND THE WAY TO ADD ONE, WHICH DID NOT EXIST. The screen had five
-    # links and all five went to an organization that was already there;
-    # `/new` was reachable only by typing the URL. A screen that can do
-    # something and does not offer it is a screen that cannot do it.
-    add = ("" if subject else
-           '<p class="doing"><a class="act" href="/new">add a project</a>'
-           '<span class="tiny">it writes one contract, and nothing runs '
-           'until you commit it</span></p>')
-    return (f'<main class="sereno" data-veredicto="{v}"'
+
+    body, vitals = [], []
+    for reading in readings:
+        command = reading.get("comando") or ""
+        if not subject and command == "org list":
+            body.append(_projects(reading, readings, ctx))
+        elif subject and command.startswith("tenant show"):
+            body.append(_services_of(reading, ctx))
+        else:
+            vitals.append(_vital(reading, ctx))
+
+    where = (f'<a class="act act--quiet" href="/">all projects</a>' if subject
+             else '<span class="mark">aegis</span>')
+    action = (f'<a class="act" href="/org/{_e(subject)}/edit">edit the contract</a>'
+              if subject else '<a class="act" href="/new">new project</a>')
+    bar = (f'<header class="bar" data-state="{v}">{where}'
+           + (f'<b class="who">{_e(subject)}</b>' if subject else "")
+           + f'<p class="sentence">{_e(SENTENCE[v])}</p>{action}</header>')
+    return (f'<main class="sereno panel" data-veredicto="{v}"'
             + (f' data-subject="{_e(subject)}"' if subject else "")
-            + f'>{head}{"".join(lead)}{add}{"".join(rest)}</main>')
+            + f'>{bar}'
+            # THE PROJECTS BEFORE THE INDICATORS. The bar already said
+            # how the whole thing is, in a sentence; what somebody opens
+            # this for is underneath it, and the instance's vitals come
+            # after because they support that rather than compete with
+            # it.
+            + "".join(body)
+            + (f'<section class="vitals">{"".join(vitals)}</section>' if vitals else "")
+            + '</main>')
+
 
 # ── the one screen that writes ───────────────────────────────────────
 # EVERY CHOICE ON IT COMES OUT OF `aegis org schema`. Nothing below

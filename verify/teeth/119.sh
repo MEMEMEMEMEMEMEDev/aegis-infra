@@ -49,6 +49,12 @@ control_2() { sed -i 's/^que: .*/que: la ronda de una instancia en marcha, dicho
 
 # a SYNTHETIC case that says why the real state is out of reach: it is
 # the deliberate exception the rule allows, and it has to pass
+# A SYNTHETIC case is legitimate — it is one of the three provenances —
+# and adding one must not move the verdict. It still has to say which
+# command each document answers: this built one without `producido_por`
+# and the check was right to bite it. A control that produces an
+# illegitimate tree proves nothing about the check and blames it for
+# working.
 control_3() { mkdir -p "$C119/probe-119b/documents" \
     && printf '{"steps":[],"rc":2}\n' > "$C119/probe-119b/documents/edge.json" \
-    && printf 'version: 1\ncaso: probe-119b\nque: un borde sin zona\nprocedencia: sintetico\npor_que: esta instancia no corre el perfil local y no hay otra donde medirlo\nforma:\n  edge.json:\n    claves: [rc, steps]\n    estados: []\n' > "$C119/probe-119b/case.yaml"; }
+    && printf 'version: 1\ncaso: probe-119b\nque: un borde sin zona\nprocedencia: sintetico\npor_que: esta instancia no corre el perfil local y no hay otra donde medirlo\nproducido_por:\n- comando: edge check\n  documento: edge.json\n  rc: 2\nmedido_en: "2026-09-14T00:00:00-03:00"\nforma:\n  edge.json:\n    claves: [rc, steps]\n    estados: []\n' > "$C119/probe-119b/case.yaml"; }

@@ -410,3 +410,147 @@ ol.left .note{ color:var(--mid); font-size:12.5px; }
 .srv .dot{ width:8px; height:8px; border-radius:99px; display:inline-block;
            margin-right:5px; vertical-align:baseline;
            box-shadow:0 0 0 1px rgb(11 13 16 / .12) inset; }
+
+
+/* ══ THE PANEL ═══════════════════════════════════════════════════════
+ * Until 2026-09-14 this screen was one section per command, stacked, in
+ * the order the commands were written — the shape of the DOCUMENT. A
+ * panel has a shape of its own: a bar you read in one line, a row of
+ * indicators that open themselves when they need somebody, and the
+ * PROJECTS filling the rest. Everything a source measured is still one
+ * click away underneath, because summarising is not replacing.
+ */
+.panel { max-width:1180px; display:flex; flex-direction:column; gap:14px; }
+
+/* The bar: the whole instance in one line, and the one thing you can do. */
+.bar {
+  display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
+  padding:13px 16px; box-shadow:var(--shadow); margin:0;
+}
+.bar .mark { font-weight:800; letter-spacing:-.04em; font-size:17px; }
+.bar .who { font-size:19px; font-weight:800; letter-spacing:-.035em; }
+.bar .sentence { margin:0; flex:1; min-width:14ch; font-size:14.5px; color:var(--mid); }
+.bar > .act:last-child { margin-left:auto; background:var(--ink); color:var(--paper);
+                         border-color:var(--ink); font-weight:700; }
+.bar[data-state="wrong"]     .sentence { color:var(--wrong-ink); font-weight:600; }
+.bar[data-state="attention"] .sentence { color:var(--attention-ink); font-weight:600; }
+.bar[data-state="unseen"]    .sentence { color:var(--unseen-ink); font-weight:600; }
+
+/* The indicators. A line each, and OPEN ALREADY when they are not fine:
+ * the order is the alarm, made structural. `<details>` and not a script,
+ * because this console has never served one. */
+.vitals { display:grid; gap:8px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); }
+.vital {
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--r-s);
+  padding:0; overflow:hidden;
+}
+.vital > details > summary {
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:11px 14px; cursor:pointer; list-style:none; font-size:13px;
+}
+.vital summary::-webkit-details-marker { display:none; }
+.vital summary::after { content:"+"; margin-left:auto; color:var(--faint);
+                        font-size:15px; line-height:1; }
+.vital details[open] > summary::after { content:"−"; }
+.vital summary > b { font-weight:700; letter-spacing:-.01em; }
+.vital summary .fig { color:var(--faint); font-family:var(--mono); font-size:11.5px; }
+.vital summary .age { margin:0; font-size:10px; }
+.vital summary .chip { font-size:0; padding:0; width:9px; height:9px; border-radius:99px;
+                       box-shadow:none; }
+.vital summary .chip::before { display:none; }
+.vital:has(details[open]) { grid-column:1 / -1; }
+.fold > summary { cursor:pointer; list-style:none; font-size:12px; color:var(--faint);
+                  padding:11px 0 0; margin-top:11px; border-top:1px solid var(--line); }
+.fold > summary::after { content:"+"; margin-left:6px; }
+.fold[open] > summary::after { content:"−"; }
+.vital-body { padding:0 14px 14px; border-top:1px solid var(--line); }
+.vital-body .age { margin-top:10px; }
+/* Inside an indicator, the old panel keeps its own furniture but loses
+ * the outer card: two borders around one thing reads as two things. */
+.vital-body > .source, .vital-body .tiles { margin-top:10px; }
+
+/* The projects: the body of the screen, and what somebody came for. */
+.projects {
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
+  padding:16px 18px 18px; box-shadow:var(--shadow);
+}
+.projects > h2 { font-size:11px; font-weight:700; letter-spacing:.12em;
+                 text-transform:uppercase; color:var(--faint); margin-bottom:12px; }
+.projects > .grid { display:grid; gap:12px;
+                    grid-template-columns:repeat(auto-fill,minmax(232px,1fr)); }
+.proj {
+  border:1px solid var(--line); border-radius:var(--r-s); padding:14px 15px;
+  display:flex; flex-direction:column; gap:9px; background:var(--panel);
+  transition:box-shadow .16s ease, border-color .16s ease;
+}
+.proj:hover { box-shadow:var(--shadow); border-color:rgb(11 13 16 / .18); }
+.proj > h3 { font-size:17px; font-weight:800; letter-spacing:-.035em; }
+.proj > h3 > a { color:inherit; text-decoration:none; }
+.proj > h3 > a::after { content:""; position:absolute; inset:0; }
+.proj { position:relative; }
+.proj .host { margin:0; font-size:11.5px; color:var(--faint); word-break:break-all; }
+.proj .meta { margin:0; font-size:11.5px; color:var(--faint); }
+.proj .why  { margin:0; font-size:12px; }
+.proj .facts-row { gap:12px 18px; }
+.proj .fact .figure { font-size:19px; }
+.proj .dots { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.proj .dots .n { font-size:11px; color:var(--faint); font-family:var(--mono);
+                 margin-left:2px; }
+.proj .dots .dot { width:9px; height:9px; border-radius:99px; display:inline-block;
+                   box-shadow:0 0 0 1px rgb(11 13 16 / .12) inset; }
+.proj .dots .dot[data-plain] { background:var(--sunken); }
+.proj .push { margin:0; display:flex; align-items:center; gap:4px; flex-wrap:wrap;
+              font-size:11px; }
+.proj .push .mono { color:var(--faint); margin-right:3px; }
+.proj .push .link { padding:1px 5px; font-size:9.5px; border-radius:4px; }
+/* A project that is not fine is not a different colour: it is a card
+ * with a line of its own along the top. Colour is for the chips, and a
+ * grid of tinted rectangles is a grid nobody reads. */
+.proj[data-state]:not([data-state="fine"]) { box-shadow:inset 0 3px 0 0 currentColor; }
+
+@media (max-width:640px){
+  .bar > .act:last-child { margin-left:0; }
+  .projects > .grid { grid-template-columns:1fr; }
+}
+/* An indicator that opens does NOT turn the panel back into a scroll:
+ * its detail scrolls inside its own box. That is the difference between
+ * a dashboard and a document, and it was the operator's whole point. */
+.vital-body { max-height:340px; overflow-y:auto; }
+/* «Nothing» on a card reads as «this never deployed». It is not the
+ * same fact, so the card says which window it looked in. */
+.proj .push.none { color:var(--faint); font-style:italic; }
+
+/* ── the panel corrects the skin's own default ─────────────────────
+ * `[data-state="fine"]` and its siblings set a background AND a colour
+ * on ANY element carrying the attribute. That was right when a state
+ * was worn by a chip or a tile; on a panel it tints every card, and a
+ * grid of pale rectangles is the «Windows 8» the operator rejected on
+ * the very first pass. These rules are more specific and win.
+ *
+ * So on this screen the surface stays neutral and the state is a line
+ * along the top of the card. Colour is for the chips and the links —
+ * the small things you look AT — and never for the ground under them. */
+.panel .source, .panel .proj, .panel .vital, .panel .projects {
+  background:var(--panel); color:var(--ink);
+}
+.panel .proj[data-state="wrong"]     { box-shadow:inset 0 3px 0 0 var(--wrong-ink); }
+.panel .proj[data-state="attention"] { box-shadow:inset 0 3px 0 0 var(--attention-ink); }
+.panel .proj[data-state="unseen"]    { box-shadow:inset 0 3px 0 0 var(--unseen-ink);
+                                       background-image:none; }
+.panel .proj[data-state="fine"]      { box-shadow:none; }
+.panel .proj:hover { box-shadow:var(--shadow); }
+
+/* The indicator's dot is the state at a glance, so it takes the INK of
+ * the state and not its pale ground: a nine-pixel mint dot is a dot
+ * nobody sees. */
+.vital summary .chip { background:currentColor; }
+.vital[data-state="unseen"] summary .chip { background-image:var(--hatch);
+                                            border-radius:1px; }
+
+/* One frame per thing. The projects section held a border and a shadow
+ * around cards that have their own, and two borders around one thing
+ * reads as two things. */
+.panel .projects { border:0; box-shadow:none; padding:2px 0 0; }
+.panel .projects > h2 { margin-bottom:4px; }
+.panel .projects > .age { margin:0 0 12px; }

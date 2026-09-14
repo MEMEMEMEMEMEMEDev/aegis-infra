@@ -13,9 +13,20 @@ S124="$AEGIS_ROOT/share/console/sereno.css"
 red_1() { python3 - "$S124" <<'P'
 import sys, pathlib, re
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-s = re.sub(r'\.chip\[data-state="unseen"\]::before \{[^}]*\}', '', s)
-s = s.replace('.chip[data-state="unseen"] { box-shadow:none; }', '')
-p.write_text(s)
+# EVERY non-colour treatment of `unseen`, not just the chip's. This
+# removed the chip's hatch and nothing else, and stopped biting the day
+# the builds panel gave a second element one — the check was satisfied
+# by a rule this tooth had never heard of. What it has to produce is a
+# skin where `unseen` is told apart BY COLOUR ALONE, wherever it is
+# drawn, which is the thing the check forbids.
+out = []
+for rule in re.split(r"(?<=\})", s):
+    if "unseen" in rule and re.search(r"background-image|border-radius|box-shadow:\s*inset|border:", rule):
+        rule = re.sub(r"(background-image|border-radius|box-shadow|border)\s*:[^;}]*;?", "", rule)
+    out.append(rule)
+after = "".join(out)
+assert after != s, "re-aim this tooth: nothing dresses `unseen` beyond its colour"
+p.write_text(after)
 P
 }
 
@@ -24,7 +35,24 @@ P
 red_2() { sed -i '/^\[data-state="busy"\]/d' "$S124"; }
 
 # the same, for the one that asks a person for a decision
-red_3() { sed -i '/^\[data-state="attention"\]/d' "$S124"; }
+# A state loses its surface and its ink EVERYWHERE, not only in the one
+# rule that used to be its only one. Deleting the base line stopped
+# biting the day the panel gave `attention` a second rule of its own:
+# the state was still dressed, by something this tooth had never heard
+# of, and the check was right to stay green.
+red_3() { python3 - "$S124" <<'P'
+import sys, pathlib, re
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+out = []
+for rule in re.split(r"(?<=\})", s):
+    if '[data-state="attention"]' in rule:
+        rule = re.sub(r"\b(background|background-color|color)\s*:[^;}]*;?", "", rule)
+    out.append(rule)
+after = "".join(out)
+assert after != s, "re-aim this tooth: nothing gives `attention` a surface"
+p.write_text(after)
+P
+}
 
 # ── controls: real changes that must NOT move the verdict ────────────
 

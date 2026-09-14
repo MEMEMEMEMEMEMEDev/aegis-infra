@@ -6,8 +6,40 @@
 # and `cpu` go back to being answers nobody serves. This is the state
 # the artifact was actually in until 2026-08-29, and the check has to
 # be able to see it — otherwise it was written to fit today's tree.
-red_1() { rm -f "$AEGIS_ROOT/init/phases/87-ai.sh" "$AEGIS_ROOT/libexec/aegis-ai" \
-                "$AEGIS_ROOT/libexec/aegis-sync" "$AEGIS_ROOT/libexec/aegis-check"; }
+# THE WIZARD GOES ON OFFERING A VALUE AND NOBODY CARRIES IT OUT, which
+# is the defect this check exists for and the shape `AI=gpu` had before
+# phase 87 was written.
+#
+# It used to delete four files, on the assumption that they were the
+# only ones serving those values. The product grew and the assumption
+# stopped holding —the GPU runtime is set up in phase 20, the CI carries
+# it, the host measures it— so deleting those four changed nothing and
+# the tooth went quiet. Now the VALUE is taken out of every consumer and
+# left in the validator, which is the defect itself rather than a guess
+# about where it would come from.
+red_1() { python3 - "$AEGIS_ROOT" <<'P'
+import sys, pathlib, re
+root = pathlib.Path(sys.argv[1])
+keep = root / "lib" / "config.sh"          # the wizard goes on offering it
+word = re.compile(r"(?<![A-Za-z0-9_])gpu(?![A-Za-z0-9_])")
+touched = 0
+for d in ("init", "libexec", "lib", "seed"):
+    base = root / d
+    if not base.is_dir():
+        continue
+    for f in base.rglob("*"):
+        if not f.is_file() or f == keep:
+            continue
+        try:
+            text = f.read_text(errors="replace")
+        except Exception:
+            continue
+        if word.search(text):
+            f.write_text(word.sub("xpu", text))
+            touched += 1
+assert touched, "re-aim this tooth: nothing names `gpu` outside the validator"
+P
+}
 
 # a value ADDED to the validator and served by nobody: the same defect
 # arriving by the other door, which is the one a new question opens.

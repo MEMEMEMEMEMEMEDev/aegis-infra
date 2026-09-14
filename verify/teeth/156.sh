@@ -246,16 +246,35 @@ control_1() {
 # graduate and the refusal would be a wall instead of a door.
 control_2() {
     python3 - "$AEGIS_ROOT/$CAT" <<'PY'
-import re, sys
-p = sys.argv[1]; t = open(p, encoding="utf-8").read()
-# (?m) and NOT (?ms): with DOTALL the `.` of `.*` crosses newlines,
-# the greedy match runs to the end of the file, and this control ate
-# the whole catalogue — which the check reported, correctly, as a
-# tree that no longer holds together. A tooth that mutates more than
-# it means to measures something else.
-m = re.search(r"(?m)^    pending:\n(?:^      .*\n)+", t)
-assert m, "no `pending:` block where this control expects one"
-open(p, "w", encoding="utf-8").write(
-    t[:m.start()] + "    digest: sha256:" + "9f" * 32 + "\n" + t[m.end():])
+import sys
+# A `pending:` block ends at the first line indented no deeper than it
+# is — and BLANK LINES BELONG TO IT. The regex this used stopped at the
+# empty line inside the `reason: |` literal, left the second half of the
+# paragraph orphaned at the top level, and handed the check a catalogue
+# that is not YAML. The check reported a tree that does not hold
+# together, which was true, and was about the tooth.
+#
+# Its own comment already said it: a tooth that mutates more than it
+# means to measures something else. This one mutated LESS, and the
+# lesson is the same.
+p = sys.argv[1]
+lines = open(p, encoding="utf-8").read().splitlines(keepends=True)
+out, i, done = [], 0, False
+while i < len(lines):
+    line = lines[i]
+    if not done and line.rstrip("\n") == "    pending:":
+        out.append("    digest: sha256:" + "9f" * 32 + "\n")
+        i += 1
+        while i < len(lines):
+            nxt = lines[i]
+            if nxt.strip() and (len(nxt) - len(nxt.lstrip(" "))) <= 4:
+                break
+            i += 1
+        done = True
+        continue
+    out.append(line)
+    i += 1
+assert done, "no `pending:` block where this control expects one"
+open(p, "w", encoding="utf-8").write("".join(out))
 PY
 }

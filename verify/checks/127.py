@@ -37,7 +37,13 @@ for name in cases:
     except Exception as e:                                # noqa: BLE001
         print(f"case {name} cannot be rendered ({type(e).__name__}: {e})")
         continue
-    sources = re.findall(r'<section class="source"[^>]*>', html)
+    # `class="source ..."` and not `class="source"` exactly: the panel of
+    # 2026-09-14 gave these elements a second class, and a check anchored
+    # on the whole attribute went red over the ORDER of two words while
+    # every reading was drawn with its age. What is being asked is
+    # whether the element declares itself a drawn source, not how its
+    # class list is spelled.
+    sources = re.findall(r'<section class="[^"]*\bsource\b[^"]*"[^>]*>', html)
     if len(sources) != len(readings):
         print(f"case {name}: {len(readings)} reading(s) and {len(sources)} source(s) drawn")
     for tag in sources:

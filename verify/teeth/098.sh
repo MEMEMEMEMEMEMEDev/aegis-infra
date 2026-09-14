@@ -53,13 +53,19 @@ P
 
 # the rules stay perfect and the server stops asking: the module is
 # right, the check that only read the module would stay green, and the
-# door is open
+# door is open.
+#
+# BOTH HANDLERS ASK, so both stop asking: this anchored on a single
+# occurrence and went quiet the day `do_POST` was written, which is the
+# same way four teeth of check 099 broke. A tooth that cannot be applied
+# does not bite and does not say so.
 red_5() { python3 - "$S098" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-old = '            why = guard.why_not_read(self.headers, port)'
-assert s.count(old) == 1
-p.write_text(s.replace(old, '            why = None', 1))
+old = "            why = guard.why_not_read(self.headers, port)"
+n = s.count(old)
+assert n >= 1, "re-aim this tooth"
+p.write_text(s.replace(old, "            why = None"))
 P
 }
 

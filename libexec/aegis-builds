@@ -166,7 +166,11 @@ def show(last, steps, narrate, only=None):
               + (f", of {only}" if only else "") + f"){off}")
     if not events:
         # A measured zero: the database answered and it holds nothing.
-        steps.already("builds", count=0)
+        # HOW MANY WERE READ, and not only how many came back. A card
+        # that shows no push has to be able to say «none among the last
+        # N», because «nothing» on a screen reads as «this never
+        # deployed» — and those are different facts.
+        steps.already("builds", count=0, leidos=last, organizacion=only)
         if narrate:
             print(f"  {grey}the database answered and holds no build event{off}")
         steps.finish()
@@ -225,8 +229,8 @@ def show(last, steps, narrate, only=None):
     # prints it. What changes is that the rc now answers the question
     # this command is actually asking — did I read the builds — instead
     # of answering a question about somebody else's component.
-    steps.already("builds", count=len(events), links_measured=list(LINKS),
-                  links_elsewhere=BEYOND)
+    steps.already("builds", count=len(events), leidos=last, organizacion=only,
+                  links_measured=list(LINKS), links_elsewhere=BEYOND)
     if narrate:
         for link, who in BEYOND.items():
             print(f"  {grey}{link}: not measured here — {who}{off}")
