@@ -42,7 +42,7 @@ if not os.path.isfile(SERVER):
 # them changes anything. `org plan` is the interesting entry — its whole
 # job is to say what `apply` WOULD do, without doing it.
 READ_ONLY = {
-    "org list", "org schema", "org plan", "org validate",
+    "org list", "org schema", "org plan", "org validate", "repos list",
     "tenant show", "traffic show", "capacity show", "builds show",
     "check", "edge check", "data remote status",
 }

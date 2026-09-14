@@ -48,7 +48,14 @@ panel:
 | `aegis capacity show` | does another organization fit, and what runs out first |
 | `aegis builds show` | what happened to each push, link by link |
 | `aegis check` | the round: the cluster against what is declared |
+| `aegis repos list` | what each service is written in, and which repositories nothing runs yet |
 | `aegis edge check` | do the hostnames anybody types exist and answer |
+
+The first screen leads with **your organizations**, each service carrying
+the language GitHub already measured for its repository — the contract
+says `http`, which is what a service is to the platform, and never what
+it is written in. Below them, the repositories **nothing is running
+yet**, which is the list somebody needs in front of them to take one on.
 
 ## One organization
 
@@ -174,6 +181,13 @@ anything that identifies the instance it came from.
 aegis console list                        # the corpus
 aegis console capture NAME --what "..." --run "check" --run "edge check"
 ```
+
+The capture masks two kinds of identity: every value of this instance's
+`aegis.conf` that differs from the example, and **every repository of
+the account that no contract declares**. The second was added on
+2026-09-13, after the first capture of `aegis repos list` put
+forty-three repository names into a case in one go and thirty-two of
+them were private work that merely lives in the same account.
 
 The checks over it hold two invariants for every case: **no state is
 lost and none is invented**, and **the verdict is never kinder than its

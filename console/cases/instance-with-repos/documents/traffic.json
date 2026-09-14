@@ -1,0 +1,70 @@
+{
+  "steps": [
+    {
+      "step": "traffic:drop",
+      "state": "already",
+      "requests": 57,
+      "errors": 0,
+      "p95_ms": 687.0,
+      "bytes": 25232424,
+      "hours": 24
+    },
+    {
+      "step": "traffic:panel",
+      "state": "already",
+      "requests": 3019,
+      "errors": 0,
+      "p95_ms": 95.0,
+      "bytes": 1172997,
+      "hours": 24
+    },
+    {
+      "step": "traffic:portafolio",
+      "state": "already",
+      "requests": 3154,
+      "errors": 0,
+      "p95_ms": 95.0,
+      "bytes": 258836871,
+      "hours": 24
+    },
+    {
+      "step": "traffic:shop",
+      "state": "already",
+      "requests": 6146,
+      "errors": 1,
+      "p95_ms": 95.2,
+      "bytes": 196527223,
+      "hours": 24
+    },
+    {
+      "step": "traffic:ventasfix",
+      "state": "already",
+      "requests": 2559,
+      "errors": 1,
+      "p95_ms": 206.9,
+      "bytes": 2070843,
+      "hours": 24
+    },
+    {
+      "step": "traffic:platform",
+      "state": "already",
+      "requests": 1694,
+      "hours": 24,
+      "note": "not attributed to any organization"
+    },
+    {
+      "step": "traffic:unattributed",
+      "state": "already",
+      "requests": 608,
+      "hours": 24,
+      "note": "tenant-shaped routes that belong to no contract (the canary, an organization mid-removal): counted, never credited"
+    },
+    {
+      "step": "traffic:total",
+      "state": "already",
+      "requests": 17237,
+      "hours": 24
+    }
+  ],
+  "rc": 0
+}

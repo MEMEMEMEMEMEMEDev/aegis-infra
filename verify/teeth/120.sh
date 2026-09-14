@@ -39,3 +39,67 @@ control_2() { printf '  ejemplo: owner/app en sitio.example.test\n' >> "$C120/co
 control_3() { mkdir -p "$C120/probe-120/documents" \
     && printf '{"steps":[{"step":"x","state":"already"}],"rc":0}\n' > "$C120/probe-120/documents/edge.json" \
     && printf 'version: 1\ncaso: probe-120\nque: una captura limpia\nprocedencia: medido\nproducido_por:\n- comando: edge check\n  documento: edge.json\n  rc: 0\nmedido_en: 2026-09-11T00:00:00-03:00\naegis: 5d89b79c5cd2a60e58241d1d24208179f8f5fec3\nforma:\n  edge.json:\n    claves: [rc, steps]\n    estados: [already]\n' > "$C120/probe-120/case.yaml"; }
+
+# ── the second kind of identity (2026-09-13) ─────────────────────────
+
+# THE ONE. The capture stops masking the repositories nobody deploys,
+# and the next case carries this account's private work into a public
+# repository: an android app, a game server, an old assignment.
+red_6() { python3 - "$AEGIS_ROOT/console/cases" <<'P'
+import sys, pathlib, json
+root = pathlib.Path(sys.argv[1])
+for path in sorted(root.rglob("*.json")):
+    doc = json.loads(path.read_text())
+    hit = False
+    for step in doc.get("steps") or []:
+        n = step.get("step", "")
+        if n.startswith("repo:") and not step.get("sirve") and n.endswith(("-01", "-02")):
+            step["step"] = "repo:merpy-android"
+            hit = True
+    if hit:
+        path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
+        break
+else:
+    raise SystemExit("re-aim this tooth: no case carries an undeployed repository")
+P
+}
+
+# a name that merely LOOKS generic is not one: the mask has to be the
+# capture's, not a word somebody chose
+red_7() { python3 - "$AEGIS_ROOT/console/cases" <<'P'
+import sys, pathlib, json
+root = pathlib.Path(sys.argv[1])
+for path in sorted(root.rglob("*.json")):
+    doc = json.loads(path.read_text())
+    hit = False
+    for step in doc.get("steps") or []:
+        n = step.get("step", "")
+        if n.startswith("repo:") and not step.get("sirve") and n.endswith("-03"):
+            step["step"] = "repo:proyecto-viejo"
+            hit = True
+    if hit:
+        path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
+        break
+else:
+    raise SystemExit("re-aim this tooth")
+P
+}
+
+# a repository a contract DOES declare keeps its real name, and that is
+# correct: it is part of what this platform runs and what its own
+# documents already describe
+control_4() { python3 - "$AEGIS_ROOT/console/cases" <<'P'
+import sys, pathlib, json
+root = pathlib.Path(sys.argv[1])
+for path in sorted(root.rglob("*.json")):
+    doc = json.loads(path.read_text())
+    hit = False
+    for step in doc.get("steps") or []:
+        if step.get("step", "").startswith("repo:") and step.get("sirve"):
+            step["lenguaje"] = "Zig"
+            hit = True
+    if hit:
+        path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
+        break
+P
+}

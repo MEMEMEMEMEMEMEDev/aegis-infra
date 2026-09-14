@@ -176,7 +176,27 @@ def _window(step):
     return f"last {step.get('hours', 24)}h"
 
 
-def _panel_organizations(doc, states):
+# WHAT EACH SERVICE IS WRITTEN IN. It does not come from the contract —
+# a contract says `http`, which is what a service is TO THE PLATFORM —
+# and the console does not go and ask: `aegis repos` does, and this
+# reads its document like any other. A language nobody could measure
+# comes back as None and is drawn as nothing, never as a guess.
+def languages_of(readings):
+    by = {}
+    for r in readings or []:
+        if (r.get("comando") or "").startswith("repos list"):
+            for step in (r.get("documento") or {}).get("steps") or []:
+                name = step.get("step", "")
+                if not name.startswith("repo:"):
+                    continue
+                for u in step.get("sirve") or []:
+                    by[(u.get("organizacion"), u.get("servicio"))] = {
+                        "lenguaje": step.get("lenguaje"),
+                        "repo": name.split(":", 1)[1]}
+    return by
+
+
+def _panel_organizations(doc, states, ctx=None):
     tiles = []
     for step in doc.get("steps") or []:
         state = SCREEN.get(step.get("state"), UNSEEN)
@@ -189,9 +209,11 @@ def _panel_organizations(doc, states):
                 f'<p class="why">{_e(step.get("error", ""))}</p></article>')
             continue
         services = step.get("servicios") or []
+        langs = (ctx or {}).get('langs') or {}
         chips = "".join(
             f'<span class="srv" data-kind="{_e(sv.get("tipo"))}">{_e(sv.get("nombre"))}'
-            f'<i>{_e(sv.get("tipo"))}</i></span>' for sv in services)
+            f'<i>{_e((langs.get((name, sv.get("nombre"))) or {}).get("lenguaje") or sv.get("tipo"))}</i>'
+            f'</span>' for sv in services)
         extras = []
         if step.get("bucket"):
             extras.append("bucket")
@@ -211,7 +233,7 @@ def _panel_organizations(doc, states):
     return f'<div class="tiles">{"".join(tiles)}</div>'
 
 
-def _panel_traffic(doc, states):
+def _panel_traffic(doc, states, ctx=None):
     rows, tail = [], []
     for step in doc.get("steps") or []:
         state = SCREEN.get(step.get("state"), UNSEEN)
@@ -240,7 +262,7 @@ def _panel_traffic(doc, states):
             + (f'<ul class="tail">{"".join(tail)}</ul>' if tail else ""))
 
 
-def _panel_round(doc, states):
+def _panel_round(doc, states, ctx=None):
     cells = []
     for step in doc.get("steps") or []:
         state = SCREEN.get(step.get("state"), UNSEEN)
@@ -276,7 +298,7 @@ def _panel_round(doc, states):
     return f'<div class="grid">{"".join(cells)}</div>'
 
 
-def _panel_edge(doc, states):
+def _panel_edge(doc, states, ctx=None):
     good, bad_ = [], []
     for step in doc.get("steps") or []:
         state = SCREEN.get(step.get("state"), UNSEEN)
@@ -296,7 +318,7 @@ def _panel_edge(doc, states):
     return f'<ul class="tail">{"".join(bad_ + good)}</ul>'
 
 
-def _panel_capacity(doc, states):
+def _panel_capacity(doc, states, ctx=None):
     figures, fits = [], []
     for step in doc.get("steps") or []:
         state = SCREEN.get(step.get("state"), UNSEEN)
@@ -328,7 +350,7 @@ def _panel_capacity(doc, states):
     return f'<div class="tiles">{head}</div>' + (f'<ul class="tail">{"".join(fits)}</ul>' if fits else "")
 
 
-def _panel_builds(doc, states):
+def _panel_builds(doc, states, ctx=None):
     rows = []
     gaps = []
     for step in doc.get("steps") or []:
@@ -379,7 +401,7 @@ def _bar(pct, state):
             f'<span style="width:{width:.0f}%"></span></div>')
 
 
-def _panel_tenant(doc, states):
+def _panel_tenant(doc, states, ctx=None):
     """One organization: what its contract declares, against what is
     running. The tiles are the services; everything the contract does
     NOT declare is drawn apart and never folded in, because an
@@ -491,7 +513,7 @@ _WHY = {
 }
 
 
-def _panel_backup(doc, states):
+def _panel_backup(doc, states, ctx=None):
     cards = []
     for step in doc.get("steps") or []:
         state = SCREEN.get(step.get("state"), UNSEEN)
@@ -531,6 +553,44 @@ _WHY_BACKUP = {
 }
 
 
+def _panel_repos(doc, states, ctx=None):
+    """The repositories, seen from the end that matters on this screen:
+    the ones NOTHING is running. A list of what is already deployed is
+    the panel above under another name; this is the only place that says
+    what could be."""
+    free, total, deployed = [], 0, 0
+    for step in doc.get("steps") or []:
+        state = SCREEN.get(step.get("state"), UNSEEN)
+        states.add(state)
+        name = step.get("step", "")
+        if name == "repos":
+            total, deployed = step.get("total", 0), step.get("deployed", 0)
+            continue
+        if not name.startswith("repo:") or step.get("sirve"):
+            continue
+        free.append((step.get("empujado") or "", name.split(":", 1)[1],
+                     step.get("lenguaje")))
+    if not (doc.get("steps") or []):
+        states.add(UNSEEN)
+        return (f'<p class="empty" data-state="{UNSEEN}">GitHub could not be asked, '
+                f'which is not the same as having no repositories</p>')
+    free.sort(reverse=True)
+    # THE MOST RECENTLY PUSHED FIRST and only a handful drawn, because
+    # forty rows is a list nobody reads. The count is said out loud so
+    # that what is collapsed is COUNTED and not hidden.
+    shown = free[:8]
+    rows = "".join(
+        f'<li data-state="{FINE}"><span class="mono">{_e(name)}</span>'
+        + (f'<span class="srv">{_e(lang)}</span>' if lang else "")
+        + '</li>' for _when, name, lang in shown)
+    rest = (f'<li class="rest" data-state="{FINE}">and {len(free) - len(shown)} more '
+            f'that nothing is running</li>' if len(free) > len(shown) else "")
+    return (f'<div class="facts-row">{_fact("repositories", _num(total))}'
+            f'{_fact("deployed", _num(deployed))}'
+            f'{_fact("could be", _num(len(free)))}</div>'
+            f'<ul class="tail repos">{rows}{rest}</ul>')
+
+
 PANELS = {
     "org list": _panel_organizations,
     "traffic show": _panel_traffic,
@@ -542,6 +602,7 @@ PANELS = {
     # panel is found by the longest key that starts the command.
     "tenant show": _panel_tenant,
     "data remote status": _panel_backup,
+    "repos list": _panel_repos,
 }
 
 
@@ -573,7 +634,7 @@ def _blind(reading):
             f'{_age(reading)}</section>')
 
 
-def _source(reading):
+def _source(reading, ctx=None):
     if reading.get("sin_documento") or reading.get("documento") is None:
         return _blind(reading), {UNSEEN}
     doc = reading["documento"]
@@ -581,7 +642,7 @@ def _source(reading):
     states = set()
     panel = panel_for(reading.get("comando") or "")
     if panel and steps:
-        body = [panel(doc, states)]
+        body = [panel(doc, states, ctx)]
     else:
         body = []
         for step in steps:
@@ -636,10 +697,15 @@ def render(readings, subject=None):
     `traffic show --org shop`) rather than the instance's documents
     filtered here. A screen that filtered would drop measurements, and
     dropping one is the one thing this console may not do."""
-    bodies, _ = [], None
+    # PROJECTS FIRST, and the rest after. Until 2026-09-13 this drew the
+    # sources in the order they were written, which is the shape of the
+    # DOCUMENT and not the shape of a screen: what somebody opens this
+    # for is their organizations, and they were one panel among six.
+    ctx = {"langs": languages_of(readings)}
+    lead, rest = [], []
     for reading in readings:
-        body, _ = _source(reading)
-        bodies.append(body)
+        body, _ = _source(reading, ctx)
+        (lead if reading.get("comando") == "org list" else rest).append(body)
     v = verdict_of(readings)
     # The way in to the edit lives HERE and not on a screen of its own,
     # because the moment to change an organization is the moment you are
@@ -651,9 +717,17 @@ def render(readings, subject=None):
            f'edit the contract</a></p>' if subject else "")
     head = (f'<header class="verdict" data-state="{v}">{who}'
             f'<p class="sentence">{_e(SENTENCE[v])}</p></header>')
+    # AND THE WAY TO ADD ONE, WHICH DID NOT EXIST. The screen had five
+    # links and all five went to an organization that was already there;
+    # `/new` was reachable only by typing the URL. A screen that can do
+    # something and does not offer it is a screen that cannot do it.
+    add = ("" if subject else
+           '<p class="doing"><a class="act" href="/new">add a project</a>'
+           '<span class="tiny">it writes one contract, and nothing runs '
+           'until you commit it</span></p>')
     return (f'<main class="sereno" data-veredicto="{v}"'
             + (f' data-subject="{_e(subject)}"' if subject else "")
-            + f'>{head}{"".join(bodies)}</main>')
+            + f'>{head}{"".join(lead)}{add}{"".join(rest)}</main>')
 
 # ── the one screen that writes ───────────────────────────────────────
 # EVERY CHOICE ON IT COMES OUT OF `aegis org schema`. Nothing below

@@ -1,0 +1,428 @@
+{
+  "steps": [
+    {
+      "step": "repo:ventasfix-app",
+      "state": "already",
+      "lenguaje": "PHP",
+      "privado": true,
+      "empujado": "2026-09-13T17:09:05Z",
+      "sirve": [
+        {
+          "organizacion": "ventasfix",
+          "servicio": "app",
+          "tipo": "http"
+        }
+      ]
+    },
+    {
+      "step": "repo:ventasfix-carrito",
+      "state": "already",
+      "lenguaje": "PHP",
+      "privado": true,
+      "empujado": "2026-09-13T06:22:14Z",
+      "sirve": [
+        {
+          "organizacion": "ventasfix",
+          "servicio": "carrito",
+          "tipo": "http"
+        }
+      ]
+    },
+    {
+      "step": "repo:portafolio-v3",
+      "state": "already",
+      "lenguaje": "Astro",
+      "privado": true,
+      "empujado": "2026-09-13T05:31:09Z",
+      "sirve": [
+        {
+          "organizacion": "portafolio",
+          "servicio": "front",
+          "tipo": "estatico"
+        },
+        {
+          "organizacion": "portafolio",
+          "servicio": "bff",
+          "tipo": "http"
+        }
+      ]
+    },
+    {
+      "step": "repo:panel-api",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "privado": true,
+      "empujado": "2026-09-13T05:26:34Z",
+      "sirve": [
+        {
+          "organizacion": "panel",
+          "servicio": "api",
+          "tipo": "http"
+        }
+      ]
+    },
+    {
+      "step": "repo:shop-web",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "privado": true,
+      "empujado": "2026-09-13T05:24:11Z",
+      "sirve": [
+        {
+          "organizacion": "shop",
+          "servicio": "web",
+          "tipo": "estatico"
+        }
+      ]
+    },
+    {
+      "step": "repo:shop-api",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "privado": true,
+      "empujado": "2026-09-13T05:22:07Z",
+      "sirve": [
+        {
+          "organizacion": "shop",
+          "servicio": "api",
+          "tipo": "http"
+        }
+      ]
+    },
+    {
+      "step": "repo:panel-web",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "privado": true,
+      "empujado": "2026-09-13T05:18:28Z",
+      "sirve": [
+        {
+          "organizacion": "panel",
+          "servicio": "web",
+          "tipo": "estatico"
+        }
+      ]
+    },
+    {
+      "step": "repo:shop-admin",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "privado": true,
+      "empujado": "2026-09-13T05:15:19Z",
+      "sirve": [
+        {
+          "organizacion": "shop",
+          "servicio": "admin",
+          "tipo": "estatico"
+        }
+      ]
+    },
+    {
+      "step": "repo:repo-08",
+      "state": "already",
+      "lenguaje": "Dockerfile",
+      "privado": true,
+      "empujado": "2026-09-13T05:12:17Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-19",
+      "state": "already",
+      "lenguaje": "Shell",
+      "privado": false,
+      "empujado": "2026-09-13T01:22:14Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:drop-app",
+      "state": "already",
+      "lenguaje": "Go",
+      "privado": true,
+      "empujado": "2026-09-12T22:20:03Z",
+      "sirve": [
+        {
+          "organizacion": "drop",
+          "servicio": "app",
+          "tipo": "http"
+        }
+      ]
+    },
+    {
+      "step": "repo:repo-15",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "privado": true,
+      "empujado": "2026-09-12T21:38:32Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:shop-worker",
+      "state": "already",
+      "lenguaje": "Python",
+      "privado": true,
+      "empujado": "2026-09-10T20:12:24Z",
+      "sirve": [
+        {
+          "organizacion": "shop",
+          "servicio": "worker",
+          "tipo": "worker"
+        }
+      ]
+    },
+    {
+      "step": "repo:shop-stock",
+      "state": "already",
+      "lenguaje": "Go",
+      "privado": true,
+      "empujado": "2026-09-04T22:50:51Z",
+      "sirve": [
+        {
+          "organizacion": "shop",
+          "servicio": "stock",
+          "tipo": "http"
+        }
+      ]
+    },
+    {
+      "step": "repo:repo-16",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "privado": true,
+      "empujado": "2026-09-02T23:46:09Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-12",
+      "state": "already",
+      "lenguaje": "Kotlin",
+      "privado": true,
+      "empujado": "2026-09-02T23:29:37Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-13",
+      "state": "already",
+      "lenguaje": "Go",
+      "privado": true,
+      "empujado": "2026-09-02T23:20:37Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:__ai_gateway_repo__",
+      "state": "already",
+      "lenguaje": "Go",
+      "privado": true,
+      "empujado": "2026-09-02T10:53:56Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-23",
+      "state": "already",
+      "lenguaje": "HTML",
+      "privado": true,
+      "empujado": "2026-09-02T05:15:13Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-17",
+      "state": "already",
+      "lenguaje": "Python",
+      "privado": true,
+      "empujado": "2026-08-27T08:15:53Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-20",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "privado": true,
+      "empujado": "2026-08-27T07:39:52Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-24",
+      "state": "already",
+      "lenguaje": "Java",
+      "privado": true,
+      "empujado": "2026-08-26T10:49:16Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-29",
+      "state": "already",
+      "lenguaje": "Shell",
+      "privado": true,
+      "empujado": "2026-08-26T07:02:27Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-09",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "privado": true,
+      "empujado": "2026-08-10T10:11:59Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-02",
+      "state": "already",
+      "lenguaje": "Shell",
+      "privado": true,
+      "empujado": "2026-08-03T19:58:17Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-10",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "privado": true,
+      "empujado": "2026-07-23T11:46:29Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-25",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "privado": true,
+      "empujado": "2026-07-14T23:59:42Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-27",
+      "state": "already",
+      "lenguaje": "HCL",
+      "privado": true,
+      "empujado": "2026-07-04T08:24:59Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-21",
+      "state": "already",
+      "lenguaje": "Dockerfile",
+      "privado": true,
+      "empujado": "2026-07-04T02:29:00Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-06",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "privado": true,
+      "empujado": "2026-05-21T11:16:10Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-28",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "privado": true,
+      "empujado": "2026-04-30T10:13:26Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-32",
+      "state": "already",
+      "lenguaje": "ShaderLab",
+      "privado": true,
+      "empujado": "2026-04-22T00:14:37Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-26",
+      "state": "already",
+      "lenguaje": "Shell",
+      "privado": true,
+      "empujado": "2026-04-20T15:31:52Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-11",
+      "state": "already",
+      "lenguaje": null,
+      "privado": true,
+      "empujado": "2026-03-24T13:52:57Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-04",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "privado": true,
+      "empujado": "2026-03-08T20:40:44Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-07",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "privado": true,
+      "empujado": "2026-03-08T20:34:11Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-05",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "privado": true,
+      "empujado": "2026-03-08T20:34:00Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-18",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "privado": true,
+      "empujado": "2026-03-02T14:44:02Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-30",
+      "state": "already",
+      "lenguaje": "Go",
+      "privado": true,
+      "empujado": "2026-02-11T10:44:14Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-31",
+      "state": "already",
+      "lenguaje": "SCSS",
+      "privado": true,
+      "empujado": "2026-01-19T13:25:11Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-01",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "privado": true,
+      "empujado": "2026-01-14T06:39:11Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-14",
+      "state": "already",
+      "lenguaje": "Java",
+      "privado": true,
+      "empujado": "2026-01-09T13:30:33Z",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-03",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "privado": true,
+      "empujado": "2026-01-09T01:38:22Z",
+      "sirve": []
+    },
+    {
+      "step": "repos",
+      "state": "already",
+      "total": 43,
+      "deployed": 11,
+      "unclaimed": 32,
+      "sin_lenguaje": 1
+    }
+  ],
+  "rc": 0
+}

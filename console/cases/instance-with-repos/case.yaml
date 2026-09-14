@@ -1,0 +1,52 @@
+version: 1
+caso: instance-with-repos
+que: 'la instancia con la pantalla nueva: los proyectos primero, con el lenguaje
+  de cada servicio, y los repositorios que ningun contrato nombra'
+procedencia: medido
+producido_por:
+- comando: org list
+  documento: org.json
+  rc: 0
+- comando: repos list
+  documento: repos.json
+  rc: 0
+- comando: traffic show
+  documento: traffic.json
+  rc: 0
+- comando: check
+  documento: check.json
+  rc: 1
+medido_en: '2026-09-13T21:35:17-03:00'
+aegis: b31f97e4c76598044ca21e6dd5d485feea68670a
+forma:
+  org.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  repos.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  traffic.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  check.json:
+    claves:
+    - failures
+    - notices
+    - rc
+    - steps
+    estados:
+    - already
+    - bad
+    - good
+    - not-evaluable
+    - not-evaluated
+    - wrong

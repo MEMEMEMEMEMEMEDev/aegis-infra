@@ -157,6 +157,42 @@ def _substitutions():
     return sorted(subs, key=lambda p: -len(p[0]))
 
 
+def repos_nobody_deploys(runs):
+    """The repositories of this account that NO contract declares, as
+    substitutions.
+
+    THE SECOND KIND OF IDENTITY, and it was found the first time
+    `repos list` was captured. The blunt rule above masks what differs
+    from the example `aegis.conf`, and a repository name is in no
+    `aegis.conf`: forty-three of them went into a case in one go —
+    `merpy-android`, `mineserver`, an old university assignment — and
+    the corpus is published.
+
+    What a contract DECLARES is another matter: those names are already
+    part of what this platform runs and what its own documents describe.
+    What nobody deploys is somebody's private work that happens to live
+    in the same account, and it has no business in a case at all.
+
+    They are replaced by position rather than dropped, so that the shape
+    a case exists to hold —how many there are, what they are written in,
+    how many nothing is running— survives intact.
+    """
+    if not any(line.split()[:1] == ["repos"] for line in runs if line.split()):
+        return []
+    try:
+        _rc, doc = cli.run_json("repos", "list")
+    except cli.CouldNotEvaluate:
+        # Nobody could ask. There is then nothing to mask, and the
+        # capture of that source will record the blindness itself.
+        return []
+    free = [s["step"].split(":", 1)[1] for s in doc.get("steps") or []
+            if s.get("step", "").startswith("repo:") and not s.get("sirve")]
+    # Longest first for the same reason the conf values are: one name
+    # containing another must not be left half-scrubbed.
+    return [(n, f"repo-{i:02d}") for i, n in
+            enumerate(sorted(free, key=len, reverse=True), 1)]
+
+
 def anonymise(text, subs):
     for value, replacement in subs:
         text = text.replace(value, replacement)
@@ -204,6 +240,10 @@ def capture(name, what, runs):
     dest = os.path.join(CASES, name)
     docs_dir = os.path.join(dest, "documents")
     subs = _substitutions()
+    # The repositories nobody deploys are identity too, and they are
+    # not in any aegis.conf. Appended AFTER, so the conf's values still
+    # win where a name happens to contain one.
+    subs = subs + repos_nobody_deploys(runs)
     produced, shapes = [], {}
 
     for line in runs:
@@ -299,7 +339,8 @@ def listing():
 # organization fits, and the edge says whether the hostnames anybody
 # types actually exist. More arrive with the panels that need
 # them.
-SOURCES = ("org list", "traffic show", "capacity show", "builds show", "check", "edge check")
+SOURCES = ("org list", "repos list", "traffic show", "capacity show",
+           "builds show", "check", "edge check")
 
 
 # AND WHAT ONE ORGANIZATION'S SCREEN READS. Three commands, each one

@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+# aegis-summary: The account repositories: what each is written in, and which run
+# aegis-group:   apps
+# aegis-subcommands: list
+# aegis-help:
+# Usage: aegis repos [list] [--json]
+#
+# list  every repository of the account, with the language GitHub already
+#       measured, and which organization and service claims it. The ones
+#       nothing claims are the ones that could be taken on.
+#
+"""aegis-repos — the account's repositories, and which of them are deployed.
+
+WHY THIS EXISTS. A contract says a service is `http` or `estatico`,
+which is what the service is TO THE PLATFORM. It does not say what it is
+WRITTEN IN, and it never will: the language is a fact about the
+repository, and the repository already knows. GitHub measures it on
+every push and hands it over for free.
+
+Until now nobody asked. The console drew `http` where a person expects
+to see «Go», and there was no way to go from «I have forty repositories»
+to «three of them are running» without reading five contracts by hand.
+
+TWO ANSWERS IN ONE READING, because they are the same question asked
+from the two ends:
+
+  · for a repository that IS deployed — which organization and which
+    service, and what it is written in;
+  · for one that is NOT — nothing claims it, which is exactly the list
+    somebody needs in front of them to take one on.
+
+AND AN EMPTY LIST IS NOT «you have no repositories». If `gh` is not
+authenticated, or the network is down, the answer is `not-evaluable`:
+a screen that showed zero would be telling somebody their account is
+empty when the truth is that nobody could ask. That distinction is the
+whole product.
+"""
+import json
+import os
+import subprocess
+import sys
+
+# ── canonical python preamble (V-102) ────────────────────────────────
+_AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
+    os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
+from aegis import cli, outcomes, paths           # noqa: E402
+
+import yaml                                      # noqa: E402
+
+grey = "\033[90m"
+green = "\033[32m"
+off = "\033[0m"
+
+ORGS = os.path.join(str(paths.platform_dir()), "orgs")
+# How many to ask for. A ceiling and not «all», because a page of a
+# thousand is a page nobody reads and a request nobody meant to make.
+LIMIT = 200
+
+
+def _gh(*args):
+    return subprocess.run(["gh", *args], capture_output=True, text=True)
+
+
+def _name_of(url):
+    """The repository's name out of whatever form the contract wrote it
+    in: git@github.com:owner/name.git, https://…/name, or name."""
+    if not url:
+        return None
+    tail = url.rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1]
+    return tail.removesuffix(".git") or None
+
+
+def claimed():
+    """Which repository each service of each contract is built from.
+
+    FROM THE CONTRACTS AND NOT FROM GITHUB'S SIDE: a repository with the
+    right name that no contract names is not deployed, and a topic or a
+    naming convention would say otherwise. The contract is the only
+    thing that decides.
+    """
+    out = {}
+    if not os.path.isdir(ORGS):
+        return out
+    for f in sorted(os.listdir(ORGS)):
+        if not f.endswith((".yaml", ".yml")):
+            continue
+        try:
+            d = yaml.safe_load(open(os.path.join(ORGS, f), encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            continue
+        org, top = d.get("organizacion"), d.get("repo")
+        for s in d.get("servicios") or []:
+            name = _name_of(s.get("repo") or top)
+            if name:
+                # One repository can serve two services — a front and a
+                # bff out of one tree — so they accumulate rather than
+                # overwrite. Reporting only the last one would hide a
+                # service the platform is really running.
+                out.setdefault(name, []).append({"organizacion": org,
+                                                 "servicio": s.get("nombre"),
+                                                 "tipo": s.get("tipo")})
+    return out
+
+
+def show(steps, narrate):
+    r = _gh("repo", "list", "--limit", str(LIMIT), "--json",
+            "name,primaryLanguage,isPrivate,pushedAt,url")
+    if r.returncode != 0:
+        # NOT an empty account. Nobody could be asked.
+        why = (r.stderr or "gh did not answer").strip().splitlines()
+        if narrate:
+            print(f"  {grey}GitHub could not be asked: this is not an account with no "
+                  f"repositories, it is one nobody could look at{off}")
+        steps.not_evaluable("repos", why="gh-silent",
+                            detail=why[0][:200] if why else "gh did not answer")
+        steps.finish()
+    try:
+        repos = json.loads(r.stdout)
+    except ValueError as e:
+        steps.not_evaluable("repos", why="unreadable-answer", detail=str(e))
+        steps.finish()
+
+    mine = claimed()
+    deployed = [x for x in repos if x["name"] in mine]
+    free = [x for x in repos if x["name"] not in mine]
+    if narrate:
+        print(f"\nrepositories  {grey}({len(repos)} in the account, "
+              f"{len(deployed)} deployed){off}")
+
+    for x in sorted(repos, key=lambda x: x.get("pushedAt") or "", reverse=True):
+        lang = (x.get("primaryLanguage") or {}).get("name")
+        uses = mine.get(x["name"]) or []
+        data = {"lenguaje": lang, "privado": bool(x.get("isPrivate")),
+                "empujado": x.get("pushedAt"), "sirve": uses}
+        if narrate:
+            where = (", ".join(f"{u['organizacion']}/{u['servicio']}" for u in uses)
+                     or f"{grey}nothing claims it{off}")
+            mark = f"{green}·{off}" if uses else f"{grey}·{off}"
+            print(f"  {mark} {x['name']:<24} {lang or '-':<12} {where}")
+        # A repository nothing claims is `already` and not `wrong`: it
+        # is not a finding, it is an option. Painting it red would teach
+        # somebody to ignore the colour on the one screen where the
+        # colour has to mean something.
+        steps.already(f"repo:{x['name']}", **data)
+
+    steps.already("repos", total=len(repos), deployed=len(deployed),
+                  unclaimed=len(free),
+                  sin_lenguaje=sum(1 for x in repos
+                                   if not (x.get("primaryLanguage") or {}).get("name")))
+    if narrate:
+        print(f"  {grey}{len(free)} repositories no contract names{off}")
+    steps.finish()
+
+
+def main():
+    import argparse
+    ap = cli.parser("repos", __doc__.split("\n")[0])
+    flags = argparse.ArgumentParser(add_help=False)
+    flags.add_argument("--json", action="store_true", dest="json_mode",
+                       default=argparse.SUPPRESS,
+                       help="the document of states instead of the narration")
+    sub = ap.add_subparsers(dest="verb")
+    sub.add_parser("list", parents=[flags],
+                   help="every repository, and which service claims it")
+    ap.add_argument("--json", action="store_true", dest="json_mode",
+                    help="the document of states instead of the narration")
+    a = ap.parse_args()
+    steps = outcomes.Steps(json_mode=a.json_mode)
+    return show(steps, not a.json_mode)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
