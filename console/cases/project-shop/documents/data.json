@@ -1,0 +1,24 @@
+{
+  "steps": [
+    {
+      "step": "backup:shop",
+      "state": "wrong",
+      "late": true,
+      "holds": true,
+      "databases": [
+        {
+          "servicio": "datos",
+          "tipo": "postgres"
+        }
+      ],
+      "bucket": true,
+      "cadence_seconds": 86400,
+      "copies": 3,
+      "bytes": 9270886,
+      "age_seconds": 253498,
+      "age_hours": 70.4,
+      "newest_timestamp_seconds": 1789281009
+    }
+  ],
+  "rc": 1
+}

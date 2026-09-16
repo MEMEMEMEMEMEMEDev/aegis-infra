@@ -1,0 +1,14 @@
+{
+  "steps": [
+    {
+      "step": "traffic:shop",
+      "state": "already",
+      "requests": 3783,
+      "errors": 0,
+      "p95_ms": 95.0,
+      "bytes": 160276293,
+      "hours": 24
+    }
+  ],
+  "rc": 0
+}

@@ -1,0 +1,59 @@
+{
+  "steps": [
+    {
+      "step": "capacity:memory",
+      "state": "already",
+      "allocatable": 25481117696,
+      "asked": 10582228992,
+      "free": 14898888704,
+      "free_human": "14208Mi"
+    },
+    {
+      "step": "capacity:cpu",
+      "state": "already",
+      "allocatable": 32000,
+      "asked": 5760,
+      "free": 26240,
+      "free_human": "26240m"
+    },
+    {
+      "step": "capacity:nodes",
+      "state": "already",
+      "nodes": 1,
+      "pods": 53
+    },
+    {
+      "step": "fits:deposito",
+      "state": "already",
+      "room": 6,
+      "binding": "memory",
+      "wants_cpu": 2000,
+      "wants_memory": 2147483648
+    },
+    {
+      "step": "fits:grande",
+      "state": "already",
+      "room": 1,
+      "binding": "memory",
+      "wants_cpu": 8000,
+      "wants_memory": 12884901888
+    },
+    {
+      "step": "fits:mediana",
+      "state": "already",
+      "room": 2,
+      "binding": "memory",
+      "wants_cpu": 4000,
+      "wants_memory": 6442450944
+    },
+    {
+      "step": "fits:pequena",
+      "state": "already",
+      "room": 6,
+      "binding": "memory",
+      "wants_cpu": 2000,
+      "wants_memory": 2147483648
+    }
+  ],
+  "rc": 0
+}

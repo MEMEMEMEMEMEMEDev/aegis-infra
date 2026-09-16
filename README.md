@@ -253,38 +253,43 @@ verdad sobre tu máquina no se pone a adivinar.
 Lo que la separa de un tablero cualquiera son **cuatro estados** en vez
 de dos. Casi todos pintan de verde tanto «no encontré fallas» como «no
 pude llegar a mirar», y sólo uno de los dos se investiga. Acá **«nadie
-pudo mirar» es un estado con nombre**, es el único sin color propio —va
-tramado— y es el primero que se dibuja.
+pudo mirar» es un estado con nombre**, es el único sin color propio (va
+tramado) y es el primero que se dibuja.
 
-Abre con **tus organizaciones**, y cada servicio lleva el lenguaje que
-GitHub ya midió para su repositorio, con un punto del color que GitHub
-mismo le pone: el contrato dice `http`, que es lo que un servicio es
-para la plataforma, y nunca en qué está escrito. Un punto y no un logo a
-propósito, porque cada uno de esos es una marca registrada con su
-política de uso. Debajo, los repositorios que **todavía no corre nadie**,
-y cada uno abre el formulario de alta ya lleno. Después el
-tráfico que de verdad llegó a cada una, si entra otra organización, qué
-le pasó a cada push eslabón por eslabón, la ronda y el borde. Entrando a
-una la ve **como el clúster la tiene**, contra lo que su contrato
-declara — incluido lo que el contrato **no** declara, que es justo lo
+Está organizada como las consolas que ya conocés, y no como está escrito
+el CLI: un menú con **Projects, Deployments, Domains, Traffic, Storage,
+Security, Machine y Health**, y al lado de cada entrada un punto con el
+peor estado de lo que la alimenta, así «algo anda mal en Storage» se lee
+antes de abrir Storage. Cada palabra de la plataforma va traducida: el
+contrato dice `http` y la pantalla dice *web service*; dice `cuota` y la
+pantalla dice *plan*.
+
+Abre con **tus proyectos**: cada servicio lleva el lenguaje que GitHub
+ya midió para su repositorio, con un punto del color que GitHub mismo le
+pone (un punto y no un logo, porque cada logo es una marca registrada
+con su política de uso), lo que llegó en 24 horas y el último push con
+sus cuatro eslabones. Debajo, los repositorios que **todavía no corre
+nadie**, y cada uno abre el formulario de alta ya lleno. Entrando a un
+proyecto lo ve **como el clúster lo tiene**, contra lo que su contrato
+declara, incluido lo que el contrato **no** declara, que es justo lo
 que ninguna otra herramienta de la casa puede ver, porque todas derivan
 del contrato.
 
-Y **da de alta una organización**: podés partir de uno de tus
-repositorios —la consola ya sabe en qué está escrito— o describirla a
-mano, y también cambiar una que ya existe mostrándote el diff del
-contrato antes de pisarlo. Escribe el contrato, deriva los manifiestos
-y crea los secretos que falten, que son las tres cosas que **sólo
-escriben ficheros en esta máquina**. Después te muestra los tres pasos
-que quedan y por qué queda cada uno: **tu commit**, el sync, y
-`aegis app apply`, que es el que sale a GitHub.
+Y **da de alta un proyecto**: podés partir de uno de tus repositorios
+(la consola ya sabe en qué está escrito) o describirlo a mano, y también
+cambiar uno que ya existe mostrándote el diff del contrato antes de
+pisarlo. Escribe el contrato, deriva los manifiestos y crea los secretos
+que falten, que son las tres cosas que **sólo escriben ficheros en esta
+máquina**. Después te muestra los tres pasos que quedan y por qué queda
+cada uno: **tu commit**, el sync, y `aegis app apply`, que es el que
+sale a GitHub.
 
 No commitea, no empuja, no aplica y no toca el clúster. Eso es lo que
 hace inofensivo el fichero: ArgoCD lee el remoto, así que nada corre
 hasta que tú commitees. Y no quita nada: borrar un servicio es
 `aegis org` a mano.
 
-No se publica por el túnel —se entra con `ssh -L 7391:127.0.0.1:7391`—
+No se publica por el túnel (se entra con `ssh -L 7391:127.0.0.1:7391`)
 y el porqué, junto con el modelo de seguridad y lo que falta, está en
 [La consola](docs/console.md).
 
@@ -479,7 +484,7 @@ verificador).
 | comando | qué hace |
 |---|---|
 | `aegis check` | La ronda rutinaria. Sin argumentos y sin escribir nada: mide el clúster vivo contra lo declarado (firma en Enforce, respaldos por organización, desincronías). |
-| `aegis console serve` / `capture` / `list` | La consola visual, en loopback y sobre el CLI: dibuja los documentos que los comandos ya emiten. `capture` guarda un estado del mundo como caso; `list` muestra el corpus. Ver [La consola](docs/console.md). |
+| `aegis console serve` / `capture` / `list` / `draw` | La consola visual, en loopback y sobre el CLI: dibuja los documentos que los comandos ya emiten, organizados en Projects, Deployments, Domains, Traffic, Storage, Security, Machine y Health. `capture` guarda un estado del mundo como caso; `list` muestra el corpus; `draw` escribe todas las pantallas de un caso como ficheros HTML, sin servidor. Ver [La consola](docs/console.md). |
 | `aegis tenant show` | Una organización **como el clúster la tiene**, contra lo que su contrato declara: sus servicios, el volumen de cada base, si cada camino público tiene a alguien detrás, su cuota, y lo que el contrato no declara. `aegis org` es el lado contrato y no toca el clúster; éste no escribe un fichero. |
 | `aegis traffic show` | Lo que de verdad llegó a cada organización, leído de las métricas de traefik. Atribuye por organización, reporta lo de la plataforma aparte, y **reconcilia contra el total** para que nada desaparezca. `--org` lo acota a una. |
 | `aegis capacity show` | ¿Entra otra organización? El allocatable del nodo contra la suma de los requests vivos, y cuántas de cada plan caben — diciendo **qué se acaba primero**. Si el apiserver no contesta dice que no pudo mirar, nunca cero. |

@@ -1,0 +1,84 @@
+{
+  "steps": [
+    {
+      "step": "backup:drop",
+      "state": "already",
+      "note": "no service of the CONTRACT holds state: there is nothing a copy would carry",
+      "holds": false,
+      "databases": [],
+      "bucket": false,
+      "cadence_seconds": 86400,
+      "copies": 0,
+      "bytes": 0
+    },
+    {
+      "step": "backup:panel",
+      "state": "wrong",
+      "late": true,
+      "holds": true,
+      "databases": [
+        {
+          "servicio": "datos",
+          "tipo": "postgres"
+        }
+      ],
+      "bucket": false,
+      "cadence_seconds": 86400,
+      "copies": 2,
+      "bytes": 75768,
+      "age_seconds": 253500,
+      "age_hours": 70.4,
+      "newest_timestamp_seconds": 1789281003
+    },
+    {
+      "step": "backup:portafolio",
+      "state": "already",
+      "note": "no service of the CONTRACT holds state: there is nothing a copy would carry",
+      "holds": false,
+      "databases": [],
+      "bucket": false,
+      "cadence_seconds": 86400,
+      "copies": 0,
+      "bytes": 0
+    },
+    {
+      "step": "backup:shop",
+      "state": "wrong",
+      "late": true,
+      "holds": true,
+      "databases": [
+        {
+          "servicio": "datos",
+          "tipo": "postgres"
+        }
+      ],
+      "bucket": true,
+      "cadence_seconds": 86400,
+      "copies": 3,
+      "bytes": 9270886,
+      "age_seconds": 253494,
+      "age_hours": 70.4,
+      "newest_timestamp_seconds": 1789281009
+    },
+    {
+      "step": "backup:ventasfix",
+      "state": "wrong",
+      "late": true,
+      "holds": true,
+      "databases": [
+        {
+          "servicio": "datos",
+          "tipo": "postgres"
+        }
+      ],
+      "bucket": false,
+      "cadence_seconds": 86400,
+      "copies": 2,
+      "bytes": 38588,
+      "age_seconds": 253491,
+      "age_hours": 70.4,
+      "newest_timestamp_seconds": 1789281012
+    }
+  ],
+  "rc": 1
+}

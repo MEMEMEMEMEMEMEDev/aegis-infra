@@ -1,0 +1,45 @@
+version: 1
+caso: project-shop
+que: 'one project as its own screen reads it: the cluster side of its contract,
+  its last pushes, its traffic and its off-site copy'
+procedencia: medido
+producido_por:
+- comando: tenant show shop
+  documento: tenant.json
+  rc: 0
+- comando: builds show --org shop
+  documento: builds.json
+  rc: 0
+- comando: traffic show --org shop
+  documento: traffic.json
+  rc: 0
+- comando: data remote status --org shop
+  documento: data.json
+  rc: 1
+medido_en: '2026-09-16T01:55:07-03:00'
+aegis: 71031e750767d8805a8ad76fec81ba5c01c0a471
+forma:
+  tenant.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  builds.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  traffic.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  data.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - wrong

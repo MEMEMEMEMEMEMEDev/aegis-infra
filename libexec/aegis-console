@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 # aegis-summary: The visual console: capture the states of the world it has to draw
 # aegis-group:   operate
-# aegis-subcommands: capture list serve
+# aegis-subcommands: capture list serve draw
 # aegis-help:
 # Usage: aegis console capture <name> --what "<one sentence>" --run "<command>" [--run ...]
 #        aegis console list
 #        aegis console serve [--port N]
+#        aegis console draw <directory> --case <name> [--case <name> ...]
 #
 # capture  runs each <command> with --json, ANONYMISES the documents and
 #          writes them to console/cases/<name>/ together with a case.yaml
 #          declaring where they came from and what shape they had.
 # list     the corpus: name, provenance and what state of the world it is
 # serve    reads the instance and draws it, on 127.0.0.1 and nowhere else
+# draw     writes every screen of the cases named into a directory, as
+#          plain HTML files: the console with no server, for looking at
 #
 """aegis-console — the states of the world the console has to draw.
 
@@ -343,8 +346,10 @@ def listing():
 # each project's last push on its own card, and ten events across five
 # organizations is a window one busy tenant fills by itself. Sixty is
 # about a week here, and what a card cannot find it says out loud.
+# `data remote status` with no --org answers about EVERY organization
+# in one listing of the destination; it is what the Storage page reads.
 SOURCES = ("org list", "repos list", "traffic show", "capacity show",
-           "builds show --last 60", "check", "edge check")
+           "builds show --last 60", "check", "edge check", "data remote status")
 
 
 # AND WHAT ONE ORGANIZATION'S SCREEN READS. Three commands, each one
@@ -585,6 +590,22 @@ def _read_instance(sources=SOURCES):
     return readings
 
 
+PAGES = ("deployments", "domains", "traffic", "storage", "security", "machine", "health")
+
+
+def _back(query, readings):
+    """Where «read it again» sends somebody back to. Only a path this
+    console itself serves: the value comes off a URL anybody can type,
+    and a redirect built out of it unread is an open door."""
+    asked = urllib.parse.parse_qs(query).get("back", [""])[0]
+    if asked == "/" or asked.lstrip("/") in PAGES:
+        return asked
+    m = re.fullmatch(r"/projects/([^/]+)", asked)
+    if m and urllib.parse.unquote(m.group(1)) in _organizations(readings):
+        return asked
+    return "/"
+
+
 def serve(port):
     import http.server
     import secrets
@@ -639,8 +660,8 @@ def serve(port):
             # `form-action 'self'` and not 'none' since the console
             # grew a screen that writes. Everything else stands: no
             # script, nothing fetched, no frame. The one thing this
-            # page may now do is submit back to itself, which is
-            # exactly the narrowest form of what it needs.
+            # page may do is submit back to itself, which is exactly
+            # the narrowest form of what it needs.
             self.send_header("Content-Security-Policy",
                              "default-src 'none'; style-src 'unsafe-inline'; "
                              "font-src data:; form-action 'self'; base-uri 'none'; "
@@ -649,6 +670,12 @@ def serve(port):
             self.end_headers()
             if not head_only:
                 self.wfile.write(raw)
+
+        def _redirect(self, where, code=303):
+            self.send_response(code)
+            self.send_header("Location", where)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def do_HEAD(self):                                # noqa: N802
             # Without this, a HEAD answers 501 — and the first thing
@@ -677,6 +704,17 @@ def serve(port):
             raw = self.rfile.read(length).decode("utf-8", "replace")
             return {k: v[0] for k, v in _u.parse_qs(raw, keep_blank_values=True).items()}
 
+        def _instance(self):
+            with lock:
+                return list(state["readings"])
+
+        def _wrap(self, body, title, subject=None):
+            """Every screen gets the frame: the menu with its dots and
+            when the instance was read. The forms and the plan included,
+            so that nobody lands on a page with no way back."""
+            return drawing.wrap(body, title, instance=self._instance(),
+                                active="projects", subject=subject)
+
         def do_POST(self):                                # noqa: N802
             why = guard.why_not_read(self.headers, port)
             if why:
@@ -694,14 +732,14 @@ def serve(port):
             if path == "/new/write":
                 self._write(fields)
                 return
-            m = re.fullmatch(r"/org/([^/]+)/(edit|write)", path)
+            m = re.fullmatch(r"/projects/([^/]+)/(edit|write)", path)
             if m:
                 # The name off a URL is matched against the contracts
                 # and never passed along as typed: every source here
                 # ends up as an argv.
                 name = urllib.parse.unquote(m.group(1))
-                if name not in _organizations(state["readings"]):
-                    self._send(404, "no organization by that name\n",
+                if name not in _organizations(self._instance()):
+                    self._send(404, "no project by that name\n",
                                "text/plain; charset=utf-8")
                     return
                 if m.group(2) == "edit":
@@ -725,7 +763,7 @@ def serve(port):
             before = None
             if org:
                 if current is None:
-                    self._send(404, "no organization by that name\n",
+                    self._send(404, "no project by that name\n",
                                "text/plain; charset=utf-8")
                     return
                 before = yaml.safe_dump(current, allow_unicode=True,
@@ -733,8 +771,8 @@ def serve(port):
                 _contract, text, refused = drawing.contract_from_edit(
                     fields, schema, current)
                 if refused:
-                    self._send(200, drawing.wrap(drawing.render_edit(
-                        schema, current, token, fields, refused), f"{org} · edit"))
+                    self._send(200, self._wrap(drawing.render_edit(
+                        schema, current, token, fields, refused), f"{org} · edit", org))
                     return
             else:
                 _contract, text = drawing.contract_from_form(fields, schema)
@@ -743,8 +781,8 @@ def serve(port):
                 page = (drawing.render_edit(schema, current, token, fields, bad)
                         if org else
                         drawing.render_form(schema, token, fields, bad))
-                self._send(200, drawing.wrap(page, f"{org} · edit" if org
-                                             else "a new organization"))
+                self._send(200, self._wrap(page, f"{org} · edit" if org
+                                           else "a new project", org))
                 return
             tmp = tempfile.mkdtemp(prefix="aegis-console-")
             try:
@@ -759,13 +797,13 @@ def serve(port):
                             if org else
                             drawing.render_form(schema, token, fields,
                                                 f"the plan could not be run: {e}"))
-                    self._send(200, drawing.wrap(page, "the plan"))
+                    self._send(200, self._wrap(page, "the plan", org))
                     return
             finally:
                 shutil.rmtree(tmp, ignore_errors=True)
-            self._send(200, drawing.wrap(
+            self._send(200, self._wrap(
                 drawing.render_plan(doc, text, token, before=before, org=org),
-                "the plan"))
+                "the plan", org))
 
         def _write(self, fields, org=None):
             # VALIDATED AGAIN, on the way in. What comes back in a form
@@ -787,8 +825,8 @@ def serve(port):
                 else:
                     refused = drawing.refuse_edit(submitted, current)
                 if refused:
-                    self._send(200, drawing.wrap(drawing.render_edit(
-                        _schema(), current, token, None, refused), f"{org} · edit"))
+                    self._send(200, self._wrap(drawing.render_edit(
+                        _schema(), current, token, None, refused), f"{org} · edit", org))
                     return
                 target, bad = replace_contract(text)
             else:
@@ -797,7 +835,7 @@ def serve(port):
                 page = (drawing.render_edit(_schema(), self._current(org), token,
                                             None, bad) if org else
                         drawing.render_form(_schema(), token, {}, bad))
-                self._send(200, drawing.wrap(page, "a new organization"))
+                self._send(200, self._wrap(page, "a new project", org))
                 return
             # AND THE REST OF THE ERRAND. The manifests and the secrets
             # come from the two commands that write files and nothing
@@ -813,22 +851,21 @@ def serve(port):
                 state["readings"] = _read_instance()
                 state["orgs"].clear()
             name = os.path.basename(target).removesuffix(".yaml")
-            self._send(200, drawing.wrap(
+            self._send(200, self._wrap(
                 drawing.render_plan(doc, text, token, written=target,
                                     after=after, org=name,
-                                    platform=str(paths.platform_dir())), "the plan"))
+                                    platform=str(paths.platform_dir())), "the plan", name))
 
         def do_GET(self, head_only=False):                # noqa: N802
-            # THE HOST CHECK APPLIES TO READS TOO, and it was missing
-            # while this console only read. A page on the internet whose
-            # name resolves to 127.0.0.1 reaches this port with its own
-            # origin intact, and what it finds is every hostname, every
-            # organization and every finding of the round.
+            # THE HOST CHECK APPLIES TO READS TOO. A page on the internet
+            # whose name resolves to 127.0.0.1 reaches this port with its
+            # own origin intact, and what it finds is every hostname,
+            # every organization and every finding of the round.
             why = guard.why_not_read(self.headers, port)
             if why:
                 self._refuse(why, head_only)
                 return
-            path = self.path.split("?")[0]
+            path, _, query = self.path.partition("?")
             if path == "/measure":
                 # Re-measuring is a GET today and it changes nothing but
                 # what is on the screen. The moment anything here writes,
@@ -836,9 +873,7 @@ def serve(port):
                 with lock:
                     state["readings"] = _read_instance()
                     state["orgs"].clear()
-                self.send_response(303)
-                self.send_header("Location", "/")
-                self.end_headers()
+                self._redirect(_back(query, self._instance()))
                 return
             if path == "/new":
                 # `?repo=<name>` is the import: the form opens already
@@ -849,38 +884,45 @@ def serve(port):
                 # nothing, which is the only safe answer to a name that
                 # came off a URL.
                 filled = None
-                asked = urllib.parse.parse_qs(
-                    self.path.partition("?")[2]).get("repo", [""])[0]
+                asked = urllib.parse.parse_qs(query).get("repo", [""])[0]
+                readings = self._instance()
                 if asked:
-                    step = drawing.repo_in(state["readings"], asked)
+                    step = drawing.repo_in(readings, asked)
                     if step is not None:
                         filled = drawing.import_fields(
                             asked, step.get("lenguaje"), step.get("url"))
-                self._send(200, drawing.wrap(
-                    drawing.render_form(_schema(), token, filled),
-                    "a new organization"), head_only=head_only)
+                self._send(200, self._wrap(drawing.render_form(_schema(), token, filled),
+                                           "a new project"), head_only=head_only)
                 return
-            m = re.fullmatch(r"/org/([^/]+)/edit", path)
+            # The old address of a project. Bookmarks are kept working;
+            # nothing is served at the old one.
+            m = re.fullmatch(r"/org/([^/]+)(/edit)?", path)
+            if m:
+                self._redirect(f"/projects/{m.group(1)}{m.group(2) or ''}", 301)
+                return
+            m = re.fullmatch(r"/projects/([^/]+)/edit", path)
             if m:
                 name = urllib.parse.unquote(m.group(1))
                 current = self._current(name)
                 if current is None:
-                    self._send(404, "no organization by that name\n",
+                    self._send(404, "no project by that name\n",
                                "text/plain; charset=utf-8", head_only)
                     return
-                self._send(200, drawing.wrap(drawing.render_edit(
-                    _schema(), current, token), f"{name} · edit"),
+                self._send(200, self._wrap(drawing.render_edit(
+                    _schema(), current, token), f"{name} · edit", name),
                     head_only=head_only)
                 return
-            if path.startswith("/org/"):
+            m = re.fullmatch(r"/projects/([^/]+)", path)
+            if m:
                 # The name comes off a URL anybody can type. It is
                 # matched against the organizations the CONTRACTS
                 # declare and never passed along as typed: every one of
                 # these sources ends up as an argv, and an argv built
                 # out of a URL is the oldest hole there is.
-                name = urllib.parse.unquote(path[len("/org/"):]).strip("/")
-                if name not in _organizations(state["readings"]):
-                    self._send(404, "no organization by that name\n",
+                name = urllib.parse.unquote(m.group(1))
+                instance = self._instance()
+                if name not in _organizations(instance):
+                    self._send(404, "no project by that name\n",
                                "text/plain; charset=utf-8", head_only)
                     return
                 with lock:
@@ -889,15 +931,18 @@ def serve(port):
                     readings = read_org(name)
                     with lock:
                         state["orgs"][name] = readings
-                self._send(200, drawing.page(readings, f"{name} · aegis", subject=name),
+                self._send(200, drawing.page(readings, f"{name} · aegis", subject=name,
+                                             instance=instance), head_only=head_only)
+                return
+            if path.lstrip("/") in PAGES:
+                key = path.lstrip("/")
+                self._send(200, drawing.page(self._instance(), f"{key} · aegis", view=key),
                            head_only=head_only)
                 return
             if path != "/":
                 self._send(404, "404\n", "text/plain; charset=utf-8", head_only)
                 return
-            with lock:
-                readings = list(state["readings"])
-            self._send(200, drawing.page(readings, "aegis"), head_only=head_only)
+            self._send(200, drawing.page(self._instance(), "aegis"), head_only=head_only)
 
     # 127.0.0.1 AND NOT 0.0.0.0, and there is no flag to change it. This
     # page shows everything the round can see about the instance and it
@@ -909,9 +954,10 @@ def serve(port):
     server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"the console is reading on http://127.0.0.1:{port}/  (ctrl-c to stop)")
     print(f"  sources: {', '.join(SOURCES)}")
-    print(f"  /org/<name> reads one organization: "
+    print(f"  pages:   /{'  /'.join(PAGES)}")
+    print(f"  /projects/<name> reads one project: "
           f"{', '.join(x.replace('{org}', '<name>') for x in ORG_SOURCES)}")
-    print(f"  /new         describes a new organization. It writes ONE file and "
+    print(f"  /new describes a new project. It writes ONE file and "
           f"nothing else: no commit, no push, no cluster")
     print(f"  /measure reads them again")
     try:
@@ -920,6 +966,89 @@ def serve(port):
         print("\nstopped")
     finally:
         server.server_close()
+    return 0
+
+
+# ── draw ─────────────────────────────────────────────────────────────
+# THE DESIGN LOOP THE OPERATOR ASKED FOR: «pantallas estáticas con datos
+# reales, que se abren como ficheros en el navegador». A case is a set
+# of documents, and the screens are pure functions of documents, so
+# every screen of a case can be written to disk with no server, no
+# cluster and no browser — looked at, criticised, redrawn. And because
+# a case is anonymised by construction (check 120), what comes out can
+# be shown to anybody.
+def _static_links(html, subjects=()):
+    """The console's paths, as file names beside each other. A project
+    that has no case among the ones drawn has no file either, so its
+    link goes back to the first screen rather than to a 404."""
+    def one(m):
+        href = m.group(1)
+        if href == "/":
+            return 'href="index.html"'
+        if href.startswith("/measure"):
+            return 'href="index.html"'
+        if href.startswith("/new"):
+            return 'href="new.html"'
+        mm = re.fullmatch(r"/projects/([^/#?]+)(/edit)?(#.*)?", href)
+        if mm:
+            if mm.group(1) not in subjects:
+                return 'href="index.html"'
+            return (f'href="project-{mm.group(1)}.html'
+                    f'{mm.group(3) or ("#settings" if mm.group(2) else "")}"')
+        if href.lstrip("/") in PAGES:
+            return f'href="{href.lstrip("/")}.html"'
+        return m.group(0)
+    return re.sub(r'href="(/[^"]*)"', one, html)
+
+
+def draw(directory, names):
+    from aegis import console as drawing
+
+    readings, subjects = [], {}
+    for name in names:
+        path = os.path.join(CASES, name)
+        if not os.path.isdir(path):
+            print(f"there is no case named {name!r} in {os.path.relpath(CASES, _AEGIS_ROOT)}/",
+                  file=sys.stderr)
+            return 3
+        for r in drawing.readings_of_case(path):
+            cmd = r.get("comando") or ""
+            org = None
+            if cmd.startswith("tenant show "):
+                org = cmd.split()[2]
+            elif " --org " in f" {cmd} ":
+                org = cmd.split("--org", 1)[1].split()[0]
+            if org:
+                subjects.setdefault(org, []).append(r)
+            else:
+                readings.append(r)
+    if not readings and not subjects:
+        print("nothing to draw: the cases named carry no readings", file=sys.stderr)
+        return 3
+    os.makedirs(directory, exist_ok=True)
+    written = []
+
+    def put(filename, html):
+        with open(os.path.join(directory, filename), "w", encoding="utf-8") as fh:
+            fh.write(_static_links(html, set(subjects)))
+        written.append(filename)
+
+    put("index.html", drawing.page(readings, "aegis"))
+    for key in PAGES:
+        put(f"{key}.html", drawing.page(readings, f"{key} · aegis", view=key))
+    for org, own in sorted(subjects.items()):
+        put(f"project-{org}.html", drawing.page(own, f"{org} · aegis", subject=org,
+                                                instance=readings))
+    try:
+        _rc, schema = cli.run_json("org", "schema")
+    except cli.CouldNotEvaluate:
+        schema = {"steps": [], "rc": 2}
+    put("new.html", drawing.wrap(drawing.render_form(schema, "static-preview"),
+                                 "a new project", instance=readings))
+    for f in written:
+        print(f"  {os.path.join(directory, f)}")
+    print(f"\n{len(written)} screen(s) drawn from {len(names)} case(s): "
+          f"{len(readings)} instance reading(s), {len(subjects)} project(s)")
     return 0
 
 
@@ -936,11 +1065,18 @@ def main():
     sv = sub.add_parser("serve", help="read the instance and draw it, on loopback")
     sv.add_argument("--port", type=int, default=7391,
                     help="the loopback port (default 7391)")
+    d = sub.add_parser("draw", help="every screen of a case, as files in a directory")
+    d.add_argument("directory")
+    d.add_argument("--case", action="append", default=[], metavar="NAME", required=True,
+                   help="a case of console/cases/ (repeatable: an instance case and a "
+                        "project case together draw both)")
     a = ap.parse_args()
     if a.verb == "list":
         return listing()
     if a.verb == "serve":
         return serve(a.port)
+    if a.verb == "draw":
+        return draw(a.directory, a.case)
     return capture(a.name, a.what, a.run)
 
 

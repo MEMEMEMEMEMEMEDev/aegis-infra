@@ -1,0 +1,188 @@
+{
+  "steps": [
+    {
+      "step": "build:shop-web:47",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "shop-web",
+      "build": "47",
+      "branch": "main",
+      "tag": "main-000047",
+      "digest": null,
+      "when": "2026-09-13T05:26:52Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:shop-api:33",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "shop-api",
+      "build": "33",
+      "branch": "main",
+      "tag": "main-000033",
+      "digest": null,
+      "when": "2026-09-13T05:25:40Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:shop-web:46",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "shop-web",
+      "build": "46",
+      "branch": "main",
+      "tag": "main-000046",
+      "digest": "sha256:5d2dc9a344514e9c097a4d963f2e6de8e309e09b77b12fa94ea94d8244f074ae",
+      "when": "2026-09-13T05:24:12Z"
+    },
+    {
+      "step": "build:shop-api:31",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "shop-api",
+      "build": "31",
+      "branch": "main",
+      "tag": "main-000031",
+      "digest": "sha256:34ca5d1e562bb466a134ae2ddb97c9b9494180e9508d0663b7e713973bd98026",
+      "when": "2026-09-13T05:22:08Z"
+    },
+    {
+      "step": "build:shop-web:45",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "shop-web",
+      "build": "45",
+      "branch": "main",
+      "tag": "main-000045",
+      "digest": null,
+      "when": "2026-09-13T05:20:12Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:shop-api:32",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "shop-api",
+      "build": "32",
+      "branch": "main",
+      "tag": "main-000032",
+      "digest": null,
+      "when": "2026-09-13T05:17:22Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:shop-admin:29",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "shop-admin",
+      "build": "29",
+      "branch": "main",
+      "tag": "main-000029",
+      "digest": null,
+      "when": "2026-09-13T05:16:34Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:shop-admin:27",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "shop-admin",
+      "build": "27",
+      "branch": "main",
+      "tag": "main-000027",
+      "digest": null,
+      "when": "2026-09-13T05:15:41Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:shop-admin:28",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "shop-admin",
+      "build": "28",
+      "branch": "main",
+      "tag": "main-000028",
+      "digest": "sha256:10d83818ca97b14c3345c1b9a820894da037b66055f8db8b65653fbb3f38760c",
+      "when": "2026-09-13T05:15:20Z"
+    },
+    {
+      "step": "build:shop-api:30",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "shop-api",
+      "build": "30",
+      "branch": "main",
+      "tag": "main-000030",
+      "digest": "sha256:ab0dce9dca4764f8080c804d486ad79edfce7ea95c7af96c939a97159246d27b",
+      "when": "2026-09-13T05:13:41Z"
+    },
+    {
+      "step": "builds",
+      "state": "already",
+      "count": 10,
+      "leidos": 10,
+      "organizacion": "shop",
+      "links_measured": [
+        "build",
+        "scan",
+        "sign",
+        "digest"
+      ],
+      "links_elsewhere": {
+        "sync": "ArgoCD's Application status (aegis check, section 3)",
+        "admission": "Kyverno's rejections in the tenant namespaces"
+      }
+    }
+  ],
+  "rc": 0
+}

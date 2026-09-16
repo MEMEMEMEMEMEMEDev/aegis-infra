@@ -209,505 +209,6 @@ def languages_of(readings):
     return by
 
 
-def _panel_organizations(doc, states, ctx=None):
-    tiles = []
-    for step in doc.get("steps") or []:
-        state = SCREEN.get(step.get("state"), UNSEEN)
-        states.add(state)
-        name = step.get("step", "").split(":", 1)[-1]
-        if not step.get("valid", True):
-            tiles.append(
-                f'<article class="tile" data-state="{state}">'
-                f'<h3>{_e(name)}</h3>{_chip(state, "contract refused")}'
-                f'<p class="why">{_e(step.get("error", ""))}</p></article>')
-            continue
-        services = step.get("servicios") or []
-        langs = (ctx or {}).get('langs') or {}
-        # THE COLOUR IS GITHUB'S OWN, measured in the same answer as the
-        # language's name. It is what this screen shows instead of a
-        # logo: every one of those is a trademark with a usage policy,
-        # and a platform whose argument is «measured, and it says where
-        # it got it» does not redistribute somebody else's mark.
-        #
-        # A language nobody could measure gets NO dot, rather than a
-        # grey one — an absent mark reads as «no language», and a grey
-        # one reads as a language that happens to be grey.
-        def _srv(sv):
-            known = langs.get((name, sv.get("nombre"))) or {}
-            colour = known.get("color")
-            dot = (f'<i class="dot" style="background:{_e(colour)}"></i>'
-                   if _is_colour(colour) else "")
-            return (f'<span class="srv" data-kind="{_e(sv.get("tipo"))}">{dot}'
-                    f'{_e(sv.get("nombre"))}'
-                    f'<i>{_e(known.get("lenguaje") or sv.get("tipo"))}</i></span>')
-        chips = "".join(_srv(sv) for sv in services)
-        extras = []
-        if step.get("bucket"):
-            extras.append("bucket")
-        if step.get("ai"):
-            extras.append(f"ai {step['ai']}")
-        tiles.append(
-            f'<article class="tile" data-state="{state}">'
-            f'<h3><a href="/org/{_e(name)}">{_e(name)}</a></h3>{_chip(state, "contract")}'
-            f'<p class="host mono">{_e(step.get("dominio") or "no public domain")}</p>'
-            f'<div class="srvs">{chips}</div>'
-            f'<p class="meta">quota <b>{_e(step.get("cuota"))}</b>'
-            + (f' · {_e(" · ".join(extras))}' if extras else "")
-            + f' · {len(services)} service(s)</p></article>')
-    if not tiles:
-        states.add(UNSEEN)
-        tiles.append(f'<p class="empty" data-state="{UNSEEN}">no contract was read</p>')
-    return f'<div class="tiles">{"".join(tiles)}</div>'
-
-
-def _panel_traffic(doc, states, ctx=None):
-    rows, tail = [], []
-    for step in doc.get("steps") or []:
-        state = SCREEN.get(step.get("state"), UNSEEN)
-        states.add(state)
-        name = step.get("step", "").split(":", 1)[-1]
-        if name in ("platform", "unattributed", "total") or "requests" not in step:
-            note = step.get("note")
-            tail.append(f'<li data-state="{state}">{_chip(state, name)}'
-                        f'<span class="mono">{_e(_num(step.get("requests", 0)))} req</span>'
-                        + (f'<span class="note">{_e(note)}</span>' if note else "") + "</li>")
-            continue
-        errors = int(step.get("errors", 0))
-        rows.append(
-            f'<article class="tile" data-state="{state}">'
-            f'<h3>{_e(name)}</h3>{_chip(state, _window(step))}'
-            f'<div class="facts-row">'
-            f'{_fact("requests", _num(step.get("requests", 0)))}'
-            f'{_fact("5xx", _num(errors))}'
-            f'{_fact("p95", str(step.get("p95_ms", 0)) + " ms")}'
-            f'{_fact("served", _bytes(step.get("bytes", 0)))}'
-            f'</div></article>')
-    if not rows:
-        states.add(UNSEEN)
-        rows.append(f'<p class="empty" data-state="{UNSEEN}">nothing was measured</p>')
-    return (f'<div class="tiles">{"".join(rows)}</div>'
-            + (f'<ul class="tail">{"".join(tail)}</ul>' if tail else ""))
-
-
-def _panel_round(doc, states, ctx=None):
-    cells = []
-    for step in doc.get("steps") or []:
-        state = SCREEN.get(step.get("state"), UNSEEN)
-        states.add(state)
-        # Rule 1, mechanically: a section that is fine is a dot and a
-        # name. A section that is not opens itself, with only the
-        # measures that are not fine — and the fine ones are COUNTED so
-        # that the collapse never reads as «there was nothing else».
-        shown, hidden = [], 0
-        for m in step.get("measures") or []:
-            ms = SCREEN.get(m.get("state"), UNSEEN)
-            states.add(ms)
-            if ms == FINE and state != FINE:
-                hidden += 1
-                continue
-            if state == FINE:
-                hidden += 1
-                continue
-            notes = "".join(f'<p class="note">{_e(n)}</p>' for n in m.get("notes") or [])
-            shown.append(f'<li class="measure" data-state="{ms}">{_chip(ms, ms)}'
-                         f'<span class="what">{_e(m.get("measure", ""))}</span>{notes}</li>')
-        body = ""
-        if shown:
-            body = f'<ul class="measures">{"".join(shown)}</ul>'
-        if hidden:
-            body += f'<p class="rest">{hidden} more, all fine</p>'
-        cells.append(
-            f'<article class="cell" data-state="{state}" data-step="{_e(step.get("step",""))}">'
-            f'{_chip(state, state)}<h3>{_e(step.get("step", "?"))}</h3>{body}</article>')
-    if not cells:
-        states.add(UNSEEN)
-        cells.append(f'<p class="empty" data-state="{UNSEEN}">the round measured nothing</p>')
-    return f'<div class="grid">{"".join(cells)}</div>'
-
-
-def _panel_edge(doc, states, ctx=None):
-    good, bad_ = [], []
-    for step in doc.get("steps") or []:
-        state = SCREEN.get(step.get("state"), UNSEEN)
-        states.add(state)
-        name = step.get("step", "")
-        if name.startswith("hostname:"):
-            bad_.append(f'<li data-state="{state}">{_chip(state, "missing")}'
-                        f'<span class="mono">{_e(name.split(":", 1)[1])}</span></li>')
-        elif name == "surplus-cnames":
-            hosts = step.get("hostnames") or []
-            good.append(f'<li data-state="{state}">{_chip(state, "surplus")}'
-                        f'<span class="mono">{_e(", ".join(hosts))}</span>'
-                        f'<span class="note">no contract asks for these; they do not move the rc</span></li>')
-        else:
-            good.append(f'<li data-state="{state}">{_chip(state, "at the edge")}'
-                        f'<span class="mono">{_e(step.get("hostnames", "?"))} hostname(s) exist</span></li>')
-    return f'<ul class="tail">{"".join(bad_ + good)}</ul>'
-
-
-def _panel_capacity(doc, states, ctx=None):
-    figures, fits = [], []
-    for step in doc.get("steps") or []:
-        state = SCREEN.get(step.get("state"), UNSEEN)
-        states.add(state)
-        name = step.get("step", "")
-        if name.startswith("fits:"):
-            plan = name.split(":", 1)[1]
-            room = step.get("room")
-            # «none» and «unknown» are different words on purpose: one is
-            # a measurement, the other is the absence of one, and this is
-            # the panel where confusing them costs an organization.
-            answer = ("unknown" if room is None
-                      else f"{room} more" if room else "none")
-            fits.append(
-                f'<li data-state="{state}">{_chip(state, plan)}'
-                f'<span class="mono">{_e(answer)}</span>'
-                + (f'<span class="note">{_e(step["binding"])} is what runs out first</span>'
-                   if step.get("binding") else "") + "</li>")
-        elif name in ("capacity:memory", "capacity:cpu"):
-            figures.append(_fact(name.split(":", 1)[1] + " free",
-                                 step.get("free_human", "?")))
-        elif name == "capacity:nodes":
-            figures.append(_fact("pods asking", _num(step.get("pods", 0))))
-        else:
-            figures.append(_fact(name.split(":", 1)[-1], step.get("why", "not measured")))
-    head = (f'<article class="tile" data-state="{worst(states)}">'
-            f'<div class="facts-row">{"".join(figures)}</div></article>'
-            if figures else "")
-    return f'<div class="tiles">{head}</div>' + (f'<ul class="tail">{"".join(fits)}</ul>' if fits else "")
-
-
-def _panel_builds(doc, states, ctx=None):
-    rows = []
-    gaps = []
-    for step in doc.get("steps") or []:
-        state = SCREEN.get(step.get("state"), UNSEEN)
-        states.add(state)
-        name = step.get("step", "")
-        if name == "builds" and step.get("links_elsewhere"):
-            # The gaps come as DATA on the summary step (see the comment
-            # in aegis-builds about the permanent rc 2). They are drawn
-            # as unmeasured all the same: on a chain, a link that is
-            # simply absent reads as fine.
-            for link, who in (step["links_elsewhere"] or {}).items():
-                # Drawn unmeasured, and NOT counted towards the
-                # section's verdict for the same reason the links above
-                # are not: these two are measured elsewhere ALWAYS, by
-                # design, so letting them decide would make this panel
-                # say «nobody looked» on every instance for ever. A
-                # signal that never changes is a signal nobody reads,
-                # which is this project's own line about `degraded`.
-                gaps.append(f'<li data-state="{UNSEEN}">{_chip(UNSEEN, link)}'
-                            f'<span class="note">not measured here — {_e(who)}</span></li>')
-            continue
-        links = step.get("links") or {}
-        # THE CHAIN. Each link carries its own state, so a link nobody
-        # measured is drawn as unmeasured and not as a gap in a row of
-        # ticks — which on a chain reads as «fine».
-        drawn = "".join(
-            f'<span class="link" data-state="{SCREEN.get(v, UNSEEN)}" '
-            f'title="{_e(k)}">{_e(k)}</span>'
-            for k, v in links.items())
-        # THE LINKS ARE DRAWN WITH THEIR OWN STATE AND DO NOT DECIDE THE
-        # SECTION'S. A build the anti-loop skipped has four unmeasured
-        # links because nothing ran, and letting those colour the whole
-        # panel made a healthy instance's deployments read «nobody
-        # looked» next to a page that said everything was in order. Two
-        # verdicts about the same thing, and the louder one was wrong.
-        #
-        # Nothing is lost by it: each link carries its own `data-state`
-        # in the HTML, which is where check 122 reads them, and the
-        # step's own state is already in `states` above.
-        rows.append(
-            f'<article class="build" data-state="{state}">'
-            f'<h3>{_e(step.get("image", "?"))}</h3>'
-            f'<span class="mono build-n">build {_e(step.get("build", "?"))}</span>'
-            f'<div class="chain">{drawn}</div>'
-            + (f'<p class="note">{_e(step["why"])}</p>' if step.get("why") else "")
-            + '</article>')
-    if not rows:
-        states.add(UNSEEN)
-        rows.append(f'<p class="empty" data-state="{UNSEEN}">no build was read</p>')
-    return (f'<div class="builds">{"".join(rows)}</div>'
-            + (f'<ul class="tail">{"".join(gaps)}</ul>' if gaps else ""))
-
-
-
-def _bar(pct, state):
-    """One dimension of a quota, drawn. The number is beside it: a bar
-    on its own is a feeling, and the decision («can I add a service»)
-    is taken on the figure."""
-    width = max(0, min(100, pct))
-    return (f'<div class="bar" data-state="{state}">'
-            f'<span style="width:{width:.0f}%"></span></div>')
-
-
-def _panel_tenant(doc, states, ctx=None):
-    """One organization: what its contract declares, against what is
-    running. The tiles are the services; everything the contract does
-    NOT declare is drawn apart and never folded in, because an
-    unclaimed workload or an unclaimed volume is precisely the thing
-    that has been invisible until now."""
-    tiles, extra, head = [], [], []
-    for step in doc.get("steps") or []:
-        state = SCREEN.get(step.get("state"), UNSEEN)
-        states.add(state)
-        name = step.get("step", "")
-        kind, _, what = name.partition(":")
-
-        if kind == "namespace":
-            head.append(f'<div class="fact"><span class="figure mono">'
-                        f'{_e(step.get("namespace", "?"))}</span>'
-                        f'<span class="label">namespace</span></div>')
-            if not step.get("exists"):
-                extra.append(f'<li data-state="{state}">{_chip(state, "namespace")}'
-                             f'<span class="note">the contract is in git and '
-                             f'nothing of it is running</span></li>')
-            continue
-
-        if kind == "service":
-            ready, desired = step.get("ready"), step.get("desired")
-            count = (f'{ready}/{desired}' if desired is not None else "none")
-            bits = [f'<span class="srv">{_e(step.get("tipo", "?"))}</span>']
-            if step.get("publico"):
-                bits.append(f'<span class="srv mono">{_e(step["publico"])}</span>')
-            if step.get("volume"):
-                bits.append(f'<span class="srv">{_e(step.get("volume_size") or "disk")}'
-                            f'<i>{_e(step.get("volume_phase", ""))}</i></span>')
-            elif step.get("volume_phase") == "missing":
-                bits.append('<span class="srv" data-state="wrong">no volume</span>')
-            elif step.get("volume_unmeasured"):
-                bits.append(f'<span class="srv" data-state="unseen">disk not measured</span>')
-            why = step.get("why")
-            tiles.append(
-                f'<article class="tile" data-state="{state}">'
-                f'<h3>{_e(what)}</h3>{_chip(state, count)}'
-                f'<div class="srvs">{"".join(bits)}</div>'
-                + (f'<p class="why">{_e(_WHY.get(why, why))}</p>' if why else "")
-                + (f'<p class="host mono">{_e(step["digest"][:19])}\u2026</p>'
-                   if step.get("digest") else "")
-                + '</article>')
-            continue
-
-        if kind == "public":
-            eps = step.get("endpoints")
-            note = ("not routed" if not step.get("routed") else
-                    "routed at nobody" if eps == 0 else
-                    "nobody counted who is behind it" if eps is None else
-                    f'{eps} behind it')
-            extra.append(f'<li data-state="{state}">{_chip(state, step.get("publico", "/"))}'
-                         f'<span class="mono">{_e(step.get("service", ""))}</span>'
-                         f'<span class="note">{_e(note)}</span></li>')
-            continue
-
-        if kind == "routing":
-            for host in step.get("hosts") or []:
-                head.append(f'<div class="fact"><span class="figure mono">{_e(host)}</span>'
-                            f'<span class="label">host</span></div>')
-            continue
-
-        if kind == "quota":
-            pct = step.get("percent")
-            if pct is None:
-                extra.append(f'<li data-state="{state}">{_chip(state, "quota")}'
-                             f'<span class="note">{_e(step.get("why", "not measured"))}'
-                             f'</span></li>')
-                continue
-            tight = step.get("tightest", "")
-            used = (step.get("used") or {}).get(tight)
-            hard = (step.get("hard") or {}).get(tight)
-            head.append(
-                f'<div class="fact quota"><span class="figure">{pct:.0f}%</span>'
-                f'<span class="label">{_e(tight)}</span>'
-                f'{_bar(pct, state)}'
-                f'<span class="label mono">{_e(used)} of {_e(hard)}</span></div>')
-            continue
-
-        # unclaimed:<workload> and unclaimed-volume:<claim>, and
-        # anything a future version of the command learns to say. The
-        # default is to DRAW IT, never to drop it: a step this panel
-        # does not recognise is still a measurement, and the one thing
-        # the console may not do is lose one.
-        extra.append(
-            f'<li data-state="{state}">{_chip(state, kind)}'
-            f'<span class="mono">{_e(what)}</span>'
-            f'<span class="note">{_e(_WHY.get(kind, kind))}</span></li>')
-
-    if not tiles and not extra:
-        states.add(UNSEEN)
-        return f'<p class="empty" data-state="{UNSEEN}">nothing was measured</p>'
-    return ((f'<div class="facts-row head">{"".join(head)}</div>' if head else "")
-            + (f'<div class="tiles">{"".join(tiles)}</div>' if tiles else "")
-            + (f'<ul class="tail">{"".join(extra)}</ul>' if extra else ""))
-
-
-# The sentences the panel puts beside a machine word. They live here and
-# not in the command because they are for a person reading a screen; the
-# command's word is what travels, and check 123 makes sure the screen
-# never has to READ one of these back.
-_WHY = {
-    "no-workload": "declared in the contract, and nothing in the cluster answers to it",
-    "no-namespace": "the namespace does not exist",
-    "unclaimed": "running here, and no service of the contract claims it",
-    "unclaimed-volume": "bound here, and no service of the contract declares it \u2014 "
-                        "so nothing copies it",
-}
-
-
-def _panel_backup(doc, states, ctx=None):
-    cards = []
-    for step in doc.get("steps") or []:
-        state = SCREEN.get(step.get("state"), UNSEEN)
-        states.add(state)
-        org = step.get("step", "").split(":", 1)[-1]
-        age = step.get("age_hours")
-        cad = step.get("cadence_seconds") or 0
-        facts = []
-        if age is not None:
-            facts.append(_fact("hours old", f"{age:g}"))
-        if cad:
-            facts.append(_fact("every", f"{cad // 3600}h"))
-        facts.append(_fact("copies", str(step.get("copies", 0))))
-        if step.get("bytes"):
-            facts.append(_fact("stored", _bytes(step["bytes"])))
-        note = step.get("note") or _WHY_BACKUP.get(step.get("why"), step.get("why"))
-        if step.get("late"):
-            note = "later than two turns of its own clock"
-        cards.append(
-            f'<article class="tile" data-state="{state}">'
-            f'<h3>{_e(org)}</h3>{_chip(state, "off-site copy")}'
-            f'<div class="facts-row">{"".join(facts)}</div>'
-            + (f'<p class="why">{_e(note)}</p>' if note else "") + '</article>')
-    if not cards:
-        states.add(UNSEEN)
-        return f'<p class="empty" data-state="{UNSEEN}">nothing was measured</p>'
-    return f'<div class="tiles">{"".join(cards)}</div>'
-
-
-_WHY_BACKUP = {
-    "no-copy-at-the-destination": "this organization holds state and there is no copy "
-                                  "of it at the destination",
-    "destination-unreachable": "the destination did not answer \u2014 which is not the "
-                               "same as having no copy",
-    "no-readable-date": "there are objects there and none of them has a readable date: "
-                        "their age cannot be stated",
-}
-
-
-def _panel_repos(doc, states, ctx=None):
-    """The repositories, seen from the end that matters on this screen:
-    the ones NOTHING is running. A list of what is already deployed is
-    the panel above under another name; this is the only place that says
-    what could be."""
-    free, total, deployed = [], 0, 0
-    for step in doc.get("steps") or []:
-        state = SCREEN.get(step.get("state"), UNSEEN)
-        states.add(state)
-        name = step.get("step", "")
-        if name == "repos":
-            total, deployed = step.get("total", 0), step.get("deployed", 0)
-            continue
-        if not name.startswith("repo:") or step.get("sirve"):
-            continue
-        free.append((step.get("empujado") or "", name.split(":", 1)[1],
-                     step.get("lenguaje"), step.get("color")))
-    if not (doc.get("steps") or []):
-        states.add(UNSEEN)
-        return (f'<p class="empty" data-state="{UNSEEN}">GitHub could not be asked, '
-                f'which is not the same as having no repositories</p>')
-    free.sort(reverse=True)
-    # THE MOST RECENTLY PUSHED FIRST and only a handful drawn, because
-    # forty rows is a list nobody reads. The count is said out loud so
-    # that what is collapsed is COUNTED and not hidden.
-    shown = free[:8]
-    rows = "".join(
-        f'<li data-state="{FINE}">'
-        f'<a class="mono" href="/new?repo={_e(name)}">{_e(name)}</a>'
-        + (f'<span class="srv">'
-           + (f'<i class="dot" style="background:{_e(colour)}"></i>'
-              if _is_colour(colour) else "")
-           + f'{_e(lang)}</span>' if lang else "")
-        + '</li>' for _when, name, lang, colour in shown)
-    rest = (f'<li class="rest" data-state="{FINE}">and {len(free) - len(shown)} more '
-            f'that nothing is running</li>' if len(free) > len(shown) else "")
-    return (f'<div class="facts-row">{_fact("repositories", _num(total))}'
-            f'{_fact("deployed", _num(deployed))}'
-            f'{_fact("could be", _num(len(free)))}</div>'
-            f'<ul class="tail repos">{rows}{rest}</ul>')
-
-
-PANELS = {
-    "org list": _panel_organizations,
-    "traffic show": _panel_traffic,
-    "check": _panel_round,
-    "edge check": _panel_edge,
-    "capacity show": _panel_capacity,
-    "builds show": _panel_builds,
-    # Parameterised: the command carries the organization's name, so the
-    # panel is found by the longest key that starts the command.
-    "tenant show": _panel_tenant,
-    "data remote status": _panel_backup,
-    "repos list": _panel_repos,
-}
-
-
-def panel_for(command):
-    """The panel for a command, by the longest declared prefix. A
-    command with no panel is not an error: `_source` falls back to the
-    generic dump, which shows every step and loses nothing. A panel is
-    an improvement over that, never a replacement for it."""
-    best = None
-    for key in PANELS:
-        if command == key or command.startswith(key + " "):
-            if best is None or len(key) > len(best):
-                best = key
-    return PANELS[best] if best else None
-
-
-def _blind(reading):
-    """A command that gave back no document. THE CASE ZERO.
-
-    Most dashboards answer this with a spinner that never stops, which
-    is lying politely: the page does not say «I do not know», it says
-    «wait», and that is a promise it will not keep. Here it is a state
-    with its own name, and the reason travels with it.
-    """
-    return (f'<section class="source" data-state="{UNSEEN}" '
-            f'data-command="{_e(reading["comando"])}"{_when(reading)}>'
-            f'<h2>{_e(reading["comando"])}</h2>{_chip(UNSEEN, "could not look")}'
-            f'<p class="why">{_e(reading["sin_documento"])}</p>'
-            f'{_age(reading)}</section>')
-
-
-def _source(reading, ctx=None):
-    if reading.get("sin_documento") or reading.get("documento") is None:
-        return _blind(reading), {UNSEEN}
-    doc = reading["documento"]
-    steps = doc.get("steps") or []
-    states = set()
-    panel = panel_for(reading.get("comando") or "")
-    if panel and steps:
-        body = [panel(doc, states, ctx)]
-    else:
-        body = []
-        for step in steps:
-            states.add(SCREEN.get(step.get("state"), UNSEEN))
-            for m in step.get("measures") or []:
-                states.add(SCREEN.get(m.get("state"), UNSEEN))
-            body.append(_step(step))
-    if not steps:
-        # Zero steps is not success: outcomes.py says so in its own rc.
-        states.add(UNSEEN)
-        body.append(f'<p class="empty" data-state="{UNSEEN}">'
-                    f'nothing was measured</p>')
-    state = worst(states)
-    return (f'<section class="source" data-state="{state}" '
-            f'data-command="{_e(reading["comando"])}" data-rc="{_e(reading.get("rc"))}"'
-            f'{_when(reading)}>'
-            f'<h2>{_e(reading["comando"])}</h2>{_chip(state, state)}'
-            f'{_age(reading)}{"".join(body)}</section>'), states
-
-
 def verdict_of(readings):
     """How the whole thing is. Never kinder than its readings (I-2)."""
     states = set()
@@ -732,311 +233,6 @@ SENTENCE = {
     UNSEEN: "Something could not be looked at.",
     BUSY: "aegis is working on it.",
 }
-
-
-# ── the panel ────────────────────────────────────────────────────────
-# WHAT THIS SCREEN WAS UNTIL 2026-09-14, and it took the operator saying
-# it plainly: «estamos buscando un panel, no un scroll hacia abajo con
-# info». It was one section per command, stacked, in the order the
-# commands were written. That is the shape of the DOCUMENT. A panel has
-# a shape of its own: what you came to see fills it, and everything else
-# is an indicator you open when it asks you to.
-#
-# So the body is the PROJECTS, assembled across readings — the contract
-# says which exist, the traffic says what reached them, the builds say
-# what happened to their last push — and every source keeps its whole
-# panel one click away inside a `<details>`. Nothing is lost by
-# summarising, because the summary is not a replacement: the document is
-# still there, underneath, and check 122 renders every case to make sure
-# no state fell out on the way.
-#
-# `<details>` and not a script: this console has never served one, and a
-# fold that works with JavaScript disabled is a fold that works.
-
-# One short figure per source, for the line you read without opening it.
-# A panel whose indicators all say the same word is a panel nobody reads
-# twice, so each one says the number it is actually about.
-def _headline(command, doc):
-    steps = (doc or {}).get("steps") or []
-    def count(pred):
-        return sum(1 for st in steps if pred(st))
-    if command == "check":
-        bad = count(lambda st: SCREEN.get(st.get("state")) != FINE)
-        return f"{len(steps)} sections" + (f" · {bad} asking" if bad else "")
-    if command.startswith("edge"):
-        bad = count(lambda st: SCREEN.get(st.get("state")) != FINE)
-        return f"{len(steps)} hostnames" + (f" · {bad} asking" if bad else "")
-    if command.startswith("capacity"):
-        for st in steps:
-            if st.get("step") == "capacity:memory" and st.get("free_human"):
-                return f"{st['free_human']} free"
-        return f"{len(steps)} readings"
-    if command.startswith("traffic"):
-        for st in steps:
-            if st.get("step") == "traffic:total":
-                return f"{_num(st.get('requests', 0))} req · {_window(st)}"
-        got = sum(st.get("requests", 0) for st in steps if "requests" in st)
-        return f"{_num(got)} req" if got else f"{len(steps)} readings"
-    if command.startswith("builds"):
-        return f"{count(lambda st: st.get('step','').startswith('build:'))} pushes"
-    if command.startswith("repos"):
-        for st in steps:
-            if st.get("step") == "repos":
-                return (f"{_num(st.get('total', 0))} repos · "
-                        f"{_num(st.get('unclaimed', 0))} free")
-        return f"{len(steps)} repos"
-    if command.startswith("tenant"):
-        return f"{count(lambda st: st.get('step','').startswith('service:'))} services"
-    if command.startswith("data remote"):
-        for st in steps:
-            if st.get("age_hours") is not None:
-                return f"{st['age_hours']:g} h old"
-        return "off-site copy"
-    if command.startswith("org"):
-        return f"{len(steps)} contracts"
-    return f"{len(steps)} readings"
-
-
-def _vital(reading, ctx=None):
-    """One source, folded. The line says what it is, how it is and one
-    number; opening it gives the panel that was there before.
-
-    IT OPENS BY ITSELF WHEN IT IS NOT FINE. That is «the order is the
-    alarm» made structural: what needs somebody is already open when the
-    page loads, and what does not is a line."""
-    body, states = _source(reading, ctx)
-    inner = body.split(">", 1)[1].rsplit("</section>", 1)[0]
-    doc = reading.get("documento")
-    state = worst(states) if states else UNSEEN
-    command = reading.get("comando") or ""
-    figure = (_headline(command, doc) if doc is not None
-              else "could not be looked at")
-    # THE AGE COMES OUT TO THE SUMMARY LINE. It was inside the fold, and
-    # a measurement whose age you have to click to see is a measurement
-    # read as if it were now — which is the oldest lie a dashboard
-    # tells, and the one check 127 exists for.
-    inner = inner.replace(_age(reading), "", 1)
-    return (f'<section class="source vital" data-state="{state}" '
-            f'data-command="{_e(command)}" data-rc="{_e(reading.get("rc"))}"'
-            f'{_when(reading)}>'
-            f'<details{" open" if state != FINE else ""}>'
-            f'<summary><b>{_e(command)}</b>'
-            f'<span class="fig">{_e(figure)}</span>'
-            f'{_age(reading)}{_chip(state, state)}</summary>'
-            f'<div class="vital-body">{inner}</div></details></section>')
-
-
-def _per_org(readings, key):
-    """What each organization's own step says, out of a source that
-    reports per organization. Used to put the traffic on a project's
-    card without the traffic panel losing it: the same measure drawn in
-    two places loses nothing, and the card is where somebody looks."""
-    out = {}
-    for r in readings or []:
-        for st in (r.get("documento") or {}).get("steps") or []:
-            name = st.get("step", "")
-            if name.startswith(key):
-                out[name.split(":", 1)[1]] = st
-    return out
-
-
-def _window_read(readings):
-    """How many builds the reading covers. A card that shows no push has
-    to say «none among the last N»: «nothing» on a screen reads as «this
-    never deployed», and those are different facts."""
-    for r in readings or []:
-        for st in (r.get("documento") or {}).get("steps") or []:
-            if st.get("step") == "builds" and st.get("leidos"):
-                return st["leidos"]
-    return None
-
-
-def _last_push(readings, org, services):
-    """The most recent build of any image this organization is built
-    from. It is the one fact a person looks for on a project card and it
-    lived in a panel of its own until today."""
-    mine = {sv.get("nombre") for sv in services or []}
-    best = None
-    for r in readings or []:
-        if not (r.get("comando") or "").startswith("builds"):
-            continue
-        for st in (r.get("documento") or {}).get("steps") or []:
-            if not st.get("step", "").startswith("build:"):
-                continue
-            image = st.get("image") or ""
-            # `<org>-<service>` is how a tenant's image is named, and the
-            # organization's own name is how a one-repo tenant's is.
-            tail = image[len(org) + 1:] if image.startswith(org + "-") else None
-            if image != org and (tail is None or tail not in mine):
-                continue
-            when = st.get("when") or ""
-            if best is None or when > (best.get("when") or ""):
-                best = st
-    return best
-
-
-def _project_card(step, readings, langs):
-    org = step.get("step", "").split(":", 1)[-1]
-    state = SCREEN.get(step.get("state"), UNSEEN)
-    if not step.get("valid", True):
-        return (f'<article class="proj" data-state="{state}">'
-                f'<h3>{_e(org)}</h3>{_chip(state, "contract refused")}'
-                f'<p class="why">{_e(step.get("error", ""))}</p></article>')
-    services = step.get("servicios") or []
-    dots = "".join(
-        (lambda k: f'<i class="dot" title="{_e(k.get("lenguaje") or sv.get("tipo"))}"'
-                   + (f' style="background:{_e(k.get("color"))}"'
-                      if _is_colour(k.get("color")) else ' data-plain="1"')
-                   + '></i>')(langs.get((org, sv.get("nombre"))) or {})
-        for sv in services)
-    figs = []
-    t = _per_org(readings, "traffic:").get(org)
-    if t and "requests" in t:
-        figs.append(_fact("requests", _num(t.get("requests", 0))))
-        figs.append(_fact("5xx", _num(t.get("errors", 0))))
-    push = _last_push(readings, org, services)
-    window = _window_read(readings)
-    chain = ""
-    if push:
-        chain = ('<p class="push"><span class="mono">'
-                 + _e(f'{push.get("image", "?")} #{push.get("build", "?")}')
-                 + '</span>'
-                 + "".join(f'<span class="link" data-state="{SCREEN.get(v, UNSEEN)}">'
-                           f'{_e(k[0])}</span>'
-                           for k, v in (push.get("links") or {}).items())
-                 + '</p>')
-    elif window:
-        chain = (f'<p class="push none">no push among the last {_e(window)} read</p>')
-    extras = []
-    if step.get("bucket"):
-        extras.append("bucket")
-    if step.get("ai"):
-        extras.append(f"ai {step['ai']}")
-    return (f'<article class="proj" data-state="{state}">'
-            f'<h3><a href="/org/{_e(org)}">{_e(org)}</a></h3>'
-            f'<p class="host mono">{_e(step.get("dominio") or "no public domain")}</p>'
-            f'<div class="dots">{dots}<span class="n">{len(services)}</span></div>'
-            + (f'<div class="facts-row">{"".join(figs)}</div>' if figs else "")
-            + chain
-            + f'<p class="meta">quota <b>{_e(step.get("cuota"))}</b>'
-            + (f' · {_e(" · ".join(extras))}' if extras else "") + '</p></article>')
-
-
-def _projects(reading, readings, ctx):
-    """The body of the panel: one card per organization, assembled
-    ACROSS readings. The contract says which exist, the traffic says what
-    reached them, the builds say what happened to their last push — and
-    until today those were three sections a screen apart."""
-    doc = reading.get("documento")
-    if doc is None:
-        body, _ = _source(reading, ctx)
-        return body
-    langs = (ctx or {}).get("langs") or {}
-    cards, states = [], set()
-    for step in doc.get("steps") or []:
-        states.add(SCREEN.get(step.get("state"), UNSEEN))
-        if not step.get("step", "").startswith("organization:"):
-            continue
-        cards.append(_project_card(step, readings, langs))
-    if not cards:
-        states.add(UNSEEN)
-        cards.append(f'<p class="empty" data-state="{UNSEEN}">no contract was read</p>')
-    state = worst(states) if states else UNSEEN
-    return (f'<section class="source projects" data-state="{state}" '
-            f'data-command="{_e(reading.get("comando"))}" '
-            f'data-rc="{_e(reading.get("rc"))}"{_when(reading)}>'
-            f'<h2>projects</h2>{_age(reading)}'
-            f'<div class="grid">{"".join(cards)}</div></section>')
-
-
-def _services_of(reading, ctx):
-    """The body of ONE organization's panel: its services as cards."""
-    doc = reading.get("documento")
-    if doc is None:
-        body, _ = _source(reading, ctx)
-        return body
-    states = set()
-    cards, rest = [], []
-    for step in doc.get("steps") or []:
-        state = SCREEN.get(step.get("state"), UNSEEN)
-        states.add(state)
-        kind, _, what = step.get("step", "").partition(":")
-        if kind != "service":
-            continue
-        ready, desired = step.get("ready"), step.get("desired")
-        count = f"{ready}/{desired}" if desired is not None else "none"
-        bits = [f'<span class="srv">{_e(step.get("tipo", "?"))}</span>']
-        if step.get("publico"):
-            bits.append(f'<span class="srv mono">{_e(step["publico"])}</span>')
-        if step.get("volume"):
-            bits.append(f'<span class="srv">{_e(step.get("volume_size") or "disk")}</span>')
-        cards.append(
-            f'<article class="proj" data-state="{state}">'
-            f'<h3>{_e(what)}</h3>{_chip(state, count)}'
-            f'<div class="dots">{"".join(bits)}</div>'
-            + (f'<p class="why">{_e(_WHY.get(step.get("why"), step.get("why")))}</p>'
-               if step.get("why") else "")
-            + '</article>')
-    if not cards:
-        states.add(UNSEEN)
-        cards.append(f'<p class="empty" data-state="{UNSEEN}">nothing was measured</p>')
-    state = worst(states) if states else UNSEEN
-    # Everything the tenant document says that is NOT a service — the
-    # namespace, the routing, the quota, what nothing claims — still has
-    # to reach the screen, so the whole panel goes underneath.
-    body, _ = _source(reading, ctx)
-    inner = body.split(">", 1)[1].rsplit("</section>", 1)[0]
-    # The whole panel goes underneath, MINUS its own age line: the age
-    # belongs to the reading and the reading is drawn once. Two ages for
-    # one measurement is two chances to read the wrong one.
-    inner = inner.replace(_age(reading), "", 1)
-    return (f'<section class="source projects" data-state="{state}" '
-            f'data-command="{_e(reading.get("comando"))}" '
-            f'data-rc="{_e(reading.get("rc"))}"{_when(reading)}>'
-            f'<h2>services</h2>{_age(reading)}'
-            f'<div class="grid">{"".join(cards)}</div>'
-            f'<details class="fold"><summary><b>everything it measured</b>'
-            f'</summary><div class="vital-body">{inner}</div></details></section>')
-
-
-def render(readings, subject=None):
-    """The panel. `subject` names WHO it is about — an organization — and
-    when it is given the verdict is about that organization and nothing
-    else, which is why the readings behind it are scoped commands rather
-    than the instance's documents filtered here. A screen that filtered
-    would drop measurements, and dropping one is the one thing this
-    console may not do."""
-    ctx = {"langs": languages_of(readings)}
-    v = verdict_of(readings)
-
-    body, vitals = [], []
-    for reading in readings:
-        command = reading.get("comando") or ""
-        if not subject and command == "org list":
-            body.append(_projects(reading, readings, ctx))
-        elif subject and command.startswith("tenant show"):
-            body.append(_services_of(reading, ctx))
-        else:
-            vitals.append(_vital(reading, ctx))
-
-    where = (f'<a class="act act--quiet" href="/">all projects</a>' if subject
-             else '<span class="mark">aegis</span>')
-    action = (f'<a class="act" href="/org/{_e(subject)}/edit">edit the contract</a>'
-              if subject else '<a class="act" href="/new">new project</a>')
-    bar = (f'<header class="bar" data-state="{v}">{where}'
-           + (f'<b class="who">{_e(subject)}</b>' if subject else "")
-           + f'<p class="sentence">{_e(SENTENCE[v])}</p>{action}</header>')
-    return (f'<main class="sereno panel" data-veredicto="{v}"'
-            + (f' data-subject="{_e(subject)}"' if subject else "")
-            + f'>{bar}'
-            # THE PROJECTS BEFORE THE INDICATORS. The bar already said
-            # how the whole thing is, in a sentence; what somebody opens
-            # this for is underneath it, and the instance's vitals come
-            # after because they support that rather than compete with
-            # it.
-            + "".join(body)
-            + (f'<section class="vitals">{"".join(vitals)}</section>' if vitals else "")
-            + '</main>')
 
 
 # ── the one screen that writes ───────────────────────────────────────
@@ -1163,14 +359,18 @@ def render_form(schema, token, filled=None, problem=None, action="/new",
     filled = filled or {}
     types = {k.split(":", 1)[1]: v for k, v in by.items() if k.startswith("tipo:")}
     offerable = sorted(k for k, v in types.items() if v.get("disponible", True))
+    # The words a person reads beside the contract's own. The VALUE the
+    # form submits is the contract's word, always: the label is for the
+    # person, and the validator never sees it.
+    from .screens import KIND
     quotas = (by.get("cuota") or {}).get("opciones") or []
     sizes = (by.get("tamano") or {}).get("opciones") or []
 
-    back = f'/org/{_e(subject)}' if subject else '/'
-    where = f'back to {_e(subject)}' if subject else 'all organizations'
+    back = f'/projects/{_e(subject)}' if subject else '/'
+    where = f'back to {_e(subject)}' if subject else 'all projects'
     head = (f'<header class="verdict" data-state="{FINE}">'
             f'<p class="subject"><a class="act act--quiet" href="{back}">{where}'
-            f'</a><b>{_e(subject) if subject else "a new organization"}</b></p>'
+            f'</a><b>{_e(subject) if subject else "a new project"}</b></p>'
             f'<p class="sentence">'
             + ('Nothing is changed yet. The next screen is the plan, and even that '
                'writes nothing.' if subject else
@@ -1196,7 +396,8 @@ def render_form(schema, token, filled=None, problem=None, action="/new",
         n = f"servicio{i}"
         picked = filled.get(f"{n}.tipo", "")
         options = "".join(
-            f'<option value="{_e(t)}"{" selected" if t == picked else ""}>{_e(t)}</option>'
+            f'<option value="{_e(t)}"{" selected" if t == picked else ""}>{_e(t)}'
+            f'{" · " + _e(KIND[t]) if t in KIND else ""}</option>'
             for t in offerable)
         rows.append(
             f'<fieldset class="row"{" data-existing=\"1\"" if i < existing else ""}>'
@@ -1225,6 +426,7 @@ def render_form(schema, token, filled=None, problem=None, action="/new",
         spec = types[kind]
         if not spec.get("disponible", True):
             legend.append(f'<li data-state="{UNSEEN}">{_chip(UNSEEN, kind)}'
+                          f'<b>{_e(KIND.get(kind, kind))}</b>'
                           f'<span class="note">{_e(spec.get("porque_no", "not offerable here"))}'
                           f'</span></li>')
             continue
@@ -1234,18 +436,34 @@ def render_form(schema, token, filled=None, problem=None, action="/new",
         if spec.get("porque"):
             note += f" — {spec['porque']}"
         legend.append(f'<li data-state="{FINE}">{_chip(FINE, kind)}'
+                      f'<b>{_e(KIND.get(kind, kind))}</b>'
                       f'<span class="note">{_e(note)}</span></li>')
 
     keep = ('<p class="hint">The services already in the contract stay: this screen '
             'adds and changes, it does not remove. Removing one is `aegis org` by '
             'hand, which says what it is about to do.</p>' if existing else "")
+    contract = by.get("contract") or {}
+    name_hint = ("a short lowercase name; it becomes the namespace and the prefix of "
+                 "every image"
+                 + (f' · pattern {contract["nombre_patron"]}' if contract.get("nombre_patron")
+                    else ""))
+    host_hint = ("the hostname people will type, like shop.example.test"
+                 + (f' · needed when {contract["dominio_si"]}' if contract.get("dominio_si")
+                    else ""))
+    about = ('<p class="hint plain">A service is one thing that runs: a static site, a web '
+             'service, a background worker, or a database or cache the platform provides. '
+             '<b>Public path</b> is where it answers on the hostname (<code>/</code>, '
+             '<code>/api</code>); <b>port</b> is what a web service listens on; '
+             '<b>repository</b> is the git URL it is built from. What each kind needs and '
+             'refuses is listed under the rows.</p>')
     body = (f'<section class="source" data-state="{FINE}">'
-            f'<h2>{"the organization" if not subject else "what it is"}</h2>{keep}'
+            f'<h2>{"the project" if not subject else "what it is"}</h2>{keep}'
             f'<form method="post" action="{_e(action)}">'
             f'<input type="hidden" name="token" value="{_e(token)}">'
-            f'{_field("organizacion", "name", filled.get("organizacion", ""), hint=(by.get("contract") or {}).get("nombre_patron", ""))}'
-            f'{_field("dominio", "public hostname", filled.get("dominio", ""), hint=(by.get("contract") or {}).get("dominio_si", ""))}'
-            f'{_choice("cuota", "ceiling", quotas, filled.get("cuota", ""), "the contract names a plan and never a number")}'
+            f'{_field("organizacion", "name", filled.get("organizacion", ""), hint=name_hint)}'
+            f'{_field("dominio", "public hostname", filled.get("dominio", ""), hint=host_hint)}'
+            f'{_choice("cuota", "plan", quotas, filled.get("cuota", ""), "how much of the machine it may take: " + str((by.get("cuota") or {}).get("nota") or "the contract names a plan and never a number"))}'
+            f'<h3 class="sub">services</h3>{about}'
             f'<div class="rows">{"".join(rows)}</div>'
             f'<ul class="tail legend">{"".join(legend)}</ul>'
             f'<button class="act" type="submit">see the plan</button>'
@@ -1453,7 +671,7 @@ def render_edit(schema, current, token, filled=None, problem=None):
     org = (current or {}).get("organizacion") or ""
     filled = filled or fields_of_contract(current or {})
     body = render_form(schema, token, filled, problem,
-                       action=f"/org/{org}/edit", existing=len(
+                       action=f"/projects/{org}/edit", existing=len(
                            (current or {}).get("servicios") or []),
                        subject=org)
     return body
@@ -1555,11 +773,11 @@ def render_plan(doc, contract_text, token, written=None, before=None, org=None,
                     "repository, and nothing is running yet. Three things are left "
                     "and each one is left for a reason.")
         action = (f'<p class="host mono">{_e(written)}</p>'
-                  f'<a class="act act--quiet" href="/">all organizations</a>')
+                  f'<a class="act act--quiet" href="/">all projects</a>')
     else:
         sentence = "Nothing has been written. This is what would change."
-        back = f"/org/{_e(org)}/edit" if editing and org else "/new"
-        where = f"/org/{_e(org)}/write" if editing and org else "/new/write"
+        back = f"/projects/{_e(org)}/edit" if editing and org else "/new"
+        where = f"/projects/{_e(org)}/write" if editing and org else "/new/write"
         action = (f'<form method="post" action="{where}">'
                   f'<input type="hidden" name="token" value="{_e(token)}">'
                   f'<input type="hidden" name="contrato" value="{_e(contract_text)}">'
@@ -1568,7 +786,7 @@ def render_plan(doc, contract_text, token, written=None, before=None, org=None,
                   + f'</button>'
                   f'<a class="act act--quiet" href="{back}">change something</a></form>')
     head = (f'<header class="verdict" data-state="{v}">'
-            f'<p class="subject"><a class="act act--quiet" href="/">all organizations</a>'
+            f'<p class="subject"><a class="act act--quiet" href="/">all projects</a>'
             f'<b>the plan</b></p><p class="sentence">{_e(sentence)}</p></header>')
     # THE DIFF FIRST, and the generated files after. What the person did
     # is two lines of YAML; which of the six derived manifests that
@@ -1643,11 +861,16 @@ def skin():
         return "/* the skin could not be read; the states are in the data-state attributes */"
 
 
-def wrap(body, title="aegis"):
-    """A whole document around a body that is already drawn. `page`
-    renders readings; the screens that are not readings —the form, the
-    plan— come through here so that the skin is inlined in exactly one
-    place."""
+def wrap(body, title="aegis", instance=None, active="projects", subject=None):
+    """A whole document around a body that is already drawn. The
+    screens that are not readings —the form, the plan— come through
+    here, and when the instance's readings are given they get the same
+    frame as every other screen: the menu, its dots, when the instance
+    was read. Without them the body is served bare, which is what the
+    checks that render a form on its own get."""
+    if instance is not None:
+        from . import screens
+        body = screens.frame(body, instance, active, subject)
     return ("<!doctype html>\n"
             '<html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
@@ -1655,9 +878,25 @@ def wrap(body, title="aegis"):
             f"<body>{body}</body></html>\n")
 
 
-def page(readings, title="aegis", subject=None):
+# ── the screens ──────────────────────────────────────────────────────
+# They live in lib/aegis/screens.py, organized the way people think —
+# projects, deployments, domains, storage, security, the machine, the
+# round — and this module keeps the vocabulary they translate from, the
+# atoms they draw with, and the forms. `render` is the door the checks
+# knock on: check 122 renders every case through it and reads the
+# states back, check 127 counts the sources and their ages.
+def render(readings, subject=None, view=None, instance=None):
+    """A whole screen, as HTML: the overview by default, one project
+    when `subject` names it, one concept page when `view` names it.
+    `instance` is the instance's readings, used as context around a
+    project's own (the contract, the languages, the menu's dots)."""
+    from . import screens
+    return screens.render(readings, subject=subject, view=view, instance=instance)
+
+
+def page(readings, title="aegis", subject=None, view=None, instance=None):
     return ("<!doctype html>\n"
             '<html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             f"<title>{_e(title)}</title><style>{skin()}</style></head>"
-            f"<body>{render(readings, subject)}</body></html>\n")
+            f"<body>{render(readings, subject, view, instance)}</body></html>\n")

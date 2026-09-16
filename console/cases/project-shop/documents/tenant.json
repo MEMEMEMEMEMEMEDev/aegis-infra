@@ -1,0 +1,152 @@
+{
+  "steps": [
+    {
+      "step": "namespace",
+      "state": "already",
+      "namespace": "org-shop",
+      "exists": true,
+      "phase": "Active"
+    },
+    {
+      "step": "service:web",
+      "state": "already",
+      "tipo": "estatico",
+      "publico": "/",
+      "kind": "Deployment",
+      "workload": "shop-web",
+      "ready": 1,
+      "desired": 1,
+      "image": "registry.registry-system.svc.cluster.local:5000/shop-web@sha256:5d2dc9a344514e9c097a4d963f2e6de8e309e09b77b12fa94ea94d8244f074ae",
+      "digest": "sha256:5d2dc9a344514e9c097a4d963f2e6de8e309e09b77b12fa94ea94d8244f074ae"
+    },
+    {
+      "step": "service:admin",
+      "state": "already",
+      "tipo": "estatico",
+      "publico": "/admin",
+      "kind": "Deployment",
+      "workload": "shop-admin",
+      "ready": 1,
+      "desired": 1,
+      "image": "registry.registry-system.svc.cluster.local:5000/shop-admin@sha256:10d83818ca97b14c3345c1b9a820894da037b66055f8db8b65653fbb3f38760c",
+      "digest": "sha256:10d83818ca97b14c3345c1b9a820894da037b66055f8db8b65653fbb3f38760c"
+    },
+    {
+      "step": "service:api",
+      "state": "already",
+      "tipo": "http",
+      "publico": "/api",
+      "kind": "Deployment",
+      "workload": "shop-api",
+      "ready": 1,
+      "desired": 1,
+      "image": "registry.registry-system.svc.cluster.local:5000/shop-api@sha256:34ca5d1e562bb466a134ae2ddb97c9b9494180e9508d0663b7e713973bd98026",
+      "digest": "sha256:34ca5d1e562bb466a134ae2ddb97c9b9494180e9508d0663b7e713973bd98026"
+    },
+    {
+      "step": "service:stock",
+      "state": "already",
+      "tipo": "http",
+      "kind": "Deployment",
+      "workload": "shop-stock",
+      "ready": 1,
+      "desired": 1,
+      "image": "registry.registry-system.svc.cluster.local:5000/shop-stock@sha256:f36e220531a4e56748b9c40871a37e4adb47069dec0b84f56624a756e7ef2058",
+      "digest": "sha256:f36e220531a4e56748b9c40871a37e4adb47069dec0b84f56624a756e7ef2058"
+    },
+    {
+      "step": "service:worker",
+      "state": "already",
+      "tipo": "worker",
+      "kind": "Deployment",
+      "workload": "shop-worker",
+      "ready": 1,
+      "desired": 1,
+      "image": "registry.registry-system.svc.cluster.local:5000/shop-worker@sha256:c8e6f4aa32277f2ada0c7e54068fb7dff7b9c2e9be18d744ecf4b940ac6d75f8",
+      "digest": "sha256:c8e6f4aa32277f2ada0c7e54068fb7dff7b9c2e9be18d744ecf4b940ac6d75f8"
+    },
+    {
+      "step": "service:datos",
+      "state": "already",
+      "tipo": "postgres",
+      "kind": "StatefulSet",
+      "workload": "datos",
+      "ready": 1,
+      "desired": 1,
+      "image": "registry.registry-system.svc.cluster.local:5000/postgres@sha256:fe30b547d0e9fc2af0377ef99d9a31fd7171281ff4b42d49b3587e0c043676af",
+      "digest": "sha256:fe30b547d0e9fc2af0377ef99d9a31fd7171281ff4b42d49b3587e0c043676af",
+      "volume": "datos-datos-0",
+      "volume_phase": "Bound",
+      "volume_size": "2Gi"
+    },
+    {
+      "step": "service:cola",
+      "state": "already",
+      "tipo": "redis",
+      "kind": "StatefulSet",
+      "workload": "cola",
+      "ready": 1,
+      "desired": 1,
+      "image": "registry.registry-system.svc.cluster.local:5000/redis@sha256:56b7b6108e832bd4e6024838729f649125943c4a09988b4d66c4695e8acf5958",
+      "digest": "sha256:56b7b6108e832bd4e6024838729f649125943c4a09988b4d66c4695e8acf5958"
+    },
+    {
+      "step": "public:web",
+      "state": "already",
+      "publico": "/",
+      "service": "shop-web",
+      "routed": true,
+      "endpoints": 1
+    },
+    {
+      "step": "public:admin",
+      "state": "already",
+      "publico": "/admin",
+      "service": "shop-admin",
+      "routed": true,
+      "endpoints": 1
+    },
+    {
+      "step": "public:api",
+      "state": "already",
+      "publico": "/api",
+      "service": "shop-api",
+      "routed": true,
+      "endpoints": 1
+    },
+    {
+      "step": "routing",
+      "state": "already",
+      "public": 3,
+      "hosts": [
+        "shop.example.test"
+      ]
+    },
+    {
+      "step": "quota",
+      "state": "already",
+      "quota": "org-shop-quota",
+      "used": {
+        "limits.cpu": "4500m",
+        "limits.memory": "3Gi",
+        "persistentvolumeclaims": "1",
+        "pods": "7",
+        "requests.cpu": "550m",
+        "requests.memory": "1088Mi",
+        "requests.storage": "2Gi"
+      },
+      "hard": {
+        "limits.cpu": "8",
+        "limits.memory": "12Gi",
+        "persistentvolumeclaims": "10",
+        "pods": "40",
+        "requests.cpu": "4",
+        "requests.memory": "6Gi",
+        "requests.storage": "50Gi"
+      },
+      "tightest": "limits.cpu",
+      "percent": 56.2
+    }
+  ],
+  "rc": 0
+}

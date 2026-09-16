@@ -213,7 +213,7 @@ aegis console serve            # http://127.0.0.1:7391
 A visual layer **on top of** the CLI, not instead of it: every screen is
 drawn from the documents the commands already emit. It measures nothing
 of its own and can run nothing you cannot. It has **no AI agent**, and
-that is a decision — a platform whose job is to say what is true about
+that is a decision: a platform whose job is to say what is true about
 your machine does not get to guess.
 
 What separates it from any other dashboard is **four states instead of
@@ -222,11 +222,22 @@ not reach it» the same green, and only one of those gets investigated.
 Here **«nobody could look» is a state with a name**, the only one with
 no colour of its own, and the first one drawn.
 
-It reads six commands, it shows one organization **as the cluster has
-it** against what its contract declares — including what the contract
-does **not** declare, which is exactly what no other tool here can see,
-because they all derive from the contract — and it writes one thing: a
-contract in `orgs/`. No commit, no push, no apply, no cluster.
+It is organized the way the consoles you already know are, and not the
+way the CLI is written: a menu with **Projects, Deployments, Domains,
+Traffic, Storage, Security, Machine and Health**, and beside each entry
+a dot with the worst state of what feeds it, so that «something is
+wrong on Storage» is readable before Storage is open. Every word of the
+platform is translated: the contract says `http`, the screen says *web
+service*.
+
+It opens with your projects, each service carrying the language GitHub
+measured for its repository, what reached it in 24 hours and its last
+push link by link. It shows one project **as the cluster has it**
+against what its contract declares, including what the contract does
+**not** declare, which is exactly what no other tool here can see,
+because they all derive from the contract. And it writes one thing: a
+contract in `orgs/`, with its manifests and its missing secrets. No
+commit, no push, no apply, no cluster.
 
 It is not published through the tunnel; you reach it with
 `ssh -L 7391:127.0.0.1:7391`. The reasons, the security model and what

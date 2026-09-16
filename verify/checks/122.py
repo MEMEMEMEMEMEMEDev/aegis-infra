@@ -90,6 +90,13 @@ def states_in(readings):
             for k, v in node.items():
                 if k == "state" and isinstance(v, str):
                     found.add(v)
+                # A LINK'S WORD IS A STATE TOO. `builds show` says how
+                # each link of a push went as `links: {scan: done, …}`,
+                # and a screen that draws a link hatched is drawing a
+                # state the document carries — the first version of
+                # this walk did not see it and called it invented.
+                if k == "links" and isinstance(v, dict):
+                    found.update(x for x in v.values() if isinstance(x, str))
                 walk(v)
         elif isinstance(node, list):
             for v in node:

@@ -68,7 +68,7 @@
   --glow:0 14px 34px -22px currentColor;
   --shadow:0 2px 6px -4px rgb(11 13 16 / .10), 0 18px 46px -34px rgb(11 13 16 / .45);
   --hatch:repeating-linear-gradient(-45deg, currentColor 0 1.4px, transparent 1.4px 4.6px);
-  --r:18px; --r-s:11px;
+  --r:16px; --r-s:11px; --side:224px;
   --ui:"Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   /* COMMITTED TO LIGHT, and it is a choice rather than an omission.
@@ -85,472 +85,340 @@
 * { box-sizing:border-box; }
 body {
   margin:0; background:var(--paper); color:var(--ink);
-  font-family:var(--ui); font-size:14px; line-height:1.55;
+  font-family:var(--ui); font-size:14px; line-height:1.5;
   -webkit-font-smoothing:antialiased;
 }
+h1, h2, h3 { margin:0; letter-spacing:-.02em; }
+a { color:inherit; }
+.mono { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+.faint { color:var(--faint); }
 
-.sereno { max-width:940px; margin:0 auto; padding:clamp(18px,4vw,34px); }
-.sereno h2, .sereno h3 { margin:0; letter-spacing:-.02em; }
-
-/* ── rule 3: the sentence is the alarm ───────────────────────────── */
-.verdict {
-  border-radius:26px; padding:clamp(22px,4vw,34px); margin-bottom:18px;
-  box-shadow:var(--glow);
-}
-.verdict .sentence {
-  margin:0; font-size:clamp(22px,4.2vw,34px); font-weight:800;
-  letter-spacing:-.035em; line-height:1.1;
-}
-
-/* ── one source: one command that was consulted ──────────────────── */
-.source {
-  background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
-  box-shadow:var(--shadow); padding:18px 20px; margin-bottom:14px;
-}
-.source > h2 {
-  font-family:var(--mono); font-size:12.5px; font-weight:500;
-  color:var(--faint); letter-spacing:0; display:inline-block; margin-right:9px;
-}
-.source .why { margin:10px 0 0; font-size:13.5px; color:var(--mid); }
-
-/* ── a step, and its measures ─────────────────────────────────────── */
-.step { padding:12px 0; border-top:1px solid var(--line); }
-.step:first-of-type { border-top:0; margin-top:6px; }
-.step > h3 { font-size:14.5px; font-weight:700; display:inline-block; margin-right:9px; }
-.facts {
-  display:flex; flex-wrap:wrap; gap:4px 14px; margin:8px 0 0;
-  font-family:var(--mono); font-size:11.5px; color:var(--faint);
-}
-.facts dt { font-weight:500; }
-.facts dt::after { content:":"; }
-.facts dd { margin:0 0 0 -10px; color:var(--mid); }
-
-.measures { list-style:none; margin:10px 0 0; padding:0; display:flex; flex-direction:column; gap:7px; }
-.measure { display:flex; align-items:flex-start; gap:9px; flex-wrap:wrap; }
-.measure .what { font-size:13px; flex:1; min-width:12ch; }
-.measure .note { flex-basis:100%; margin:2px 0 0; font-size:12px; color:var(--faint); }
-.empty { margin:10px 0 0; font-size:13px; }
-
-/* ── rule 2: surface, never an outline ───────────────────────────── */
+/* ══ THE STATES ═════════════════════════════════════════════════════
+ * Painted on the SMALL things a person looks at — the chip, the pip in
+ * the menu, a link of the chain, the fill of a bar — and never on the
+ * ground under them. Until 2026-09-16 the rule was `[data-state=X]`
+ * on any element, and on a grid of cards that is the «Windows 8» the
+ * operator rejected on the first pass: every surface tinted, nothing
+ * readable. A container still CARRIES its state in the attribute, for
+ * the checks and for a line along its top; it does not wear it.
+ */
 .chip {
   display:inline-flex; align-items:center; gap:6px; flex:none;
-  border-radius:999px; padding:4px 11px 4px 9px;
-  font-size:11.5px; font-weight:700; letter-spacing:.005em;
-  box-shadow:var(--glow);
+  border-radius:999px; padding:3px 10px 3px 8px;
+  font-size:11px; font-weight:700; letter-spacing:.005em; white-space:nowrap;
 }
-.chip::before {
-  content:""; width:7px; height:7px; border-radius:50%;
-  background:currentColor; flex:none;
-}
+.chip::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; flex:none; }
+.pip { width:8px; height:8px; border-radius:99px; display:inline-block; flex:none; }
+.pip.none { background:transparent; box-shadow:inset 0 0 0 1px var(--line); }
+.link { font-size:10.5px; font-weight:700; letter-spacing:.03em; border-radius:5px; padding:2px 6px; white-space:nowrap; }
+.bar { height:7px; border-radius:99px; overflow:hidden; width:100%; background:rgb(11 13 16 / .09); }
+.bar > span { display:block; height:100%; background:currentColor; border-radius:99px; }
 
-[data-state="fine"]      { background:var(--fine-bg);      color:var(--fine-ink); }
-[data-state="busy"]      { background:var(--busy-bg);      color:var(--busy-ink); }
-[data-state="attention"] { background:var(--attention-bg); color:var(--attention-ink); }
-[data-state="wrong"]     { background:var(--wrong-bg);     color:var(--wrong-ink); }
+.chip[data-state="fine"],      .pip[data-state="fine"],      .link[data-state="fine"],      .bar[data-state="fine"]      { background:var(--fine-bg);      color:var(--fine-ink); }
+.chip[data-state="busy"],      .pip[data-state="busy"],      .link[data-state="busy"],      .bar[data-state="busy"]      { background:var(--busy-bg);      color:var(--busy-ink); }
+.chip[data-state="attention"], .pip[data-state="attention"], .link[data-state="attention"], .bar[data-state="attention"] { background:var(--attention-bg); color:var(--attention-ink); }
+.chip[data-state="wrong"],     .pip[data-state="wrong"],     .link[data-state="wrong"],     .bar[data-state="wrong"]     { background:var(--wrong-bg);     color:var(--wrong-ink); }
+.chip[data-state="unseen"],    .pip[data-state="unseen"],    .link[data-state="unseen"],    .bar[data-state="unseen"]    { background:var(--unseen-bg);    color:var(--unseen-ink); }
+/* The pip is the state at a glance, so it takes the INK and not the pale
+ * ground: an eight-pixel mint dot is a dot nobody sees. */
+.pip[data-state="fine"] { background:var(--fine-ink); }
+.pip[data-state="busy"] { background:var(--busy-ink); }
+.pip[data-state="attention"] { background:var(--attention-ink); }
+.pip[data-state="wrong"] { background:var(--wrong-ink); }
 
-/* Rule 7. The only state with no colour, no glow and a hatch instead of
- * a dot — a SQUARE one, so it is told apart from the others with the
- * screen in black and white. «Could not look» is not a paler shade of
- * «it is fine»; it is a different kind of answer. */
-[data-state="unseen"] { background:var(--unseen-bg); color:var(--unseen-ink); }
-.chip[data-state="unseen"] { box-shadow:none; }
+/* Rule 7. «Could not look» is the one state that must survive black and
+ * white, a bad screen and an eye that does not see red: it is hatched,
+ * its dot is a SQUARE with an edge, and it has no glow. It is not a
+ * paler shade of «fine»; it is a different kind of answer. */
 .chip[data-state="unseen"]::before {
   border-radius:2px; background:transparent;
   background-image:var(--hatch); box-shadow:inset 0 0 0 1px currentColor;
 }
-
+.pip[data-state="unseen"] { border-radius:2px; background-image:var(--hatch);
+                            box-shadow:inset 0 0 0 1px currentColor; }
+.link[data-state="unseen"], .bar[data-state="unseen"] { background-image:var(--hatch); }
 /* Rule 5: busy is the one that moves, and only if the reader lets it. */
 @media (prefers-reduced-motion: no-preference) {
-  .chip[data-state="busy"]::before { animation:sereno-beat 2.4s ease-in-out infinite; }
+  .chip[data-state="busy"]::before, .pip[data-state="busy"] { animation:sereno-beat 2.4s ease-in-out infinite; }
 }
 @keyframes sereno-beat { 0%,100% { opacity:1; } 50% { opacity:.28; } }
 
-/* Rule 1: what needs attention rises. The states that ask something of
- * a person come first inside their source; `fine` sinks to the bottom.
- * A calm screen is calm because nothing rose, not because it is green. */
-.source { display:flex; flex-direction:column; }
-.source > h2, .source > .chip { order:0; }
-.step[data-state="unseen"]    { order:1; }
-.step[data-state="wrong"]     { order:2; }
-.step[data-state="attention"] { order:3; }
-.step[data-state="busy"]      { order:4; }
-.step[data-state="fine"]      { order:5; }
-
-/* Rule 4: what is clickable has no hue. Declared here even though the
- * read-only console has no buttons yet, so that the day it does, the
- * rule is already law and not a discussion. */
+/* Rule 4: what is clickable has no hue. */
 .act {
-  font:inherit; font-weight:700; font-size:13px; cursor:pointer;
-  border-radius:11px; padding:9px 16px;
+  display:inline-flex; align-items:center; gap:6px;
+  font:inherit; font-weight:700; font-size:13px; cursor:pointer; text-decoration:none;
+  border-radius:10px; padding:8px 14px; white-space:nowrap;
   border:1px solid var(--ink); background:var(--ink); color:var(--paper);
 }
+.act:hover { background:#22262b; border-color:#22262b; }
 .act--quiet { background:transparent; color:var(--ink); border-color:var(--line); }
+.act--quiet:hover { background:var(--sunken); border-color:var(--line); color:var(--ink); }
 .act--danger { background:transparent; color:var(--danger); border-color:var(--danger); }
-
+.act.small { padding:5px 10px; font-size:12px; }
 :focus-visible { outline:2px solid var(--busy-ink); outline-offset:3px; border-radius:8px; }
 
-.age { margin:6px 0 0; font-family:var(--mono); font-size:11px; color:var(--faint); }
-
-/* ── panels ───────────────────────────────────────────────────────
- * Everything above draws a document. What follows draws the THINGS the
- * document is about: organisations as organisations, traffic as
- * traffic, the round as a board. The generic drawing stays underneath
- * for any source nobody has designed yet — a panel is an improvement
- * over it, never a replacement, so a new command cannot make its own
- * reading vanish while somebody gets around to it.
+/* ══ THE FRAME ══════════════════════════════════════════════════════
+ * A menu on the left with one line per page and a dot with its state,
+ * the way the consoles people already know are laid out — so that
+ * «something is wrong on Storage» is readable before Storage is open.
  */
-.mono { font-family:var(--mono); font-variant-numeric:tabular-nums; }
-
-.tiles {
-  display:grid; grid-template-columns:repeat(auto-fill, minmax(248px, 1fr));
-  gap:12px; margin-top:12px;
+.console { display:grid; grid-template-columns:var(--side) minmax(0, 1fr); min-height:100vh; }
+.side {
+  position:sticky; top:0; height:100vh; display:flex; flex-direction:column; gap:16px;
+  padding:18px 12px; border-right:1px solid var(--line); background:var(--paper);
 }
-.tile {
-  border-radius:var(--r-s); padding:15px 16px;
-  display:flex; flex-direction:column; gap:8px;
+.brand { font-weight:800; font-size:18px; letter-spacing:-.045em; text-decoration:none; padding:2px 10px; }
+.menu { display:flex; flex-direction:column; gap:2px; }
+.menu a {
+  display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:9px;
+  color:var(--mid); text-decoration:none; font-weight:600; font-size:13.5px;
 }
-.tile > h3 { font-size:17px; font-weight:800; letter-spacing:-.03em; }
-.tile .host { margin:0; font-size:11.5px; opacity:.72; word-break:break-all; }
-.tile .meta { margin:0; font-size:12px; opacity:.8; }
-.tile .why { margin:0; font-size:12.5px; opacity:.9; }
+.menu a:hover { background:var(--sunken); color:var(--ink); }
+.menu a.here { background:var(--panel); color:var(--ink); box-shadow:0 1px 2px rgb(11 13 16 / .06), 0 0 0 1px var(--line); }
+.menu .ico { color:var(--faint); flex:none; }
+.menu a.here .ico { color:var(--ink); }
+.menu .pip { margin-left:auto; }
+.side-foot { margin-top:auto; display:flex; flex-direction:column; gap:8px; padding:0 4px; }
+.measured { margin:0; font-family:var(--mono); font-size:11px; color:var(--faint); padding:0 6px; }
 
-/* Rule 1 again, at the level of a tile: what is fine is a quiet
- * surface, and the tile that asks something keeps its own colour. The
- * chip carries the state; the tile carries the mood. */
-.tile .chip { align-self:flex-start; box-shadow:none; background:transparent; padding-left:0; }
+.screen { max-width:1200px; padding:20px clamp(16px, 3vw, 36px) 56px; display:flex; flex-direction:column; gap:16px; }
+.top { display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:2px 0 14px; border-bottom:1px solid var(--line); }
+.crumbs { margin:0; display:flex; gap:9px; align-items:baseline; font-size:13px; color:var(--faint); }
+.crumbs a { color:var(--faint); text-decoration:none; }
+.crumbs a:hover { color:var(--ink); }
+.crumbs b { font-size:22px; font-weight:800; letter-spacing:-.035em; color:var(--ink); line-height:1.1; }
+/* Rule 3: the sentence is the alarm. */
+.top .sentence { margin:0; flex:1; min-width:16ch; font-size:14.5px; font-weight:600; color:var(--mid); }
+.top[data-state="wrong"] .sentence     { color:var(--wrong-ink); }
+.top[data-state="attention"] .sentence { color:var(--attention-ink); }
+.top[data-state="unseen"] .sentence    { color:var(--unseen-ink); }
+.top[data-state="busy"] .sentence      { color:var(--busy-ink); }
+.actions { display:flex; gap:8px; margin-left:auto; flex-wrap:wrap; }
+.page-lead { margin:-2px 0 0; max-width:72ch; color:var(--mid); font-size:13.5px; }
 
-.srvs { display:flex; flex-wrap:wrap; gap:5px; }
-.srv {
-  display:inline-flex; align-items:baseline; gap:5px;
-  background:rgb(255 255 255 / .55); border-radius:7px; padding:3px 7px;
-  font-size:11.5px; font-weight:700;
+/* ══ ONE READING ════════════════════════════════════════════════════
+ * A source is one command that was consulted: it says which, when, and
+ * how it is. Everything a screen draws about that reading sits inside.
+ */
+.source, .block {
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
+  padding:16px 18px 18px; display:flex; flex-direction:column; gap:12px;
 }
-.srv i { font-style:normal; font-weight:500; opacity:.62; font-size:10.5px; }
+.source[data-state="wrong"]     { box-shadow:inset 0 3px 0 0 var(--wrong-ink); }
+.source[data-state="attention"] { box-shadow:inset 0 3px 0 0 var(--attention-ink); }
+.source[data-state="unseen"]    { box-shadow:inset 0 3px 0 0 var(--unseen-ink); }
+.src-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.src-head h2 { font-size:15px; font-weight:800; }
+.src-head .ico { color:var(--faint); }
+.src-head .age, .src-head .act { margin-left:auto; }
+.src-head .act + .age { margin-left:0; }
+.age { margin:0; font-family:var(--mono); font-size:11px; color:var(--faint); }
+.lead { margin:0; color:var(--mid); font-size:13px; max-width:80ch; }
+.source > .why { margin:0; font-size:13.5px; color:var(--ink); }
+.note { margin:0; font-size:12px; color:var(--faint); }
+.note b { color:var(--mid); }
+.legend b { color:var(--ink); }
+code.mono { background:var(--sunken); padding:1px 5px; border-radius:5px; font-size:12px; }
+.empty { margin:0; font-size:13px; color:var(--faint); }
+.sub { margin:4px 0 -4px; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); }
 
-.facts-row { display:flex; flex-wrap:wrap; gap:16px 22px; }
+/* The strip: one line per page of the console, with its number. */
+.strip { display:grid; grid-template-columns:repeat(auto-fit, minmax(168px, 1fr)); gap:10px; }
+.peek { padding:0; gap:0; position:relative; border-radius:var(--r-s); }
+.peek:hover { border-color:rgb(11 13 16 / .22); }
+.peek .cover { display:flex; flex-direction:column; gap:5px; padding:13px 14px 6px; text-decoration:none; color:inherit; }
+.peek .cover b { font-size:13px; font-weight:700; }
+.peek .cover .ico { color:var(--faint); }
+.peek .fig { font-family:var(--mono); font-size:11.5px; color:var(--mid); }
+.peek .spread { display:flex; gap:8px; flex-wrap:wrap; margin-top:2px; }
+.peek .spot { display:inline-flex; align-items:center; gap:4px; font-family:var(--mono); font-size:11px; color:var(--faint); }
+.peek .spot b { font-weight:500; }
+.peek .spot.lbl { color:var(--faint); margin-left:2px; }
+.peek .age { padding:0 14px 11px; }
+
+/* Cards: a project, a service. The state is a line along the top, the
+ * surface stays neutral, and the whole card is the link. */
+.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:12px; }
+.card {
+  border:1px solid var(--line); border-radius:var(--r-s); padding:14px 15px;
+  display:flex; flex-direction:column; gap:9px; background:var(--panel); position:relative;
+}
+.card:hover { border-color:rgb(11 13 16 / .22); }
+.card[data-state="wrong"]     { box-shadow:inset 0 3px 0 0 var(--wrong-ink); }
+.card[data-state="attention"] { box-shadow:inset 0 3px 0 0 var(--attention-ink); }
+.card[data-state="unseen"]    { box-shadow:inset 0 3px 0 0 var(--unseen-ink); }
+.card > header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.card > header .pip, .card > header .chip { margin-left:auto; }
+.card h3 { font-size:16px; font-weight:800; letter-spacing:-.03em; }
+.card h3 a { color:inherit; text-decoration:none; }
+.proj h3 a::after { content:""; position:absolute; inset:0; }
+.card .host { font-size:11.5px; color:var(--faint); text-decoration:none; word-break:break-all;
+              position:relative; z-index:1; width:fit-content; }
+.card a.host:hover { color:var(--ink); }
+.pills { display:flex; flex-wrap:wrap; gap:5px; }
+.pill {
+  display:inline-flex; align-items:center; gap:5px; background:var(--sunken);
+  border-radius:7px; padding:3px 8px; font-size:11.5px; font-weight:700;
+}
+.pill i { font-style:normal; font-weight:500; color:var(--faint); display:inline-flex; align-items:center; gap:4px; }
+.pill .ico { width:13px; height:13px; color:var(--faint); }
+.pill .chip { margin:-3px -8px; }
+.dot { width:8px; height:8px; border-radius:99px; display:inline-block; flex:none;
+       box-shadow:inset 0 0 0 1px rgb(11 13 16 / .12); }
+.facts-row { display:flex; flex-wrap:wrap; gap:12px 22px; }
 .fact { display:flex; flex-direction:column; gap:2px; }
-.fact .figure { font-size:21px; font-weight:600; letter-spacing:-.04em; line-height:1; }
-.fact .label { font-size:10.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; opacity:.65; }
+.fact .figure { font-size:19px; font-weight:600; letter-spacing:-.03em; line-height:1.1; }
+.fact .label { font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); }
+.facts-row.head { padding:12px 14px; border-radius:var(--r-s); background:var(--sunken); gap:10px 28px; }
+.facts-row.head .figure { font-size:16px; }
+.card .fact .figure { font-size:17px; }
+.push { margin:0; display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:11.5px; }
+.push .lbl { font-size:10px; text-transform:uppercase; letter-spacing:.08em; font-weight:700; color:var(--faint); }
+.push .when { color:var(--faint); font-family:var(--mono); font-size:11px; }
+.push.none, .push .why { color:var(--faint); font-style:italic; font-size:11px; flex-basis:100%; }
+.meta { margin:0; font-size:11.5px; color:var(--faint); }
+.meta b { color:var(--mid); font-weight:600; }
+.why { margin:0; font-size:12.5px; color:var(--mid); }
+.chain { display:inline-flex; gap:3px; flex-wrap:wrap; }
+.chain.small .link { font-size:9.5px; padding:1px 5px; }
 
-/* The round: fourteen cells. One that is fine is a dot and a name —
- * that is the whole point, a calm board is calm because nothing opened. */
-.grid {
-  display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr));
-  gap:9px; margin-top:12px; align-items:start;
-}
-.cell {
-  border-radius:var(--r-s); padding:11px 13px;
-  display:flex; flex-wrap:wrap; align-items:baseline; gap:8px;
-}
-.cell > h3 { font-size:13px; font-weight:700; letter-spacing:-.01em; }
-.cell .chip { box-shadow:none; background:transparent; padding:0; font-size:0; }
-.cell .measures { flex-basis:100%; margin-top:6px; }
-.cell .rest { flex-basis:100%; margin:6px 0 0; font-size:11.5px; opacity:.62; }
-/* A cell that needs attention takes the whole row: the order is the
- * alarm, and so is the space. */
-.cell:not([data-state="fine"]) { grid-column:1 / -1; }
+/* Tables: deployments, hostnames, traffic, copies. Digits line up. */
+table.rows { width:100%; border-collapse:collapse; font-size:13px; }
+.rows th { text-align:left; font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+           color:var(--faint); padding:6px 10px; border-bottom:1px solid var(--line); white-space:nowrap; }
+.rows td { padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:middle; }
+.rows tr:last-child td { border-bottom:0; }
+.rows td.num, .rows th.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.rows td.note { color:var(--faint); font-size:12px; }
+.rows td > a { color:inherit; font-weight:600; text-decoration:none; }
+.rows td > a:hover { text-decoration:underline; }
+.rows .when { font-family:var(--mono); font-size:11.5px; color:var(--faint); white-space:nowrap; }
+.rows .bar-cell { width:24%; min-width:90px; }
+.rows tr.tail-row td { color:var(--faint); }
+.rows .pills { gap:4px; }
 
-.tail { list-style:none; margin:12px 0 0; padding:0; display:flex; flex-direction:column; gap:7px; }
+/* Usage: the figure beside the bar, because the decision is taken on the number. */
+.usage { display:flex; flex-wrap:wrap; gap:14px 28px; align-items:flex-end; }
+.fact.quota { min-width:220px; gap:5px; }
+.fact.quota .figure { font-size:26px; }
+
+/* The round as a status list: fine is a line, not fine opens itself. */
+.sects { display:flex; flex-direction:column; gap:4px; }
+.sect { border:1px solid var(--line); border-radius:var(--r-s); }
+.sect > summary { display:flex; align-items:center; gap:10px; padding:9px 12px; cursor:pointer; list-style:none; font-size:13px; }
+.sect > summary::-webkit-details-marker { display:none; }
+.sect > summary b { font-weight:700; }
+.sect .count { margin-left:auto; color:var(--faint); font-family:var(--mono); font-size:11px; }
+.sect[open] > summary { border-bottom:1px solid var(--line); }
+.measures { list-style:none; margin:0; padding:10px 12px; display:flex; flex-direction:column; gap:7px; }
+.measure { display:flex; align-items:flex-start; gap:9px; flex-wrap:wrap; }
+.measure .what { font-size:13px; flex:1; min-width:12ch; }
+.measure .note { flex-basis:100%; margin:2px 0 0; }
+.sect .rest { margin:0; padding:8px 12px; font-size:11.5px; color:var(--faint); }
+.more { margin:2px 0 0; font-size:12.5px; }
+.more a { display:inline-flex; align-items:center; gap:8px; color:var(--mid); text-decoration:none; font-weight:600; }
+.more a:hover { color:var(--ink); }
+
+/* A step, generically: the floor under every designed screen. */
+.step { padding:12px 0; border-top:1px solid var(--line); display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; }
+.step:first-of-type { border-top:0; }
+.step > h3 { font-size:14px; font-weight:700; }
+.step .measures { flex-basis:100%; padding:6px 0 0; }
+.facts { display:flex; flex-wrap:wrap; gap:4px 14px; margin:0; flex-basis:100%;
+         font-family:var(--mono); font-size:11.5px; color:var(--faint); }
+.facts dt { font-weight:500; }
+.facts dt::after { content:":"; }
+.facts dd { margin:0 0 0 -10px; color:var(--mid); }
+
+.tail { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:7px; }
 .tail li { display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; font-size:12.5px; }
-.tail li .note { flex-basis:100%; margin-left:0; font-size:11.5px; color:var(--faint); }
-.tail li > .mono { opacity:.85; }
+.tail li .note { flex-basis:100%; }
+.tail.plain li { display:block; font-size:13px; color:var(--mid); }
+.tail.plain b { color:var(--ink); }
+.repos { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; }
+.repo { display:flex; align-items:center; gap:10px; padding:8px 4px; border-top:1px solid var(--line);
+        color:inherit; text-decoration:none; font-size:13px; }
+.repo:hover { background:var(--sunken); }
+.repo .ico { color:var(--faint); }
+.repo i { font-style:normal; color:var(--faint); display:inline-flex; gap:5px; align-items:center; font-size:12px; }
+.repo .when { margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--faint); }
+.repos .rest { padding:8px 4px; border-top:1px solid var(--line); font-size:12.5px; }
+.repos .rest a { color:var(--mid); }
 
-@media (max-width: 520px) {
-  .tiles, .grid { grid-template-columns:1fr; }
-  .facts-row { gap:12px 18px; }
-}
+.tabs { display:flex; gap:2px; flex-wrap:wrap; border-bottom:1px solid var(--line); }
+.tabs a { padding:8px 12px; color:var(--mid); text-decoration:none; font-weight:600; font-size:13px;
+          border-bottom:2px solid transparent; margin-bottom:-1px; }
+.tabs a:hover { color:var(--ink); border-color:var(--ink); }
 
-/* The chain of a push. Each link carries its own state, so one nobody
- * measured is DRAWN as unmeasured — on a row of ticks, a missing link
- * reads as fine, and these are the two links no other platform shows. */
-.builds { display:flex; flex-direction:column; gap:8px; margin-top:12px; }
-.build {
-  border-radius:var(--r-s); padding:11px 13px;
-  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-}
-.build > h3 { font-size:13.5px; font-weight:700; }
-.build .build-n { font-size:11.5px; opacity:.62; }
-.build .note { flex-basis:100%; margin:2px 0 0; font-size:11.5px; opacity:.7; }
-.chain { display:flex; align-items:center; gap:4px; margin-left:auto; flex-wrap:wrap; }
-.link {
-  font-size:10.5px; font-weight:700; letter-spacing:.04em;
-  border-radius:6px; padding:3px 7px;
-}
-.link[data-state="unseen"] { background-image:var(--hatch); background-blend-mode:multiply; }
-
-/* ── one organization ──────────────────────────────────────────────
- * The screen you reach by entering a name from the list. Its header
- * carries the way back, because a page you can only leave with the
- * browser's button is a page that feels like a dead end. */
-.subject {
-  margin:0 0 10px; display:flex; align-items:center; gap:11px; flex-wrap:wrap;
-}
-.subject b { font-size:25px; font-weight:800; letter-spacing:-.035em; }
-.tile > h3 > a { color:inherit; text-decoration:none; border-bottom:1.5px solid currentColor; }
-.tile > h3 > a:hover { border-bottom-color:transparent; }
-
-/* The facts that are true of the whole organization: its namespace, the
- * hostname anybody types, and how much of its ceiling is spent. They sit
- * above the services because they are what somebody came to read. */
-.facts-row.head {
-  gap:14px 28px; padding:14px 16px; margin:12px 0 2px;
-  border-radius:var(--r-s); background:var(--sunken);
-}
-.facts-row.head .figure { font-size:15px; }
-.fact.quota { min-width:190px; gap:5px; }
-.fact.quota .figure { font-size:25px; }
-
-/* The one drawing on this page. A bar alone is a feeling, so the figure
- * and the two quantities stay beside it: the decision it is read for —
- * does another service fit in here — is taken on the numbers. */
-.bar {
-  height:7px; border-radius:99px; background:rgb(11 13 16 / .09);
-  overflow:hidden; width:100%;
-}
-.bar > span { display:block; height:100%; background:currentColor; border-radius:99px; }
-.bar[data-state="unseen"] { background-image:var(--hatch); }
-
-/* ── the one screen that writes ────────────────────────────────────
- * No script anywhere in this console, so nothing here is greyed out as
- * a choice is made: the rules travel as words beside each type and the
- * validator is what refuses. Which means the fields have to be legible
- * enough to be read, not just filled. */
-form { display:flex; flex-direction:column; gap:16px; margin-top:14px; }
+/* ══ THE SCREENS THAT WRITE ═════════════════════════════════════════
+ * No script anywhere in this console, so nothing is greyed out as a
+ * choice is made: the rules travel as words beside each type and the
+ * validator is what refuses. The fields have to be legible enough to
+ * be read, not just filled. */
+.sereno:not(.screen) { max-width:960px; padding:22px clamp(16px, 3vw, 36px) 56px; display:flex; flex-direction:column; gap:14px; }
+.verdict { border-radius:var(--r); padding:18px 20px; background:var(--panel); border:1px solid var(--line); }
+.verdict .sentence { margin:0; font-size:clamp(17px, 2.4vw, 22px); font-weight:800; letter-spacing:-.03em; line-height:1.15; }
+.subject { margin:0 0 10px; display:flex; align-items:center; gap:11px; flex-wrap:wrap; }
+.subject b { font-size:22px; font-weight:800; letter-spacing:-.035em; }
+.source > h2 { font-size:15px; font-weight:800; }
+form { display:flex; flex-direction:column; gap:16px; }
 .field { display:flex; flex-direction:column; gap:5px; }
-.field > .label { font-size:10.5px; font-weight:700; letter-spacing:.1em;
-                  text-transform:uppercase; opacity:.62; }
+.field > .label { font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); }
 input[type="text"], select {
-  font:inherit; font-size:15px; color:var(--ink);
-  background:var(--panel); border:1px solid var(--line);
-  border-radius:var(--r-s); padding:10px 12px; width:100%;
+  font:inherit; font-size:14.5px; color:var(--ink); background:var(--panel);
+  border:1px solid var(--line); border-radius:var(--r-s); padding:9px 12px; width:100%;
 }
-input[type="text"]:focus-visible, select:focus-visible, .pick:focus-within {
-  outline:2px solid var(--ink); outline-offset:2px;
-}
+input[type="text"]:focus-visible, select:focus-visible, .pick:focus-within { outline:2px solid var(--ink); outline-offset:2px; }
 .hint { margin:0; font-size:11.5px; color:var(--faint); font-family:var(--mono); }
-
-/* The ceiling is picked, not typed: the contract names a plan and never
- * a number, and a row of choices says that better than a text box. */
+.hint.plain { font-family:var(--ui); font-size:13px; color:var(--mid); max-width:80ch; }
+.hint.plain b { color:var(--ink); }
+.hint.plain code { font-family:var(--mono); background:var(--sunken); padding:0 4px; border-radius:4px; }
+.legend li > b { font-size:12.5px; }
 .picks { display:flex; flex-wrap:wrap; gap:8px; }
 .pick { position:relative; }
 .pick input { position:absolute; inset:0; opacity:0; margin:0; cursor:pointer; }
-.pick span {
-  display:block; padding:9px 15px; border-radius:99px; font-size:14px; font-weight:600;
-  background:var(--sunken); color:var(--mid); border:1px solid transparent;
-}
-.pick input:checked + span { background:var(--fine-bg); color:var(--fine-ink);
-                             border-color:currentColor; }
-
-.rows { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
-.row {
-  border:1px solid var(--line); border-radius:var(--r-s); padding:13px 14px 15px;
-  margin:0; display:flex; flex-direction:column; gap:10px; background:var(--panel);
-}
-.row > legend { font-size:11px; font-weight:700; letter-spacing:.08em;
-                text-transform:uppercase; opacity:.62; padding:0 5px; }
-.row > legend i { font-style:normal; font-weight:500; letter-spacing:0;
-                  text-transform:none; opacity:.75; }
+.pick span { display:block; padding:8px 14px; border-radius:99px; font-size:13.5px; font-weight:600;
+             background:var(--sunken); color:var(--mid); border:1px solid transparent; }
+.pick input:checked + span { background:var(--ink); color:var(--paper); }
+.rows { display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); }
+table.rows { display:table; }
+.row { border:1px solid var(--line); border-radius:var(--r-s); padding:13px 14px 15px; margin:0;
+       display:flex; flex-direction:column; gap:10px; background:var(--panel); }
+.row > legend { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); padding:0 5px; }
+.row > legend i { font-style:normal; font-weight:500; letter-spacing:0; text-transform:none; }
+.row[data-existing] { background:var(--sunken); }
 .legend li { align-items:baseline; }
-button.act { font:inherit; font-weight:700; cursor:pointer; align-self:flex-start; }
-
-/* The contract itself, shown before it is written and after. It is the
- * thing that gets committed, so it is not hidden behind a summary. */
-.contract {
-  margin:12px 0; padding:14px 16px; border-radius:var(--r-s);
-  background:var(--sunken); font-size:12.5px; line-height:1.55;
-  overflow-x:auto; white-space:pre;
-}
-pre.why { margin:10px 0 0; font-family:var(--mono); font-size:12px;
-          white-space:pre-wrap; color:inherit; }
-
-/* What the person actually changed, before the machinery's own list of
- * derived files. Two lines of YAML is what they did; which of six
- * generated manifests that touches is true and second. */
-.diff { margin:12px 0 0; border-radius:var(--r-s); overflow-x:auto;
-        background:var(--sunken); padding:10px 0; font-size:12.5px; line-height:1.6; }
+button.act { align-self:flex-start; }
+.contract { margin:0; padding:14px 16px; border-radius:var(--r-s); background:var(--sunken);
+            font-size:12.5px; line-height:1.55; overflow-x:auto; white-space:pre; }
+pre.why { margin:0; font-family:var(--mono); font-size:12px; white-space:pre-wrap; color:inherit; }
+.diff { margin:0; border-radius:var(--r-s); overflow-x:auto; background:var(--sunken); padding:10px 0;
+        font-size:12.5px; line-height:1.6; }
 .dl { padding:0 16px; white-space:pre; }
 .dl[data-d="add"]  { background:var(--fine-bg);  color:var(--fine-ink); }
 .dl[data-d="del"]  { background:var(--wrong-bg); color:var(--wrong-ink); }
 .dl[data-d="at"]   { color:var(--faint); font-size:11px; padding-top:5px; }
 .dl[data-d="same"] { color:var(--mid); }
-/* A row already in the contract reads as given, not as blank space to
- * fill: on this screen the rows that are shown are the ones that live. */
-.row[data-existing] { background:var(--sunken); }
-/* The way in to the edit sits on the organization's own screen, pushed
- * to the end of the line: it is available, and it is not the thing you
- * came to read. */
-.subject .edit { margin-left:auto; }
+ol.left { margin:0; padding-left:22px; display:flex; flex-direction:column; gap:12px; }
+ol.left li { font-size:13px; }
+ol.left li::marker { font-weight:700; color:var(--faint); font-size:11px; }
+code.cmd { display:block; background:var(--sunken); border-radius:var(--r-s); padding:10px 13px;
+           font-size:12.5px; overflow-x:auto; white-space:pre; margin-bottom:5px; }
+ol.left .note { color:var(--mid); font-size:12.5px; }
 
-/* The one thing this screen can DO, and it sits between the projects
- * and everything else: available where somebody is already looking, and
- * not competing with what they came to read. */
-.doing{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:4px 0 2px; }
-.doing .tiny{ font-size:12px; color:var(--faint); }
-.doing .act{ background:var(--ink); color:var(--paper); border-color:var(--ink);
-             font-weight:700; }
-.tail.repos li{ gap:10px; }
-.tail.repos .rest{ color:var(--faint); font-size:12px; }
-
-/* What is left for a person, as commands ready to paste. Numbered
- * because they are a sequence and the order is load-bearing: the commit
- * before the sync, the sync before the repository exists. */
-ol.left{ margin:12px 0 0; padding-left:22px; display:flex; flex-direction:column; gap:12px; }
-ol.left li{ font-size:13px; }
-ol.left li::marker{ font-weight:700; color:var(--faint); font-size:11px; }
-code.cmd{ display:block; background:var(--sunken); border-radius:var(--r-s);
-          padding:10px 13px; font-size:12.5px; overflow-x:auto; white-space:pre;
-          margin-bottom:5px; }
-ol.left .note{ color:var(--mid); font-size:12.5px; }
-
-/* The language's own colour, the one GitHub paints its dots with. Not a
- * logo: every one of those is a trademark with a usage policy, and this
- * product does not redistribute somebody else's mark. A language nobody
- * could measure gets no dot at all — an absent mark reads as «no
- * language», a grey one reads as a language that happens to be grey. */
-.srv .dot{ width:8px; height:8px; border-radius:99px; display:inline-block;
-           margin-right:5px; vertical-align:baseline;
-           box-shadow:0 0 0 1px rgb(11 13 16 / .12) inset; }
-
-
-/* ══ THE PANEL ═══════════════════════════════════════════════════════
- * Until 2026-09-14 this screen was one section per command, stacked, in
- * the order the commands were written — the shape of the DOCUMENT. A
- * panel has a shape of its own: a bar you read in one line, a row of
- * indicators that open themselves when they need somebody, and the
- * PROJECTS filling the rest. Everything a source measured is still one
- * click away underneath, because summarising is not replacing.
- */
-.panel { max-width:1180px; display:flex; flex-direction:column; gap:14px; }
-
-/* The bar: the whole instance in one line, and the one thing you can do. */
-.bar {
-  display:flex; align-items:center; gap:14px; flex-wrap:wrap;
-  background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
-  padding:13px 16px; box-shadow:var(--shadow); margin:0;
+/* ══ SMALL SCREENS ══════════════════════════════════════════════════ */
+@media (max-width: 880px) {
+  .console { grid-template-columns:1fr; }
+  .side { position:static; height:auto; flex-direction:row; align-items:center; flex-wrap:wrap;
+          border-right:0; border-bottom:1px solid var(--line); padding:10px 12px; gap:8px; }
+  .menu { flex-direction:row; overflow-x:auto; flex:1; min-width:0; scrollbar-width:none; }
+  .menu a { white-space:nowrap; padding:7px 9px; gap:7px; }
+  .side-foot { margin-top:0; margin-left:auto; flex-direction:row; align-items:center; }
+  .measured { display:none; }
+  .top .actions { margin-left:0; }
 }
-.bar .mark { font-weight:800; letter-spacing:-.04em; font-size:17px; }
-.bar .who { font-size:19px; font-weight:800; letter-spacing:-.035em; }
-.bar .sentence { margin:0; flex:1; min-width:14ch; font-size:14.5px; color:var(--mid); }
-.bar > .act:last-child { margin-left:auto; background:var(--ink); color:var(--paper);
-                         border-color:var(--ink); font-weight:700; }
-.bar[data-state="wrong"]     .sentence { color:var(--wrong-ink); font-weight:600; }
-.bar[data-state="attention"] .sentence { color:var(--attention-ink); font-weight:600; }
-.bar[data-state="unseen"]    .sentence { color:var(--unseen-ink); font-weight:600; }
-
-/* The indicators. A line each, and OPEN ALREADY when they are not fine:
- * the order is the alarm, made structural. `<details>` and not a script,
- * because this console has never served one. */
-.vitals { display:grid; gap:8px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); }
-.vital {
-  background:var(--panel); border:1px solid var(--line); border-radius:var(--r-s);
-  padding:0; overflow:hidden;
+@media (max-width: 560px) {
+  .grid { grid-template-columns:1fr; }
+  table.rows { display:block; overflow-x:auto; white-space:nowrap; }
+  .strip { grid-template-columns:repeat(2, 1fr); }
 }
-.vital > details > summary {
-  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-  padding:11px 14px; cursor:pointer; list-style:none; font-size:13px;
-}
-.vital summary::-webkit-details-marker { display:none; }
-.vital summary::after { content:"+"; margin-left:auto; color:var(--faint);
-                        font-size:15px; line-height:1; }
-.vital details[open] > summary::after { content:"−"; }
-.vital summary > b { font-weight:700; letter-spacing:-.01em; }
-.vital summary .fig { color:var(--faint); font-family:var(--mono); font-size:11.5px; }
-.vital summary .age { margin:0; font-size:10px; }
-.vital summary .chip { font-size:0; padding:0; width:9px; height:9px; border-radius:99px;
-                       box-shadow:none; }
-.vital summary .chip::before { display:none; }
-.vital:has(details[open]) { grid-column:1 / -1; }
-.fold > summary { cursor:pointer; list-style:none; font-size:12px; color:var(--faint);
-                  padding:11px 0 0; margin-top:11px; border-top:1px solid var(--line); }
-.fold > summary::after { content:"+"; margin-left:6px; }
-.fold[open] > summary::after { content:"−"; }
-.vital-body { padding:0 14px 14px; border-top:1px solid var(--line); }
-.vital-body .age { margin-top:10px; }
-/* Inside an indicator, the old panel keeps its own furniture but loses
- * the outer card: two borders around one thing reads as two things. */
-.vital-body > .source, .vital-body .tiles { margin-top:10px; }
-
-/* The projects: the body of the screen, and what somebody came for. */
-.projects {
-  background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
-  padding:16px 18px 18px; box-shadow:var(--shadow);
-}
-.projects > h2 { font-size:11px; font-weight:700; letter-spacing:.12em;
-                 text-transform:uppercase; color:var(--faint); margin-bottom:12px; }
-.projects > .grid { display:grid; gap:12px;
-                    grid-template-columns:repeat(auto-fill,minmax(232px,1fr)); }
-.proj {
-  border:1px solid var(--line); border-radius:var(--r-s); padding:14px 15px;
-  display:flex; flex-direction:column; gap:9px; background:var(--panel);
-  transition:box-shadow .16s ease, border-color .16s ease;
-}
-.proj:hover { box-shadow:var(--shadow); border-color:rgb(11 13 16 / .18); }
-.proj > h3 { font-size:17px; font-weight:800; letter-spacing:-.035em; }
-.proj > h3 > a { color:inherit; text-decoration:none; }
-.proj > h3 > a::after { content:""; position:absolute; inset:0; }
-.proj { position:relative; }
-.proj .host { margin:0; font-size:11.5px; color:var(--faint); word-break:break-all; }
-.proj .meta { margin:0; font-size:11.5px; color:var(--faint); }
-.proj .why  { margin:0; font-size:12px; }
-.proj .facts-row { gap:12px 18px; }
-.proj .fact .figure { font-size:19px; }
-.proj .dots { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
-.proj .dots .n { font-size:11px; color:var(--faint); font-family:var(--mono);
-                 margin-left:2px; }
-.proj .dots .dot { width:9px; height:9px; border-radius:99px; display:inline-block;
-                   box-shadow:0 0 0 1px rgb(11 13 16 / .12) inset; }
-.proj .dots .dot[data-plain] { background:var(--sunken); }
-.proj .push { margin:0; display:flex; align-items:center; gap:4px; flex-wrap:wrap;
-              font-size:11px; }
-.proj .push .mono { color:var(--faint); margin-right:3px; }
-.proj .push .link { padding:1px 5px; font-size:9.5px; border-radius:4px; }
-/* A project that is not fine is not a different colour: it is a card
- * with a line of its own along the top. Colour is for the chips, and a
- * grid of tinted rectangles is a grid nobody reads. */
-.proj[data-state]:not([data-state="fine"]) { box-shadow:inset 0 3px 0 0 currentColor; }
-
-@media (max-width:640px){
-  .bar > .act:last-child { margin-left:0; }
-  .projects > .grid { grid-template-columns:1fr; }
-}
-/* An indicator that opens does NOT turn the panel back into a scroll:
- * its detail scrolls inside its own box. That is the difference between
- * a dashboard and a document, and it was the operator's whole point. */
-.vital-body { max-height:340px; overflow-y:auto; }
-/* «Nothing» on a card reads as «this never deployed». It is not the
- * same fact, so the card says which window it looked in. */
-.proj .push.none { color:var(--faint); font-style:italic; }
-
-/* ── the panel corrects the skin's own default ─────────────────────
- * `[data-state="fine"]` and its siblings set a background AND a colour
- * on ANY element carrying the attribute. That was right when a state
- * was worn by a chip or a tile; on a panel it tints every card, and a
- * grid of pale rectangles is the «Windows 8» the operator rejected on
- * the very first pass. These rules are more specific and win.
- *
- * So on this screen the surface stays neutral and the state is a line
- * along the top of the card. Colour is for the chips and the links —
- * the small things you look AT — and never for the ground under them. */
-.panel .source, .panel .proj, .panel .vital, .panel .projects {
-  background:var(--panel); color:var(--ink);
-}
-.panel .proj[data-state="wrong"]     { box-shadow:inset 0 3px 0 0 var(--wrong-ink); }
-.panel .proj[data-state="attention"] { box-shadow:inset 0 3px 0 0 var(--attention-ink); }
-.panel .proj[data-state="unseen"]    { box-shadow:inset 0 3px 0 0 var(--unseen-ink);
-                                       background-image:none; }
-.panel .proj[data-state="fine"]      { box-shadow:none; }
-.panel .proj:hover { box-shadow:var(--shadow); }
-
-/* The indicator's dot is the state at a glance, so it takes the INK of
- * the state and not its pale ground: a nine-pixel mint dot is a dot
- * nobody sees. */
-.vital summary .chip { background:currentColor; }
-.vital[data-state="unseen"] summary .chip { background-image:var(--hatch);
-                                            border-radius:1px; }
-
-/* One frame per thing. The projects section held a border and a shadow
- * around cards that have their own, and two borders around one thing
- * reads as two things. */
-.panel .projects { border:0; box-shadow:none; padding:2px 0 0; }
-.panel .projects > h2 { margin-bottom:4px; }
-.panel .projects > .age { margin:0 0 12px; }

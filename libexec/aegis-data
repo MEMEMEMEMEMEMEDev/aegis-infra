@@ -2700,6 +2700,73 @@ def _owes_a_backup(org):
             "bucket": bool((d.get("almacenamiento") or {}).get("bucket"))}
 
 
+def _remote_status_step(org, owed, steps, inventory, cad_s):
+    """ONE organization's copy, recorded as one step and NOT finished:
+    the caller decides whether the document is about one organization
+    or about all of them, and the step is the same either way."""
+    holds = bool(owed["databases"]) or owed["bucket"]
+    data = {"holds": holds, "databases": owed["databases"], "bucket": owed["bucket"],
+            "cadence_seconds": cad_s}
+    if inventory is None:
+        # A destination that cannot be reached is NOT an organization
+        # with no backup. Reporting it as missing sends somebody to
+        # rebuild a copy that is probably right there, behind a network
+        # that is down.
+        steps.not_evaluable(f"backup:{org}", why="destination-unreachable",
+                            detail=inventory_error[0], holds=holds)
+        return
+    _cfg, bundles, orphans = inventory
+    items = bundles.get(org) or []
+    epochs = [e for e in (remote_epoch(o["modificado"]) for o in items) if e]
+    data.update({"copies": len(items),
+                 "bytes": sum(o["bytes"] for o in items if o["bytes"] >= 0)})
+    if not holds:
+        # «according to the CONTRACT», and the word is load-bearing: a
+        # claim that no service declares is invisible from here on
+        # purpose, because this command reads contracts and saying so
+        # is what makes the gap findable. `aegis tenant show` is the
+        # one holding the other instrument.
+        steps.already(f"backup:{org}", note="no service of the CONTRACT holds "
+                      "state: there is nothing a copy would carry", **data)
+        return
+    if not items:
+        steps.wrong(f"backup:{org}", why="no-copy-at-the-destination", **data)
+        return
+    if not epochs:
+        # There ARE objects and none of them has a readable date. That
+        # is not freshness: it is a copy whose age nobody can state.
+        steps.not_evaluable(f"backup:{org}", why="no-readable-date", **data)
+        return
+    age = int(time.time()) - int(max(epochs))
+    data["age_seconds"] = age
+    data["age_hours"] = round(age / 3600.0, 1)
+    data["newest_timestamp_seconds"] = int(max(epochs))
+    mine = [c for c in orphans if c.split("/", 1)[0].lstrip("org-") == org
+            or c.startswith(f"org-{org}/")]
+    if mine:
+        data["without_manifest"] = mine
+    # LATE, and against the clock this instance actually keeps. One
+    # missed run is a machine that was off; two is a mechanism that
+    # stopped.
+    late = cad_s > 0 and age > 2 * cad_s
+    (steps.wrong if (late or mine) else steps.already)(
+        f"backup:{org}", late=late, **data)
+
+
+inventory_error = [None]
+
+
+def _remote_inventory_once():
+    """The destination listed ONCE for however many organizations are
+    asked about. None when it could not be reached, and the reason is
+    kept beside so that every step can carry it."""
+    try:
+        return remote_inventory()
+    except cli.CouldNotEvaluate as e:
+        inventory_error[0] = str(e)
+        return None
+
+
 def remote_status_document(org, steps):
     """The freshness of ONE organization's copy, as the document.
 
@@ -2715,60 +2782,31 @@ def remote_status_document(org, steps):
         print(f"aegis: no organization named {org!r} in the contracts "
               f"(`aegis org list`)", file=sys.stderr)
         sys.exit(outcomes.RC_USAGE)
-
     cad_text, _src = cadence_current()
     cad_s = parse_duration(cad_text) or 0
-    holds = bool(owed["databases"]) or owed["bucket"]
+    _remote_status_step(org, owed, steps, _remote_inventory_once(), cad_s)
+    steps.finish()
 
-    try:
-        _cfg, bundles, orphans = remote_inventory()
-    except cli.CouldNotEvaluate as e:
-        # A destination that cannot be reached is NOT an organization
-        # with no backup. Reporting it as missing sends somebody to
-        # rebuild a copy that is probably right there, behind a network
-        # that is down.
-        steps.not_evaluable(f"backup:{org}", why="destination-unreachable",
-                            detail=str(e), holds=holds)
-        steps.finish()
 
-    items = bundles.get(org) or []
-    epochs = [e for e in (remote_epoch(o["modificado"]) for o in items) if e]
-    data = {"holds": holds, "databases": owed["databases"], "bucket": owed["bucket"],
-            "copies": len(items), "cadence_seconds": cad_s,
-            "bytes": sum(o["bytes"] for o in items if o["bytes"] >= 0)}
+def remote_status_all(steps):
+    """Every organization the contracts declare, one step each, out of
+    ONE listing of the destination. It is what the console's Storage
+    screen reads: the same step `--org` emits, for all of them, so that
+    a screen about all the copies does not have to ask N times.
 
-    if not holds:
-        # «according to the CONTRACT», and the word is load-bearing: a
-        # claim that no service declares is invisible from here on
-        # purpose, because this command reads contracts and saying so
-        # is what makes the gap findable. `aegis tenant show` is the
-        # one holding the other instrument.
-        steps.already(f"backup:{org}", note="no service of the CONTRACT holds "
-                      "state: there is nothing a copy would carry", **data)
-        steps.finish()
-    if not items:
-        steps.wrong(f"backup:{org}", why="no-copy-at-the-destination", **data)
-        steps.finish()
-    if not epochs:
-        # There ARE objects and none of them has a readable date. That
-        # is not freshness: it is a copy whose age nobody can state.
-        steps.not_evaluable(f"backup:{org}", why="no-readable-date", **data)
-        steps.finish()
-
-    age = int(time.time()) - int(max(epochs))
-    data["age_seconds"] = age
-    data["age_hours"] = round(age / 3600.0, 1)
-    data["newest_timestamp_seconds"] = int(max(epochs))
-    mine = [c for c in orphans if c.split("/", 1)[0].lstrip("org-") == org
-            or c.startswith(f"org-{org}/")]
-    if mine:
-        data["without_manifest"] = mine
-    # LATE, and against the clock this instance actually keeps. One
-    # missed run is a machine that was off; two is a mechanism that
-    # stopped.
-    late = cad_s > 0 and age > 2 * cad_s
-    (steps.wrong if (late or mine) else steps.already)(
-        f"backup:{org}", late=late, **data)
+    A tree with no contracts is not a destination with nothing on it:
+    it is a document with no steps, which the house reads as rc 2.
+    """
+    names = sorted(f[:-5] for f in os.listdir(ORGS_DIR) if f.endswith(".yaml")
+                   and not f.startswith((".", "_"))) if os.path.isdir(ORGS_DIR) else []
+    cad_text, _src = cadence_current()
+    cad_s = parse_duration(cad_text) or 0
+    inventory = _remote_inventory_once() if names else None
+    for org in names:
+        owed = _owes_a_backup(org)
+        if owed is None:
+            continue
+        _remote_status_step(org, owed, steps, inventory, cad_s)
     steps.finish()
 
 
@@ -2838,11 +2876,12 @@ def remote_main(a):
             # of it would be a change nobody asked for— and the question
             # «how is THIS organization's copy» gets the shape every
             # other command in the house answers in.
-            if not a.org:
-                print("aegis: `remote status --json` answers about ONE "
-                      "organization: add --org NAME", file=sys.stderr)
-                return outcomes.RC_USAGE
             steps = outcomes.Steps(json_mode=a.json_mode)
+            if not a.org:
+                # `--json` with no organization: all of them, out of
+                # one listing. `--org` without `--json` keeps answering
+                # as the document too, as it did.
+                return remote_status_all(steps)
             return remote_status_document(a.org, steps)
         return remote_status()
     return remote_cadence(a.cadence)
