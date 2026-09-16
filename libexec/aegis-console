@@ -349,7 +349,8 @@ def listing():
 # `data remote status` with no --org answers about EVERY organization
 # in one listing of the destination; it is what the Storage page reads.
 SOURCES = ("org list", "repos list", "traffic show", "capacity show",
-           "builds show --last 60", "check", "edge check", "data remote status")
+           "builds show --last 60", "check", "edge check", "data remote status",
+           "quota list")
 
 
 # AND WHAT ONE ORGANIZATION'S SCREEN READS. Three commands, each one
@@ -551,6 +552,35 @@ def finish_contract(path):
     return done
 
 
+def _plan_args(plan):
+    out = []
+    for k, v in (plan.get("numeros") or {}).items():
+        if v:
+            out += ["--set", f"{k}={v}"]
+    if plan.get("descripcion"):
+        out += ["--describe", plan["descripcion"]]
+    return out
+
+
+def write_plan(plan):
+    """A NEW plan into plans.yaml, through `aegis quota add`: the one
+    program that validates a plan the way the generator will read it.
+    Returns (doc, None) or (None, why it could not be asked)."""
+    try:
+        return cli.run_json("quota", "add", plan.get("nombre") or "", "--from",
+                            plan.get("desde") or "", *_plan_args(plan))[1], None
+    except cli.CouldNotEvaluate as e:
+        return None, f"the plan could not be written: {e}"
+
+
+def change_plan(plan):
+    """A plan of your own, changed, through `aegis quota set`."""
+    try:
+        return cli.run_json("quota", "set", plan.get("nombre") or "", *_plan_args(plan))[1], None
+    except cli.CouldNotEvaluate as e:
+        return None, f"the plan could not be changed: {e}"
+
+
 def _organizations(readings):
     """Who the console will draw a page for: the names the contracts
     declare, taken from the reading already on the screen. Derived and
@@ -590,20 +620,21 @@ def _read_instance(sources=SOURCES):
     return readings
 
 
-PAGES = ("deployments", "domains", "traffic", "storage", "security", "machine", "health")
+PAGES = ("deployments", "domains", "traffic", "storage", "plans", "security", "machine",
+         "health")
 
 
-def _back(query, readings):
-    """Where «read it again» sends somebody back to. Only a path this
-    console itself serves: the value comes off a URL anybody can type,
-    and a redirect built out of it unread is an open door."""
+def _back(query, readings, default="/"):
+    """Where a link sends somebody back to. Only a path this console
+    itself serves: the value comes off a URL anybody can type, and a
+    redirect built out of it unread is an open door."""
     asked = urllib.parse.parse_qs(query).get("back", [""])[0]
-    if asked == "/" or asked.lstrip("/") in PAGES:
+    if asked == "/" or asked.lstrip("/") in PAGES or asked == "/new":
         return asked
-    m = re.fullmatch(r"/projects/([^/]+)", asked)
+    m = re.fullmatch(r"/projects/([^/]+)(/edit)?", asked)
     if m and urllib.parse.unquote(m.group(1)) in _organizations(readings):
         return asked
-    return "/"
+    return default
 
 
 def serve(port):
@@ -641,6 +672,24 @@ def serve(port):
 
     def read_org(name):
         return _read_instance(tuple(s.format(org=name) for s in ORG_SOURCES))
+
+    def _listing():
+        """The plans, asked of the command every time a form needs them,
+        for the same reason the schema is."""
+        try:
+            return cli.run_json("quota", "list")[1]
+        except cli.CouldNotEvaluate:
+            return {"steps": [], "rc": 2}
+
+    def _refresh(prefixes):
+        """Re-read only the sources a write could have changed: a plan
+        written changes the plans and what fits on the machine, and
+        nothing else. The rest keeps the time it was read at."""
+        fresh = _read_instance(tuple(s for s in SOURCES if s.split()[0] in prefixes))
+        with lock:
+            kept = [r for r in state["readings"] if r["comando"].split()[0] not in prefixes]
+            state["readings"] = kept + fresh
+            state["orgs"].clear()
 
     class Handler(http.server.BaseHTTPRequestHandler):
         # The default logs one line per request to stderr, which on a
@@ -732,6 +781,24 @@ def serve(port):
             if path == "/new/write":
                 self._write(fields)
                 return
+            if path == "/plans/new":
+                self._plan_preview(fields)
+                return
+            if path == "/plans/write":
+                self._plan_write(fields)
+                return
+            m = re.fullmatch(r"/plans/([^/]+)/(edit|write)", path)
+            if m:
+                name = urllib.parse.unquote(m.group(1))
+                plans = drawing._plans_in(_listing())
+                if name not in plans:
+                    self._send(404, "no plan by that name\n", "text/plain; charset=utf-8")
+                    return
+                if m.group(2) == "edit":
+                    self._plan_preview(fields, editing=name)
+                else:
+                    self._plan_write(fields, editing=name)
+                return
             m = re.fullmatch(r"/projects/([^/]+)/(edit|write)", path)
             if m:
                 # The name off a URL is matched against the contracts
@@ -752,6 +819,49 @@ def serve(port):
         def _current(self, org):
             """The contract this screen is about to change, whole."""
             return read_contract(org)
+
+        def _back_of(self, fields):
+            return _back("back=" + urllib.parse.quote(fields.get("back") or "", safe="/"),
+                         self._instance(), default="/plans")
+
+        def _plan_preview(self, fields, editing=None):
+            plan = drawing.quota_from_form(fields)
+            back = self._back_of(fields)
+            listing = _listing()
+            before = None
+            if editing:
+                plan["nombre"] = editing
+                before = (drawing._plans_in(listing).get(editing) or {}).get("numeros")
+            missing = [k for k, _l, _h in drawing.QUOTA_FIELDS if not plan["numeros"].get(k)]
+            if not plan["nombre"] or missing:
+                why = ("the plan needs a name" if not plan["nombre"] else
+                       f"every one of the seven numbers is needed; missing: {', '.join(missing)}")
+                self._send(200, self._wrap(drawing.render_quota_form(
+                    listing, token, base=plan.get("desde"), editing=editing, filled=fields,
+                    problem=why, back=back), "a plan"))
+                return
+            capacity = next((r.get("documento") for r in self._instance()
+                             if (r.get("comando") or "").startswith("capacity show")), None)
+            self._send(200, self._wrap(drawing.render_quota_preview(
+                plan, token, capacity=capacity, editing=editing, before=before, back=back),
+                "a plan"))
+
+        def _plan_write(self, fields, editing=None):
+            plan = drawing.quota_from_form(fields)
+            back = self._back_of(fields)
+            if editing:
+                plan["nombre"] = editing
+                doc, bad = change_plan(plan)
+            else:
+                doc, bad = write_plan(plan)
+            if bad:
+                self._send(200, self._wrap(drawing.render_quota_form(
+                    _listing(), token, base=plan.get("desde"), editing=editing,
+                    filled=fields, problem=bad, back=back), "a plan"))
+                return
+            _refresh(("quota", "capacity"))
+            self._send(200, self._wrap(drawing.render_quota_written(
+                doc, plan["nombre"], back=back, editing=bool(editing)), "a plan"))
 
         def _preview(self, fields, org=None):
             """Build it, validate it, and draw what would change. NOTHING
@@ -894,6 +1004,34 @@ def serve(port):
                 self._send(200, self._wrap(drawing.render_form(_schema(), token, filled),
                                            "a new project"), head_only=head_only)
                 return
+            if path == "/plans/new":
+                q = urllib.parse.parse_qs(query)
+                base = q.get("from", [""])[0]
+                back = _back("back=" + q.get("back", [""])[0], self._instance(), default="/plans")
+                listing = _listing()
+                if base and base in drawing._plans_in(listing):
+                    page = drawing.render_quota_form(listing, token, base=base, back=back)
+                else:
+                    page = drawing.render_quota_start(listing, token, back=back)
+                self._send(200, self._wrap(page, "a new plan"), head_only=head_only)
+                return
+            m = re.fullmatch(r"/plans/([^/]+)/edit", path)
+            if m:
+                name = urllib.parse.unquote(m.group(1))
+                listing = _listing()
+                plans = drawing._plans_in(listing)
+                if name not in plans:
+                    self._send(404, "no plan by that name\n", "text/plain; charset=utf-8",
+                               head_only)
+                    return
+                if plans[name].get("de_serie"):
+                    # A shipped plan keeps its numbers: the way to «change»
+                    # it is a plan of your own that starts from it.
+                    self._redirect(f"/plans/new?from={urllib.parse.quote(name)}")
+                    return
+                self._send(200, self._wrap(drawing.render_quota_form(
+                    listing, token, editing=name), f"{name} · plan"), head_only=head_only)
+                return
             # The old address of a project. Bookmarks are kept working;
             # nothing is served at the old one.
             m = re.fullmatch(r"/org/([^/]+)(/edit)?", path)
@@ -989,6 +1127,8 @@ def _static_links(html, subjects=()):
             return 'href="index.html"'
         if href.startswith("/new"):
             return 'href="new.html"'
+        if href.startswith("/plans/new") or re.fullmatch(r"/plans/[^/]+/edit", href):
+            return 'href="new-plan.html"'
         mm = re.fullmatch(r"/projects/([^/#?]+)(/edit)?(#.*)?", href)
         if mm:
             if mm.group(1) not in subjects:
@@ -1045,6 +1185,11 @@ def draw(directory, names):
         schema = {"steps": [], "rc": 2}
     put("new.html", drawing.wrap(drawing.render_form(schema, "static-preview"),
                                  "a new project", instance=readings))
+    listing = next((r.get("documento") for r in readings
+                    if (r.get("comando") or "").startswith("quota list")), None)
+    if listing is not None:
+        put("new-plan.html", drawing.wrap(drawing.render_quota_start(listing, "static-preview"),
+                                          "a new plan", instance=readings))
     for f in written:
         print(f"  {os.path.join(directory, f)}")
     print(f"\n{len(written)} screen(s) drawn from {len(names)} case(s): "

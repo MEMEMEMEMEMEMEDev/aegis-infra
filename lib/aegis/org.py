@@ -2314,8 +2314,16 @@ def describe_contract(steps):
               f"  {grey}(plans.yaml){off}")
         print(f"  tamano    {', '.join(sizes) or grey + 'none declared' + off}"
               f"  {grey}(plans.yaml, default {DEFAULT_SIZE}){off}")
+        # WORDS AND NUMBERS TRAVEL WITH THE OPTIONS. A form that offers
+        # four bare words asks somebody to pick a ceiling they cannot
+        # see; the sentence each plan carries (`descripcion:`) and its
+        # seven numbers are what a person actually chooses by. The
+        # contract still names the word and never a number.
         add("cuota", ALREADY if quotas else WRONG, opciones=quotas, origen="plans.yaml",
-            nota="the contract names a plan and never a number")
+            nota="the contract names a plan and never a number",
+            descripciones={q: (plans["cuota"][q] or {}).get("descripcion") for q in quotas},
+            numeros={q: {k: str(v) for k, v in (plans["cuota"][q] or {}).items()
+                         if k in QUOTA_KEYS} for q in quotas})
         add("tamano", ALREADY if sizes else WRONG, opciones=sizes, origen="plans.yaml", por_omision=DEFAULT_SIZE,
             solo_para=sorted(TYPES - PROVIDED))
         ai_plans = sorted(plans.get("ai") or {})

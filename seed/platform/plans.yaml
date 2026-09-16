@@ -12,6 +12,16 @@
 # The plans are STEPS, not a continuum. A continuum invites negotiating
 # every case ("what if we give them 2.5 CPU?") and six months later
 # there are thirty different quotas nobody can reason about as a whole.
+#
+# A STEP OF YOUR OWN IS STILL A STEP. `aegis quota add <name> --from
+# <plan>` writes a new named plan into the `cuota:` section below, with
+# the same seven numbers and the same validation the shipped ones get,
+# and a contract then names it like any other. What never happens is a
+# number in a contract. The plans aegis ships keep their numbers; the
+# ones you add are yours to change (`aegis quota set`) or remove.
+#
+# `descripcion:` is the sentence a person picks a plan by. It is words,
+# not numbers, so it can be set on any plan, shipped or not.
 
 anfitrion:
   # THE CEILING OVER EVERY OTHER CEILING: what aegis leaves alone on
@@ -110,6 +120,7 @@ cuota:
   # tight: a quota is not an aspiration, it is the ceiling that keeps a
   # bug in here from running the neighbor over.
   pequena:
+    descripcion: "A static front and at most one small backend. The tight one: a quota is a ceiling, not an aspiration."
     requests.cpu: "2"
     requests.memory: 2Gi
     limits.cpu: "4"
@@ -124,6 +135,7 @@ cuota:
 
   # Front end + API + one database. The default step for a real product.
   mediana:
+    descripcion: "Front end, API and one database. The usual step for a real product."
     requests.cpu: "4"
     requests.memory: 6Gi
     limits.cpu: "8"
@@ -133,6 +145,7 @@ cuota:
     requests.storage: 50Gi
 
   grande:
+    descripcion: "Several services that really work: connections held, caches in memory, uploads. The biggest step aegis ships."
     requests.cpu: "8"
     requests.memory: 12Gi
     limits.cpu: "16"

@@ -96,10 +96,18 @@ PAGES = (
     ("domains", "Domains", "/domains", ("edge check",)),
     ("traffic", "Traffic", "/traffic", ("traffic show",)),
     ("storage", "Storage", "/storage", ("data remote status",)),
+    ("plans", "Plans", "/plans", ("quota list",)),
     ("security", "Security", "/security", ()),
     ("machine", "Machine", "/machine", ("capacity show",)),
     ("health", "Health", "/health", ("check",)),
 )
+
+# The menu in three groups, the way the consoles people know are laid
+# out: what you build and ship, what it does while it runs, and the
+# platform under it. A flat list of nine is a list somebody scans twice.
+MENU = (("Build & ship", ("projects", "deployments", "domains")),
+        ("Run", ("traffic", "storage", "plans")),
+        ("Platform", ("security", "machine", "health")))
 
 LEAD = {
     "projects": "Each project is one of your applications: its services, its domain, "
@@ -125,6 +133,15 @@ LEAD = {
     "health": "The round: the whole platform measured against what the contracts "
               "declare, section by section. This is where every finding lives, "
               "including the ones the other screens summarise.",
+    "plans": "A plan is the ceiling a project may take: what it reserves, what it may "
+             "burst to, how many pods and disks. A contract names a plan and never a "
+             "number, so changing the machine is one file and not thirty contracts. "
+             "The plans aegis ships keep their numbers; the ones you add are yours.",
+}
+QUOTA_LABEL = {
+    "requests.cpu": "CPU reserved", "requests.memory": "memory reserved",
+    "limits.cpu": "CPU ceiling", "limits.memory": "memory ceiling",
+    "pods": "pods", "persistentvolumeclaims": "disks", "requests.storage": "disk",
 }
 
 
@@ -179,6 +196,7 @@ def _icon(name):
         "rocket": '<path d="M8 1.5c3 2 4 6 3 9H5c-1-3 0-7 3-9z" stroke-linejoin="round"/>'
                   '<path d="M5 10.5 3 13l2.2-.5M11 10.5 13 13l-2.2-.5M8 10.5v3"/>',
         "traffic": '<path d="M2 13V9M6 13V5M10 13V7M14 13V3"/>',
+        "steps": '<path d="M1.5 14h4v-4h4V6h4V2" stroke-linejoin="round"/>',
     }
     body = paths.get(name) or '<circle cx="8" cy="8" r="6"/>'
     return (f'<svg class="ico" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" '
@@ -188,7 +206,7 @@ def _icon(name):
 
 PAGE_ICON = {"projects": "rocket", "deployments": "rocket", "domains": "globe",
              "traffic": "traffic", "storage": "database", "security": "shield",
-             "machine": "chip", "health": "pulse"}
+             "machine": "chip", "health": "pulse", "plans": "steps"}
 
 
 def _pip(state):
@@ -211,6 +229,46 @@ def _bar(pct, state):
     width = max(0, min(100, float(pct or 0)))
     return (f'<div class="bar" data-state="{state}"><span style="width:{width:.0f}%">'
             f'</span></div>')
+
+
+def _cpu_words(millis):
+    try:
+        return f"{float(millis) / 1000:g} CPU"
+    except (TypeError, ValueError):
+        return "?"
+
+
+def _quantity_words(key, value):
+    """A Kubernetes quantity as a person reads it: `2` CPU, `6Gi`, `40`."""
+    from . import quantity
+    try:
+        if key.endswith(".cpu"):
+            return _cpu_words(quantity.cpu(value))
+        if key.endswith(".memory") or key == "requests.storage":
+            return _bytes(quantity.mem(value))
+    except (TypeError, ValueError):
+        return str(value)
+    return str(value)
+
+
+def _plan_words(numbers):
+    """One line for a plan: what it reserves, what it may take."""
+    n = numbers or {}
+    return (f'{_quantity_words("requests.cpu", n.get("requests.cpu"))} · '
+            f'{_quantity_words("requests.memory", n.get("requests.memory"))} reserved · '
+            f'up to {_quantity_words("limits.cpu", n.get("limits.cpu"))} · '
+            f'{_quantity_words("limits.memory", n.get("limits.memory"))} · '
+            f'{n.get("pods", "?")} pods · {n.get("persistentvolumeclaims", "?")} disks · '
+            f'{_quantity_words("requests.storage", n.get("requests.storage"))} of disk')
+
+
+def plans_of(readings):
+    """The plans, by name, out of `quota list`'s document."""
+    out = {}
+    for st in steps_of(reading_for(readings, "quota list")):
+        if st.get("step", "").startswith("plan:"):
+            out[st["step"].split(":", 1)[1]] = st
+    return out
 
 
 def _note(text, state=None):
@@ -517,11 +575,15 @@ def frame(main, readings, active, subject=None):
     is the same on every page so that a person always knows where they
     are — which is most of what a console is for."""
     dots = page_states(readings)
+    by = {k: (label, path) for k, label, path, _f in PAGES}
     items = []
-    for key, label, path, _feeds in PAGES:
-        here = ' class="here"' if key == active else ""
-        items.append(f'<a href="{path}"{here}>{_icon(PAGE_ICON[key])}<span>{_e(label)}</span>'
-                     f'{_pip(dots.get(key))}</a>')
+    for group, keys in MENU:
+        items.append(f'<h4>{_e(group)}</h4>')
+        for key in keys:
+            label, path = by[key]
+            here = ' class="here"' if key == active else ""
+            items.append(f'<a href="{path}"{here}>{_icon(PAGE_ICON[key])}<span>{_e(label)}</span>'
+                         f'{_pip(dots.get(key))}</a>')
     when = _oldest(readings)
     read = (f'instance read {_e(_time(when))}' if when else "instance not read yet")
     return (f'<div class="console">'
@@ -532,7 +594,19 @@ def frame(main, readings, active, subject=None):
             f'{main}</div>')
 
 
-def _top(crumbs, verdict, sentence=None, actions=""):
+def _wheres(readings):
+    """The pages that are not fine, as links beside the sentence: the
+    sentence says something is wrong, this says where to click."""
+    dots = page_states(readings)
+    by = {k: (label, path) for k, label, path, _f in PAGES}
+    bad = [(k, dots[k]) for k, _l, _p, _f in PAGES if dots.get(k) and dots[k] != FINE]
+    if not bad:
+        return ""
+    return ('<p class="wheres">' + "".join(
+        f'<a href="{by[k][1]}">{_pip(st)}{_e(by[k][0])}</a>' for k, st in bad) + '</p>')
+
+
+def _top(crumbs, verdict, sentence=None, actions="", wheres=""):
     trail = []
     for i, (label, href) in enumerate(crumbs):
         if href and i < len(crumbs) - 1:
@@ -541,14 +615,14 @@ def _top(crumbs, verdict, sentence=None, actions=""):
             trail.append(f'<b>{_e(label)}</b>')
     return (f'<header class="top" data-state="{verdict}">'
             f'<p class="crumbs">{"<span>/</span>".join(trail)}</p>'
-            f'<p class="sentence">{_e(sentence or SENTENCE[verdict])}</p>'
+            f'<p class="sentence">{_e(sentence or SENTENCE[verdict])}</p>{wheres}'
             + (f'<div class="actions">{actions}</div>' if actions else "") + '</header>')
 
 
-def _main(view, verdict, crumbs, body, actions="", sentence=None, subject=None):
+def _main(view, verdict, crumbs, body, actions="", sentence=None, subject=None, wheres=""):
     return (f'<main class="sereno screen" data-veredicto="{verdict}" data-view="{_e(view)}"'
             + (f' data-subject="{_e(subject)}"' if subject else "")
-            + f'>{_top(crumbs, verdict, sentence, actions)}'
+            + f'>{_top(crumbs, verdict, sentence, actions, wheres)}'
             + (f'<p class="lead page-lead">{_e(LEAD[view])}</p>' if view in LEAD else "")
             + body + '</main>')
 
@@ -607,7 +681,8 @@ def _project_card(p):
               f'{_e(p["domain"])}</a>' if p["domain"] else
               '<span class="host mono faint">no public domain</span>')
     return (f'<article class="card proj" data-state="{state}">'
-            f'<header><h3><a href="/projects/{_e(name)}">{_e(name)}</a></h3>{_pip(state)}</header>'
+            f'<header><h3><a href="/projects/{_e(name)}">{_e(name)}</a></h3>'
+            f'{_chip(state, STATE_WORD[state])}</header>'
             f'{domain}<div class="pills">{pills}</div>{figs}{deploy}'
             f'<p class="meta">{" · ".join(extras)} · {len(p["services"])} service'
             f'{"s" if len(p["services"]) != 1 else ""}</p></article>')
@@ -641,7 +716,27 @@ def _spread(reading):
     return out
 
 
-def _peek(reading, key, label, path, figure, states):
+def _round_line(readings, key):
+    """What the round adds to a page's dot, said on the page's peek so
+    that a red dot in the menu beside a peek that looks fine is not a
+    riddle: the peek is one reading, the dot is every reading that
+    feeds the page."""
+    check = reading_for(readings, "check")
+    if check is None or key not in ROUND_PAGES:
+        return ""
+    if blind(check):
+        return f'<span class="round">{_pip(UNSEEN)}the round could not look</span>'
+    mine = [st for st in steps_of(check) if st.get("step") in ROUND_PAGES[key]]
+    if not mine:
+        return ""
+    st = worst(states_in(check, mine))
+    bad = [x.get("step") for x in mine if state_of(x) != FINE]
+    if bad:
+        return (f'<span class="round">{_pip(st)}round: {_e(", ".join(bad))}</span>')
+    return f'<span class="round">{_pip(st)}round: {len(mine)} fine</span>'
+
+
+def _peek(reading, key, label, path, figure, states, extra=""):
     """One page, summarised on the overview in a line, a number and the
     spread of its states, and drawn as the SECTION of the reading that
     feeds it: it is that reading's one appearance on this screen, so it
@@ -652,7 +747,7 @@ def _peek(reading, key, label, path, figure, states):
             f'data-rc="{_e(reading.get("rc"))}"{_when(reading)}>'
             f'<a class="cover" href="{path}">{_icon(PAGE_ICON[key])}<b>{_e(label)}</b>'
             f'<span class="fig">{_e(figure)}</span><span class="spread">{_spread(reading)}'
-            f'</span></a>{_age(reading)}</section>')
+            f'</span>{extra}</a>{_age(reading)}</section>')
 
 
 def _peek_figure(key, reading):
@@ -670,11 +765,11 @@ def _peek_figure(key, reading):
         n = next((st.get("hostnames") for st in steps if st.get("step") == "edge"), None)
         missing = sum(1 for st in steps if st.get("step", "").startswith("hostname:"))
         surplus = next((st.get("count") for st in steps if st.get("step") == "surplus-cnames"), 0)
-        out = f'{n} hostnames at the edge' if n is not None else f'{len(steps)} readings'
+        out = f'{n} at the edge' if n is not None else f'{len(steps)} readings'
         if missing:
             out += f' · {missing} missing'
         if surplus:
-            out += f' · {surplus} nobody asked for'
+            out += f' · {surplus} surplus'
         return out
     if key == "traffic":
         total = next((st for st in steps if st.get("step") == "traffic:total"), None)
@@ -687,19 +782,23 @@ def _peek_figure(key, reading):
         copies = [st for st in steps if st.get("step", "").startswith("backup:")]
         holding = [st for st in copies if st.get("holds")]
         ages = [st.get("age_hours") for st in holding if st.get("age_hours") is not None]
-        out = f'{len(holding)} project{"s" if len(holding) != 1 else ""} with data'
+        out = f'{len(holding)} with data'
         if ages:
-            out += f' · newest copy {max(ages):g} h old' if len(ages) == 1 else \
+            out += f' · copy {max(ages):g} h old' if len(ages) == 1 else \
                    f' · oldest copy {max(ages):g} h'
         return out
     if key == "machine":
-        mem = next((st.get("free_human") for st in steps if st.get("step") == "capacity:memory"), None)
+        mem = next((st.get("free") for st in steps if st.get("step") == "capacity:memory"), None)
         fits = [st for st in steps if st.get("step", "").startswith("fits:")]
         room = max((st.get("room") or 0) for st in fits) if fits else None
-        out = f'{mem} free' if mem else f'{len(steps)} readings'
+        out = f'{_bytes(mem)} free' if mem is not None else f'{len(steps)} readings'
         if room is not None:
-            out += f' · room for {room} more'
+            out += f' · fits {room} more'
         return out
+    if key == "plans":
+        plans = [st for st in steps if st.get("step", "").startswith("plan:")]
+        mine = sum(1 for st in plans if not st.get("de_serie"))
+        return (f'{len(plans)} plans' + (f' · {mine} yours' if mine else " · all shipped"))
     return f'{len(steps)} readings'
 
 
@@ -751,7 +850,7 @@ def overview(readings):
     and the detail is one click away, never a scroll."""
     v = verdict_of(readings)
     peeks, drawn = [], set()
-    order = ("health", "deployments", "domains", "traffic", "storage", "machine")
+    order = ("deployments", "domains", "traffic", "storage", "plans", "machine", "health")
     labels = {k: (lbl, path) for k, lbl, path, _f in PAGES}
     feeds = {k: f for k, _l, _p, f in PAGES}
     for key in order:
@@ -761,13 +860,14 @@ def overview(readings):
                 continue
             drawn.add(id(r))
             label, path = labels[key]
+            extra = _round_line(readings, key)
             if blind(r):
-                peeks.append(_peek(r, key, label, path, "could not look", {UNSEEN}))
+                peeks.append(_peek(r, key, label, path, "could not look", {UNSEEN}, extra))
                 continue
             st = states_in(r)
             if not steps_of(r):
                 st.add(UNSEEN)
-            peeks.append(_peek(r, key, label, path, _peek_figure(key, r), st))
+            peeks.append(_peek(r, key, label, path, _peek_figure(key, r), st, extra))
     org = reading_for(readings, "org list")
     projects = ""
     if org is not None:
@@ -778,10 +878,19 @@ def overview(readings):
             ps = projects_of(readings)
             states = states_in(org)
             cards = "".join(_project_card(p) for p in ps)
-            if not ps:
+            if not ps and steps_of(org):
+                # Contracts were read and none is a project: the honest
+                # empty state, with the two ways in.
+                cards = ('<div class="empty-state"><p>No projects yet. A project is one of '
+                         'your applications, described in one file the platform derives '
+                         'everything from.</p><p><a class="act" href="/new">Import a '
+                         'repository</a> <a class="act act--quiet" href="/new">Describe one '
+                         'by hand</a></p></div>')
+            elif not ps:
                 states.add(UNSEEN)
                 cards = f'<p class="empty" data-state="{UNSEEN}">no contract was read</p>'
-            projects = _section(org, "Projects", f'<div class="grid">{cards}</div>', states,
+            projects = _section(org, f"Your projects · {len(ps)}" if ps else "Your projects",
+                                f'<div class="grid">{cards}</div>', states,
                                 "projects", icon="rocket")
     repos = reading_for(readings, "repos list")
     imports = ""
@@ -795,7 +904,7 @@ def overview(readings):
     body = ((f'<div class="strip">{"".join(peeks)}</div>' if peeks else "")
             + projects + imports + others)
     actions = '<a class="act" href="/new">New project</a>'
-    return _main("projects", v, [("Projects", "/")], body, actions)
+    return _main("projects", v, [("Projects", "/")], body, actions, wheres=_wheres(readings))
 
 
 # ── one project ──────────────────────────────────────────────────────
@@ -1047,7 +1156,7 @@ def _backup_section(reading, names=None, ident="storage"):
                          "stopped.", icon="database")
 
 
-def _settings(p, org):
+def _settings(p, org, plans=None):
     """The contract, as a person reads it. Not a reading of its own —
     it is the same `org list` step the projects screen drew — so it is
     a plain block that says where it came from, with the one button
@@ -1062,6 +1171,13 @@ def _settings(p, org):
         f'<td class="mono">{_e(sv["public"] or "")}</td><td class="mono">{_e(sv["port"] or "")}</td>'
         f'<td>{_e(", ".join(USES.get(u, u) for u in sv["uses"]) or "nothing")}</td></tr>'
         for sv in p["services"])
+    plan = (plans or {}).get(p["plan"]) or {}
+    about_plan = ""
+    if plan:
+        about_plan = (f'<p class="note">Plan <b class="mono">{_e(p["plan"])}</b>'
+                      + (f': {_e(plan["descripcion"])}' if plan.get("descripcion") else "")
+                      + f' · {_e(_plan_words(plan.get("numeros")))} · '
+                      f'<a href="/plans">every plan</a></p>')
     facts = (f'<div class="facts-row head">{_fact("plan", p["plan"] or "?")}'
              f'{_fact("domain", p["domain"] or "none")}'
              f'{_fact("contract", p["contract"] or "?")}'
@@ -1071,7 +1187,7 @@ def _settings(p, org):
             f'<h2>Settings</h2><a class="act" href="/projects/{_e(org)}/edit">Edit the contract</a>'
             f'</header><p class="lead">The contract is the one file in git that says what this '
             f'project is. Everything the platform derives —manifests, policies, quota— comes '
-            f'from it, and editing it here writes that file and nothing else.</p>{facts}'
+            f'from it, and editing it here writes that file and nothing else.</p>{facts}{about_plan}'
             f'<table class="rows"><thead><tr><th>service</th><th>kind</th><th>public path</th>'
             f'<th>port</th><th>may reach</th></tr></thead><tbody>{rows}</tbody></table>'
             f'</section>')
@@ -1111,7 +1227,8 @@ def project(readings, subject, instance=None):
     strip = ('<nav class="tabs">'
              + "".join(f'<a href="#{k}">{_e(l)}</a>' for k, l in tabs if k in parts or k == "settings")
              + '</nav>')
-    body = strip + "".join(parts[k] for k, _l in tabs if k in parts) + others + _settings(p, subject)
+    body = (strip + "".join(parts[k] for k, _l in tabs if k in parts) + others
+            + _settings(p, subject, plans_of(ctx)))
     domain = (f'<a class="act act--quiet" href="https://{_e(p["domain"])}/" rel="noreferrer">'
               f'open {_e(p["domain"])}</a>' if p and p.get("domain") else "")
     actions = domain + f'<a class="act" href="/projects/{_e(subject)}/edit">Edit the contract</a>'
@@ -1340,13 +1457,16 @@ def _capacity_section(reading):
                 wants.append(f'{st["wants_cpu"] / 1000:g} CPU')
             if st.get("wants_memory"):
                 wants.append(_bytes(st["wants_memory"]))
-            fits.append(f'<tr><td class="mono">{_e(plan)}</td><td class="faint">{_e(" · ".join(wants))}</td>'
+            fits.append(f'<tr><td><a class="mono" href="/plans">{_e(plan)}</a></td><td class="faint">{_e(" · ".join(wants))}</td>'
                         f'<td class="mono num">{_e(answer)}</td>'
                         f'<td class="note">{_e(st["binding"]) + " runs out first" if st.get("binding") else ""}</td>'
                         f'<td>{_pip(state)}</td></tr>')
         elif name in ("capacity:memory", "capacity:cpu"):
             what = name.split(":", 1)[1]
-            figures.append(_fact(f"{what} free", st.get("free_human", "?")))
+            free = st.get("free")
+            words = (_bytes(free) if what == "memory" else _cpu_words(free)) if free is not None \
+                else st.get("free_human", "?")
+            figures.append(_fact(f"{what} free", words))
             if st.get("allocatable"):
                 figures.append(_fact(f"{what} spoken for",
                                      f'{(st.get("asked", 0) / st["allocatable"]) * 100:.0f}%'))
@@ -1410,9 +1530,91 @@ def health(readings):
     return _main("health", v, [("Health", "/health")], "".join(parts))
 
 
+def _plans_section(reading, capacity, projects):
+    if blind(reading):
+        return _blind_section(reading, "The plans", "plans", icon="steps")
+    states = states_in(reading)
+    room = {st.get("step", "").split(":", 1)[1]: st
+            for st in steps_of(capacity) if st.get("step", "").startswith("fits:")}
+    rows = []
+    for st in steps_of(reading):
+        if not st.get("step", "").startswith("plan:"):
+            continue
+        name = st["step"].split(":", 1)[1]
+        n = st.get("numeros") or {}
+        state = state_of(st)
+        using = st.get("proyectos") or []
+        who = ", ".join(f'<a href="/projects/{_e(o)}">{_e(o)}</a>' for o in using) or \
+            '<span class="faint">nobody yet</span>'
+        r = room.get(name)
+        if capacity is None:
+            fits = '<span class="faint">machine not read</span>'
+        elif r is None:
+            fits = '<span class="faint">?</span>'
+        elif r.get("room") is None:
+            fits = f'{_pip(state_of(r))}<span class="faint">could not be measured</span>'
+        else:
+            fits = (f'{_pip(state_of(r))}{r["room"]} more' if r["room"] else
+                    f'{_pip(state_of(r))}none')
+        shipped = st.get("de_serie")
+        badge = ('<span class="badge">shipped</span>' if shipped else
+                 '<span class="badge mine">yours</span>')
+        action = (f'<a class="act act--quiet small" href="/plans/{_e(name)}/edit">Change</a>'
+                  if not shipped else
+                  f'<a class="act act--quiet small" href="/plans/new?from={_e(name)}">Start from it</a>')
+        rows.append(
+            f'<tr><td><b class="mono">{_e(name)}</b><br>{badge}</td>'
+            f'<td class="desc">{_e(st.get("descripcion") or "")}'
+            + (f'<br><span class="note">{_e(st.get("error"))}</span>' if st.get("error") else "")
+            + f'</td>'
+            f'<td class="num">{_e(_quantity_words("requests.cpu", n.get("requests.cpu")))}<br>'
+            f'{_e(_quantity_words("requests.memory", n.get("requests.memory")))}</td>'
+            f'<td class="num">{_e(_quantity_words("limits.cpu", n.get("limits.cpu")))}<br>'
+            f'{_e(_quantity_words("limits.memory", n.get("limits.memory")))}</td>'
+            f'<td class="num mono">{_e(n.get("pods", "?"))}</td>'
+            f'<td class="num mono">{_e(n.get("persistentvolumeclaims", "?"))}</td>'
+            f'<td class="num">{_e(_quantity_words("requests.storage", n.get("requests.storage")))}</td>'
+            f'<td>{who}</td><td class="fits">{fits}</td><td>{action}</td></tr>')
+    if not rows:
+        states.add(UNSEEN)
+        body = f'<p class="empty" data-state="{UNSEEN}">no plan was read</p>'
+    else:
+        body = (f'<table class="rows plans"><thead><tr><th>plan</th><th>what it is for</th>'
+                f'<th class="num">reserves</th><th class="num">may take</th><th class="num">pods</th>'
+                f'<th class="num">disks</th><th class="num">disk</th><th>used by</th>'
+                f'<th>room for</th><th></th></tr></thead><tbody>{"".join(rows)}</tbody></table>'
+                f'<p class="note legend"><b>Reserves</b> is what the scheduler sets aside for the '
+                f'whole project and what the quota charges; <b>may take</b> is the ceiling under a '
+                f'burst. CPU over the ceiling is throttled, memory over it is killed. <b>Room '
+                f'for</b> is how many more projects of that plan the machine would still fit, as '
+                f'Machine measured it.</p>')
+    return _section(reading, "The plans", body, states, "plans", icon="steps")
+
+
+def plans(readings):
+    v = verdict_of(readings)
+    projects = projects_of(readings)
+    q = reading_for(readings, "quota list")
+    parts = []
+    if q is not None:
+        parts.append(_plans_section(q, reading_for(readings, "capacity show"), projects))
+    else:
+        parts.append('<p class="empty">the plans were not read on this page</p>')
+    parts.append(
+        '<section class="block" id="sizes"><header class="src-head">' + _icon("steps") +
+        '<h2>Two ceilings, not one</h2></header><p class="lead">The <b>plan</b> is the wall '
+        'around the whole project: the apiserver refuses anything past it. Each service has a '
+        '<b>size</b> of its own inside that wall (<code class="mono">tamano</code>: chico, mediano, '
+        'grande), which is what one container may reserve and burst to. Their sum has to fit '
+        'in the plan, and the generator says so before anything is written, naming the plan '
+        'that would hold it.</p></section>')
+    actions = '<a class="act" href="/plans/new">New plan</a>'
+    return _main("plans", v, [("Plans", "/plans")], "".join(parts), actions)
+
+
 VIEWS = {"projects": overview, "deployments": deployments, "domains": domains,
          "traffic": traffic, "storage": storage, "security": security,
-         "machine": machine, "health": health}
+         "machine": machine, "health": health, "plans": plans}
 
 
 def render(readings, subject=None, view=None, instance=None):

@@ -1,0 +1,99 @@
+version: 1
+caso: instance-with-plans
+que: 'the instance with its nine sources: the plans of the catalogue among them,
+  with their words, their numbers and who names each'
+procedencia: medido
+producido_por:
+- comando: org list
+  documento: org.json
+  rc: 0
+- comando: repos list
+  documento: repos.json
+  rc: 0
+- comando: traffic show
+  documento: traffic.json
+  rc: 0
+- comando: capacity show
+  documento: capacity.json
+  rc: 0
+- comando: builds show --last 60
+  documento: builds.json
+  rc: 0
+- comando: check
+  documento: check.json
+  rc: 1
+- comando: edge check
+  documento: edge.json
+  rc: 0
+- comando: data remote status
+  documento: data.json
+  rc: 1
+- comando: quota list
+  documento: quota.json
+  rc: 0
+medido_en: '2026-09-16T02:37:58-03:00'
+aegis: ad7e5742d4992a27a91bd5966ff9c649da7b432e
+forma:
+  org.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  repos.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  traffic.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  capacity.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  builds.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  check.json:
+    claves:
+    - failures
+    - notices
+    - rc
+    - steps
+    estados:
+    - already
+    - bad
+    - good
+    - not-evaluable
+    - not-evaluated
+    - notice
+    - wrong
+  edge.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  data.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+    - wrong
+  quota.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already

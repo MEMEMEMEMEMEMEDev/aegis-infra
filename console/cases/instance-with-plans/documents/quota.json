@@ -1,0 +1,101 @@
+{
+  "steps": [
+    {
+      "step": "plan:deposito",
+      "state": "already",
+      "numeros": {
+        "requests.cpu": "2",
+        "requests.memory": "2Gi",
+        "limits.cpu": "4",
+        "limits.memory": "4Gi",
+        "pods": "20",
+        "persistentvolumeclaims": "2",
+        "requests.storage": "120Gi"
+      },
+      "descripcion": "Holds bytes, not processes: one service and a big disk, with the compute of a small plan.",
+      "de_serie": false,
+      "proyectos": [
+        "drop"
+      ],
+      "pide": {
+        "requests_cpu_m": 2000,
+        "requests_memory_bytes": 2147483648,
+        "limits_cpu_m": 4000,
+        "limits_memory_bytes": 4294967296
+      }
+    },
+    {
+      "step": "plan:grande",
+      "state": "already",
+      "numeros": {
+        "requests.cpu": "8",
+        "requests.memory": "12Gi",
+        "limits.cpu": "16",
+        "limits.memory": "24Gi",
+        "pods": "80",
+        "persistentvolumeclaims": "20",
+        "requests.storage": "200Gi"
+      },
+      "descripcion": "Several services that really work: connections held, caches in memory, uploads. The biggest step aegis ships.",
+      "de_serie": true,
+      "proyectos": [],
+      "pide": {
+        "requests_cpu_m": 8000,
+        "requests_memory_bytes": 12884901888,
+        "limits_cpu_m": 16000,
+        "limits_memory_bytes": 25769803776
+      }
+    },
+    {
+      "step": "plan:mediana",
+      "state": "already",
+      "numeros": {
+        "requests.cpu": "4",
+        "requests.memory": "6Gi",
+        "limits.cpu": "8",
+        "limits.memory": "12Gi",
+        "pods": "40",
+        "persistentvolumeclaims": "10",
+        "requests.storage": "50Gi"
+      },
+      "descripcion": "Front end, API and one database. The usual step for a real product.",
+      "de_serie": true,
+      "proyectos": [
+        "shop"
+      ],
+      "pide": {
+        "requests_cpu_m": 4000,
+        "requests_memory_bytes": 6442450944,
+        "limits_cpu_m": 8000,
+        "limits_memory_bytes": 12884901888
+      }
+    },
+    {
+      "step": "plan:pequena",
+      "state": "already",
+      "numeros": {
+        "requests.cpu": "2",
+        "requests.memory": "2Gi",
+        "limits.cpu": "4",
+        "limits.memory": "4Gi",
+        "pods": "20",
+        "persistentvolumeclaims": "5",
+        "requests.storage": "10Gi"
+      },
+      "descripcion": "A static front and at most one small backend. The tight one: a quota is a ceiling, not an aspiration.",
+      "de_serie": true,
+      "proyectos": [
+        "panel",
+        "portafolio",
+        "ventasfix"
+      ],
+      "pide": {
+        "requests_cpu_m": 2000,
+        "requests_memory_bytes": 2147483648,
+        "limits_cpu_m": 4000,
+        "limits_memory_bytes": 4294967296
+      }
+    }
+  ],
+  "rc": 0
+}

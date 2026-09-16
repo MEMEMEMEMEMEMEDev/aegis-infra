@@ -1,0 +1,1014 @@
+{
+  "steps": [
+    {
+      "step": "build:ventasfix-app:23",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-app",
+      "build": "23",
+      "branch": "main",
+      "tag": "main-000023",
+      "digest": null,
+      "when": "2026-09-13T17:10:02Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-app:22",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-app",
+      "build": "22",
+      "branch": "main",
+      "tag": "main-000022",
+      "digest": "sha256:1d901ae92dbcfe1ab408507a1b66430f326aada19b4b8ccb7d41ad71268b213b",
+      "when": "2026-09-13T17:09:06Z"
+    },
+    {
+      "step": "build:ventasfix-app:21",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-app",
+      "build": "21",
+      "branch": "main",
+      "tag": "main-000021",
+      "digest": null,
+      "when": "2026-09-13T06:29:38Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-app:20",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-app",
+      "build": "20",
+      "branch": "main",
+      "tag": "main-000020",
+      "digest": "sha256:d45020c2b5c41e6fae02017b8013784f18a1b58f5053ddb66616f324aa6cc188",
+      "when": "2026-09-13T06:28:30Z"
+    },
+    {
+      "step": "build:ventasfix-carrito:24",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-carrito",
+      "build": "24",
+      "branch": "main",
+      "tag": "main-000024",
+      "digest": null,
+      "when": "2026-09-13T06:24:23Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-app:19",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-app",
+      "build": "19",
+      "branch": "main",
+      "tag": "main-000019",
+      "digest": null,
+      "when": "2026-09-13T06:23:28Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-carrito:23",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-carrito",
+      "build": "23",
+      "branch": "main",
+      "tag": "main-000023",
+      "digest": "sha256:4f72f68dc91653ef44452d87373093efe8f6f511b859963a45d483ec0495b879",
+      "when": "2026-09-13T06:22:15Z"
+    },
+    {
+      "step": "build:ventasfix-app:18",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-app",
+      "build": "18",
+      "branch": "main",
+      "tag": "main-000018",
+      "digest": "sha256:9598f6b58051f33b6b13af0b83b7da7265a3a92677a191fdbc2e8101e8f99203",
+      "when": "2026-09-13T06:20:42Z"
+    },
+    {
+      "step": "build:ventasfix-carrito:22",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-carrito",
+      "build": "22",
+      "branch": "main",
+      "tag": "main-000022",
+      "digest": null,
+      "when": "2026-09-13T06:16:54Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-app:17",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-app",
+      "build": "17",
+      "branch": "main",
+      "tag": "main-000017",
+      "digest": null,
+      "when": "2026-09-13T06:15:44Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-app:16",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-app",
+      "build": "16",
+      "branch": "main",
+      "tag": "main-000016",
+      "digest": "sha256:48d05b9e28ea03cb4ef0879414c37cdd1427351621bdf3697ea728c5347434c5",
+      "when": "2026-09-13T06:14:46Z"
+    },
+    {
+      "step": "build:ventasfix-carrito:21",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-carrito",
+      "build": "21",
+      "branch": "main",
+      "tag": "main-000021",
+      "digest": "sha256:4a2d56eae73848db5056753b7eba5c085a0f86e369f6c69a8fbbf214e9821588",
+      "when": "2026-09-13T06:12:57Z"
+    },
+    {
+      "step": "build:ventasfix-carrito:20",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-carrito",
+      "build": "20",
+      "branch": "main",
+      "tag": "main-000020",
+      "digest": null,
+      "when": "2026-09-13T06:03:28Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-carrito:19",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-carrito",
+      "build": "19",
+      "branch": "main",
+      "tag": "main-000019",
+      "digest": "sha256:83d66cd7607cdc5a909de17aa9a190094fd499ec038fc81e50633bb0b5454823",
+      "when": "2026-09-13T06:02:20Z"
+    },
+    {
+      "step": "build:ventasfix-carrito:18",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-carrito",
+      "build": "18",
+      "branch": "main",
+      "tag": "main-000018",
+      "digest": null,
+      "when": "2026-09-13T05:51:44Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-carrito:17",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-carrito",
+      "build": "17",
+      "branch": "main",
+      "tag": "main-000017",
+      "digest": "sha256:06613a32d8daadd9e06fb59cd6788e875acbbec38fe35dd47b73a447fcfff85f",
+      "when": "2026-09-13T05:50:51Z"
+    },
+    {
+      "step": "build:ventasfix-carrito:16",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-carrito",
+      "build": "16",
+      "branch": "main",
+      "tag": "main-000016",
+      "digest": null,
+      "when": "2026-09-13T05:47:24Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-carrito:15",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-carrito",
+      "build": "15",
+      "branch": "main",
+      "tag": "main-000015",
+      "digest": null,
+      "when": "2026-09-13T05:44:22Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-carrito:8",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-carrito",
+      "build": "8",
+      "branch": "main",
+      "tag": "main-000008",
+      "digest": null,
+      "when": "2026-09-13T05:43:22Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-carrito:9",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-carrito",
+      "build": "9",
+      "branch": "main",
+      "tag": "main-000009",
+      "digest": "sha256:fe8dd9012ac931622ab40b2ff6e1f2790eb42604ea2f5dc3750961840d1d53f1",
+      "when": "2026-09-13T05:42:24Z"
+    },
+    {
+      "step": "build:ventasfix-carrito:7",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-carrito",
+      "build": "7",
+      "branch": "main",
+      "tag": "main-000007",
+      "digest": null,
+      "when": "2026-09-13T05:40:42Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-app:15",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-app",
+      "build": "15",
+      "branch": "main",
+      "tag": "main-000015",
+      "digest": null,
+      "when": "2026-09-13T05:39:43Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-carrito:14",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-carrito",
+      "build": "14",
+      "branch": "main",
+      "tag": "main-000014",
+      "digest": null,
+      "when": "2026-09-13T05:37:32Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-carrito:13",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-carrito",
+      "build": "13",
+      "branch": "main",
+      "tag": "main-000013",
+      "digest": "sha256:9c6e88b23e82f93048d5d3d348562157f2ca072950b9dd6180b7fc9b33619841",
+      "when": "2026-09-13T05:36:35Z"
+    },
+    {
+      "step": "build:ventasfix-app:14",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-app",
+      "build": "14",
+      "branch": "main",
+      "tag": "main-000014",
+      "digest": "sha256:715f1783332fc43e94278fa43d3671cb8419b6829ef134b8c0eee225d109772e",
+      "when": "2026-09-13T05:34:53Z"
+    },
+    {
+      "step": "build:panel-api:31",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "panel-api",
+      "build": "31",
+      "branch": "main",
+      "tag": "main-000031",
+      "digest": null,
+      "when": "2026-09-13T05:33:22Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-app:13",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-app",
+      "build": "13",
+      "branch": "main",
+      "tag": "main-000013",
+      "digest": null,
+      "when": "2026-09-13T05:29:25Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-carrito:11",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-carrito",
+      "build": "11",
+      "branch": "main",
+      "tag": "main-000011",
+      "digest": "sha256:6531eb2024ca798e090e7bdbd7c74fd28f43e2b128c27c23bb27ff032ffeec36",
+      "when": "2026-09-13T05:28:31Z"
+    },
+    {
+      "step": "build:shop-web:47",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "shop-web",
+      "build": "47",
+      "branch": "main",
+      "tag": "main-000047",
+      "digest": null,
+      "when": "2026-09-13T05:26:52Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:panel-api:29",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "panel-api",
+      "build": "29",
+      "branch": "main",
+      "tag": "main-000029",
+      "digest": "sha256:2a535d593f0d826d0d3d2588f0115fb4af2f384793f54b5ec3bfe3d1f79abad2",
+      "when": "2026-09-13T05:26:49Z"
+    },
+    {
+      "step": "build:shop-api:33",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "shop-api",
+      "build": "33",
+      "branch": "main",
+      "tag": "main-000033",
+      "digest": null,
+      "when": "2026-09-13T05:25:40Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-app:12",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-app",
+      "build": "12",
+      "branch": "main",
+      "tag": "main-000012",
+      "digest": "sha256:e58b84fe5fdef1e9e606e748fc0a893b1eaf93d1a13fe0f1c4a6879239907cac",
+      "when": "2026-09-13T05:25:16Z"
+    },
+    {
+      "step": "build:shop-web:46",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "shop-web",
+      "build": "46",
+      "branch": "main",
+      "tag": "main-000046",
+      "digest": "sha256:5d2dc9a344514e9c097a4d963f2e6de8e309e09b77b12fa94ea94d8244f074ae",
+      "when": "2026-09-13T05:24:12Z"
+    },
+    {
+      "step": "build:ventasfix-carrito:12",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-carrito",
+      "build": "12",
+      "branch": "main",
+      "tag": "main-000012",
+      "digest": null,
+      "when": "2026-09-13T05:23:41Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-app:11",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-app",
+      "build": "11",
+      "branch": "main",
+      "tag": "main-000011",
+      "digest": null,
+      "when": "2026-09-13T05:22:20Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:shop-api:31",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "shop-api",
+      "build": "31",
+      "branch": "main",
+      "tag": "main-000031",
+      "digest": "sha256:34ca5d1e562bb466a134ae2ddb97c9b9494180e9508d0663b7e713973bd98026",
+      "when": "2026-09-13T05:22:08Z"
+    },
+    {
+      "step": "build:ventasfix-carrito:10",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-carrito",
+      "build": "10",
+      "branch": "main",
+      "tag": "main-000010",
+      "digest": "sha256:062871ff1aa6c9b599e914625cacdde7d9eb5189e0068a79583ae7b9d6bce980",
+      "when": "2026-09-13T05:21:27Z"
+    },
+    {
+      "step": "build:shop-web:45",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "shop-web",
+      "build": "45",
+      "branch": "main",
+      "tag": "main-000045",
+      "digest": null,
+      "when": "2026-09-13T05:20:12Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:panel-api:30",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "panel-api",
+      "build": "30",
+      "branch": "main",
+      "tag": "main-000030",
+      "digest": null,
+      "when": "2026-09-13T05:19:44Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:panel-web:31",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "panel-web",
+      "build": "31",
+      "branch": "main",
+      "tag": "main-000031",
+      "digest": null,
+      "when": "2026-09-13T05:19:22Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-app:9",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-app",
+      "build": "9",
+      "branch": "main",
+      "tag": "main-000009",
+      "digest": null,
+      "when": "2026-09-13T05:18:31Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:panel-web:30",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "panel-web",
+      "build": "30",
+      "branch": "main",
+      "tag": "main-000030",
+      "digest": "sha256:2131b42c8e261f65944329637b416342874b5e9b92936846f11944d2633e8cdc",
+      "when": "2026-09-13T05:18:29Z"
+    },
+    {
+      "step": "build:shop-api:32",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "shop-api",
+      "build": "32",
+      "branch": "main",
+      "tag": "main-000032",
+      "digest": null,
+      "when": "2026-09-13T05:17:22Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-app:10",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "ventasfix-app",
+      "build": "10",
+      "branch": "main",
+      "tag": "main-000010",
+      "digest": null,
+      "when": "2026-09-13T05:16:48Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:shop-admin:29",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "shop-admin",
+      "build": "29",
+      "branch": "main",
+      "tag": "main-000029",
+      "digest": null,
+      "when": "2026-09-13T05:16:34Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:shop-admin:27",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "shop-admin",
+      "build": "27",
+      "branch": "main",
+      "tag": "main-000027",
+      "digest": null,
+      "when": "2026-09-13T05:15:41Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:shop-admin:28",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "shop-admin",
+      "build": "28",
+      "branch": "main",
+      "tag": "main-000028",
+      "digest": "sha256:10d83818ca97b14c3345c1b9a820894da037b66055f8db8b65653fbb3f38760c",
+      "when": "2026-09-13T05:15:20Z"
+    },
+    {
+      "step": "build:panel-api:28",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "panel-api",
+      "build": "28",
+      "branch": "main",
+      "tag": "main-000028",
+      "digest": "sha256:5ce93ae7385e7d233f734a12b39f9c6d47a39b3d196c14b3f8e2e4f00bb539e7",
+      "when": "2026-09-13T05:14:33Z"
+    },
+    {
+      "step": "build:shop-api:30",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "shop-api",
+      "build": "30",
+      "branch": "main",
+      "tag": "main-000030",
+      "digest": "sha256:ab0dce9dca4764f8080c804d486ad79edfce7ea95c7af96c939a97159246d27b",
+      "when": "2026-09-13T05:13:41Z"
+    },
+    {
+      "step": "build:ventasfix-app:7",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-app",
+      "build": "7",
+      "branch": "main",
+      "tag": "main-000007",
+      "digest": "sha256:08a858b06a1c3c9e76f3b36050d5c406dcfb760359efeef7c5e561c216f3f2c1",
+      "when": "2026-09-13T05:11:54Z"
+    },
+    {
+      "step": "build:shop-web:44",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "shop-web",
+      "build": "44",
+      "branch": "main",
+      "tag": "main-000044",
+      "digest": null,
+      "when": "2026-09-13T05:10:07Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:ventasfix-app:8",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-app",
+      "build": "8",
+      "branch": "main",
+      "tag": "main-000008",
+      "digest": "sha256:4d074cc80f1ad9615648ac7e71be395a92a970aa69354859b1e33b9e3562529a",
+      "when": "2026-09-13T05:09:02Z"
+    },
+    {
+      "step": "build:shop-admin:26",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "shop-admin",
+      "build": "26",
+      "branch": "main",
+      "tag": "main-000026",
+      "digest": "sha256:eb0d7a8e933e4b328f43ef5a5fd42a8ae6cd024cf094c602ee2dde9bed9b8408",
+      "when": "2026-09-13T05:08:22Z"
+    },
+    {
+      "step": "build:ventasfix-app:4",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "ventasfix-app",
+      "build": "4",
+      "branch": "main",
+      "tag": "main-000004",
+      "digest": "sha256:c778dd8ef98af2de23694910e9dc514514e1a8748c291f90931e7b83d5e16314",
+      "when": "2026-09-13T05:06:59Z"
+    },
+    {
+      "step": "build:panel-api:27",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "panel-api",
+      "build": "27",
+      "branch": "main",
+      "tag": "main-000027",
+      "digest": null,
+      "when": "2026-09-13T05:06:55Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:panel-web:29",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "panel-web",
+      "build": "29",
+      "branch": "main",
+      "tag": "main-000029",
+      "digest": null,
+      "when": "2026-09-13T05:05:42Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:shop-web:42",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "shop-web",
+      "build": "42",
+      "branch": "main",
+      "tag": "main-000042",
+      "digest": "sha256:f23951c7107672a2e7e2d29d2b5a19414c8fdeb8441ef08944a1c587b2602739",
+      "when": "2026-09-13T05:04:54Z"
+    },
+    {
+      "step": "build:shop-admin:25",
+      "state": "already",
+      "links": {
+        "build": "not-evaluable",
+        "scan": "not-evaluable",
+        "sign": "not-evaluable",
+        "digest": "not-evaluable"
+      },
+      "image": "shop-admin",
+      "build": "25",
+      "branch": "main",
+      "tag": "main-000025",
+      "digest": null,
+      "when": "2026-09-13T05:04:42Z",
+      "why": "no build (only manifests changed)"
+    },
+    {
+      "step": "build:panel-web:28",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "panel-web",
+      "build": "28",
+      "branch": "main",
+      "tag": "main-000028",
+      "digest": "sha256:27a3932d037b3090d3d7da0c22df33c8210f5f876e5e946bd6c292f45290c033",
+      "when": "2026-09-13T05:03:24Z"
+    },
+    {
+      "step": "build:shop-web:43",
+      "state": "already",
+      "links": {
+        "build": "done",
+        "scan": "done",
+        "sign": "done",
+        "digest": "done"
+      },
+      "image": "shop-web",
+      "build": "43",
+      "branch": "main",
+      "tag": "main-000043",
+      "digest": "sha256:9c27cefa27f83a06679038a0a0a9f2260a2c748bf0e2cac5cd8b573e0534caa7",
+      "when": "2026-09-13T05:02:45Z"
+    },
+    {
+      "step": "builds",
+      "state": "already",
+      "count": 60,
+      "leidos": 60,
+      "organizacion": null,
+      "links_measured": [
+        "build",
+        "scan",
+        "sign",
+        "digest"
+      ],
+      "links_elsewhere": {
+        "sync": "ArgoCD's Application status (aegis check, section 3)",
+        "admission": "Kyverno's rejections in the tenant namespaces"
+      }
+    }
+  ],
+  "rc": 0
+}

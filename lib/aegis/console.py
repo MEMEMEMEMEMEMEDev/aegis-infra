@@ -237,6 +237,34 @@ def _schema_of(doc):
     return {s.get("step", ""): s for s in (doc or {}).get("steps") or []}
 
 
+def _plan_choice(by, value, back):
+    """The plan, picked by what it is for. Each option carries the
+    sentence its plan declares and its numbers in words, out of the
+    schema — never typed here — and the way to a plan of your own sits
+    beside them, because «none of these fits» is a real answer."""
+    from .screens import _plan_words
+    cuota = by.get("cuota") or {}
+    options = cuota.get("opciones") or []
+    if not options:
+        return (f'<div class="field" data-state="{UNSEEN}"><span class="label">plan</span>'
+                f'<p class="hint">nobody could read the list of plans, so none is offered. '
+                f'This is not a platform without them.</p></div>')
+    words = cuota.get("descripciones") or {}
+    numbers = cuota.get("numeros") or {}
+    picks = "".join(
+        f'<label class="plan-pick"><input type="radio" name="cuota" value="{_e(o)}"'
+        f'{" checked" if o == value or (not value and i == 0) else ""}>'
+        f'<span class="plan-body"><b class="mono">{_e(o)}</b>'
+        + (f'<span class="desc">{_e(words.get(o))}</span>' if words.get(o) else "")
+        + f'<span class="nums">{_e(_plan_words(numbers.get(o)))}</span></span></label>'
+        for i, o in enumerate(options))
+    return (f'<div class="field"><span class="label">plan</span>'
+            f'<div class="plan-picks">{picks}</div>'
+            f'<p class="hint plain">How much of the machine the whole project may take. '
+            f'{_e(cuota.get("nota") or "")} None of these fits? '
+            f'<a href="/plans/new?back={_e(back)}">Create a plan of your own</a>.</p></div>')
+
+
 # WHAT A LANGUAGE SUGGESTS A SERVICE IS. A SUGGESTION AND NOTHING MORE:
 # it is written on the form as a suggestion, the person changes it in one
 # click, and nothing downstream reads it. The measured half is the repo
@@ -416,7 +444,7 @@ def render_form(schema, token, filled=None, problem=None, action="/new",
             f'<input type="hidden" name="token" value="{_e(token)}">'
             f'{_field("organizacion", "name", filled.get("organizacion", ""), hint=name_hint)}'
             f'{_field("dominio", "public hostname", filled.get("dominio", ""), hint=host_hint)}'
-            f'{_choice("cuota", "plan", quotas, filled.get("cuota", ""), "how much of the machine it may take: " + str((by.get("cuota") or {}).get("nota") or "the contract names a plan and never a number"))}'
+            f'{_plan_choice(by, filled.get("cuota", ""), action)}'
             f'<h3 class="sub">services</h3>{about}'
             f'<div class="rows">{"".join(rows)}</div>'
             f'<ul class="tail legend">{"".join(legend)}</ul>'
@@ -854,3 +882,219 @@ def page(readings, title="aegis", subject=None, view=None, instance=None):
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             f"<title>{_e(title)}</title><style>{skin()}</style></head>"
             f"<body>{render(readings, subject, view, instance)}</body></html>\n")
+
+
+# ── a plan of your own ───────────────────────────────────────────────
+# The same shape as the contract's screens: a form that writes nothing,
+# a preview that writes nothing, and one button. What it writes is one
+# named step in plans.yaml, through `aegis quota`, with the validation
+# the shipped plans get. The seven numbers are asked for in a person's
+# words, with the Kubernetes spelling beside each so that what is typed
+# is what the file will say.
+QUOTA_FIELDS = (
+    ("requests.cpu", "CPU reserved",
+     "what the scheduler sets aside for the whole project; the sizes of its services add up "
+     "inside this. `2` is two cores, `500m` half a core"),
+    ("requests.memory", "memory reserved", "`2Gi`, `512Mi`; the same rule as the CPU"),
+    ("limits.cpu", "CPU ceiling", "what it may burst to; CPU over the ceiling is throttled"),
+    ("limits.memory", "memory ceiling",
+     "memory over the ceiling is killed, so this is a number somebody measured"),
+    ("pods", "pods", "how many containers may run at once, replicas included"),
+    ("persistentvolumeclaims", "disks", "how many volumes it may claim"),
+    ("requests.storage", "disk",
+     "the declared size of all its volumes together (`10Gi`); the provisioner does not "
+     "enforce it on the disk itself"),
+)
+
+
+def _plans_in(listing):
+    return {st["step"].split(":", 1)[1]: st for st in (listing or {}).get("steps") or []
+            if st.get("step", "").startswith("plan:")}
+
+
+def quota_from_form(fields):
+    """The form's fields, as a plan. Pure and deliberately dumb: what is
+    typed travels to `aegis quota`, which refuses in its own words."""
+    v = lambda k: (fields.get(k) or "").strip()      # noqa: E731
+    numbers = {k: v(k) for k, _l, _h in QUOTA_FIELDS}
+    return {"nombre": v("nombre"), "desde": v("desde"), "descripcion": v("descripcion"),
+            "numeros": numbers}
+
+
+def render_quota_start(listing, token, back="/plans"):
+    """Where a new plan starts: from one that exists. Chosen first and
+    on its own screen because there is no script to copy the numbers
+    across when a radio changes."""
+    plans = _plans_in(listing)
+    from .screens import _plan_words
+    if not plans:
+        body = (f'<section class="source" data-state="{UNSEEN}"><h2>start from a plan</h2>'
+                f'<p class="empty">nobody could read the plans, so there is nothing to start '
+                f'from. This is not a platform without them.</p></section>')
+    else:
+        rows = "".join(
+            f'<a class="plan-start" href="/plans/new?from={_e(n)}&amp;back={_e(back)}">'
+            f'<span class="plan-body"><b class="mono">{_e(n)}</b>'
+            + (f'<span class="desc">{_e(st.get("descripcion"))}</span>' if st.get("descripcion") else "")
+            + f'<span class="nums">{_e(_plan_words(st.get("numeros")))}</span></span>'
+            f'<span class="act act--quiet small">Start from it</span></a>'
+            for n, st in sorted(plans.items()))
+        body = (f'<section class="source" data-state="{FINE}"><h2>start from a plan</h2>'
+                f'<p class="lead">A new plan is a copy of one that exists, changed where you '
+                f'say. Pick the closest.</p><div class="plan-starts">{rows}</div></section>')
+    head = (f'<header class="verdict" data-state="{FINE}">'
+            f'<p class="subject"><a class="act act--quiet" href="{_e(back)}">back</a>'
+            f'<b>a new plan</b></p><p class="sentence">Nothing is written yet. A plan is a '
+            f'named step in the catalogue; a contract names it and never a number.</p></header>')
+    return f'<main class="sereno" data-veredicto="{FINE}">{head}{body}</main>'
+
+
+def render_quota_form(listing, token, base=None, editing=None, filled=None, problem=None,
+                      back="/plans"):
+    """The seven numbers, in words, with the base's values already in
+    the boxes. `editing` names a plan of your own being changed; then
+    the name is fixed and there is no base."""
+    plans = _plans_in(listing)
+    source = plans.get(editing or base) or {}
+    filled = dict(filled or {})
+    if not filled:
+        for k, _l, _h in QUOTA_FIELDS:
+            filled[k] = (source.get("numeros") or {}).get(k, "")
+        filled["descripcion"] = source.get("descripcion") or "" if editing else ""
+        filled["nombre"] = editing or ""
+        filled["desde"] = base or ""
+    what = f'change {editing}' if editing else 'a new plan'
+    head = (f'<header class="verdict" data-state="{FINE}">'
+            f'<p class="subject"><a class="act act--quiet" href="{_e(back)}">back</a>'
+            f'<b>{_e(what)}</b></p><p class="sentence">'
+            + ("Nothing is changed yet. The next screen shows the plan as it would be, and "
+               "even that writes nothing." if editing else
+               f"Nothing is written yet. This starts from `{_e(base)}`; the next screen "
+               f"shows the plan as it would be, and even that writes nothing.")
+            + '</p></header>')
+    trouble = ""
+    if problem:
+        trouble = (f'<section class="source" data-state="{WRONG}">'
+                   f'<h2>this is not a plan yet</h2>{_chip(WRONG, "refused")}'
+                   f'<pre class="why">{_e(problem)}</pre></section>')
+    action = f'/plans/{_e(editing)}/edit' if editing else '/plans/new'
+    numbers = "".join(
+        f'{_field(k, f"{label}  ·  {k}", filled.get(k, ""), hint=hint)}'
+        for k, label, hint in QUOTA_FIELDS)
+    who = source.get("proyectos") or []
+    warn = (f'<p class="hint plain" data-state="{ATTENTION}">'
+            f'<b>{_e(", ".join(who))}</b> name{"s" if len(who) == 1 else ""} this plan. '
+            f'Changing its numbers changes what {"it" if len(who) == 1 else "they"} may take, '
+            f'once `aegis org apply` and a commit carry it to {"its" if len(who) == 1 else "their"} '
+            f'namespace{"" if len(who) == 1 else "s"}.</p>' if editing and who else "")
+    name_field = (f'<p class="field"><span class="label">name</span>'
+                  f'<b class="mono">{_e(editing)}</b>'
+                  f'<input type="hidden" name="nombre" value="{_e(editing)}"></p>'
+                  if editing else
+                  _field("nombre", "name", filled.get("nombre", ""),
+                         hint="lowercase, digits and dashes, 3 to 30 characters; it is the word "
+                              "a contract will name"))
+    body = (f'<section class="source" data-state="{FINE}"><h2>the plan</h2>{warn}'
+            f'<form method="post" action="{action}">'
+            f'<input type="hidden" name="token" value="{_e(token)}">'
+            f'<input type="hidden" name="desde" value="{_e(filled.get("desde", ""))}">'
+            f'<input type="hidden" name="back" value="{_e(back)}">'
+            f'{name_field}'
+            f'{_field("descripcion", "what it is for", filled.get("descripcion", ""), hint="one sentence; it is what a person picks the plan by")}'
+            f'<h3 class="sub">the seven numbers</h3><div class="numbers">{numbers}</div>'
+            f'<button class="act" type="submit">see it</button></form></section>')
+    return f'<main class="sereno" data-veredicto="{FINE}">{head}{trouble}{body}</main>'
+
+
+def render_quota_preview(plan, token, capacity=None, editing=None, before=None, back="/plans"):
+    """The plan as it would be written, and the one button.
+
+    `capacity` is the instance's `capacity show` document, if it was
+    read: with it the screen says how many projects of this plan the
+    machine would still fit, which is the one question the numbers
+    are chosen against."""
+    from . import quantity
+    from .screens import QUOTA_LABEL, _quantity_words
+    numbers = plan.get("numeros") or {}
+    rows = []
+    for k, label, _h in QUOTA_FIELDS:
+        was = (before or {}).get(k)
+        changed = editing and was is not None and str(was) != str(numbers.get(k))
+        rows.append(f'<tr{" class=changed" if changed else ""}><td>{_e(label)}</td>'
+                    f'<td class="mono">{_e(numbers.get(k, ""))}</td>'
+                    f'<td>{_e(_quantity_words(k, numbers.get(k)))}</td>'
+                    + (f'<td class="note">was {_e(was)}</td>' if changed else "<td></td>")
+                    + '</tr>')
+    room = ""
+    if capacity:
+        free = {st.get("step"): st for st in capacity.get("steps") or []}
+        mem, cpu = free.get("capacity:memory"), free.get("capacity:cpu")
+        try:
+            want_cpu = quantity.cpu(numbers.get("requests.cpu"))
+            want_mem = quantity.mem(numbers.get("requests.memory"))
+            n_cpu = (cpu or {}).get("free", 0) // want_cpu if want_cpu else None
+            n_mem = (mem or {}).get("free", 0) // want_mem if want_mem else None
+            fits = min(x for x in (n_cpu, n_mem) if x is not None)
+            binding = "memory" if n_mem is not None and (n_cpu is None or n_mem <= n_cpu) else "CPU"
+            room = (f'<p class="note">On this machine as it was last read, '
+                    f'<b>{int(fits)}</b> more project{"s" if fits != 1 else ""} of this plan '
+                    f'would fit; {binding} runs out first.</p>')
+        except (TypeError, ValueError, KeyError):
+            room = ""
+    yaml_block = (f'cuota:\n  {plan.get("nombre")}:\n'
+                  + (f'    descripcion: "{plan.get("descripcion")}"\n' if plan.get("descripcion") else "")
+                  + "".join(f'    {k}: {numbers.get(k, "")}\n' for k, _l, _h in QUOTA_FIELDS))
+    hidden = "".join(f'<input type="hidden" name="{_e(k)}" value="{_e(v)}">'
+                     for k, v in (("nombre", plan.get("nombre")), ("desde", plan.get("desde")),
+                                  ("descripcion", plan.get("descripcion")), ("back", back))
+                     ) + "".join(f'<input type="hidden" name="{_e(k)}" value="{_e(numbers.get(k, ""))}">'
+                                 for k, _l, _h in QUOTA_FIELDS)
+    where = f'/plans/{_e(editing)}/write' if editing else '/plans/write'
+    again = f'/plans/{_e(editing)}/edit' if editing else f'/plans/new?from={_e(plan.get("desde"))}'
+    head = (f'<header class="verdict" data-state="{FINE}">'
+            f'<p class="subject"><a class="act act--quiet" href="{_e(back)}">back</a>'
+            f'<b>{_e(plan.get("nombre"))}</b></p><p class="sentence">Nothing has been written. '
+            f'This is the plan as it would be in the catalogue.</p></header>')
+    body = (f'<section class="source" data-state="{FINE}"><h2>the plan</h2>'
+            + (f'<p class="lead">{_e(plan.get("descripcion"))}</p>' if plan.get("descripcion") else "")
+            + f'<table class="rows"><thead><tr><th>number</th><th>as the file says it</th>'
+            f'<th>in words</th><th></th></tr></thead><tbody>{"".join(rows)}</tbody></table>{room}'
+            f'<pre class="contract mono">{_e(yaml_block)}</pre>'
+            f'<form method="post" action="{where}">'
+            f'<input type="hidden" name="token" value="{_e(token)}">{hidden}'
+            f'<button class="act" type="submit">'
+            + ("write it over the plan" if editing else "write it into the catalogue")
+            + f'</button><a class="act act--quiet" href="{again}">change something</a></form>'
+            f'</section>')
+    return f'<main class="sereno" data-veredicto="{FINE}">{head}{body}</main>'
+
+
+def render_quota_written(doc, name, back="/plans", editing=False):
+    """What `aegis quota` said, and where to go next."""
+    steps = (doc or {}).get("steps") or []
+    st = next((x for x in steps if x.get("step") == f"plan:{name}"), steps[0] if steps else {})
+    state = SCREEN.get(st.get("state"), UNSEEN)
+    if state == FINE:
+        sentence = (f"The plan is in the catalogue. A contract may name it now; nothing runs "
+                    f"differently until one does, and `aegis org apply` and a commit carry it.")
+        if editing and st.get("proyectos"):
+            sentence = (f"The plan is changed in the catalogue. {', '.join(st['proyectos'])} "
+                        f"name{'s' if len(st['proyectos']) == 1 else ''} it: `aegis org apply` "
+                        f"and a commit are what carry the change to the cluster.")
+    else:
+        sentence = "The catalogue was not changed."
+    head = (f'<header class="verdict" data-state="{state}">'
+            f'<p class="subject"><a class="act act--quiet" href="/plans">every plan</a>'
+            f'<b>{_e(name)}</b></p><p class="sentence">{_e(sentence)}</p></header>')
+    body = (f'<section class="source" data-state="{state}"><h2>what aegis quota said</h2>'
+            f'{_chip(state, STATE_WORD_FOR[state])}'
+            + (f'<pre class="why">{_e(st.get("error"))}</pre>' if st.get("error") else "")
+            + (f'<p class="host mono">{_e(st.get("fichero"))}</p>' if st.get("fichero") else "")
+            + f'<p><a class="act" href="{_e(back)}">'
+            + ("back to the form" if back not in ("/plans", "/") else "every plan")
+            + '</a></p></section>')
+    return f'<main class="sereno" data-veredicto="{state}">{head}{body}</main>'
+
+
+STATE_WORD_FOR = {FINE: "written", WRONG: "refused", UNSEEN: "could not look",
+                  ATTENTION: "attention", BUSY: "working"}

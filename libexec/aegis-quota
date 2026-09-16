@@ -1,0 +1,501 @@
+#!/usr/bin/env python3
+# aegis-summary: The plans a project may take: the catalogue in plans.yaml, listed and grown
+# aegis-group:   apps
+# aegis-subcommands: list add set remove
+# aegis-help:
+# Usage: aegis quota list [--json]
+#        aegis quota add <name> --from <plan> [--set KEY=VALUE ...] [--describe TEXT] [--json]
+#        aegis quota set <name> [--set KEY=VALUE ...] [--describe TEXT] [--json]
+#        aegis quota remove <name> [--json]
+#
+# list     every plan of plans.yaml: its sentence, its seven numbers,
+#          whether aegis ships it, and which contracts name it
+# add      a NEW plan, copied from another and changed where you say;
+#          validated exactly like the shipped ones before a byte is
+#          written
+# set      the numbers of a plan of your own, or the sentence of any plan
+# remove   a plan of your own that no contract names
+#
+"""aegis quota — the catalogue of plans, the way the contract sees it.
+
+WHY THIS IS A COMMAND AND NOT A NUMBER IN A CONTRACT. plans.yaml opens
+with the argument and it is worth repeating here, because this command
+is the one place where somebody could be tempted to break it: a
+contract says `cuota: mediana` and never `cpu: 4`. The day the hardware
+changes, or a plan turns out to be badly sized, that is ONE file to edit
+and not thirty; and a plan with a name can be reasoned about, counted
+and measured (`aegis capacity show` says how many more of each would
+fit), where thirty bespoke quotas cannot.
+
+So «customising the quota» here means ADDING A STEP, with a name, to
+the same catalogue, with the same seven numbers and the same validation
+the shipped ones get — and then naming it from a contract like any
+other. What is never offered is a number outside the catalogue.
+
+WHAT STAYS AS SHIPPED. The plans the seed carries keep their numbers on
+every instance: they are the vocabulary the documentation and the
+templates speak, and an instance where `pequena` means something else
+is an instance nobody can be helped with. Their SENTENCE may be set,
+because words are not a ceiling. Everything you add is yours: change
+it, remove it while no contract names it.
+
+WHAT IT TOUCHES. plans.yaml, textually, keeping every comment in it —
+that file is argued in its own margins and a rewrite through a YAML
+dumper would erase the argument. The result is parsed and put through
+the generator's own shape check before it replaces the file. No
+cluster, no commit: what makes a plan take effect on a namespace is
+`aegis org apply` and the operator's commit, as with everything else.
+"""
+import argparse
+import json
+import os
+import re
+import sys
+import tempfile
+
+# ── canonical python preamble (V-102) ────────────────────────────────
+_AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
+    os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
+from aegis import cli, outcomes, paths, quantity      # noqa: E402
+from aegis.org import QUOTA_KEYS, SIZE_KEYS, Invalid, _check_plans   # noqa: E402
+
+import yaml                                           # noqa: E402
+
+PLANS = os.path.join(str(paths.platform_dir()), "plans.yaml")
+ORGS_DIR = os.path.join(str(paths.platform_dir()), "orgs")
+SEED_PLANS = os.path.join(_AEGIS_ROOT, "seed", "platform", "plans.yaml")
+NAME = re.compile(r"^[a-z][a-z0-9-]{2,29}$")
+COUNTS = ("pods", "persistentvolumeclaims")
+# How the file itself writes each of the seven, so that a plan this
+# command adds reads like the ones beside it. CPU and the counts are
+# quoted strings in the seed; memory and storage are bare quantities.
+QUOTED = ("requests.cpu", "limits.cpu") + COUNTS
+
+grey, off = ("\033[90m", "\033[0m") if sys.stderr.isatty() else ("", "")
+
+
+# ── reading ──────────────────────────────────────────────────────────
+def _load(path):
+    with open(path, encoding="utf-8") as fh:
+        return yaml.safe_load(fh) or {}
+
+
+def shipped():
+    """The names the seed carries: the ones whose numbers stay."""
+    try:
+        return set((_load(SEED_PLANS).get("cuota") or {}))
+    except (OSError, yaml.YAMLError):
+        return set()
+
+
+def users():
+    """Which contracts name each plan. Read from the files, the way the
+    generator reads them, so that a contract that does not validate is
+    still counted: it still names the plan."""
+    out = {}
+    if not os.path.isdir(ORGS_DIR):
+        return out
+    for f in sorted(os.listdir(ORGS_DIR)):
+        if not f.endswith(".yaml") or f.startswith((".", "_")):
+            continue
+        try:
+            c = _load(os.path.join(ORGS_DIR, f))
+        except (OSError, yaml.YAMLError):
+            continue
+        q = (c or {}).get("cuota")
+        if q:
+            out.setdefault(str(q), []).append((c.get("organizacion") or f[:-5]))
+    return out
+
+
+def _asks(numbers):
+    """The four numbers as the arithmetic reads them."""
+    try:
+        return {"requests_cpu_m": quantity.cpu(numbers["requests.cpu"]),
+                "requests_memory_bytes": quantity.mem(numbers["requests.memory"]),
+                "limits_cpu_m": quantity.cpu(numbers["limits.cpu"]),
+                "limits_memory_bytes": quantity.mem(numbers["limits.memory"])}
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def listing(steps, narrate=True):
+    try:
+        plans = _load(PLANS)
+    except (OSError, yaml.YAMLError) as e:
+        steps.not_evaluable("plans", why="plans-unreadable", detail=str(e))
+        steps.finish()
+    cuota = plans.get("cuota") or {}
+    mine, named = shipped(), users()
+    if narrate:
+        print(f"\nplans  {grey}({len(cuota)} in {PLANS}){off}")
+    for name in sorted(cuota):
+        spec = cuota[name] or {}
+        numbers = {k: str(spec[k]) for k in QUOTA_KEYS if k in spec}
+        missing = [k for k in QUOTA_KEYS if k not in spec]
+        data = {"numeros": numbers, "descripcion": spec.get("descripcion"),
+                "de_serie": name in mine, "proyectos": named.get(name, []),
+                "pide": _asks(numbers)}
+        if narrate:
+            who = f"  {grey}used by {', '.join(named[name])}{off}" if named.get(name) else ""
+            tag = "shipped" if name in mine else "yours"
+            print(f"  {name:<12} {tag:<8} {numbers.get('requests.cpu', '?')} cpu · "
+                  f"{numbers.get('requests.memory', '?')} reserved · "
+                  f"{numbers.get('limits.cpu', '?')} cpu · {numbers.get('limits.memory', '?')} "
+                  f"ceiling · {numbers.get('pods', '?')} pods · "
+                  f"{numbers.get('requests.storage', '?')} disk{who}")
+            if spec.get("descripcion"):
+                print(f"               {grey}{spec['descripcion']}{off}")
+        if missing:
+            steps.wrong(f"plan:{name}", error=f"the plan does not declare {', '.join(missing)}",
+                        **data)
+        else:
+            steps.already(f"plan:{name}", **data)
+    if not cuota:
+        steps.wrong("plans", error="plans.yaml declares no plan under `cuota:`")
+    steps.finish()
+
+
+# ── the text of the file, kept whole ─────────────────────────────────
+def _section(lines, key):
+    """The line range of a top-level section, its own line included."""
+    start = next((i for i, l in enumerate(lines) if l.rstrip("\n") == f"{key}:"), None)
+    if start is None:
+        return None
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_-]*:\s*$", lines[j]):
+            end = j
+            break
+    return start, end
+
+
+def _block(lines, sec, name):
+    """One plan's block inside the section: its line, everything indented
+    under it, and the comment lines directly above it, which describe
+    it and would otherwise be left describing the next one."""
+    start, end = sec
+    head = next((i for i in range(start + 1, end)
+                 if re.match(rf"^  {re.escape(name)}:\s*$", lines[i])), None)
+    if head is None:
+        return None
+    stop = end
+    for j in range(head + 1, end):
+        if re.match(r"^  [a-z]", lines[j]):
+            stop = j
+            break
+    # what is left after a block: the comments that belong to the NEXT
+    # plan and the blank lines between; they are not this block's
+    while stop > head + 1 and (lines[stop - 1].startswith("  #") or lines[stop - 1].strip() == ""):
+        stop -= 1
+    top = head
+    while top - 1 > start and lines[top - 1].startswith("  #"):
+        top -= 1
+    return top, head, stop
+
+
+def _value_line(key, value):
+    v = f'"{value}"' if key in QUOTED else str(value)
+    return f"    {key}: {v}\n"
+
+
+def _description_line(text):
+    return f"    descripcion: {json.dumps(text, ensure_ascii=False)}\n"
+
+
+def _render(name, numbers, description, base, today):
+    out = [f"  # {name}: added {today} with `aegis quota add`, from `{base}`. Yours to\n",
+           f"  # change (`aegis quota set {name}`) or remove; the shipped plans keep\n",
+           f"  # their numbers.\n",
+           f"  {name}:\n"]
+    if description:
+        out.append(_description_line(description))
+    out += [_value_line(k, numbers[k]) for k in QUOTA_KEYS]
+    return out
+
+
+def _write(lines):
+    """Parse, check like the generator does, then and only then replace
+    the file, atomically. A plans.yaml that stopped parsing halfway
+    through an edit is a platform where no contract validates."""
+    text = "".join(lines)
+    try:
+        plans = yaml.safe_load(text) or {}
+        _check_plans(plans)
+    except (yaml.YAMLError, Invalid) as e:
+        return f"the edited plans.yaml would not be accepted by the generator: {e}"
+    fd, tmp = tempfile.mkstemp(prefix=".plans.", dir=os.path.dirname(PLANS))
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    os.replace(tmp, PLANS)
+    return None
+
+
+# ── what is asked for, checked before anything is touched ────────────
+def _parse_sets(pairs):
+    """`KEY=VALUE` pairs into numbers, or the reason one is not one."""
+    out = {}
+    for pair in pairs or []:
+        key, sep, value = pair.partition("=")
+        if not sep or not value.strip():
+            return None, f"`{pair}` is not KEY=VALUE"
+        key, value = key.strip(), value.strip()
+        if key not in QUOTA_KEYS:
+            return None, (f"`{key}` is not one of the seven numbers a plan is made of: "
+                          f"{', '.join(QUOTA_KEYS)}")
+        out[key] = value
+    return out, None
+
+
+def _refuse_numbers(numbers):
+    """Why these seven cannot be a plan, or None."""
+    for k in SIZE_KEYS + ("requests.storage",):
+        read = quantity.cpu if k.endswith(".cpu") else quantity.mem
+        try:
+            n = read(numbers[k])
+        except (TypeError, ValueError, KeyError):
+            n = 0
+        if n <= 0:
+            return (f"{k}: {numbers.get(k)!r} is not a quantity that can be added up. It "
+                    f"has to be a positive Kubernetes quantity: `500m`, `2`, `512Mi`, `1Gi`.")
+    for k in COUNTS:
+        if not str(numbers.get(k, "")).isdigit() or int(numbers[k]) <= 0:
+            return f"{k}: {numbers.get(k)!r} has to be a whole number above zero."
+    if quantity.cpu(numbers["limits.cpu"]) < quantity.cpu(numbers["requests.cpu"]):
+        return ("the CPU ceiling (limits.cpu) is below what the plan reserves "
+                "(requests.cpu): a ceiling under the floor is not a plan.")
+    if quantity.mem(numbers["limits.memory"]) < quantity.mem(numbers["requests.memory"]):
+        return ("the memory ceiling (limits.memory) is below what the plan reserves "
+                "(requests.memory): a ceiling under the floor is not a plan.")
+    return None
+
+
+def _refuse_description(text):
+    if text is None:
+        return None
+    if "\n" in text or "\r" in text:
+        return "the description is one sentence, on one line."
+    if len(text) > 200:
+        return "the description is one sentence: 200 characters at most."
+    return None
+
+
+def add(steps, name, base, pairs, description, narrate=True):
+    import datetime
+    if not NAME.match(name or ""):
+        steps.wrong(f"plan:{name}", error=f"{name!r} is not a plan name: lowercase letters, "
+                    f"digits and dashes, 3 to 30 characters, starting with a letter.")
+        steps.finish()
+    try:
+        lines = open(PLANS, encoding="utf-8").read().splitlines(keepends=True)
+        plans = yaml.safe_load("".join(lines)) or {}
+    except (OSError, yaml.YAMLError) as e:
+        steps.not_evaluable(f"plan:{name}", why="plans-unreadable", detail=str(e))
+        steps.finish()
+    cuota = plans.get("cuota") or {}
+    if name in cuota:
+        steps.wrong(f"plan:{name}", error=f"there is already a plan named {name!r}. Changing "
+                    f"it is `aegis quota set`; a new one needs a new name.")
+        steps.finish()
+    if base not in cuota:
+        steps.wrong(f"plan:{name}", error=f"there is no plan named {base!r} to start from. "
+                    f"There is: {', '.join(sorted(cuota))}.")
+        steps.finish()
+    sets, bad = _parse_sets(pairs)
+    if bad:
+        steps.wrong(f"plan:{name}", error=bad)
+        steps.finish()
+    numbers = {k: str((cuota[base] or {}).get(k)) for k in QUOTA_KEYS}
+    numbers.update(sets)
+    bad = _refuse_numbers(numbers) or _refuse_description(description)
+    if bad:
+        steps.wrong(f"plan:{name}", error=bad, numeros=numbers)
+        steps.finish()
+    sec = _section(lines, "cuota")
+    if sec is None:
+        steps.wrong(f"plan:{name}", error="plans.yaml has no `cuota:` section to add to.")
+        steps.finish()
+    start, end = sec
+    # AT THE END OF THE SECTION, after the last plan and its trailing
+    # blank line, so the shipped plans and their margins stay exactly
+    # where they were.
+    insert = end
+    while insert > start + 1 and lines[insert - 1].strip() == "":
+        insert -= 1
+    today = datetime.date.today().isoformat()
+    # One blank line above the block, and one below only if the section
+    # does not already end in one: adding and then removing a plan has
+    # to leave the file exactly as it was.
+    block = ["\n"] + _render(name, numbers, description, base, today)
+    if insert >= len(lines) or lines[insert].strip() != "":
+        block.append("\n")
+    new = lines[:insert] + block + lines[insert:]
+    bad = _write(new)
+    if bad:
+        steps.wrong(f"plan:{name}", error=bad, numeros=numbers)
+        steps.finish()
+    if narrate:
+        print(f"  {name}: added to {PLANS} from `{base}`  {grey}(no contract names it yet; "
+              f"`cuota: {name}` in a contract does){off}")
+    steps.done(f"plan:{name}", numeros=numbers, descripcion=description, de_serie=False,
+               desde=base, fichero=PLANS)
+    steps.finish()
+
+
+def set_(steps, name, pairs, description, narrate=True):
+    try:
+        lines = open(PLANS, encoding="utf-8").read().splitlines(keepends=True)
+        plans = yaml.safe_load("".join(lines)) or {}
+    except (OSError, yaml.YAMLError) as e:
+        steps.not_evaluable(f"plan:{name}", why="plans-unreadable", detail=str(e))
+        steps.finish()
+    cuota = plans.get("cuota") or {}
+    if name not in cuota:
+        steps.wrong(f"plan:{name}", error=f"there is no plan named {name!r}. There is: "
+                    f"{', '.join(sorted(cuota))}.")
+        steps.finish()
+    sets, bad = _parse_sets(pairs)
+    if bad:
+        steps.wrong(f"plan:{name}", error=bad)
+        steps.finish()
+    if not sets and description is None:
+        steps.wrong(f"plan:{name}", error="nothing to change: give --set KEY=VALUE or "
+                    "--describe TEXT.")
+        steps.finish()
+    if sets and name in shipped():
+        steps.wrong(f"plan:{name}", error=f"{name!r} is a plan aegis ships and its numbers "
+                    f"stay as shipped: they are the vocabulary the documentation speaks. "
+                    f"Add a plan of your own from it: `aegis quota add <new-name> --from "
+                    f"{name} --set ...`. Its description can be set.")
+        steps.finish()
+    numbers = {k: str((cuota[name] or {}).get(k)) for k in QUOTA_KEYS}
+    numbers.update(sets)
+    bad = _refuse_numbers(numbers) or _refuse_description(description)
+    if bad:
+        steps.wrong(f"plan:{name}", error=bad, numeros=numbers)
+        steps.finish()
+    sec = _section(lines, "cuota")
+    span = _block(lines, sec, name) if sec else None
+    if span is None:
+        steps.wrong(f"plan:{name}", error=f"the block of {name!r} could not be found in the "
+                    f"text of plans.yaml, although the file declares it. Nothing was changed.")
+        steps.finish()
+    _top, head, stop = span
+    body = lines[head + 1:stop]
+    for k, v in sets.items():
+        pat = re.compile(rf"^    {re.escape(k)}:\s")
+        idx = next((i for i, l in enumerate(body) if pat.match(l)), None)
+        if idx is None:
+            body.append(_value_line(k, v))
+        else:
+            body[idx] = _value_line(k, v)
+    if description is not None:
+        idx = next((i for i, l in enumerate(body) if l.startswith("    descripcion:")), None)
+        if idx is None:
+            body.insert(0, _description_line(description))
+        else:
+            body[idx] = _description_line(description)
+    new = lines[:head + 1] + body + lines[stop:]
+    bad = _write(new)
+    if bad:
+        steps.wrong(f"plan:{name}", error=bad, numeros=numbers)
+        steps.finish()
+    who = users().get(name, [])
+    if narrate:
+        print(f"  {name}: changed in {PLANS}"
+              + (f"  {grey}({', '.join(who)} name it: `aegis org apply` and a commit are "
+                 f"what carry the change to their namespaces){off}" if who else ""))
+    steps.done(f"plan:{name}", numeros=numbers,
+               descripcion=description if description is not None
+               else (cuota[name] or {}).get("descripcion"),
+               proyectos=who, fichero=PLANS)
+    steps.finish()
+
+
+def remove(steps, name, narrate=True):
+    try:
+        lines = open(PLANS, encoding="utf-8").read().splitlines(keepends=True)
+        plans = yaml.safe_load("".join(lines)) or {}
+    except (OSError, yaml.YAMLError) as e:
+        steps.not_evaluable(f"plan:{name}", why="plans-unreadable", detail=str(e))
+        steps.finish()
+    cuota = plans.get("cuota") or {}
+    if name not in cuota:
+        steps.wrong(f"plan:{name}", error=f"there is no plan named {name!r}.")
+        steps.finish()
+    if name in shipped():
+        steps.wrong(f"plan:{name}", error=f"{name!r} is a plan aegis ships, and it stays.")
+        steps.finish()
+    who = users().get(name, [])
+    if who:
+        steps.wrong(f"plan:{name}", error=f"{', '.join(who)} name{'s' if len(who) == 1 else ''} "
+                    f"this plan in {'its' if len(who) == 1 else 'their'} contract: a plan a "
+                    f"contract names cannot go, or the contract stops validating. Move "
+                    f"{'it' if len(who) == 1 else 'them'} to another plan first.",
+                    proyectos=who)
+        steps.finish()
+    sec = _section(lines, "cuota")
+    span = _block(lines, sec, name) if sec else None
+    if span is None:
+        steps.wrong(f"plan:{name}", error=f"the block of {name!r} could not be found in the "
+                    f"text of plans.yaml. Nothing was changed.")
+        steps.finish()
+    top, _head, stop = span
+    new = lines[:top] + lines[stop:]
+    # Exactly one blank line where the block was: adding and removing a
+    # plan leaves the file as it was, and a run of blank lines is what a
+    # careless edit leaves behind.
+    i = top
+    while i > 0 and new[i - 1].strip() == "":
+        i -= 1
+    j = i
+    while j < len(new) and new[j].strip() == "":
+        j += 1
+    new[i:j] = ["\n"] if 0 < i < len(new) else []
+    bad = _write(new)
+    if bad:
+        steps.wrong(f"plan:{name}", error=bad)
+        steps.finish()
+    if narrate:
+        print(f"  {name}: removed from {PLANS}")
+    steps.done(f"plan:{name}", fichero=PLANS)
+    steps.finish()
+
+
+def main():
+    ap = cli.parser("quota", __doc__.split("\n")[0])
+    flags = argparse.ArgumentParser(add_help=False)
+    flags.add_argument("--json", action="store_true", dest="json_mode",
+                       default=argparse.SUPPRESS, help="the document of states")
+    ap.add_argument("--json", action="store_true", dest="json_mode",
+                    help="the document of states")
+    sub = ap.add_subparsers(dest="verb", required=True)
+    sub.add_parser("list", parents=[flags], help="every plan, with its words and its numbers")
+    a_ = sub.add_parser("add", parents=[flags], help="a new plan, copied from another")
+    a_.add_argument("name")
+    a_.add_argument("--from", dest="base", required=True, metavar="PLAN",
+                    help="the plan to copy the numbers from")
+    a_.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                    help="one of the seven numbers, changed (repeatable)")
+    a_.add_argument("--describe", metavar="TEXT", help="the sentence a person picks it by")
+    s_ = sub.add_parser("set", parents=[flags], help="change a plan of your own")
+    s_.add_argument("name")
+    s_.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
+    s_.add_argument("--describe", metavar="TEXT")
+    r_ = sub.add_parser("remove", parents=[flags], help="remove a plan of your own")
+    r_.add_argument("name")
+    a = ap.parse_args()
+    steps = outcomes.Steps(json_mode=a.json_mode)
+    narrate = not a.json_mode
+    if a.verb == "list":
+        return listing(steps, narrate)
+    if a.verb == "add":
+        return add(steps, a.name, a.base, a.set, a.describe, narrate)
+    if a.verb == "set":
+        return set_(steps, a.name, a.set, a.describe, narrate)
+    return remove(steps, a.name, narrate)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

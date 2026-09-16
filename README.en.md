@@ -228,7 +228,9 @@ Traffic, Storage, Security, Machine and Health**, and beside each entry
 a dot with the worst state of what feeds it, so that «something is
 wrong on Storage» is readable before Storage is open. Every word of the
 platform is translated: the contract says `http`, the screen says *web
-service*.
+service*. A project's plan is picked by what it is for, and a plan of
+your own is one click away: a named step in the same catalogue, never a
+number in a contract.
 
 It opens with your projects, each service carrying the language GitHub
 measured for its repository, what reached it in 24 hours and its last

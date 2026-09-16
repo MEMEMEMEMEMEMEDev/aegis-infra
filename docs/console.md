@@ -39,9 +39,11 @@ noticing. What may never change quietly is which state a thing IS.
 
 The console is organized the way people who arrive from Vercel, from
 the AWS console or from GCP already think, and not the way the CLI is
-written. A menu on the left, one line per screen, and beside each line
-**a dot with the worst state of what feeds it**, so that «something is
-wrong on Storage» is readable before Storage is open.
+written. A menu on the left in three groups (build and ship, run, platform),
+one line per screen, and beside each line **a dot with the worst state
+of what feeds it**, so that «something is wrong on Storage» is readable
+before Storage is open. The first screen says it twice: the sentence
+at the top, and under it the pages that are not fine, as links.
 
 | screen | the question it answers | drawn from |
 |---|---|---|
@@ -50,6 +52,7 @@ wrong on Storage» is readable before Storage is open.
 | **Domains** | which hostnames the contracts declare, whether each exists at the edge, which service answers on each path | `edge check`, the contracts, and the round's sections about the edge and certificates |
 | **Traffic** | what actually reached each project in the last 24 hours | `traffic show` |
 | **Storage** | which projects hold data, where the disks are, and how old each off-site copy is against its clock | `data remote status`, the contracts, and the round's `backups` |
+| **Plans** | what a project may take: each plan's sentence, its seven numbers, who names it, and how many more of it would fit | `quota list`, `capacity show` |
 | **Security** | what runs is what was signed; what each service may reach; what this console itself does and does not do | the round's sections about the supply chain, `builds show`, the contracts |
 | **Machine** | what is free, what is spoken for, how many more projects of each plan would fit | `capacity show`, and the round's sections about the node |
 | **Health** | the round, whole: every section with every measure | `check`, `edge check` |
@@ -122,7 +125,7 @@ somebody might have to type it back.
 
 ## What it reads
 
-Eight commands, each one asked for its document (`--json`), and a source
+Nine commands, each one asked for its document (`--json`), and a source
 that cannot answer is a **reading too**: never a spinner, never a blank
 panel. It is drawn as «could not look», with the reason.
 
@@ -136,6 +139,7 @@ panel. It is drawn as «could not look», with the reason.
 | `aegis check` | the round: the cluster against what is declared |
 | `aegis edge check` | do the hostnames anybody types exist |
 | `aegis data remote status` | how old the off-site copy of each project is, against the clock |
+| `aegis quota list` | the plans of the catalogue: words, numbers, who names each |
 
 The console reads once when it starts, serves what it has, and reads
 again when asked («Read it again», on every screen). Every reading is
@@ -177,6 +181,28 @@ nobody commits, and the console inherits it verbatim.
 It refuses to write over a contract that exists. Creating a project that
 is already there is an edit, and an edit is a different decision with
 its own door.
+
+### A plan of your own
+
+The plan is picked on the form by **what it is for**: each one carries
+the sentence its plan declares in `plans.yaml` and its seven numbers in
+words. When none fits, «create a plan of your own» opens the second
+thing the console writes.
+
+A plan is a **named step in the catalogue**, and that is the whole
+design: a contract names a plan and never a number, so changing the
+machine is one file and not thirty contracts, and a plan with a name
+can be counted and measured (Machine says how many more of each would
+still fit). A new plan starts from one that exists, changes the numbers
+you say, and goes through the same validation the shipped ones get,
+through `aegis quota add`. The preview says how many projects of it the
+machine would fit today; the button writes one block into `plans.yaml`,
+keeping every comment in that file. No commit, no cluster.
+
+The plans aegis ships keep their numbers: they are the vocabulary the
+documentation speaks. Their sentence can be set; to «change» one, start
+a plan of your own from it. The ones you add are yours to change and to
+remove while no contract names them. Plans says which is which.
 
 ### Changing one
 
@@ -293,6 +319,9 @@ never only the worst one.
   at their own project needs Cloudflare Access and a tunnel of its own,
   and today Access admits a single email address. That is the original
   mission and it is still ahead.
+- **Sizes of your own.** A service's `tamano` (chico, mediano, grande)
+  is the other ceiling, inside the plan, and it is still only the three
+  the seed ships. The same door would serve it.
 - **The checks of the concept screens.** The two invariants are held on
   the first screen, which is what the corpus renders; the seven concept
   screens and the project page are drawn from the same readings by the

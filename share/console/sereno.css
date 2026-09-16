@@ -169,6 +169,9 @@ a { color:inherit; }
 }
 .brand { font-weight:800; font-size:18px; letter-spacing:-.045em; text-decoration:none; padding:2px 10px; }
 .menu { display:flex; flex-direction:column; gap:2px; }
+.menu h4 { margin:12px 10px 4px; font-size:10px; font-weight:700; letter-spacing:.1em;
+           text-transform:uppercase; color:var(--faint); }
+.menu h4:first-child { margin-top:2px; }
 .menu a {
   display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:9px;
   color:var(--mid); text-decoration:none; font-weight:600; font-size:13.5px;
@@ -194,6 +197,12 @@ a { color:inherit; }
 .top[data-state="unseen"] .sentence    { color:var(--unseen-ink); }
 .top[data-state="busy"] .sentence      { color:var(--busy-ink); }
 .actions { display:flex; gap:8px; margin-left:auto; flex-wrap:wrap; }
+/* Where to click: the pages that are not fine, beside the sentence. */
+.wheres { margin:0; display:flex; gap:6px; flex-wrap:wrap; flex-basis:100%; order:5; }
+.wheres a { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:99px;
+            background:var(--sunken); color:var(--mid); text-decoration:none; font-size:12px; font-weight:600; }
+.wheres a:hover { background:var(--panel); color:var(--ink); box-shadow:0 0 0 1px var(--line); }
+.top:has(.wheres) .actions { order:4; }
 .page-lead { margin:-2px 0 0; max-width:72ch; color:var(--mid); font-size:13.5px; }
 
 /* ══ ONE READING ════════════════════════════════════════════════════
@@ -223,18 +232,21 @@ code.mono { background:var(--sunken); padding:1px 5px; border-radius:5px; font-s
 .sub { margin:4px 0 -4px; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); }
 
 /* The strip: one line per page of the console, with its number. */
-.strip { display:grid; grid-template-columns:repeat(auto-fit, minmax(168px, 1fr)); gap:10px; }
+/* Seven of them in one row on a desk, so the whole platform is one
+ * glance; they wrap on their own below that. */
+.strip { display:grid; grid-template-columns:repeat(auto-fit, minmax(138px, 1fr)); gap:8px; }
 .peek { padding:0; gap:0; position:relative; border-radius:var(--r-s); }
 .peek:hover { border-color:rgb(11 13 16 / .22); }
-.peek .cover { display:flex; flex-direction:column; gap:5px; padding:13px 14px 6px; text-decoration:none; color:inherit; }
-.peek .cover b { font-size:13px; font-weight:700; }
-.peek .cover .ico { color:var(--faint); }
-.peek .fig { font-family:var(--mono); font-size:11.5px; color:var(--mid); }
-.peek .spread { display:flex; gap:8px; flex-wrap:wrap; margin-top:2px; }
-.peek .spot { display:inline-flex; align-items:center; gap:4px; font-family:var(--mono); font-size:11px; color:var(--faint); }
+.peek .cover { display:flex; flex-direction:column; gap:4px; padding:11px 12px 5px; text-decoration:none; color:inherit; }
+.peek .cover b { font-size:12.5px; font-weight:700; display:flex; align-items:center; gap:6px; }
+.peek .cover .ico { color:var(--faint); width:13px; height:13px; }
+.peek .fig { font-family:var(--mono); font-size:11px; color:var(--mid); line-height:1.35; }
+.peek .spread { display:flex; gap:6px; flex-wrap:wrap; margin-top:1px; }
+.peek .spot { display:inline-flex; align-items:center; gap:3px; font-family:var(--mono); font-size:10.5px; color:var(--faint); }
 .peek .spot b { font-weight:500; }
 .peek .spot.lbl { color:var(--faint); margin-left:2px; }
-.peek .age { padding:0 14px 11px; }
+.peek .round { display:flex; align-items:center; gap:5px; font-size:10.5px; color:var(--faint); margin-top:2px; }
+.peek .age { padding:0 12px 9px; font-size:10px; }
 
 /* Cards: a project, a service. The state is a line along the top, the
  * surface stays neutral, and the whole card is the link. */
@@ -256,6 +268,16 @@ code.mono { background:var(--sunken); padding:1px 5px; border-radius:5px; font-s
               position:relative; z-index:1; width:fit-content; }
 .card a.host:hover { color:var(--ink); }
 .pills { display:flex; flex-wrap:wrap; gap:5px; }
+.empty-state { grid-column:1 / -1; padding:26px 20px; border:1px dashed var(--line); border-radius:var(--r-s);
+               text-align:center; color:var(--mid); font-size:14px; display:flex; flex-direction:column; gap:12px; }
+.empty-state p { margin:0; }
+.empty-state .act { margin:0 3px; }
+.badge { display:inline-block; font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+         color:var(--faint); background:var(--sunken); border-radius:5px; padding:2px 6px; margin-top:4px; }
+.badge.mine { color:var(--busy-ink); background:var(--busy-bg); }
+.rows.plans td.desc { max-width:30ch; font-size:12.5px; color:var(--mid); }
+.rows.plans td.fits { white-space:nowrap; display:flex; align-items:center; gap:6px; }
+.rows tr.changed td { background:var(--attention-bg); }
 .pill {
   display:inline-flex; align-items:center; gap:5px; background:var(--sunken);
   border-radius:7px; padding:3px 8px; font-size:11.5px; font-weight:700;
@@ -275,7 +297,8 @@ code.mono { background:var(--sunken); padding:1px 5px; border-radius:5px; font-s
 .push { margin:0; display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:11.5px; }
 .push .lbl { font-size:10px; text-transform:uppercase; letter-spacing:.08em; font-weight:700; color:var(--faint); }
 .push .when { color:var(--faint); font-family:var(--mono); font-size:11px; }
-.push.none, .push .why { color:var(--faint); font-style:italic; font-size:11px; flex-basis:100%; }
+.push.none { color:var(--faint); font-style:italic; font-size:11px; }
+.push .why { color:var(--faint); font-style:italic; font-size:11px; flex-basis:100%; }
 .meta { margin:0; font-size:11.5px; color:var(--faint); }
 .meta b { color:var(--mid); font-weight:600; }
 .why { margin:0; font-size:12.5px; color:var(--mid); }
@@ -381,6 +404,28 @@ input[type="text"]:focus-visible, select:focus-visible, .pick:focus-within { out
              background:var(--sunken); color:var(--mid); border:1px solid transparent; }
 .pick input:checked + span { background:var(--ink); color:var(--paper); }
 .rows { display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); }
+/* The plan, picked by what it is for. */
+.plan-picks { display:grid; gap:8px; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); }
+.plan-pick { position:relative; display:block; }
+.plan-pick input { position:absolute; inset:0; opacity:0; margin:0; cursor:pointer; }
+.plan-body { display:flex; flex-direction:column; gap:4px; padding:11px 13px; border-radius:var(--r-s);
+             border:1px solid var(--line); background:var(--panel); height:100%; }
+.plan-body b { font-size:14px; }
+.plan-body .desc { font-size:12.5px; color:var(--mid); }
+.plan-body .nums { font-family:var(--mono); font-size:11px; color:var(--faint); }
+.plan-pick input:checked + .plan-body { border-color:var(--ink); box-shadow:inset 0 0 0 1px var(--ink); }
+.plan-pick:focus-within .plan-body { outline:2px solid var(--busy-ink); outline-offset:2px; }
+.plan-starts { display:flex; flex-direction:column; gap:8px; }
+.plan-start { display:flex; align-items:center; gap:14px; padding:11px 13px; border:1px solid var(--line);
+              border-radius:var(--r-s); text-decoration:none; color:inherit; }
+.plan-start:hover { border-color:rgb(11 13 16 / .22); }
+.plan-start .plan-body { border:0; padding:0; flex:1; min-width:0; }
+.plan-start .act { margin-left:auto; flex:none; }
+.numbers { display:grid; gap:12px 16px; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); }
+.numbers .field { gap:4px; }
+.numbers .field + .hint { margin-top:-6px; }
+p.field b { font-size:15px; }
+.hint.plain[data-state] { padding:9px 12px; border-radius:var(--r-s); background:var(--attention-bg); color:var(--attention-ink); }
 table.rows { display:table; }
 .row { border:1px solid var(--line); border-radius:var(--r-s); padding:13px 14px 15px; margin:0;
        display:flex; flex-direction:column; gap:10px; background:var(--panel); }
@@ -419,6 +464,8 @@ ol.left .note { color:var(--mid); font-size:12.5px; }
 }
 @media (max-width: 560px) {
   .grid { grid-template-columns:1fr; }
+  .plan-start { flex-direction:column; align-items:flex-start; }
+  .plan-start .act { margin-left:0; }
   table.rows { display:block; overflow-x:auto; white-space:nowrap; }
   .strip { grid-template-columns:repeat(2, 1fr); }
 }

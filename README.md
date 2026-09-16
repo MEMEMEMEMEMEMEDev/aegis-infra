@@ -262,7 +262,9 @@ Security, Machine y Health**, y al lado de cada entrada un punto con el
 peor estado de lo que la alimenta, así «algo anda mal en Storage» se lee
 antes de abrir Storage. Cada palabra de la plataforma va traducida: el
 contrato dice `http` y la pantalla dice *web service*; dice `cuota` y la
-pantalla dice *plan*.
+pantalla dice *plan*. El plan se elige por para qué sirve, y un plan a
+tu medida está a un clic: un escalón con nombre en el mismo catálogo,
+nunca un número en un contrato.
 
 Abre con **tus proyectos**: cada servicio lleva el lenguaje que GitHub
 ya midió para su repositorio, con un punto del color que GitHub mismo le
@@ -451,7 +453,7 @@ verificador).
 | grupo | comandos |
 |---|---|
 | setup | `aegis preflight`, `aegis init`, `aegis init-log`, `aegis verify`, `aegis destroy` |
-| apps | `aegis app`, `aegis org`, `aegis repos`, `aegis image`, `aegis secret` |
+| apps | `aegis app`, `aegis org`, `aegis quota`, `aegis repos`, `aegis image`, `aegis secret` |
 | operate | `aegis check`, `aegis console`, `aegis tenant`, `aegis traffic`, `aegis capacity`, `aegis builds`, `aegis host`, `aegis sync`, `aegis ai` |
 | infra | `aegis ci`, `aegis edge`, `aegis registry`, `aegis rotate`, `aegis webhook` |
 | backup | `aegis data`, `aegis state` |
@@ -475,6 +477,7 @@ verificador).
 |---|---|
 | `aegis app new` / `apply` | `new` escribe el alta entera en archivos (contrato desde una plantilla con `--template`, esqueleto, derivaciones, secretos) sin tocar nada fuera; `apply` ejecuta los pasos de GitHub de cada contrato: repo, esqueleto, deploy key, webhook (`--check` para verlo sin tocar nada). |
 | `aegis org plan` / `apply` / `validate` / `list` / `schema` / `edge` / `routes` / `plan-delete` / `delete` / `migrate` | `plan` muestra qué cambiaría; `apply` escribe los manifiestos; `validate` solo valida el contrato; `edge` deriva los hostnames públicos de todos los contratos; `routes` deriva el ConfigMap de rutas de IA (`ai-ruteo`); `plan-delete` muestra qué borraría; `delete` borra del repo y dice qué retirar del clúster; `migrate` lleva un contrato a una versión nueva; `list` lista las organizaciones que los contratos declaran, incluidas las que no validan; `schema` dice **qué puede contener un contrato**, derivado del propio validador, que es lo que lee el formulario de la consola. |
+| `aegis quota list` / `add` / `set` / `remove` | Los planes que un proyecto puede tomar, tal como los tiene `plans.yaml`: cada uno con su descripción, sus siete números, si viene de serie y qué proyectos lo nombran. `add` escribe un plan nuevo a partir de otro, con la misma validación que los de serie; `set` cambia los números de uno tuyo o la descripción de cualquiera; `remove` quita uno tuyo que ningún contrato nombre. Los de serie conservan sus números. Nunca un número en un contrato. |
 | `aegis repos list` | Los repositorios de la cuenta, con el lenguaje que GitHub ya midió y qué organización y servicio los despliega. Los que ningún contrato nombra son los que se podrían tomar. Si `gh` no contesta dice que no pudo mirar, nunca una lista vacía. |
 | `aegis image request` / `list` / `from` / `check` / `gc` | Las imágenes base que la plataforma fabrica y firma. `request` mide el digest al que apunta un tag hoy y lo declara en `images.txt` (con `--allow CVE --until --reason` para una excepción que firma un humano); `from` imprime la línea `FROM` que se pega en un Dockerfile; `check` mide que lo declarado sea lo que hay; `gc` limpia versiones viejas. |
 | `aegis secret create` / `rotate` / `move` | Crea los secretos cifrados que faltan (nunca regenera los que existen), reemplaza el material, o copia un secreto a otro namespace (`move` necesita la clave age). |

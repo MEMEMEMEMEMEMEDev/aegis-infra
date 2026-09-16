@@ -1,0 +1,514 @@
+{
+  "steps": [
+    {
+      "step": "repo:ventasfix-app",
+      "state": "already",
+      "lenguaje": "PHP",
+      "color": "#4F5D95",
+      "privado": true,
+      "empujado": "2026-09-13T17:09:05Z",
+      "url": "https://github.com/owner/ventasfix-app",
+      "sirve": [
+        {
+          "organizacion": "ventasfix",
+          "servicio": "app",
+          "tipo": "http"
+        }
+      ]
+    },
+    {
+      "step": "repo:ventasfix-carrito",
+      "state": "already",
+      "lenguaje": "PHP",
+      "color": "#4F5D95",
+      "privado": true,
+      "empujado": "2026-09-13T06:22:14Z",
+      "url": "https://github.com/owner/ventasfix-carrito",
+      "sirve": [
+        {
+          "organizacion": "ventasfix",
+          "servicio": "carrito",
+          "tipo": "http"
+        }
+      ]
+    },
+    {
+      "step": "repo:portafolio-v3",
+      "state": "already",
+      "lenguaje": "Astro",
+      "color": "#ff5a03",
+      "privado": true,
+      "empujado": "2026-09-13T05:31:09Z",
+      "url": "https://github.com/owner/portafolio-v3",
+      "sirve": [
+        {
+          "organizacion": "portafolio",
+          "servicio": "front",
+          "tipo": "estatico"
+        },
+        {
+          "organizacion": "portafolio",
+          "servicio": "bff",
+          "tipo": "http"
+        }
+      ]
+    },
+    {
+      "step": "repo:panel-api",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "color": "#f1e05a",
+      "privado": true,
+      "empujado": "2026-09-13T05:26:34Z",
+      "url": "https://github.com/owner/panel-api",
+      "sirve": [
+        {
+          "organizacion": "panel",
+          "servicio": "api",
+          "tipo": "http"
+        }
+      ]
+    },
+    {
+      "step": "repo:shop-web",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "color": "#3178c6",
+      "privado": true,
+      "empujado": "2026-09-13T05:24:11Z",
+      "url": "https://github.com/owner/shop-web",
+      "sirve": [
+        {
+          "organizacion": "shop",
+          "servicio": "web",
+          "tipo": "estatico"
+        }
+      ]
+    },
+    {
+      "step": "repo:shop-api",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "color": "#f1e05a",
+      "privado": true,
+      "empujado": "2026-09-13T05:22:07Z",
+      "url": "https://github.com/owner/shop-api",
+      "sirve": [
+        {
+          "organizacion": "shop",
+          "servicio": "api",
+          "tipo": "http"
+        }
+      ]
+    },
+    {
+      "step": "repo:panel-web",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "color": "#f1e05a",
+      "privado": true,
+      "empujado": "2026-09-13T05:18:28Z",
+      "url": "https://github.com/owner/panel-web",
+      "sirve": [
+        {
+          "organizacion": "panel",
+          "servicio": "web",
+          "tipo": "estatico"
+        }
+      ]
+    },
+    {
+      "step": "repo:shop-admin",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "color": "#f1e05a",
+      "privado": true,
+      "empujado": "2026-09-13T05:15:19Z",
+      "url": "https://github.com/owner/shop-admin",
+      "sirve": [
+        {
+          "organizacion": "shop",
+          "servicio": "admin",
+          "tipo": "estatico"
+        }
+      ]
+    },
+    {
+      "step": "repo:repo-08",
+      "state": "already",
+      "lenguaje": "Dockerfile",
+      "color": "#384d54",
+      "privado": true,
+      "empujado": "2026-09-13T05:12:17Z",
+      "url": "https://github.com/owner/repo-08",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-19",
+      "state": "already",
+      "lenguaje": "Shell",
+      "color": "#89e051",
+      "privado": false,
+      "empujado": "2026-09-13T01:22:14Z",
+      "url": "https://github.com/owner/repo-19",
+      "sirve": []
+    },
+    {
+      "step": "repo:drop-app",
+      "state": "already",
+      "lenguaje": "Go",
+      "color": "#00ADD8",
+      "privado": true,
+      "empujado": "2026-09-12T22:20:03Z",
+      "url": "https://github.com/owner/drop-app",
+      "sirve": [
+        {
+          "organizacion": "drop",
+          "servicio": "app",
+          "tipo": "http"
+        }
+      ]
+    },
+    {
+      "step": "repo:repo-15",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "color": "#3178c6",
+      "privado": true,
+      "empujado": "2026-09-12T21:38:32Z",
+      "url": "https://github.com/owner/repo-15",
+      "sirve": []
+    },
+    {
+      "step": "repo:shop-worker",
+      "state": "already",
+      "lenguaje": "Python",
+      "color": "#3572A5",
+      "privado": true,
+      "empujado": "2026-09-10T20:12:24Z",
+      "url": "https://github.com/owner/shop-worker",
+      "sirve": [
+        {
+          "organizacion": "shop",
+          "servicio": "worker",
+          "tipo": "worker"
+        }
+      ]
+    },
+    {
+      "step": "repo:shop-stock",
+      "state": "already",
+      "lenguaje": "Go",
+      "color": "#00ADD8",
+      "privado": true,
+      "empujado": "2026-09-04T22:50:51Z",
+      "url": "https://github.com/owner/shop-stock",
+      "sirve": [
+        {
+          "organizacion": "shop",
+          "servicio": "stock",
+          "tipo": "http"
+        }
+      ]
+    },
+    {
+      "step": "repo:repo-16",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "color": "#f1e05a",
+      "privado": true,
+      "empujado": "2026-09-02T23:46:09Z",
+      "url": "https://github.com/owner/repo-16",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-12",
+      "state": "already",
+      "lenguaje": "Kotlin",
+      "color": "#A97BFF",
+      "privado": true,
+      "empujado": "2026-09-02T23:29:37Z",
+      "url": "https://github.com/owner/repo-12",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-13",
+      "state": "already",
+      "lenguaje": "Go",
+      "color": "#00ADD8",
+      "privado": true,
+      "empujado": "2026-09-02T23:20:37Z",
+      "url": "https://github.com/owner/repo-13",
+      "sirve": []
+    },
+    {
+      "step": "repo:__ai_gateway_repo__",
+      "state": "already",
+      "lenguaje": "Go",
+      "color": "#00ADD8",
+      "privado": true,
+      "empujado": "2026-09-02T10:53:56Z",
+      "url": "https://github.com/owner/__ai_gateway_repo__",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-23",
+      "state": "already",
+      "lenguaje": "HTML",
+      "color": "#e34c26",
+      "privado": true,
+      "empujado": "2026-09-02T05:15:13Z",
+      "url": "https://github.com/owner/repo-23",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-17",
+      "state": "already",
+      "lenguaje": "Python",
+      "color": "#3572A5",
+      "privado": true,
+      "empujado": "2026-08-27T08:15:53Z",
+      "url": "https://github.com/owner/repo-17",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-20",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "color": "#f1e05a",
+      "privado": true,
+      "empujado": "2026-08-27T07:39:52Z",
+      "url": "https://github.com/owner/repo-20",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-24",
+      "state": "already",
+      "lenguaje": "Java",
+      "color": "#b07219",
+      "privado": true,
+      "empujado": "2026-08-26T10:49:16Z",
+      "url": "https://github.com/owner/repo-24",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-29",
+      "state": "already",
+      "lenguaje": "Shell",
+      "color": "#89e051",
+      "privado": true,
+      "empujado": "2026-08-26T07:02:27Z",
+      "url": "https://github.com/owner/repo-29",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-09",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "color": "#f1e05a",
+      "privado": true,
+      "empujado": "2026-08-10T10:11:59Z",
+      "url": "https://github.com/owner/repo-09",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-02",
+      "state": "already",
+      "lenguaje": "Shell",
+      "color": "#89e051",
+      "privado": true,
+      "empujado": "2026-08-03T19:58:17Z",
+      "url": "https://github.com/owner/repo-02",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-10",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "color": "#f1e05a",
+      "privado": true,
+      "empujado": "2026-07-23T11:46:29Z",
+      "url": "https://github.com/owner/repo-10",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-25",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "color": "#f1e05a",
+      "privado": true,
+      "empujado": "2026-07-14T23:59:42Z",
+      "url": "https://github.com/owner/repo-25",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-27",
+      "state": "already",
+      "lenguaje": "HCL",
+      "color": "#844FBA",
+      "privado": true,
+      "empujado": "2026-07-04T08:24:59Z",
+      "url": "https://github.com/owner/repo-27",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-21",
+      "state": "already",
+      "lenguaje": "Dockerfile",
+      "color": "#384d54",
+      "privado": true,
+      "empujado": "2026-07-04T02:29:00Z",
+      "url": "https://github.com/owner/repo-21",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-06",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "color": "#3178c6",
+      "privado": true,
+      "empujado": "2026-05-21T11:16:10Z",
+      "url": "https://github.com/owner/repo-06",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-28",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "color": "#f1e05a",
+      "privado": true,
+      "empujado": "2026-04-30T10:13:26Z",
+      "url": "https://github.com/owner/repo-28",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-32",
+      "state": "already",
+      "lenguaje": "ShaderLab",
+      "color": "#222c37",
+      "privado": true,
+      "empujado": "2026-04-22T00:14:37Z",
+      "url": "https://github.com/owner/repo-32",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-26",
+      "state": "already",
+      "lenguaje": "Shell",
+      "color": "#89e051",
+      "privado": true,
+      "empujado": "2026-04-20T15:31:52Z",
+      "url": "https://github.com/owner/repo-26",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-11",
+      "state": "already",
+      "lenguaje": null,
+      "color": null,
+      "privado": true,
+      "empujado": "2026-03-24T13:52:57Z",
+      "url": "https://github.com/owner/repo-11",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-04",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "color": "#3178c6",
+      "privado": true,
+      "empujado": "2026-03-08T20:40:44Z",
+      "url": "https://github.com/owner/repo-04",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-07",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "color": "#3178c6",
+      "privado": true,
+      "empujado": "2026-03-08T20:34:11Z",
+      "url": "https://github.com/owner/repo-07",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-05",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "color": "#3178c6",
+      "privado": true,
+      "empujado": "2026-03-08T20:34:00Z",
+      "url": "https://github.com/owner/repo-05",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-18",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "color": "#3178c6",
+      "privado": true,
+      "empujado": "2026-03-02T14:44:02Z",
+      "url": "https://github.com/owner/repo-18",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-30",
+      "state": "already",
+      "lenguaje": "Go",
+      "color": "#00ADD8",
+      "privado": true,
+      "empujado": "2026-02-11T10:44:14Z",
+      "url": "https://github.com/owner/repo-30",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-31",
+      "state": "already",
+      "lenguaje": "SCSS",
+      "color": "#c6538c",
+      "privado": true,
+      "empujado": "2026-01-19T13:25:11Z",
+      "url": "https://github.com/owner/repo-31",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-01",
+      "state": "already",
+      "lenguaje": "TypeScript",
+      "color": "#3178c6",
+      "privado": true,
+      "empujado": "2026-01-14T06:39:11Z",
+      "url": "https://github.com/owner/repo-01",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-14",
+      "state": "already",
+      "lenguaje": "Java",
+      "color": "#b07219",
+      "privado": true,
+      "empujado": "2026-01-09T13:30:33Z",
+      "url": "https://github.com/owner/repo-14",
+      "sirve": []
+    },
+    {
+      "step": "repo:repo-03",
+      "state": "already",
+      "lenguaje": "JavaScript",
+      "color": "#f1e05a",
+      "privado": true,
+      "empujado": "2026-01-09T01:38:22Z",
+      "url": "https://github.com/owner/repo-03",
+      "sirve": []
+    },
+    {
+      "step": "repos",
+      "state": "already",
+      "total": 43,
+      "deployed": 11,
+      "unclaimed": 32,
+      "sin_lenguaje": 1
+    }
+  ],
+  "rc": 0
+}
