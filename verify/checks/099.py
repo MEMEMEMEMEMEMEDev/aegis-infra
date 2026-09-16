@@ -1,11 +1,13 @@
-"""Check 099 — the console writes one contract, in one place, or nothing.
+"""Check 099 — the console writes files in this instance, or nothing.
 
-The console reads. Now one screen of it writes, and that is the moment
+The console reads. Now two screens of it write, and that is the moment
 a tool stops being safe by construction and starts being safe by
 promise. The promise is small on purpose and it is `aegis org`'s own:
 
-    it writes ONE contract into orgs/, it does not commit, it does not
-    push, it does not apply, and it does not touch the cluster.
+    it writes files in this instance — a contract into orgs/, what the
+    contract derives, and since 2026-09-16 a plan into plans.yaml — it
+    does not commit, it does not push, it does not apply, and it does
+    not touch the cluster.
 
 That is what makes a file in a working tree harmless — ArgoCD reads the
 remote, so nothing runs until somebody commits. Every part of that
@@ -45,17 +47,20 @@ if not os.path.isfile(SERVER):
 # What the console is allowed to invoke, and it is TWO lists now.
 #
 # The first only reads. The second WRITES FILES IN THIS INSTANCE and
-# nothing else — `aegis org` promises it in its own module and
-# `aegis secret` never invokes kubectl at all — which is the same
-# property the console already had, so taking them on changes no
-# promise. They are what turns «here is a file, now run five commands»
-# into three.
+# nothing else — `aegis org` promises it in its own module, `aegis
+# secret` never invokes kubectl at all, and `aegis quota` (2026-09-16,
+# a plan of your own from the console) has no subprocess in it: it
+# edits plans.yaml textually and puts the result through the
+# generator's own shape check. The same property the console already
+# had, so taking them on changes no promise. `quota remove` is NOT
+# here on purpose: the console adds and changes, and never removes.
 READ_ONLY = {
     "org list", "org schema", "org plan", "org validate", "repos list",
     "tenant show", "traffic show", "capacity show", "builds show",
     "check", "edge check", "data remote status", "builds show --org",
+    "quota list",
 }
-WRITES_FILES_HERE = {"org apply", "secret create"}
+WRITES_FILES_HERE = {"org apply", "secret create", "quota add", "quota set"}
 ALLOWED = READ_ONLY | WRITES_FILES_HERE
 
 # Words that name a change this console may never make, wherever they
@@ -257,7 +262,7 @@ unknown = sorted(v for v in invoked
                                   for r in ALLOWED))
 if unknown:
     findings.append(f"the console invokes {unknown}, which is neither a command that only "
-                    f"reads nor one of the two that write files in this instance: a "
+                    f"reads nor one of the four that write files in this instance: a "
                     f"console that changes something outside this process is no longer a "
                     f"thing you can run at any moment")
 

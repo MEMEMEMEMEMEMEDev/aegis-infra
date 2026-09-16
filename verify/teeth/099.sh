@@ -150,3 +150,18 @@ control_3() { printf '\n# note: ArgoCD reads the REMOTE. A contract in a working
 # the two commands that write files in this instance are legitimate, and
 # renaming what the screen calls them is not naming a change outside it
 control_4() { sed -i 's/("secret", ("create", path), "secrets")/("secret", ("create", path), "the secrets")/' "$C099"; }
+
+# the console adds a plan and changes one; it never REMOVES one. The
+# screen that changes a plan starts invoking `quota remove` — which is
+# `aegis quota` by hand, reading what it says — and the policy refuses.
+red_9() { python3 - "$C099" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = 'cli.run_json("quota", "set", plan.get("nombre") or "", *_plan_args(plan))'
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, 'cli.run_json("quota", "remove", plan.get("nombre") or "", *_plan_args(plan))', 1))
+P
+}
+
+# reading the catalogue once more is reading, wherever it is done from
+control_5() { printf '\n\ndef _plans_again():\n    return cli.run_json("quota", "list")[1]\n' >> "$C099"; }

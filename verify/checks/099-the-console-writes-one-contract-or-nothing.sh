@@ -1,4 +1,4 @@
-# title: the console writes one contract, in one place, or nothing at all
+# title: the console writes files in this instance, a contract or a plan, or nothing at all
 # origin: new in v3 — 2026-09-12, the first screen of the console that writes (plan/15 §12)
 check() {
 # THE CONSOLE READS. One screen of it now writes, and that is the moment
