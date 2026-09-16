@@ -378,11 +378,6 @@ table.rows { width:100%; border-collapse:collapse; font-size:13px; }
  * choice is made: the rules travel as words beside each type and the
  * validator is what refuses. The fields have to be legible enough to
  * be read, not just filled. */
-.sereno:not(.screen) { max-width:960px; padding:22px clamp(16px, 3vw, 36px) 56px; display:flex; flex-direction:column; gap:14px; }
-.verdict { border-radius:var(--r); padding:18px 20px; background:var(--panel); border:1px solid var(--line); }
-.verdict .sentence { margin:0; font-size:clamp(17px, 2.4vw, 22px); font-weight:800; letter-spacing:-.03em; line-height:1.15; }
-.subject { margin:0 0 10px; display:flex; align-items:center; gap:11px; flex-wrap:wrap; }
-.subject b { font-size:22px; font-weight:800; letter-spacing:-.035em; }
 .source > h2 { font-size:15px; font-weight:800; }
 form { display:flex; flex-direction:column; gap:16px; }
 .field { display:flex; flex-direction:column; gap:5px; }

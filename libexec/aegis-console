@@ -757,12 +757,12 @@ def serve(port):
             with lock:
                 return list(state["readings"])
 
-        def _wrap(self, body, title, subject=None):
+        def _wrap(self, body, title, subject=None, active="projects"):
             """Every screen gets the frame: the menu with its dots and
             when the instance was read. The forms and the plan included,
             so that nobody lands on a page with no way back."""
             return drawing.wrap(body, title, instance=self._instance(),
-                                active="projects", subject=subject)
+                                active=active, subject=subject)
 
         def do_POST(self):                                # noqa: N802
             why = guard.why_not_read(self.headers, port)
@@ -838,13 +838,13 @@ def serve(port):
                        f"every one of the seven numbers is needed; missing: {', '.join(missing)}")
                 self._send(200, self._wrap(drawing.render_quota_form(
                     listing, token, base=plan.get("desde"), editing=editing, filled=fields,
-                    problem=why, back=back), "a plan"))
+                    problem=why, back=back), "a plan", active="plans"))
                 return
             capacity = next((r.get("documento") for r in self._instance()
                              if (r.get("comando") or "").startswith("capacity show")), None)
             self._send(200, self._wrap(drawing.render_quota_preview(
                 plan, token, capacity=capacity, editing=editing, before=before, back=back),
-                "a plan"))
+                "a plan", active="plans"))
 
         def _plan_write(self, fields, editing=None):
             plan = drawing.quota_from_form(fields)
@@ -857,11 +857,11 @@ def serve(port):
             if bad:
                 self._send(200, self._wrap(drawing.render_quota_form(
                     _listing(), token, base=plan.get("desde"), editing=editing,
-                    filled=fields, problem=bad, back=back), "a plan"))
+                    filled=fields, problem=bad, back=back), "a plan", active="plans"))
                 return
             _refresh(("quota", "capacity"))
             self._send(200, self._wrap(drawing.render_quota_written(
-                doc, plan["nombre"], back=back, editing=bool(editing)), "a plan"))
+                doc, plan["nombre"], back=back, editing=bool(editing)), "a plan", active="plans"))
 
         def _preview(self, fields, org=None):
             """Build it, validate it, and draw what would change. NOTHING
@@ -1039,7 +1039,7 @@ def serve(port):
                     page = drawing.render_quota_form(listing, token, base=base, back=back)
                 else:
                     page = drawing.render_quota_start(listing, token, back=back)
-                self._send(200, self._wrap(page, "a new plan"), head_only=head_only)
+                self._send(200, self._wrap(page, "a new plan", active="plans"), head_only=head_only)
                 return
             m = re.fullmatch(r"/plans/([^/]+)/edit", path)
             if m:
@@ -1056,7 +1056,7 @@ def serve(port):
                     self._redirect(f"/plans/new?from={urllib.parse.quote(name)}")
                     return
                 self._send(200, self._wrap(drawing.render_quota_form(
-                    listing, token, editing=name), f"{name} · plan"), head_only=head_only)
+                    listing, token, editing=name), f"{name} · plan", active="plans"), head_only=head_only)
                 return
             # The old address of a project. Bookmarks are kept working;
             # nothing is served at the old one.

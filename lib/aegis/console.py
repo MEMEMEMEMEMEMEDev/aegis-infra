@@ -206,6 +206,16 @@ SENTENCE = {
 # one `aegis org apply` runs— is what refuses.
 
 
+def _form_top(title, sentence, back_href, back_label, state=FINE, actions=""):
+    """The same bar every page of the console wears: where you are, one
+    sentence, what you can do. The forms had a header of their own and
+    it made them look like another program; they are pages of this one."""
+    return (f'<header class="top" data-state="{state}"><p class="crumbs">'
+            f'<a href="{_e(back_href)}">{_e(back_label)}</a><span>/</span><b>{_e(title)}</b>'
+            f'</p><p class="sentence">{_e(sentence)}</p>'
+            + (f'<div class="actions">{actions}</div>' if actions else "") + '</header>')
+
+
 def _field(name, label, value="", kind="text", hint="", **attrs):
     extra = "".join(f' {k}="{_e(v)}"' for k, v in attrs.items())
     return (f'<label class="field"><span class="label">{_e(label)}</span>'
@@ -418,15 +428,12 @@ def render_form(schema, token, filled=None, problem=None, action="/new",
 
     back = f'/projects/{_e(subject)}' if subject else '/'
     where = f'back to {_e(subject)}' if subject else 'all projects'
-    head = (f'<header class="verdict" data-state="{FINE}">'
-            f'<p class="subject"><a class="act act--quiet" href="{back}">{where}'
-            f'</a><b>{_e(subject) if subject else "a new project"}</b></p>'
-            f'<p class="sentence">'
-            + ('Nothing is changed yet. The next screen is the plan, and even that '
-               'writes nothing.' if subject else
-               'Nothing here is created yet. The next screen is the plan, and even '
-               'that writes nothing.')
-            + '</p></header>')
+    head = _form_top(f"{subject} · edit" if subject else "New project",
+                     ('Nothing is changed yet. The next screen is the plan, and even that '
+                      'writes nothing.' if subject else
+                      'Nothing is created yet. The next screen is the plan, and even that '
+                      'writes nothing.'),
+                     back, where.replace("back to ", "").capitalize() if subject else "Projects")
     trouble = ""
     if problem:
         # THE VALIDATOR'S OWN WORDS, not a paraphrase. It explains which
@@ -568,7 +575,7 @@ def render_form(schema, token, filled=None, problem=None, action="/new",
             f'{more}'
             f'<button class="act" type="submit">see the plan</button>'
             f'</form></section>')
-    return f'<main class="sereno" data-veredicto="{FINE}">{head}{trouble}{before}{body}</main>'
+    return f'<main class="sereno screen" data-veredicto="{FINE}">{head}{trouble}{before}{body}</main>'
 
 
 def _apply_needs(contract, services, needs, current=None, new_from=0):
@@ -1010,9 +1017,7 @@ def render_plan(doc, contract_text, token, written=None, before=None, org=None,
                   + ("write it over the contract" if editing else "write the contract")
                   + f'</button>'
                   f'<a class="act act--quiet" href="{back}">change something</a></form>')
-    head = (f'<header class="verdict" data-state="{v}">'
-            f'<p class="subject"><a class="act act--quiet" href="/">all projects</a>'
-            f'<b>the plan</b></p><p class="sentence">{_e(sentence)}</p></header>')
+    head = _form_top(f"{org} · the plan" if org else "The plan", sentence, "/", "Projects", v)
     # THE DIFF FIRST, and the generated files after. What the person did
     # is two lines of YAML; which of the six derived manifests that
     # touches is a fact about the machinery, true and second.
@@ -1021,7 +1026,7 @@ def render_plan(doc, contract_text, token, written=None, before=None, org=None,
               if editing else "")
     errand = (_errand(after, org, platform) if written and after else "")
     words = _in_words(contract_text)
-    return (f'<main class="sereno" data-veredicto="{v}">{head}{words}{change}{errand}'
+    return (f'<main class="sereno screen" data-veredicto="{v}">{head}{words}{change}{errand}'
             f'<section class="source" data-state="{v}"><h2>what would change</h2>'
             + (f'<ul class="tail">{"".join(files)}</ul>' if files else
                f'<p class="empty" data-state="{UNSEEN}">nothing was planned</p>')
@@ -1186,11 +1191,10 @@ def render_quota_start(listing, token, back="/plans"):
         body = (f'<section class="source" data-state="{FINE}"><h2>start from a plan</h2>'
                 f'<p class="lead">A new plan is a copy of one that exists, changed where you '
                 f'say. Pick the closest.</p><div class="plan-starts">{rows}</div></section>')
-    head = (f'<header class="verdict" data-state="{FINE}">'
-            f'<p class="subject"><a class="act act--quiet" href="{_e(back)}">back</a>'
-            f'<b>a new plan</b></p><p class="sentence">Nothing is written yet. A plan is a '
-            f'named step in the catalogue; a contract names it and never a number.</p></header>')
-    return f'<main class="sereno" data-veredicto="{FINE}">{head}{body}</main>'
+    head = _form_top("New plan", "Nothing is written yet. A plan is a named step in the "
+                     "catalogue; a contract names it and never a number.", back,
+                     "Plans" if back == "/plans" else "Back")
+    return f'<main class="sereno screen" data-veredicto="{FINE}">{head}{body}</main>'
 
 
 def render_quota_form(listing, token, base=None, editing=None, filled=None, problem=None,
@@ -1208,14 +1212,12 @@ def render_quota_form(listing, token, base=None, editing=None, filled=None, prob
         filled["nombre"] = editing or ""
         filled["desde"] = base or ""
     what = f'change {editing}' if editing else 'a new plan'
-    head = (f'<header class="verdict" data-state="{FINE}">'
-            f'<p class="subject"><a class="act act--quiet" href="{_e(back)}">back</a>'
-            f'<b>{_e(what)}</b></p><p class="sentence">'
-            + ("Nothing is changed yet. The next screen shows the plan as it would be, and "
-               "even that writes nothing." if editing else
-               f"Nothing is written yet. This starts from `{_e(base)}`; the next screen "
-               f"shows the plan as it would be, and even that writes nothing.")
-            + '</p></header>')
+    head = _form_top(what.capitalize(),
+                     ("Nothing is changed yet. The next screen shows the plan as it would be, "
+                      "and even that writes nothing." if editing else
+                      f"Nothing is written yet. This starts from {base}; the next screen "
+                      f"shows the plan as it would be, and even that writes nothing."),
+                     back, "Plans" if back == "/plans" else "Back")
     trouble = ""
     if problem:
         trouble = (f'<section class="source" data-state="{WRONG}">'
@@ -1247,7 +1249,7 @@ def render_quota_form(listing, token, base=None, editing=None, filled=None, prob
             f'{_field("descripcion", "what it is for", filled.get("descripcion", ""), hint="one sentence; it is what a person picks the plan by")}'
             f'<h3 class="sub">the seven numbers</h3><div class="numbers">{numbers}</div>'
             f'<button class="act" type="submit">see it</button></form></section>')
-    return f'<main class="sereno" data-veredicto="{FINE}">{head}{trouble}{body}</main>'
+    return f'<main class="sereno screen" data-veredicto="{FINE}">{head}{trouble}{body}</main>'
 
 
 def render_quota_preview(plan, token, capacity=None, editing=None, before=None, back="/plans"):
@@ -1295,10 +1297,9 @@ def render_quota_preview(plan, token, capacity=None, editing=None, before=None, 
                                  for k, _l, _h in QUOTA_FIELDS)
     where = f'/plans/{_e(editing)}/write' if editing else '/plans/write'
     again = f'/plans/{_e(editing)}/edit' if editing else f'/plans/new?from={_e(plan.get("desde"))}'
-    head = (f'<header class="verdict" data-state="{FINE}">'
-            f'<p class="subject"><a class="act act--quiet" href="{_e(back)}">back</a>'
-            f'<b>{_e(plan.get("nombre"))}</b></p><p class="sentence">Nothing has been written. '
-            f'This is the plan as it would be in the catalogue.</p></header>')
+    head = _form_top(plan.get("nombre") or "a plan", "Nothing has been written. This is the "
+                     "plan as it would be in the catalogue.", back,
+                     "Plans" if back == "/plans" else "Back")
     body = (f'<section class="source" data-state="{FINE}"><h2>the plan</h2>'
             + (f'<p class="lead">{_e(plan.get("descripcion"))}</p>' if plan.get("descripcion") else "")
             + f'<table class="rows"><thead><tr><th>number</th><th>as the file says it</th>'
@@ -1310,7 +1311,7 @@ def render_quota_preview(plan, token, capacity=None, editing=None, before=None, 
             + ("write it over the plan" if editing else "write it into the catalogue")
             + f'</button><a class="act act--quiet" href="{again}">change something</a></form>'
             f'</section>')
-    return f'<main class="sereno" data-veredicto="{FINE}">{head}{body}</main>'
+    return f'<main class="sereno screen" data-veredicto="{FINE}">{head}{body}</main>'
 
 
 def render_quota_written(doc, name, back="/plans", editing=False):
@@ -1327,9 +1328,7 @@ def render_quota_written(doc, name, back="/plans", editing=False):
                         f"and a commit are what carry the change to the cluster.")
     else:
         sentence = "The catalogue was not changed."
-    head = (f'<header class="verdict" data-state="{state}">'
-            f'<p class="subject"><a class="act act--quiet" href="/plans">every plan</a>'
-            f'<b>{_e(name)}</b></p><p class="sentence">{_e(sentence)}</p></header>')
+    head = _form_top(name, sentence, "/plans", "Plans", state)
     body = (f'<section class="source" data-state="{state}"><h2>what aegis quota said</h2>'
             f'{_chip(state, STATE_WORD_FOR[state])}'
             + (f'<pre class="why">{_e(st.get("error"))}</pre>' if st.get("error") else "")
@@ -1337,7 +1336,7 @@ def render_quota_written(doc, name, back="/plans", editing=False):
             + f'<p><a class="act" href="{_e(back)}">'
             + ("back to the form" if back not in ("/plans", "/") else "every plan")
             + '</a></p></section>')
-    return f'<main class="sereno" data-veredicto="{state}">{head}{body}</main>'
+    return f'<main class="sereno screen" data-veredicto="{state}">{head}{body}</main>'
 
 
 STATE_WORD_FOR = {FINE: "written", WRONG: "refused", UNSEEN: "could not look",

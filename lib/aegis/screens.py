@@ -1146,7 +1146,58 @@ def _backup_rows(reading, names=None):
     return rows
 
 
-def _backup_section(reading, names=None, ident="storage"):
+def _disks_of(tenant):
+    """The disks a project actually has, out of `tenant show`: the ones
+    its services declare and the ones nothing claims. Drawn as context
+    inside the storage section, and it says so: the reading itself is
+    drawn once, under Services."""
+    if tenant is None or blind(tenant):
+        return ""
+    rows = []
+    for st in steps_of(tenant):
+        kind, _, what = st.get("step", "").partition(":")
+        if kind == "service" and (st.get("volume") or st.get("volume_phase")):
+            phase = st.get("volume_phase") or ("missing" if not st.get("volume") else "")
+            rows.append(f'<tr><td><b>{_e(what)}</b></td><td>{_e(KIND.get(st.get("tipo"), st.get("tipo")))}</td>'
+                        f'<td class="mono">{_e(st.get("volume") or "")}</td>'
+                        f'<td class="num">{_e(st.get("volume_size") or "")}</td>'
+                        f'<td>{_chip(state_of(st), phase or STATE_WORD[state_of(st)])}</td>'
+                        f'<td class="note">declared in the contract; its dump travels in the copy</td></tr>')
+        elif kind == "unclaimed-volume":
+            rows.append(f'<tr><td class="faint">nobody</td><td></td><td class="mono">{_e(what)}</td>'
+                        f'<td class="num">{_e(st.get("size") or st.get("volume_size") or "")}</td>'
+                        f'<td>{_chip(state_of(st), "not in the contract")}</td>'
+                        f'<td class="note">{_e(WHY["unclaimed-volume"])}</td></tr>')
+    if not rows:
+        return ('<h3 class="sub">Disks</h3><p class="empty">no service of this project has a '
+                'disk, and nothing unclaimed was found</p>')
+    return (f'<h3 class="sub">Disks</h3><table class="rows"><thead><tr><th>service</th><th>kind</th>'
+            f'<th>volume</th><th class="num">size</th><th></th><th></th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table>'
+            f'<p class="note">from <code class="mono">{_e(tenant.get("comando"))}</code>, drawn under '
+            f'Services; a disk lives on this machine and only its dump leaves it.</p>')
+
+
+def _backup_facts(reading):
+    """The numbers that matter before the table: who holds data, how
+    many copies are late, how old the oldest is."""
+    holding = [st for st in steps_of(reading)
+               if st.get("step", "").startswith("backup:") and st.get("holds")]
+    late = [st for st in holding if st.get("late") or state_of(st) == WRONG]
+    unseen = [st for st in holding if state_of(st) == UNSEEN]
+    ages = [st["age_hours"] for st in holding if st.get("age_hours") is not None]
+    cad = next((st.get("cadence_seconds") for st in holding if st.get("cadence_seconds")), 0)
+    facts = [_fact("hold data", _num(len(holding))),
+             _fact("copies late", _num(len(late))),
+             _fact("oldest copy", f"{max(ages):g} h" if ages else "?")]
+    if cad:
+        facts.append(_fact("the clock", f"every {cad // 3600} h"))
+    if unseen:
+        facts.append(_fact("could not look", _num(len(unseen))))
+    return f'<div class="facts-row head">{"".join(facts)}</div>'
+
+
+def _backup_section(reading, names=None, ident="storage", tenant=None):
     if blind(reading):
         return _blind_section(reading, "Off-site copies", "backups", ident=ident,
                               icon="database")
@@ -1156,11 +1207,16 @@ def _backup_section(reading, names=None, ident="storage"):
         states.add(UNSEEN)
         body = f'<p class="empty" data-state="{UNSEEN}">nothing was measured</p>'
     else:
-        body = (f'<table class="rows backups"><thead><tr><th>project</th><th>holds</th>'
+        body = (_backup_facts(reading)
+                + (f'<h3 class="sub">Off-site copy</h3>' if tenant is not None else "")
+                + f'<table class="rows backups"><thead><tr><th>project</th><th>holds</th>'
                 f'<th class="num">newest copy</th><th class="num">clock</th>'
                 f'<th class="num">copies</th><th class="num">size</th><th></th><th></th>'
                 f'</tr></thead><tbody>{"".join(rows)}</tbody></table>')
-    return _section(reading, "Off-site copies", body, states, "backups", ident=ident,
+    if tenant is not None:
+        body = _disks_of(tenant) + body
+    return _section(reading, "Storage" if tenant is not None else "Off-site copies",
+                    body, states, "backups", ident=ident,
                     lead="Every project that holds data is bundled, encrypted and sent to the "
                          "destination on a clock. «Newest copy» is read against that clock: "
                          "one missed turn is a machine that was off, two is a mechanism that "
@@ -1231,7 +1287,7 @@ def project(readings, subject, instance=None):
     backup = reading_for(readings, "data remote status")
     if backup is not None:
         drawn.add(id(backup))
-        parts["storage"] = _backup_section(backup, names)
+        parts["storage"] = _backup_section(backup, names, tenant=tenant)
     others = "".join(_dump(r) for r in readings if id(r) not in drawn)
     tabs = [("services", "Services"), ("deployments", "Deployments"), ("traffic", "Traffic"),
             ("storage", "Storage"), ("settings", "Settings")]
