@@ -55,6 +55,14 @@ Healthy edge: `https://aegis.<domain>` → 200, `argocd.<domain>` →
 200, `jenkins.<domain>` → 403 anonymous (that IS success, not a
 failure).
 
+## 2b. The backup clock is yours to install
+
+`aegis-backup.timer` ships in `share/systemd/` and no phase installs it:
+it is a user unit, because the capture needs your age key. The recipe
+is in `share/systemd/README.md`; without it there is no clock, and
+`aegis data remote status` (and the console's Storage) will say so with
+copies that only get older.
+
 ## 3. Diagnosis: where to start (in order)
 
 Everything below is also on screen: `aegis console serve` reads the

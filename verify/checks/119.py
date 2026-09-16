@@ -117,7 +117,12 @@ for name in names:
                 "a derivation nobody can replay is a hand edit with a nicer name")
             continue
         # THE DERIVATION IS REPLAYED, not believed. Same discipline as a
-        # tooth: apply what is written and demand the exact result.
+        # tooth: apply what is written, IN ORDER and cumulatively over
+        # each document, and demand the exact result. The first version
+        # replayed every step against the base on its own, so a case
+        # that needed two edits to one document — a step turned wrong
+        # AND the rc that follows from it — could never be honest.
+        texts, bad = {}, False
         for step in mutation:
             doc = step.get("documento")
             src = os.path.join(CASES, base, "documents", doc or "")
@@ -125,18 +130,25 @@ for name in names:
             if not doc or not os.path.isfile(src) or not os.path.isfile(dst):
                 die(f"{where}: the mutation names documents/{doc} and it is missing "
                     f"from the base or from here")
+                bad = True
                 continue
-            text = open(src, encoding="utf-8").read()
+            text = texts.get(doc)
+            if text is None:
+                text = open(src, encoding="utf-8").read()
             frm, to = step.get("de"), step.get("a")
             if frm is None or to is None:
                 die(f"{where}: a step of the mutation has no `de`/`a`")
+                bad = True
                 continue
             if text.count(frm) != 1:
                 die(f"{where}: `{frm}` appears {text.count(frm)} time(s) in the base's {doc} "
                     "and a replayable mutation has to match exactly once")
+                bad = True
                 continue
-            text = text.replace(frm, to, 1)
-            if text != open(dst, encoding="utf-8").read():
+            texts[doc] = text.replace(frm, to, 1)
+        for doc, text in texts.items():
+            dst = os.path.join(CASES, name, "documents", doc)
+            if not bad and text != open(dst, encoding="utf-8").read():
                 die(f"{where}: replaying the recorded mutation over {base}/{doc} does NOT "
                     "reproduce this case — the document was edited by hand beyond what it declares")
 

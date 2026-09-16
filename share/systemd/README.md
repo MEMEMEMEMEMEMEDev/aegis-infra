@@ -85,3 +85,31 @@ the instantaneous curve.
 Read what it publishes without waiting for the timer:
 
     aegis host metrics
+
+## aegis-backup.service / .timer
+
+The backup clock, and it is a USER unit: the capture needs the
+operator's age key, their kubeconfig and a `kubectl exec` into every
+tenant, and none of that belongs to root. No phase installs it. An
+instance that never ran these lines has no clock, and its copies are
+the ones somebody remembers to make. Measured on the house machine on
+2026-09-16: the units had never been installed, and the copies were
+three days old.
+
+```bash
+mkdir -p ~/.config/aegis ~/.config/systemd/user
+printf 'AEGIS_HOME=%s/aegis\nAEGIS_ROOT=%s/aegis-infra\nPATH=/usr/local/bin:/usr/bin:/bin\nSOPS_AGE_KEY_FILE=%s/.config/sops/age/aegis.key\n' \
+    "$HOME" "$HOME" "$HOME" > ~/.config/aegis/backup.env
+cp "$(dirname "$(readlink -f "$(command -v aegis)")")"/../share/systemd/aegis-backup.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now aegis-backup.timer
+loginctl enable-linger "$USER"                 # or the clock stops when you log out
+systemctl --user start aegis-backup.service    # one run now, to see it work
+```
+
+`backup.env` is what the unit reads instead of your shell: systemd
+starts it with no profile, so `SOPS_AGE_KEY_FILE` in particular has to
+be there. Without it the bundle is written and the credential of the
+destination does not decrypt, and the run fails after the capture.
+`aegis data remote status` says how old each copy is, and the console's
+Storage screen reads the same document.

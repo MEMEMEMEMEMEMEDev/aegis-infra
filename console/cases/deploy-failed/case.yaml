@@ -1,0 +1,28 @@
+version: 1
+caso: deploy-failed
+que: 'a push whose build failed: the one state the corpus never carried, because on this instance
+  every build so far went through'
+procedencia: derivado
+derivado_de: instance-with-plans
+por_que: a failing build is produced by breaking a tenant's repository on purpose and letting
+  the pipeline run; the state exists and it is not made to order on a working instance
+producido_por:
+- comando: builds show --last 60
+  documento: builds.json
+  rc: 1
+mutacion:
+- documento: builds.json
+  de: "\"step\": \"build:ventasfix-app:22\",\n      \"state\": \"already\""
+  a: "\"step\": \"build:ventasfix-app:22\",\n      \"state\": \"wrong\",\n      \"why\": \"\
+    the build failed: the image did not compile\""
+- documento: builds.json
+  de: '"rc": 0'
+  a: '"rc": 1'
+forma:
+  builds.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+    - wrong

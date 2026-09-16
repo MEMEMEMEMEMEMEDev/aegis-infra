@@ -20,6 +20,7 @@ import sys
 
 ROOT = sys.argv[1]
 SUBJECTS = [os.path.join(ROOT, "lib", "aegis", "console.py"),
+            os.path.join(ROOT, "lib", "aegis", "screens.py"),
             os.path.join(ROOT, "libexec", "aegis-console")]
 
 

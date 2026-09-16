@@ -526,16 +526,25 @@ def _round_subset(reading, page, more_href="/health"):
     names = ROUND_PAGES.get(page, ())
     mine = [st for st in steps_of(reading) if st.get("step") in names]
     rest = [st for st in steps_of(reading) if st.get("step") not in names]
+    if not mine:
+        # THE ROUND SAID NOTHING ABOUT THIS PAGE. That is not a state —
+        # nothing was measured and nothing failed to be — so it is not
+        # drawn as one: check 205 caught the first version drawing it
+        # hatched, a «could not look» no document carried. A plain line,
+        # and the way to the sections it does have.
+        rs = worst(states_in(reading, rest)) if rest else None
+        return (f'<section class="block round-none"><header class="src-head">{_icon("pulse")}'
+                f'<h2>What the round says about it</h2></header>'
+                f'<p class="empty">the round measured nothing about this today</p>'
+                + (f'<p class="more"><a href="{_e(more_href)}">{_pip(rs)}{len(rest)} '
+                   f'section{"s" if len(rest) != 1 else ""} of the round on Health</a></p>'
+                   if rest else "") + '</section>')
     states = states_in(reading, mine)
     body = _round_list(mine)
     if rest:
         rs = worst(states_in(reading, rest))
         body += (f'<p class="more"><a href="{_e(more_href)}">{_pip(rs)}{len(rest)} more '
                  f'section{"s" if len(rest) != 1 else ""} of the round on Health</a></p>')
-    if not mine:
-        states.add(UNSEEN)
-        body = (f'<p class="empty" data-state="{UNSEEN}">the round has no section about '
-                f'this today</p>') + body
     return _section(reading, "What the round says about it", body, states, "round",
                     icon="pulse")
 

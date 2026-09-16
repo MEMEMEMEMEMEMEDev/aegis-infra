@@ -334,9 +334,11 @@ them were private work that merely lives in the same account.
 
 The checks over it hold two invariants for every case: **no state is
 lost and none is invented**, and **the verdict is never kinder than its
-readings**. A summary on the first screen therefore shows the **spread**
-of states of what it summarises, one dot with a count per state, and
-never only the worst one.
+readings**. They are held on the first screen, and then again on every
+screen and on the project page, because a rule measured on one screen
+is a rule the other eight can break quietly. A summary on the first
+screen therefore shows the **spread** of states of what it summarises,
+one dot with a count per state, and never only the worst one.
 
 ## What is not there yet
 
@@ -349,7 +351,5 @@ never only the worst one.
 - **Sizes of your own.** A service's `tamano` (chico, mediano, grande)
   is the other ceiling, inside the plan, and it is still only the three
   the seed ships. The same door would serve it.
-- **The checks of the concept screens.** The two invariants are held on
-  the first screen, which is what the corpus renders; the seven concept
-  screens and the project page are drawn from the same readings by the
-  same rule, and the checks that hold them to it come next.
+- **Somebody who is not the operator.** See above; and until then the
+  console is one person's.

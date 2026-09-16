@@ -6,6 +6,7 @@
 
 C123="$AEGIS_ROOT/lib/aegis/console.py"
 X123="$AEGIS_ROOT/libexec/aegis-console"
+V123="$AEGIS_ROOT/lib/aegis/screens.py"
 
 # the door that hands back text instead of a document
 red_1() { printf '\n\ndef refresh(cmd):\n    from aegis import cli\n    rc, out, err = cli.run(cmd)\n    return out\n' >> "$C123"; }
@@ -33,3 +34,8 @@ control_2() { printf '\n# history: this module used to be tempted to read the na
 # a subprocess that has nothing to do with aegis: git, for the commit
 # the capture records. It must not bite.
 control_3() { printf '\n\ndef _branch():\n    import subprocess\n    return subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True).stdout\n' >> "$X123"; }
+
+# the screens start reading the narration
+red_5() { printf '\n\ndef _looked(line):\n    from . import cli\n    rc, out, err = cli.run(line)\n    return out\n' >> "$V123"; }
+# and a comment on the screens is not reading anything
+control_4() { printf '\n# note: the screens are pure. They read documents that were handed to them.\n' >> "$V123"; }
