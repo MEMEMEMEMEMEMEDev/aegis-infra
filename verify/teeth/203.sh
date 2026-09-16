@@ -91,7 +91,7 @@ P
 
 # the words on the form change: they are for a person, and the rule is
 # that the guess is LABELLED, not that it is labelled with this sentence
-control_2() { sed -i 's/suggested from the language: change it if it is /suggested from what the repository is written in: change it if it is /' "$C203"; }
+control_2() { sed -i 's/suggested from what the repository is written in: change it if it is /suggested from the language of the repository: change it if it is /' "$C203"; }
 
 # a comment recording the URL that was invented once
 control_3() { printf '\n# note: the first version of import_fields wrote `owner` into the\n# repository URL because the owner was not to hand. It validated.\n' >> "$C203"; }
