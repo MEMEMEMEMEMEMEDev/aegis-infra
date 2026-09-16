@@ -195,6 +195,7 @@ tamano:
   # not land on the ceiling. The 500m limit is start-up: even a static
   # front spends its first second reading its config and its files.
   chico:
+    descripcion: "A compiled binary or a static front: Go, Rust, nginx serving a build."
     requests.cpu: 50m
     requests.memory: 64Mi
     limits.cpu: 500m
@@ -208,6 +209,7 @@ tamano:
   # which is the CPU-hungriest minute of the process' life and then
   # never happens again.
   mediano:
+    descripcion: "A JVM, or an interpreter with its framework loaded: node, python with an ORM, PHP."
     requests.cpu: 200m
     requests.memory: 512Mi
     limits.cpu: "1"
@@ -221,6 +223,7 @@ tamano:
   # letting the quota reject the third pod at deploy time with a
   # message about millicores.
   grande:
+    descripcion: "Something that really works: holds connections, keeps a cache in memory, processes uploads."
     requests.cpu: 500m
     requests.memory: 1Gi
     limits.cpu: "2"

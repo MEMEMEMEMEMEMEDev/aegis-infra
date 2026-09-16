@@ -151,13 +151,40 @@ now is the oldest lie a dashboard tells.
 
 Files in this instance, and nothing else, ever.
 
-`/new` describes a project and writes nothing. You can start from one of
-your own repositories, the list of the ones nothing is running is on
-the first screen, and picking one fills the form with what was measured
-about it: its name and the URL GitHub itself returned, plus **one
-suggestion** for the kind that the form says is a suggestion. What the
-form submits is a proposal; the next screen is `aegis org plan`, and
-that writes nothing either. Only then is there a button.
+`/new` describes a project and writes nothing. It opens with your
+repositories that nothing runs yet; picking one fills the form with what
+was measured about it, its name and the URL GitHub itself returned, plus
+**one suggestion** for what it is, which the form says is a suggestion.
+
+**The short path is the default.** Most projects are one repository
+that is a static site or a web service, maybe with a database, so that
+is what the screen asks for: what it is (three cards that say what each
+kind is), where it comes from, what it needs (ticked: a PostgreSQL, a
+Redis, a bucket, the internet), and which plan (picked by what it is
+for). Ticking a database adds it to the project as a service the
+platform provides and lets the web services and workers reach it; a
+person never has to know that this means «a service of type postgres
+named datos with `usa: [postgres]` on the API». The contract's own
+words sit under every card, because the contract is what gets
+committed.
+
+The form puts `8080` in the port and `/` in the public path before
+anybody types. Those two defaults, and only those, are left out of the
+contract on the kinds that refuse them; anything typed over them
+travels, and the validator refuses it by name.
+
+**More services are one click away, as many as the plan holds.** «Add
+another service» is a round trip that brings the form back with one
+more row and everything typed still in place, because the console
+serves no script. There is no fixed number: the plan preview says
+whether they fit, and names the plan that would hold them when they do
+not.
+
+What the form submits is a proposal; the next screen is `aegis org
+plan`, and that writes nothing either. It opens **in plain words**: the
+project as sentences, one per service, to check against what you
+meant, before the list of files that would be generated. Only then is
+there a button.
 
 The button does three things, and all three only write files here: the
 contract into `orgs/`, the manifests (`aegis org apply`) and the

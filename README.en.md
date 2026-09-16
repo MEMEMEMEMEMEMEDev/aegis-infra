@@ -237,9 +237,12 @@ measured for its repository, what reached it in 24 hours and its last
 push link by link. It shows one project **as the cluster has it**
 against what its contract declares, including what the contract does
 **not** declare, which is exactly what no other tool here can see,
-because they all derive from the contract. And it writes one thing: a
-contract in `orgs/`, with its manifests and its missing secrets. No
-commit, no push, no apply, no cluster.
+because they all derive from the contract. A new project is three
+cards, what it needs ticked, and a plan picked by what it is for; more
+services are one click away, as many as the plan holds. What it writes
+is a contract in `orgs/`, with its manifests and its missing secrets,
+and a plan of your own when you make one. No commit, no push, no apply,
+no cluster.
 
 It is not published through the tunnel; you reach it with
 `ssh -L 7391:127.0.0.1:7391`. The reasons, the security model and what

@@ -871,6 +871,26 @@ def serve(port):
             schema = _schema()
             current = self._current(org) if org else None
             before = None
+            if fields.get("do") == "add":
+                # ONE MORE ROW, and nothing else: no script grows a form
+                # here, so the form comes back with what was typed and
+                # one more service to fill in. Nothing is validated on
+                # the way, because nothing is being proposed yet.
+                fields = dict(fields)
+                fields["rows"] = str(drawing.rows_in(fields) + 1)
+                if org:
+                    if current is None:
+                        self._send(404, "no project by that name\n",
+                                   "text/plain; charset=utf-8")
+                        return
+                    page = drawing.render_edit(schema, current, token, fields)
+                else:
+                    page = drawing.render_form(schema, token, fields,
+                                               before=drawing.import_box_for(
+                                                   self._instance()))
+                self._send(200, self._wrap(page, f"{org} · edit" if org
+                                           else "a new project", org))
+                return
             if org:
                 if current is None:
                     self._send(404, "no project by that name\n",
@@ -1001,7 +1021,13 @@ def serve(port):
                     if step is not None:
                         filled = drawing.import_fields(
                             asked, step.get("lenguaje"), step.get("url"))
-                self._send(200, self._wrap(drawing.render_form(_schema(), token, filled),
+                # With no repository chosen the screen opens with the
+                # ones nothing runs yet, which is where most projects
+                # start; the form waits underneath for the ones that do
+                # not come from a repository.
+                before = "" if filled else drawing.import_box_for(readings)
+                self._send(200, self._wrap(drawing.render_form(_schema(), token, filled,
+                                                               before=before),
                                            "a new project"), head_only=head_only)
                 return
             if path == "/plans/new":
@@ -1183,7 +1209,8 @@ def draw(directory, names):
         _rc, schema = cli.run_json("org", "schema")
     except cli.CouldNotEvaluate:
         schema = {"steps": [], "rc": 2}
-    put("new.html", drawing.wrap(drawing.render_form(schema, "static-preview"),
+    put("new.html", drawing.wrap(drawing.render_form(schema, "static-preview",
+                                                     before=drawing.import_box_for(readings)),
                                  "a new project", instance=readings))
     listing = next((r.get("documento") for r in readings
                     if (r.get("comando") or "").startswith("quota list")), None)

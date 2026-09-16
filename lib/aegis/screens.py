@@ -42,6 +42,17 @@ KIND_ICON = {
     "estatico": "static", "http": "web", "worker": "worker",
     "postgres": "database", "mongodb": "database", "redis": "cache",
 }
+# What each kind IS, for the card a person picks it from. The schema
+# still decides which kinds are offerable and what each needs and
+# refuses; these are the words beside them.
+KIND_ABOUT = {
+    "estatico": "HTML, CSS and JS served as files: Astro, Vue, a built React app. "
+                "Nothing of yours runs on the server.",
+    "http": "A server that listens on a port: Node, PHP, Go, Java, Python. It can reach "
+            "what you tick under «what it needs».",
+    "worker": "Runs without listening: queues, scheduled jobs, processing. No public "
+              "path and no port.",
+}
 USES = {
     "internet": "the internet", "postgres": "its PostgreSQL", "redis": "its Redis",
     "mongodb": "its MongoDB", "bucket": "its bucket", "ai": "the AI gateway",
@@ -802,7 +813,7 @@ def _peek_figure(key, reading):
     return f'{len(steps)} readings'
 
 
-def _import_box(reading, href="/new"):
+def import_box(reading, href="/new"):
     """The repositories NOTHING is running yet, as the way in to a new
     project. Vercel calls this «Import Git Repository», and it is the
     one list somebody needs in front of them to take a repository on."""
@@ -896,7 +907,7 @@ def overview(readings):
     imports = ""
     if repos is not None:
         drawn.add(id(repos))
-        imports = _import_box(repos)
+        imports = import_box(repos)
     # Anything else that was consulted and has no place designed for it
     # is drawn in full: a reading may never vanish because nobody has
     # designed its screen yet.

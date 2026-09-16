@@ -2325,7 +2325,8 @@ def describe_contract(steps):
             numeros={q: {k: str(v) for k, v in (plans["cuota"][q] or {}).items()
                          if k in QUOTA_KEYS} for q in quotas})
         add("tamano", ALREADY if sizes else WRONG, opciones=sizes, origen="plans.yaml", por_omision=DEFAULT_SIZE,
-            solo_para=sorted(TYPES - PROVIDED))
+            solo_para=sorted(TYPES - PROVIDED),
+            descripciones={t: (plans["tamano"][t] or {}).get("descripcion") for t in sizes})
         ai_plans = sorted(plans.get("ai") or {})
         try:
             caps = sorted(capabilities())

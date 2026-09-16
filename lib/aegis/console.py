@@ -204,7 +204,6 @@ SENTENCE = {
 # a field cannot be greyed out as the type changes, so the rules travel
 # as TEXT beside each type, and the validator —one validator, the same
 # one `aegis org apply` runs— is what refuses.
-SERVICE_ROWS = 3
 
 
 def _field(name, label, value="", kind="text", hint="", **attrs):
@@ -327,11 +326,73 @@ def import_fields(repo, language, url=None):
             "servicio0.publico": "/", "servicio0.repo": ssh}
 
 
+def rows_in(fields):
+    """How many service rows a form carries: the count it declares, or
+    the rows actually present, whichever is larger. There is no fixed
+    number — a project has as many services as its plan holds, and the
+    plan preview is what says whether they fit."""
+    fields = fields or {}
+    declared = 0
+    try:
+        declared = int(fields.get("rows") or 0)
+    except (TypeError, ValueError):
+        declared = 0
+    present = 0
+    for k in fields:
+        if k.startswith("servicio") and "." in k:
+            try:
+                present = max(present, int(k[len("servicio"):k.index(".")]) + 1)
+            except ValueError:
+                pass
+    return max(declared, present)
+
+
+def import_box_for(readings):
+    """The repositories nothing runs yet, for the top of the new-project
+    screen. Empty when the instance's readings are not to hand."""
+    from .screens import import_box, reading_for
+    r = reading_for(readings, "repos list")
+    return import_box(r) if r is not None else ""
+
+
+# What a project may NEED, ticked rather than declared: a database is a
+# service the platform provides, and a person should not have to know
+# that a PostgreSQL is «a service of type postgres named datos» to get
+# one. Each need is (the contract's word, the label, the name the
+# provided service gets, the sentence). Whether a need is OFFERED comes
+# from the schema — `usa.opciones` says which exist, `tipo:<x>.disponible`
+# whether the platform can deliver it here — never from this table.
+NEEDS = (
+    ("postgres", "a PostgreSQL database", "datos",
+     "tables: users, orders, anything relational. Bundled and copied off-site."),
+    ("redis", "a Redis cache", "cola",
+     "a cache or a queue in memory. What it holds is a copy and may be evicted."),
+    ("mongodb", "a MongoDB database", "mongo", "documents instead of tables."),
+    ("bucket", "a bucket for files", None,
+     "uploads and files, S3-style, in this instance's own object store."),
+    ("internet", "reach the internet", None,
+     "by default a service reaches nothing outside. Tick this if it calls an API, "
+     "sends mail or fetches anything."),
+)
+PROVIDED_NAME = {k: name for k, _l, name, _d in NEEDS if name}
+DEFAULT_PORT = "8080"
+DEFAULT_PATH = "/"
+DEFAULT_SERVICE = "web"
+
+
 def render_form(schema, token, filled=None, problem=None, action="/new",
-                existing=0, subject=None):
-    """The screen where an organization is described by somebody who
-    does not write YAML. It writes NOTHING: what it submits is a
-    proposal, and the next screen is the plan.
+                existing=0, subject=None, before=""):
+    """The screen where a project is described by somebody who does not
+    write YAML. It writes NOTHING: what it submits is a proposal, and
+    the next screen is the plan.
+
+    THE SHORT PATH IS THE DEFAULT. Most projects are one repository
+    that is a static site or a web service, maybe with a database. So
+    the screen asks for that and nothing more: what it is (three cards),
+    where it comes from, what it needs (ticked), which plan. The
+    contract's own words travel underneath every card. More services
+    are one click away, as many as the plan holds, and each one is a
+    plain row.
 
     `existing` is how many of the service rows are already in the
     contract. They are drawn first and marked, because on an edit the
@@ -344,9 +405,16 @@ def render_form(schema, token, filled=None, problem=None, action="/new",
     # The words a person reads beside the contract's own. The VALUE the
     # form submits is the contract's word, always: the label is for the
     # person, and the validator never sees it.
-    from .screens import KIND
-    quotas = (by.get("cuota") or {}).get("opciones") or []
+    from .screens import KIND, KIND_ABOUT, KIND_ICON, _icon
     sizes = (by.get("tamano") or {}).get("opciones") or []
+    # Small to large, which is how a person reads a ladder; the schema
+    # lists them alphabetically. A size the ladder does not know goes
+    # after the ones it does.
+    ladder = ("chico", "mediano", "grande")
+    sizes = [z for z in ladder if z in sizes] + [z for z in sizes if z not in ladder]
+    size_words = (by.get("tamano") or {}).get("descripciones") or {}
+    default_size = (by.get("tamano") or {}).get("por_omision") or (sizes[0] if sizes else "")
+    usa_options = set((by.get("usa") or {}).get("opciones") or [])
 
     back = f'/projects/{_e(subject)}' if subject else '/'
     where = f'back to {_e(subject)}' if subject else 'all projects'
@@ -373,57 +441,111 @@ def render_form(schema, token, filled=None, problem=None, action="/new",
     # it has to be legible as a guess. Everything else on the screen was
     # measured or typed by a person.
     suggested = bool((filled or {}).get("servicio0.repo")) and not existing
+
+    def val(key, default=""):
+        # A default only where the person has said nothing at all: a
+        # field they emptied stays empty, and on an edit every field is
+        # already there.
+        return filled[key] if key in filled else default
+
+    # ── the main service, guided ─────────────────────────────────────
+    n = "servicio0"
+    kind0 = val(f"{n}.tipo")
+    cards = []
+    for k in [x for x in ("estatico", "http", "worker") if x in offerable]:
+        cards.append(
+            f'<label class="kind-pick"><input type="radio" name="{n}.tipo" value="{_e(k)}"'
+            f'{" checked" if k == kind0 else ""}><span class="plan-body">'
+            f'<b>{_icon(KIND_ICON.get(k, "web"))}{_e(KIND.get(k, k))} '
+            f'<span class="mono">{_e(k)}</span></b>'
+            f'<span class="desc">{_e(KIND_ABOUT.get(k, ""))}</span></span></label>')
+    kind_hint = ('suggested from what the repository is written in: change it if it is '
+                 'wrong' if suggested else "what runs, out of what the platform can build")
+    size_cards = "".join(
+        f'<label class="kind-pick"><input type="radio" name="{n}.tamano" value="{_e(z)}"'
+        f'{" checked" if z == val(n + ".tamano", default_size) else ""}>'
+        f'<span class="plan-body"><b>{_e(z)}</b>'
+        f'<span class="desc">{_e(size_words.get(z) or "")}</span></span></label>'
+        for z in sizes)
+    main = (f'<div class="main-svc">'
+            f'<div class="field wide"><span class="label">what it is</span>'
+            f'<div class="kind-picks">{"".join(cards)}</div><p class="hint">{kind_hint}</p></div>'
+            f'<div class="wide">{_field(n + ".repo", "repository", val(n + ".repo"), hint="the git URL it is built from, as you would clone it: git@github.com:you/your-app.git")}</div>'
+            f'<div class="cell">{_field(n + ".nombre", "service name", val(n + ".nombre", DEFAULT_SERVICE), hint="how it is called inside the project; `web` is fine for the first one")}</div>'
+            f'<div class="cell">{_field(n + ".publico", "public path", val(n + ".publico", DEFAULT_PATH), hint="where it answers on the hostname: `/` for the site, `/api` for an API; not for a worker")}</div>'
+            f'<div class="cell">{_field(n + ".puerto", "port", val(n + ".puerto", DEFAULT_PORT), hint="what a web service listens on; leave it as is unless you know otherwise. Not used by a static site or a worker")}</div>'
+            + (f'<div class="field wide"><span class="label">size</span>'
+               f'<div class="size-picks">{size_cards}</div>'
+               f'<p class="hint">what one copy of it may reserve and burst to, inside the plan</p></div>'
+               if sizes else "")
+            + '</div>')
+
+    # ── what it needs, ticked ────────────────────────────────────────
+    needs = []
+    for key, label, _name, desc in NEEDS:
+        if key not in usa_options:
+            continue
+        spec = types.get(key) or {}
+        available = spec.get("disponible", True) if key in types else True
+        checked = " checked" if filled.get(f"needs.{key}") else ""
+        if available:
+            needs.append(f'<label class="need"><input type="checkbox" name="needs.{_e(key)}" '
+                         f'value="on"{checked}><span><b>{_e(label)}</b>'
+                         f'<span class="desc">{_e(desc)}</span></span></label>')
+        else:
+            needs.append(f'<label class="need off"><input type="checkbox" disabled><span>'
+                         f'<b>{_e(label)}</b><span class="desc">not offerable here: '
+                         f'{_e(spec.get("porque_no") or "")}</span></span></label>')
+    needs_hint = ('Ticking a database adds it to the project as a service the platform '
+                  'provides, and lets the web services and workers reach it. On an edit, '
+                  'ticking adds; unticking removes nothing.' if existing else
+                  'Ticking a database adds it to the project as a service the platform '
+                  'provides, and lets the web services and workers reach it.')
+
+    # ── more services, plain rows ────────────────────────────────────
+    total = max(rows_in(filled), existing, 1)
     rows = []
-    for i in range(max(SERVICE_ROWS, existing + 1)):
+    for i in range(1, total):
         n = f"servicio{i}"
-        picked = filled.get(f"{n}.tipo", "")
+        picked = val(f"{n}.tipo")
         options = "".join(
             f'<option value="{_e(t)}"{" selected" if t == picked else ""}>{_e(t)}'
             f'{" · " + _e(KIND[t]) if t in KIND else ""}</option>'
             for t in offerable)
+        size_opts = "".join(
+            f'<option value="{_e(z)}"{" selected" if z == val(n + ".tamano") else ""}>{_e(z)}</option>'
+            for z in sizes)
         rows.append(
             f'<fieldset class="row"{" data-existing=\"1\"" if i < existing else ""}>'
             f'<legend>service {i + 1}'
-            + (" <i>already in the contract</i>" if i < existing else
-               (" <i>at least one</i>" if not i and not existing else ""))
+            + (" <i>already in the contract</i>" if i < existing else "")
             + '</legend>'
-            f'{_field(n + ".nombre", "name", filled.get(n + ".nombre", ""))}'
-            f'<label class="field"><span class="label">type</span>'
+            f'{_field(n + ".nombre", "name", val(n + ".nombre"))}'
+            f'<label class="field"><span class="label">kind</span>'
             f'<select name="{n}.tipo" id="{n}.tipo"><option value=""></option>'
             f'{options}</select></label>'
-            + ('<p class="hint">suggested from the language: change it if it is '
-               'wrong</p>' if suggested and not i else "")
-            + f'{_field(n + ".puerto", "port", filled.get(n + ".puerto", ""))}'
-            f'{_field(n + ".publico", "public path", filled.get(n + ".publico", ""))}'
-            f'{_field(n + ".repo", "repository", filled.get(n + ".repo", ""))}'
-            + (f'{_field(n + ".tamano", "size", filled.get(n + ".tamano", ""))}'
-               if sizes else "")
+            f'{_field(n + ".repo", "repository", val(n + ".repo"))}'
+            f'{_field(n + ".publico", "public path", val(n + ".publico"))}'
+            f'{_field(n + ".puerto", "port", val(n + ".puerto"))}'
+            + (f'<label class="field"><span class="label">size</span>'
+               f'<select name="{n}.tamano" id="{n}.tamano"><option value=""></option>'
+               f'{size_opts}</select></label>' if sizes else "")
             + '</fieldset>')
+    more = (f'<details class="more-svc"{" open" if total > 1 else ""}>'
+            f'<summary>More services'
+            + (f' · {total - 1}' if total > 1 else "")
+            + '<span class="note">an API beside the site, a worker, a second database. '
+            'As many as the plan holds: the plan preview says whether they fit.</span>'
+            '</summary>'
+            + (f'<div class="rows">{"".join(rows)}</div>' if rows else "")
+            + f'<div class="rows-actions"><button class="act act--quiet" type="submit" '
+            f'name="do" value="add">add another service</button>'
+            + ('<span class="note">a row left empty is not a service</span>' if rows else "")
+            + '</div></details>')
 
-    # What each type is and what it refuses, as words, because there is
-    # no script to grey a field out with. Every line of it is the
-    # schema's, which is the validator's.
-    legend = []
-    for kind in sorted(types):
-        spec = types[kind]
-        if not spec.get("disponible", True):
-            legend.append(f'<li data-state="{UNSEEN}">{_chip(UNSEEN, kind)}'
-                          f'<b>{_e(KIND.get(kind, kind))}</b>'
-                          f'<span class="note">{_e(spec.get("porque_no", "not offerable here"))}'
-                          f'</span></li>')
-            continue
-        needs = ", ".join(spec.get("requiere") or []) or "nothing else"
-        refuses = ", ".join(spec.get("prohibe") or [])
-        note = f"needs {needs}" + (f" · refuses {refuses}" if refuses else "")
-        if spec.get("porque"):
-            note += f" — {spec['porque']}"
-        legend.append(f'<li data-state="{FINE}">{_chip(FINE, kind)}'
-                      f'<b>{_e(KIND.get(kind, kind))}</b>'
-                      f'<span class="note">{_e(note)}</span></li>')
-
-    keep = ('<p class="hint">The services already in the contract stay: this screen '
-            'adds and changes, it does not remove. Removing one is `aegis org` by '
-            'hand, which says what it is about to do.</p>' if existing else "")
+    keep = ('<p class="hint plain">The services already in the contract stay: this screen '
+            'adds and changes, it does not remove. Removing one is `aegis org` by hand, '
+            'which says what it is about to do.</p>' if existing else "")
     contract = by.get("contract") or {}
     name_hint = ("a short lowercase name; it becomes the namespace and the prefix of "
                  "every image"
@@ -432,25 +554,62 @@ def render_form(schema, token, filled=None, problem=None, action="/new",
     host_hint = ("the hostname people will type, like shop.example.test"
                  + (f' · needed when {contract["dominio_si"]}' if contract.get("dominio_si")
                     else ""))
-    about = ('<p class="hint plain">A service is one thing that runs: a static site, a web '
-             'service, a background worker, or a database or cache the platform provides. '
-             '<b>Public path</b> is where it answers on the hostname (<code>/</code>, '
-             '<code>/api</code>); <b>port</b> is what a web service listens on; '
-             '<b>repository</b> is the git URL it is built from. What each kind needs and '
-             'refuses is listed under the rows.</p>')
     body = (f'<section class="source" data-state="{FINE}">'
             f'<h2>{"the project" if not subject else "what it is"}</h2>{keep}'
             f'<form method="post" action="{_e(action)}">'
             f'<input type="hidden" name="token" value="{_e(token)}">'
-            f'{_field("organizacion", "name", filled.get("organizacion", ""), hint=name_hint)}'
-            f'{_field("dominio", "public hostname", filled.get("dominio", ""), hint=host_hint)}'
-            f'{_plan_choice(by, filled.get("cuota", ""), action)}'
-            f'<h3 class="sub">services</h3>{about}'
-            f'<div class="rows">{"".join(rows)}</div>'
-            f'<ul class="tail legend">{"".join(legend)}</ul>'
+            f'<input type="hidden" name="rows" value="{total}">'
+            f'{_field("organizacion", "name", val("organizacion"), hint=name_hint)}'
+            f'{_field("dominio", "public hostname", val("dominio"), hint=host_hint)}'
+            f'<h3 class="sub">what runs</h3>{main}'
+            f'<h3 class="sub">what it needs</h3><div class="needs">{"".join(needs)}</div>'
+            f'<p class="hint plain">{needs_hint}</p>'
+            f'{_plan_choice(by, val("cuota"), action)}'
+            f'{more}'
             f'<button class="act" type="submit">see the plan</button>'
             f'</form></section>')
-    return f'<main class="sereno" data-veredicto="{FINE}">{head}{trouble}{body}</main>'
+    return f'<main class="sereno" data-veredicto="{FINE}">{head}{trouble}{before}{body}</main>'
+
+
+def _apply_needs(contract, services, needs, current=None, new_from=0):
+    """The needs, as contract. A database ticked is a service the
+    platform provides, appended once; a bucket is `almacenamiento`;
+    every need lets the web services and workers reach it (`usa`).
+
+    ADD-ONLY, and careful on an edit: a need the contract already has
+    changes nothing on the services that were there — otherwise opening
+    the edit screen and pressing save would rewrite every `usa` — and
+    reaches only the services this edit ADDS (`new_from` and after). A
+    need ticked for the first time reaches them all.
+    """
+    current = current or {}
+    had = set()
+    for sv in current.get("servicios") or []:
+        if sv.get("tipo") in PROVIDED_NAME:
+            had.add(sv["tipo"])
+        for u in sv.get("usa") or []:
+            had.add(u)
+    if (current.get("almacenamiento") or {}).get("bucket"):
+        had.add("bucket")
+    taken = {sv.get("nombre") for sv in services}
+    for need in needs:
+        if need in PROVIDED_NAME and not any(sv.get("tipo") == need for sv in services):
+            name = PROVIDED_NAME[need]
+            while name in taken:
+                name += "-2"
+            services.append({"nombre": name, "tipo": need})
+            taken.add(name)
+        if need == "bucket":
+            contract.setdefault("almacenamiento", {})["bucket"] = True
+        for i, sv in enumerate(services):
+            if sv.get("tipo") not in ("http", "worker"):
+                continue
+            if need in had and i < new_from:
+                continue
+            usa = list(sv.get("usa") or [])
+            if need not in usa:
+                usa.append(need)
+                sv["usa"] = usa
 
 
 def contract_from_form(fields, schema):
@@ -462,6 +621,14 @@ def contract_from_form(fields, schema):
     the type does not allow— would have the console silently disagree
     with what somebody wrote, and they would go looking for a port they
     are sure they set.
+
+    THE FORM'S OWN DEFAULTS ARE NOT SOMETHING THE PERSON FILLED IN. The
+    screen puts `8080` in the port and `/` in the public path before
+    anybody types, so that the short path needs no typing; a static
+    site refuses a port and a worker refuses a public path, and a
+    person who picked «static site» did not ask for 8080. Exactly those
+    two defaults, on exactly the kinds that refuse them, are left out.
+    Anything typed over them travels.
 
     An empty field is not a value: it is absent. That is the difference
     between «no public hostname» and «a hostname that is the empty
@@ -479,12 +646,21 @@ def contract_from_form(fields, schema):
         if value(key):
             contract[key] = value(key)
     services = []
-    for i in range(SERVICE_ROWS):
+    for i in range(rows_in(fields)):
         n = f"servicio{i}"
         row = {k: value(f"{n}.{k}") for k in
                ("nombre", "tipo", "puerto", "publico", "repo", "tamano")}
         if not any(row.values()):
             continue
+        if row["tipo"] and row["tipo"] != "http" and row["puerto"] == DEFAULT_PORT:
+            row["puerto"] = None
+        if row["tipo"] == "worker" and row["publico"] == DEFAULT_PATH:
+            row["publico"] = None
+        if row["tipo"] in PROVIDED_NAME and row["tamano"]:
+            # A provided service has no size of its own (the platform's
+            # catalogue decides), and the form's default size was never
+            # meant for it.
+            row["tamano"] = None
         service = {}
         for key in ("nombre", "tipo"):
             if row[key]:
@@ -498,6 +674,9 @@ def contract_from_form(fields, schema):
             if row[key]:
                 service[key] = row[key]
         services.append(service)
+    needs = [k for k, _l, _n, _d in NEEDS if fields.get(f"needs.{k}")]
+    if needs:
+        _apply_needs(contract, services, needs)
     if services:
         contract["servicios"] = services
     text = yaml.safe_dump(contract, allow_unicode=True, sort_keys=False, width=88)
@@ -514,16 +693,26 @@ SHOWN = ("nombre", "tipo", "puerto", "publico", "repo", "tamano")
 def fields_of_contract(contract):
     """A contract, as the form's fields. It exists so that the edit
     screen opens showing what is actually there rather than an empty
-    form somebody has to retype."""
+    form somebody has to retype. The needs it already has come ticked,
+    and `rows` says how many services it carries."""
     contract = contract or {}
     filled = {"organizacion": contract.get("organizacion") or "",
               "dominio": contract.get("dominio") or "",
               "cuota": contract.get("cuota") or ""}
-    for i, sv in enumerate(contract.get("servicios") or []):
+    services = contract.get("servicios") or []
+    for i, sv in enumerate(services):
         n = f"servicio{i}"
         for key in SHOWN:
             v = sv.get(key)
             filled[f"{n}.{key}"] = "" if v is None else str(v)
+    filled["rows"] = str(len(services))
+    for sv in services:
+        if sv.get("tipo") in PROVIDED_NAME:
+            filled[f"needs.{sv['tipo']}"] = "on"
+        for u in sv.get("usa") or []:
+            filled[f"needs.{u}"] = "on"
+    if (contract.get("almacenamiento") or {}).get("bucket"):
+        filled["needs.bucket"] = "on"
     return filled
 
 
@@ -636,6 +825,15 @@ def contract_from_edit(fields, schema, current):
     if out:
         contract["servicios"] = out
 
+    # What it needs, ticked: ADD-ONLY, and only where the contract does
+    # not already have it — see `_apply_needs`. Unticking removes
+    # nothing, like everything else on this screen.
+    needs = [k for k, _l, _n, _d in NEEDS if fields.get(f"needs.{k}")]
+    if needs:
+        now = list(contract.get("servicios") or [])
+        _apply_needs(contract, now, needs, current=current, new_from=len(services))
+        contract["servicios"] = now
+
     refused = refuse_edit(contract, current)
     if refused:
         return None, None, refused
@@ -657,6 +855,51 @@ def render_edit(schema, current, token, filled=None, problem=None):
                            (current or {}).get("servicios") or []),
                        subject=org)
     return body
+
+
+def _in_words(contract_text):
+    """The contract, as sentences. THE FIRST THING ON THE PLAN SCREEN,
+    because a person checks what they meant against words, not against
+    a list of generated files."""
+    import yaml
+    from .screens import KIND, USES
+    try:
+        c = yaml.safe_load(contract_text) or {}
+    except yaml.YAMLError:
+        return ""
+    if not isinstance(c, dict):
+        return ""
+    rows = [f'<li><b class="mono">{_e(c.get("organizacion") or "?")}</b>'
+            + (f', at <span class="mono">{_e(c["dominio"])}</span>' if c.get("dominio") else
+               ", with no public hostname")
+            + f', plan <b class="mono">{_e(c.get("cuota") or "?")}</b>.</li>']
+    for sv in c.get("servicios") or []:
+        kind = sv.get("tipo")
+        if kind in PROVIDED_NAME:
+            rows.append(f'<li><b class="mono">{_e(sv.get("nombre"))}</b>: '
+                        f'{_e(KIND.get(kind, kind))}, provided by the platform.</li>')
+            continue
+        bits = [KIND.get(kind, kind or "?")]
+        if sv.get("publico"):
+            bits.append(f'answering at <span class="mono">{_e(sv["publico"])}</span>')
+        if sv.get("puerto"):
+            bits.append(f'on port {_e(sv["puerto"])}')
+        if sv.get("repo"):
+            bits.append(f'built from <span class="mono">{_e(sv["repo"])}</span>')
+        if sv.get("tamano"):
+            bits.append(f'size {_e(sv["tamano"])}')
+        line = f'<li><b class="mono">{_e(sv.get("nombre"))}</b>: {", ".join(bits)}'
+        if sv.get("usa"):
+            line += f'; may reach {_e(", ".join(USES.get(u, u) for u in sv["usa"]))}'
+        rows.append(line + '.</li>')
+    if (c.get("almacenamiento") or {}).get("bucket"):
+        rows.append('<li>A bucket for files.</li>')
+    if c.get("ai"):
+        tasks = (c["ai"] or {}).get("tareas") or []
+        rows.append(f'<li>AI plan <b class="mono">{_e((c["ai"] or {}).get("plan", "?"))}</b>, '
+                    f'{len(tasks)} task{"s" if len(tasks) != 1 else ""}.</li>')
+    return (f'<section class="source" data-state="{FINE}"><h2>in plain words</h2>'
+            f'<ul class="words">{"".join(rows)}</ul></section>')
 
 
 def _diff(before, after):
@@ -777,7 +1020,8 @@ def render_plan(doc, contract_text, token, written=None, before=None, org=None,
               f'<h2>what you changed</h2>{_diff(before, contract_text)}</section>'
               if editing else "")
     errand = (_errand(after, org, platform) if written and after else "")
-    return (f'<main class="sereno" data-veredicto="{v}">{head}{change}{errand}'
+    words = _in_words(contract_text)
+    return (f'<main class="sereno" data-veredicto="{v}">{head}{words}{change}{errand}'
             f'<section class="source" data-state="{v}"><h2>what would change</h2>'
             + (f'<ul class="tail">{"".join(files)}</ul>' if files else
                f'<p class="empty" data-state="{UNSEEN}">nothing was planned</p>')

@@ -277,10 +277,13 @@ declara, incluido lo que el contrato **no** declara, que es justo lo
 que ninguna otra herramienta de la casa puede ver, porque todas derivan
 del contrato.
 
-Y **da de alta un proyecto**: podés partir de uno de tus repositorios
-(la consola ya sabe en qué está escrito) o describirlo a mano, y también
-cambiar uno que ya existe mostrándote el diff del contrato antes de
-pisarlo. Escribe el contrato, deriva los manifiestos y crea los secretos
+Y **da de alta un proyecto**: partís de uno de tus repositorios (la
+consola ya sabe en qué está escrito), elegís qué es en tres tarjetas,
+marcás qué necesita (una base, una caché, un bucket, salir a internet)
+y el plan por para qué sirve; los servicios que hagan falta se agregan
+de a uno, tantos como quepan en el plan. La previsualización empieza en
+palabras. También cambia uno que ya existe mostrándote el diff del
+contrato antes de pisarlo. Escribe el contrato, deriva los manifiestos y crea los secretos
 que falten, que son las tres cosas que **sólo escriben ficheros en esta
 máquina**. Después te muestra los tres pasos que quedan y por qué queda
 cada uno: **tu commit**, el sync, y `aegis app apply`, que es el que

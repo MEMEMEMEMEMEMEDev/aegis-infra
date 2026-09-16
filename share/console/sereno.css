@@ -421,6 +421,37 @@ input[type="text"]:focus-visible, select:focus-visible, .pick:focus-within { out
 .plan-start:hover { border-color:rgb(11 13 16 / .22); }
 .plan-start .plan-body { border:0; padding:0; flex:1; min-width:0; }
 .plan-start .act { margin-left:auto; flex:none; }
+/* The guided part of a new project: the kind and the size are picked
+ * from cards that say what they are for; what it needs is ticked. */
+.kind-picks, .size-picks { display:grid; gap:8px; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); }
+.kind-pick { position:relative; display:block; }
+.kind-pick input { position:absolute; inset:0; opacity:0; margin:0; cursor:pointer; }
+.kind-pick .plan-body b { font-family:var(--ui); letter-spacing:-.01em; display:flex; align-items:center; gap:7px; }
+.kind-pick .plan-body b .mono { font-weight:500; color:var(--faint); font-size:11px; }
+.kind-pick input:checked + .plan-body { border-color:var(--ink); box-shadow:inset 0 0 0 1px var(--ink); }
+.kind-pick:focus-within .plan-body { outline:2px solid var(--busy-ink); outline-offset:2px; }
+.kind-pick .plan-body .ico { color:var(--faint); }
+.needs { display:grid; gap:8px; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); }
+.need { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border:1px solid var(--line);
+        border-radius:var(--r-s); background:var(--panel); cursor:pointer; }
+.need input { margin:3px 0 0; flex:none; accent-color:var(--ink); }
+.need b { display:block; font-size:13.5px; }
+.need .desc { display:block; font-size:12px; color:var(--mid); }
+.need.off { opacity:.6; cursor:default; }
+.need:has(input:checked) { border-color:var(--ink); }
+.main-svc { display:grid; gap:12px 16px; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); }
+.main-svc .wide { grid-column:1 / -1; }
+.main-svc .cell { display:flex; flex-direction:column; gap:5px; }
+.more-svc { border:1px dashed var(--line); border-radius:var(--r-s); padding:12px 14px; }
+.more-svc > summary { cursor:pointer; list-style:none; font-weight:700; font-size:13px; display:flex; align-items:center; gap:8px; }
+.more-svc > summary::-webkit-details-marker { display:none; }
+.more-svc > summary .note { font-weight:500; }
+.more-svc[open] > summary { margin-bottom:12px; }
+.rows-actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+button.act--quiet { background:transparent; color:var(--ink); border-color:var(--line); }
+.words { display:flex; flex-direction:column; gap:6px; }
+.words li { font-size:13.5px; }
+.words b.mono { font-size:13px; }
 .numbers { display:grid; gap:12px 16px; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); }
 .numbers .field { gap:4px; }
 .numbers .field + .hint { margin-top:-6px; }
