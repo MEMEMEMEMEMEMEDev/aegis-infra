@@ -15,8 +15,10 @@ p.write_text(s.replace(old, '''def deployments(readings):
 P
 }
 
-# the domains screen draws a hostname hatched when the edge was simply
-# not consulted: a state nobody emitted
+# the domains screen draws a hostname as «working» when the edge was
+# simply not consulted: a state nobody emitted. `busy` and not `unseen`
+# on purpose: nearly every case carries an unseen somewhere already, so
+# inventing one more would hide in the crowd; nothing ever emits busy.
 red_2() { python3 - "$S205" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
@@ -24,7 +26,7 @@ old = '''        if edge is None:
             verdict = '<span class="faint">the edge was not consulted</span>\''''
 assert s.count(old) == 1, "re-aim this tooth"
 p.write_text(s.replace(old, '''        if edge is None:
-            verdict = _chip(UNSEEN, "not consulted")''', 1))
+            verdict = _chip(BUSY, "working on it")''', 1))
 P
 }
 
