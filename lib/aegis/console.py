@@ -99,17 +99,6 @@ def _when(reading):
     return f' data-measured-at="{_e(w)}"' if w else ' data-measured-at="unknown"'
 
 
-def _age(reading):
-    """When this reading was taken, on the page and not only in an
-    attribute. A console that shows a number without its age invites
-    somebody to act on a measurement from forty minutes ago as if it
-    were now — and unlike a wrong number, nothing about the screen
-    looks off while they do it."""
-    w = reading.get("medido_en")
-    return (f'<p class="age">measured {_e(w)}</p>' if w
-            else '<p class="age" data-state="unseen">nobody recorded when this was measured</p>')
-
-
 def _is_colour(value):
     """A colour this page will paint with, or nothing.
 
@@ -124,31 +113,6 @@ def _is_colour(value):
 
 def _chip(state, label):
     return f'<span class="chip" data-state="{state}">{_e(label)}</span>'
-
-
-def _measure(measure):
-    state = SCREEN.get(measure.get("state"), UNSEEN)
-    notes = "".join(f'<p class="note">{_e(n)}</p>' for n in measure.get("notes") or [])
-    return (f'<li class="measure" data-state="{state}">'
-            f'{_chip(state, measure.get("state", "?"))}'
-            f'<span class="what">{_e(measure.get("measure", ""))}</span>{notes}</li>')
-
-
-def _step(step):
-    state = SCREEN.get(step.get("state"), UNSEEN)
-    measures = step.get("measures") or []
-    inner = f'<ul class="measures">{"".join(_measure(m) for m in measures)}</ul>' if measures else ""
-    # Everything that is not `step`, `state` or `measures` is DATA the
-    # producer chose to attach, and it is shown rather than dropped: it
-    # is how a surplus CNAME reaches the screen without inventing a
-    # state for it.
-    extra = {k: v for k, v in step.items()
-             if k not in ("step", "state", "measures", "notes", "counts")}
-    facts = "".join(f'<dt>{_e(k)}</dt><dd>{_e(v)}</dd>' for k, v in extra.items())
-    facts = f'<dl class="facts">{facts}</dl>' if facts else ""
-    return (f'<article class="step" data-state="{state}" data-step="{_e(step.get("step", "?"))}">'
-            f'<h3>{_e(step.get("step", "?"))}</h3>{_chip(state, step.get("state", "?"))}'
-            f'{facts}{inner}</article>')
 
 
 # ── panels ───────────────────────────────────────────────────────────
@@ -176,16 +140,6 @@ def _bytes(n):
 
 def _num(n):
     return f"{int(n):,}".replace(",", "\u2009")   # thin space: 5 423
-
-
-def _fact(label, value, mono=True):
-    cls = "figure mono" if mono else "figure"
-    return (f'<div class="fact"><span class="{cls}">{_e(value)}</span>'
-            f'<span class="label">{_e(label)}</span></div>')
-
-
-def _window(step):
-    return f"last {step.get('hours', 24)}h"
 
 
 # WHAT EACH SERVICE IS WRITTEN IN. It does not come from the contract —

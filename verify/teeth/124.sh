@@ -32,7 +32,20 @@ P
 
 # a state loses its rule entirely: it renders unstyled, which on this
 # page reads as nothing being there
-red_2() { sed -i '/^\[data-state="busy"\]/d' "$S124"; }
+red_2() { python3 - "$S124" <<'P'
+import sys, pathlib, re
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+# every rule that gives `busy` a surface or an ink, gone
+out = []
+for rule in re.split(r"(?<=\})", s):
+    if '[data-state="busy"]' in rule:
+        rule = re.sub(r"\b(background|background-color|color)\s*:[^;}]*;?", "", rule)
+    out.append(rule)
+after = "".join(out)
+assert after != s, "re-aim this tooth: nothing dresses `busy`"
+p.write_text(after)
+P
+}
 
 # the same, for the one that asks a person for a decision
 # A state loses its surface and its ink EVERYWHERE, not only in the one

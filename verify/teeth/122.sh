@@ -30,10 +30,12 @@ red_5() { sed -i 's/^SEVERITY = \[UNSEEN, WRONG, ATTENTION, BUSY, FINE\]/SEVERIT
 
 # the case zero stops being a state: a command with no document draws
 # nothing at all, which on a screen is indistinguishable from silence
-red_6() { python3 - "$R122" <<'P'
+red_6() { python3 - "$AEGIS_ROOT/lib/aegis/screens.py" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-s = s.replace('return _blind(reading), {UNSEEN}', 'return "", set()')
+old = 'return _blind_section(reading, title or reading.get("comando"), cls, icon=icon)'
+assert old in s, "re-aim this tooth: the generic drawing no longer names the case zero here"
+s = s.replace(old, 'return ""')
 p.write_text(s)
 P
 }
@@ -41,14 +43,16 @@ P
 # ── controls: real changes that must NOT move the verdict ────────────
 
 # the words on the screen are for people: rewording every one of them
-# must change nothing, because the contract is the attribute
-control_1() { python3 - "$R122" <<'P'
+# must change nothing, because the contract is the attribute. The
+# sentences live in console.py and the state words in screens.py.
+control_1() { python3 - "$R122" "$AEGIS_ROOT/lib/aegis/screens.py" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
 s = s.replace('"Everything is in order."', '"All good here."')
 s = s.replace('"Something could not be looked at."', '"Some of this could not be measured."')
-s = s.replace('"could not look"', '"not measured"')
 p.write_text(s)
+q = pathlib.Path(sys.argv[2]); z = q.read_text()
+q.write_text(z.replace('UNSEEN: "could not look"', 'UNSEEN: "not measured"'))
 P
 }
 
