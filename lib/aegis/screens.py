@@ -748,20 +748,28 @@ def _project_card(p):
     pills = "".join(_service_pill(sv) for sv in p["services"])
     push = p.get("push")
     state = worst({p["state"], state_of(push)} if push else {p["state"]})
-    extras = [f'plan <b class="mono">{_e(p["plan"])}</b>']
+    # THE FOOT OF THE CARD, segmented: each fact with its own label
+    # and shape, never one grey sentence. The operator read the old
+    # line («plan mediana · bucket · 7 services») and could not tell
+    # what was what.
+    n = len(p["services"])
+    foot = [f'<span class="kv"><span class="k">plan</span>'
+            f'<span class="v plan">{_icon("steps")}{_e(p["plan"] or "?")}</span></span>',
+            f'<span class="kv"><span class="k">services</span><span class="v num">{n}</span></span>']
     if p["bucket"]:
-        extras.append("bucket")
+        foot.append(f'<span class="kv"><span class="k">files</span>'
+                    f'<span class="v">{_icon("bucket")}bucket</span></span>')
     if p["ai"]:
-        extras.append(f'AI {_e(p["ai"])}')
+        foot.append(f'<span class="kv"><span class="k">AI</span>'
+                    f'<span class="v">{_icon("ai")}{_e(p["ai"])}</span></span>')
     domain = (f'<a class="host mono" href="https://{_e(p["domain"])}/" rel="noreferrer">'
-              f'{_e(p["domain"])}</a>' if p["domain"] else
+              f'{_icon("globe")}{_e(p["domain"])}</a>' if p["domain"] else
               '<span class="host mono faint">no public domain</span>')
     return (f'<article class="card proj" data-state="{state}">'
             f'<header><h3><a href="/projects/{_e(name)}">{_e(name)}</a></h3>'
             f'{_chip(state, STATE_WORD[state])}</header>'
             f'{domain}<div class="pills">{pills}</div>'
-            f'<p class="meta">{" · ".join(extras)} · {len(p["services"])} service'
-            f'{"s" if len(p["services"]) != 1 else ""}</p></article>')
+            f'<footer class="card-foot">{"".join(foot)}</footer></article>')
 
 
 def _spread(reading):

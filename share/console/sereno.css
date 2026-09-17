@@ -314,6 +314,21 @@ code.mono { background:var(--sunken); padding:1px 5px; border-radius:5px; font-s
               position:relative; z-index:1; width:fit-content; }
 .card a.host:hover { color:var(--ink); }
 .pills { display:flex; flex-wrap:wrap; gap:5px; }
+/* The foot of a project card: facts with a label each, separated by
+ * hairlines, so «plan», «services» and «bucket» read as three things. */
+.card-foot { display:flex; flex-wrap:wrap; gap:0; margin-top:auto; padding-top:10px;
+             border-top:1px solid var(--line); }
+.card-foot .kv { display:flex; flex-direction:column; gap:2px; padding:0 14px 0 0; margin-right:14px;
+                 border-right:1px solid var(--line); }
+.card-foot .kv:last-child { border-right:0; margin-right:0; padding-right:0; }
+.card-foot .k { font-size:10px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--faint); }
+.card-foot .v { display:inline-flex; align-items:center; gap:5px; font-size:13px; font-weight:700; color:var(--ink); }
+.card-foot .v.plan { font-family:var(--mono); font-weight:500; font-size:12.5px; background:var(--sunken);
+                     padding:2px 8px 2px 6px; border-radius:6px; }
+.card-foot .v.num { font-size:15px; font-variant-numeric:tabular-nums; }
+.card-foot .ico { width:13px; height:13px; color:var(--faint); }
+.card .host { display:inline-flex; align-items:center; gap:5px; }
+.card .host .ico { width:12px; height:12px; }
 .empty-state { grid-column:1 / -1; padding:26px 20px; border:1px dashed var(--line); border-radius:var(--r-s);
                text-align:center; color:var(--mid); font-size:14px; display:flex; flex-direction:column; gap:12px; }
 .empty-state p { margin:0; }
