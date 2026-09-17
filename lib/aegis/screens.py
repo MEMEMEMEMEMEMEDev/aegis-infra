@@ -745,30 +745,42 @@ def _project_card(p):
                 f'<header><h3><a href="/projects/{_e(name)}">{_e(name)}</a></h3>'
                 f'{_chip(p["state"], "contract refused")}</header>'
                 f'<p class="why">{_e(p.get("error") or "")}</p></article>')
-    pills = "".join(_service_pill(sv) for sv in p["services"])
+    # THE SERVICES AS A ROW OF SMALL ICONS, one per service, each with
+    # its kind and the dot of its language, and its name on hover.
+    # Seven of them fit where two pills would, so every card is the
+    # same height and a grid of them reads as a grid, not a skyline.
+    icons = "".join(
+        f'<span class="svc" title="{_e(sv["name"])} · {_e(KIND.get(sv["kind"], sv["kind"]))}'
+        + (f' · {_e(sv["language"])}' if sv.get("language") else "") + '">'
+        f'{_icon(KIND_ICON.get(sv["kind"], "web"))}{_dot(sv.get("colour"), sv.get("language") or "")}'
+        f'</span>' for sv in p["services"])
+    if not p["services"]:
+        icons = '<span class="faint">no service declared</span>'
     push = p.get("push")
     state = worst({p["state"], state_of(push)} if push else {p["state"]})
-    # THE FOOT OF THE CARD, segmented: each fact with its own label
-    # and shape, never one grey sentence. The operator read the old
-    # line («plan mediana · bucket · 7 services») and could not tell
-    # what was what.
+    # THE FOOT OF THE CARD, one line, segmented: each fact with its own
+    # label, never one grey sentence. The operator read the old line
+    # («plan mediana · bucket · 7 services») and could not tell what
+    # was what.
     n = len(p["services"])
     foot = [f'<span class="kv"><span class="k">plan</span>'
             f'<span class="v plan">{_icon("steps")}{_e(p["plan"] or "?")}</span></span>',
             f'<span class="kv"><span class="k">services</span><span class="v num">{n}</span></span>']
+    extras = []
     if p["bucket"]:
-        foot.append(f'<span class="kv"><span class="k">files</span>'
-                    f'<span class="v">{_icon("bucket")}bucket</span></span>')
+        extras.append(f'<span class="x" title="a bucket for files">{_icon("bucket")}</span>')
     if p["ai"]:
-        foot.append(f'<span class="kv"><span class="k">AI</span>'
-                    f'<span class="v">{_icon("ai")}{_e(p["ai"])}</span></span>')
+        extras.append(f'<span class="x" title="AI plan {_e(p["ai"])}">{_icon("ai")}</span>')
+    if extras:
+        foot.append(f'<span class="kv"><span class="k">also</span><span class="v">{"".join(extras)}</span></span>')
     domain = (f'<a class="host mono" href="https://{_e(p["domain"])}/" rel="noreferrer">'
               f'{_icon("globe")}{_e(p["domain"])}</a>' if p["domain"] else
               '<span class="host mono faint">no public domain</span>')
     return (f'<article class="card proj" data-state="{state}">'
-            f'<header><h3><a href="/projects/{_e(name)}">{_e(name)}</a></h3>'
+            f'<header><span class="avatar" aria-hidden="true">{_e(name[:1].upper())}</span>'
+            f'<h3><a href="/projects/{_e(name)}">{_e(name)}</a></h3>'
             f'{_chip(state, STATE_WORD[state])}</header>'
-            f'{domain}<div class="pills">{pills}</div>'
+            f'{domain}<div class="svcs">{icons}</div>'
             f'<footer class="card-foot">{"".join(foot)}</footer></article>')
 
 

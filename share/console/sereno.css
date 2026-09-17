@@ -296,7 +296,7 @@ code.mono { background:var(--sunken); padding:1px 5px; border-radius:5px; font-s
 
 /* Cards: a project, a service. The state is a line along the top, the
  * surface stays neutral, and the whole card is the link. */
-.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:12px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:12px; align-items:start; }
 .card {
   border:1px solid var(--line); border-radius:var(--r-s); padding:14px 15px;
   display:flex; flex-direction:column; gap:9px; background:var(--panel); position:relative;
@@ -316,7 +316,7 @@ code.mono { background:var(--sunken); padding:1px 5px; border-radius:5px; font-s
 .pills { display:flex; flex-wrap:wrap; gap:5px; }
 /* The foot of a project card: facts with a label each, separated by
  * hairlines, so «plan», «services» and «bucket» read as three things. */
-.card-foot { display:flex; flex-wrap:wrap; gap:0; margin-top:auto; padding-top:10px;
+.card-foot { display:flex; flex-wrap:wrap; gap:0; margin-top:2px; padding-top:10px;
              border-top:1px solid var(--line); }
 .card-foot .kv { display:flex; flex-direction:column; gap:2px; padding:0 14px 0 0; margin-right:14px;
                  border-right:1px solid var(--line); }
@@ -328,6 +328,19 @@ code.mono { background:var(--sunken); padding:1px 5px; border-radius:5px; font-s
 .card-foot .v.num { font-size:15px; font-variant-numeric:tabular-nums; }
 .card-foot .ico { width:13px; height:13px; color:var(--faint); }
 .card .host { display:inline-flex; align-items:center; gap:5px; }
+.avatar { width:26px; height:26px; border-radius:8px; background:var(--ink); color:var(--paper);
+          display:inline-flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; flex:none; }
+.proj > header { gap:9px; }
+.proj > header h3 { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.svcs { display:flex; gap:5px; flex-wrap:wrap; min-height:26px; align-items:center; }
+.svc { position:relative; display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px;
+       border-radius:7px; background:var(--sunken); color:var(--mid); }
+.svc .ico { width:14px; height:14px; }
+.svc .dot { position:absolute; right:-2px; bottom:-2px; width:9px; height:9px; box-shadow:0 0 0 2px var(--panel); }
+.card-foot { flex-wrap:nowrap; }
+.card-foot .x { display:inline-flex; width:22px; height:22px; align-items:center; justify-content:center;
+                border-radius:6px; background:var(--sunken); color:var(--mid); margin-right:4px; }
+.card-foot .x .ico { width:13px; height:13px; color:var(--mid); }
 .card .host .ico { width:12px; height:12px; }
 .empty-state { grid-column:1 / -1; padding:26px 20px; border:1px dashed var(--line); border-radius:var(--r-s);
                text-align:center; color:var(--mid); font-size:14px; display:flex; flex-direction:column; gap:12px; }
