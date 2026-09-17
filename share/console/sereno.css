@@ -114,11 +114,11 @@ a { color:inherit; }
 .bar { height:7px; border-radius:99px; overflow:hidden; width:100%; background:rgb(11 13 16 / .09); }
 .bar > span { display:block; height:100%; background:currentColor; border-radius:99px; }
 
-.chip[data-state="fine"], .fill[data-state="fine"], .sq[data-state="fine"], .seg[data-state="fine"], .stile[data-state="fine"] > .pip,      .pip[data-state="fine"],      .link[data-state="fine"],      .bar[data-state="fine"]      { background:var(--fine-bg);      color:var(--fine-ink); }
-.chip[data-state="busy"], .fill[data-state="busy"], .sq[data-state="busy"], .seg[data-state="busy"], .stile[data-state="busy"] > .pip,      .pip[data-state="busy"],      .link[data-state="busy"],      .bar[data-state="busy"]      { background:var(--busy-bg);      color:var(--busy-ink); }
-.chip[data-state="attention"], .fill[data-state="attention"], .sq[data-state="attention"], .seg[data-state="attention"], .stile[data-state="attention"] > .pip, .pip[data-state="attention"], .link[data-state="attention"], .bar[data-state="attention"] { background:var(--attention-bg); color:var(--attention-ink); }
-.chip[data-state="wrong"], .fill[data-state="wrong"], .sq[data-state="wrong"], .seg[data-state="wrong"], .stile[data-state="wrong"] > .pip,     .pip[data-state="wrong"],     .link[data-state="wrong"],     .bar[data-state="wrong"]     { background:var(--wrong-bg);     color:var(--wrong-ink); }
-.chip[data-state="unseen"], .fill[data-state="unseen"], .sq[data-state="unseen"], .seg[data-state="unseen"], .stile[data-state="unseen"] > .pip,    .pip[data-state="unseen"],    .link[data-state="unseen"],    .bar[data-state="unseen"]    { background:var(--unseen-bg);    color:var(--unseen-ink); }
+.chip[data-state="fine"], .fill[data-state="fine"], .sq[data-state="fine"], .seg[data-state="fine"],      .pip[data-state="fine"],      .link[data-state="fine"],      .bar[data-state="fine"]      { background:var(--fine-bg);      color:var(--fine-ink); }
+.chip[data-state="busy"], .fill[data-state="busy"], .sq[data-state="busy"], .seg[data-state="busy"],      .pip[data-state="busy"],      .link[data-state="busy"],      .bar[data-state="busy"]      { background:var(--busy-bg);      color:var(--busy-ink); }
+.chip[data-state="attention"], .fill[data-state="attention"], .sq[data-state="attention"], .seg[data-state="attention"], .pip[data-state="attention"], .link[data-state="attention"], .bar[data-state="attention"] { background:var(--attention-bg); color:var(--attention-ink); }
+.chip[data-state="wrong"], .fill[data-state="wrong"], .sq[data-state="wrong"], .seg[data-state="wrong"],     .pip[data-state="wrong"],     .link[data-state="wrong"],     .bar[data-state="wrong"]     { background:var(--wrong-bg);     color:var(--wrong-ink); }
+.chip[data-state="unseen"], .fill[data-state="unseen"], .sq[data-state="unseen"], .seg[data-state="unseen"],    .pip[data-state="unseen"],    .link[data-state="unseen"],    .bar[data-state="unseen"]    { background:var(--unseen-bg);    color:var(--unseen-ink); }
 /* The pip is the state at a glance, so it takes the INK and not the pale
  * ground: an eight-pixel mint dot is a dot nobody sees. */
 .pip[data-state="fine"] { background:var(--fine-ink); }
@@ -333,10 +333,10 @@ code.mono { background:var(--sunken); padding:1px 5px; border-radius:5px; font-s
 .proj > header { gap:9px; }
 .proj > header h3 { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .svcs { display:flex; gap:5px; flex-wrap:wrap; min-height:26px; align-items:center; }
-.svc { position:relative; display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px;
-       border-radius:7px; background:var(--sunken); color:var(--mid); }
-.svc .ico { width:14px; height:14px; }
-.svc .dot { position:absolute; right:-2px; bottom:-2px; width:9px; height:9px; box-shadow:0 0 0 2px var(--panel); }
+.svc-i { position:relative; display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px;
+         border-radius:7px; background:var(--sunken); color:var(--mid); }
+.svc-i .ico { width:14px; height:14px; }
+.svc-i .dot { position:absolute; right:-2px; bottom:-2px; width:9px; height:9px; box-shadow:0 0 0 2px var(--panel); }
 .card-foot { flex-wrap:nowrap; }
 .card-foot .x { display:inline-flex; width:22px; height:22px; align-items:center; justify-content:center;
                 border-radius:6px; background:var(--sunken); color:var(--mid); margin-right:4px; }
@@ -553,7 +553,8 @@ ol.left .note { color:var(--mid); font-size:12.5px; }
 
 /* ══ SMALL SCREENS ══════════════════════════════════════════════════ */
 @media (max-width: 880px) {
-  .console { grid-template-columns:1fr; }
+  .console { grid-template-columns:minmax(0, 1fr); }
+  .menu h4 { display:none; }
   .side { position:static; height:auto; flex-direction:row; align-items:center; flex-wrap:wrap;
           border-right:0; border-bottom:1px solid var(--line); padding:10px 12px; gap:8px; }
   .menu { flex-direction:row; overflow-x:auto; flex:1; min-width:0; scrollbar-width:none; }

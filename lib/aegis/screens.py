@@ -750,7 +750,7 @@ def _project_card(p):
     # Seven of them fit where two pills would, so every card is the
     # same height and a grid of them reads as a grid, not a skyline.
     icons = "".join(
-        f'<span class="svc" title="{_e(sv["name"])} · {_e(KIND.get(sv["kind"], sv["kind"]))}'
+        f'<span class="svc-i" title="{_e(sv["name"])} · {_e(KIND.get(sv["kind"], sv["kind"]))}'
         + (f' · {_e(sv["language"])}' if sv.get("language") else "") + '">'
         f'{_icon(KIND_ICON.get(sv["kind"], "web"))}{_dot(sv.get("colour"), sv.get("language") or "")}'
         f'</span>' for sv in p["services"])
@@ -1387,7 +1387,7 @@ def _backup_section(reading, names=None, ident="storage", tenant=None):
                    if st.get("step", "").startswith("backup:") and st.get("holds")]
         meters = ""
         if holding:
-            rows = []
+            mrows = []
             for st in holding:
                 cad = st.get("cadence_seconds") or 0
                 age = st.get("age_hours")
@@ -1395,10 +1395,10 @@ def _backup_section(reading, names=None, ident="storage", tenant=None):
                 pct = (age / limit * 100) if (age is not None and limit) else (100 if age else 0)
                 words = (f'{age:g} h of {limit:g} h' if age is not None and limit else
                          f'{age:g} h' if age is not None else "no readable age")
-                rows.append(_meter(pct, st["step"].split(":", 1)[1], words, state_of(st),
-                                   title="how old the newest copy is, against two turns of the clock"))
+                mrows.append(_meter(pct, st["step"].split(":", 1)[1], words, state_of(st),
+                                    title="how old the newest copy is, against two turns of the clock"))
             meters = (f'<figure class="chart"><figcaption>age of the newest copy, against two '
-                      f'turns of the clock</figcaption>{"".join(rows)}</figure>')
+                      f'turns of the clock</figcaption>{"".join(mrows)}</figure>')
         body = (_backup_facts(reading) + meters
                 + (f'<h3 class="sub">Off-site copy</h3>' if tenant is not None else "")
                 + f'<table class="rows backups"><thead><tr><th>project</th><th>holds</th>'
@@ -1646,38 +1646,46 @@ def _reach_table(projects):
 
 
 def _signing_summary(reading):
+    """Every push read, by how its chain went: whole, broken, or not
+    run. One bar, and the counts of the three links behind a build."""
     if reading is None:
         return ""
     if blind(reading):
         return _blind_section(reading, "Signed and scanned", "signing", icon="shield")
     pushes = [st for st in steps_of(reading) if st.get("step", "").startswith("build:")]
-    counts = {}
-    for st in pushes:
-        for k, vv in (st.get("links") or {}).items():
-            counts.setdefault(k, {}).setdefault(SCREEN.get(vv, UNSEEN), 0)
-            counts[k][SCREEN.get(vv, UNSEEN)] += 1
     states = states_in(reading)
     if not pushes:
         states.add(UNSEEN)
         body = f'<p class="empty" data-state="{UNSEEN}">no build was read</p>'
     else:
-        parts = []
-        for k in ("build", "scan", "sign", "digest"):
-            for st_k, n in sorted((counts.get(k) or {}).items()):
-                parts.append((st_k, n, f'{n} {LINK_WORD[k]} {STATE_WORD[st_k] if st_k != FINE else ""}'.strip()))
-        bar = _stack(parts, title="every link of every push read, by how it went")
-        cells = []
-        for k in ("build", "scan", "sign", "digest"):
-            c = counts.get(k) or {}
-            bits = " · ".join(f'<span class="link" data-state="{s}">{n} {STATE_WORD[s] if s != FINE else "ok"}</span>'
-                              for s, n in c.items())
-            cells.append(f'<div class="fact"><span class="figure">{bits or "—"}</span>'
-                         f'<span class="label">{_e(LINK_WORD[k])}</span></div>')
-        body = (bar + f'<div class="facts-row">{"".join(cells)}</div>'
-                f'<p class="note">Of the last {len(pushes)} pushes read. A hatched count is '
-                f'pushes where that link was not measured, most often because nothing was '
-                f'built (only manifests changed). <a href="/deployments">Every push, link by '
-                f'link, on Deployments.</a></p>')
+        whole = broken = skipped = 0
+        scanned = signed = pinned = 0
+        for st in pushes:
+            links = st.get("links") or {}
+            words = {SCREEN.get(v, UNSEEN) for v in links.values()}
+            if state_of(st) == WRONG or WRONG in words:
+                broken += 1
+            elif words and words <= {FINE}:
+                whole += 1
+            else:
+                skipped += 1
+            if links.get("build") == "done":
+                scanned += links.get("scan") == "done"
+                signed += links.get("sign") == "done"
+                pinned += links.get("digest") == "done"
+        parts = [(FINE, whole, f"{whole} built, scanned, signed and pinned"),
+                 (WRONG, broken, f"{broken} broken somewhere along the chain"),
+                 (UNSEEN, skipped, f"{skipped} built nothing (only manifests changed)")]
+        bar = _stack(parts, title=f"the last {len(pushes)} pushes, by how their chain went")
+        built = whole + broken
+        facts = (f'<div class="facts-row">{_fact("built", _num(built))}'
+                 f'{_fact("scanned", _num(scanned))}{_fact("signed", _num(signed))}'
+                 f'{_fact("pinned by digest", _num(pinned))}</div>')
+        body = (bar + facts
+                + f'<p class="note">Of the {built} that built an image, every one has to be scanned '
+                f'for known vulnerabilities, signed so the cluster refuses anything else, and '
+                f'pinned by digest so what runs is what was signed. '
+                f'<a href="/deployments">Every push, link by link, on Deployments.</a></p>')
     return _section(reading, "Signed and scanned", body, states, "signing", icon="shield")
 
 
