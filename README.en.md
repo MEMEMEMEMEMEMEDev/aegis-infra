@@ -244,7 +244,8 @@ is a contract in `orgs/`, with its manifests and its missing secrets,
 and a plan of your own when you make one. No commit, no push, no apply,
 no cluster.
 
-It is not published through the tunnel; you reach it with
+It carries its own guided tour, fifteen steps screen by screen, under
+«Take the tour». It is not published through the tunnel; you reach it with
 `ssh -L 7391:127.0.0.1:7391`. The reasons, the security model and what
 is still missing are in [The console](docs/console.md).
 

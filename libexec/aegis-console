@@ -621,7 +621,7 @@ def _read_instance(sources=SOURCES):
 
 
 PAGES = ("deployments", "domains", "traffic", "storage", "plans", "security", "machine",
-         "health")
+         "health", "tour")
 
 
 def _back(query, readings, default="/"):

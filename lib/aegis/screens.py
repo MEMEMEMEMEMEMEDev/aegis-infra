@@ -680,7 +680,8 @@ def frame(main, readings, active, subject=None):
             f'<aside class="side"><a class="brand" href="/">aegis</a>'
             f'<nav class="menu">{"".join(items)}</nav>'
             f'<div class="side-foot"><p class="measured">{read}</p>'
-            f'<a class="act act--quiet" href="/measure">Read it again</a></div></aside>'
+            f'<a class="act act--quiet" href="/measure">Read it again</a>'
+            f'<a class="tour-link" href="/tour">{_icon("pulse")}Take the tour</a></div></aside>'
             f'{main}</div>')
 
 
@@ -1038,7 +1039,8 @@ def overview(readings):
                          'your applications, described in one file the platform derives '
                          'everything from.</p><p><a class="act" href="/new">Import a '
                          'repository</a> <a class="act act--quiet" href="/new">Describe one '
-                         'by hand</a></p></div>')
+                         'by hand</a> <a class="act act--quiet" href="/tour">Take the tour'
+                         '</a></p></div>')
             elif not ps:
                 states.add(UNSEEN)
                 cards = f'<p class="empty" data-state="{UNSEEN}">no contract was read</p>'
@@ -1060,7 +1062,8 @@ def overview(readings):
             drawn.add(id(r))
     others = "".join(_dump(r) for r in readings if id(r) not in drawn)
     body = _categories(readings) + projects + imports + others
-    actions = '<a class="act" href="/new">New project</a>'
+    actions = ('<a class="act act--quiet" href="/tour">Tour</a>'
+               '<a class="act" href="/new">New project</a>')
     return _main("projects", v, [("Projects", "/")], body, actions, wheres=_wheres(readings))
 
 
@@ -1913,9 +1916,203 @@ def plans(readings):
     return _main("plans", v, [("Plans", "/plans")], "".join(parts), actions)
 
 
+# ── the tour ─────────────────────────────────────────────────────────
+# THE WALK THROUGH THE CONSOLE, screen by screen, for somebody who has
+# never seen it. It is a page and not a script: no overlay, no «next»
+# that moves the page under you. Every step says where to go, what
+# you will see there, what to do, and one tip. It writes nothing and
+# it draws no reading, so it holds every invariant by having nothing
+# to break; the four states are shown with `data-demo`, never with
+# `data-state`, so that no check reads an example as a measurement.
+def _demo(state, word):
+    return f'<span class="chip" data-demo="{state}">{_e(word)}</span>'
+
+
+def _tour_steps(readings):
+    projects = org_names(readings)
+    first = projects[0] if projects else None
+    where_project = f"/projects/{first}" if first else "/"
+    return [
+        ("Read the first screen", "/", "Projects",
+         "The sentence at the top is the verdict over everything the console measured: "
+         "«Everything is in order», «Something is wrong», «Something could not be looked "
+         "at». Under it, the pages that are not fine, as links. Then one tile per "
+         "category with a dot and a phrase, and your projects as cards.",
+         "Read the sentence, then click the first red or hatched thing. That is the "
+         "whole method: the console orders what needs you; you follow the order.",
+         "There are four states and the fourth is the point. " + _demo("fine", "fine")
+         + " measured and nothing asked. " + _demo("wrong", "wrong") + " measured and off. "
+         + _demo("attention", "attention") + " measured and a decision is yours. "
+         + _demo("unseen", "could not look") + " nobody could measure it. That last "
+         "one is hatched and drawn first, and it is never painted as fine: «no failures "
+         "found» and «I could not reach it» look identical on every other dashboard, and "
+         "only one of them gets investigated."),
+        ("Open a project", where_project, first or "a project",
+         "What the contract declares against what actually runs in its namespace: one "
+         "card per service with how many copies run, its kind, its language, its public "
+         "path, its disk. Then the routes with who answers behind each path, the usage "
+         "of the plan on its tightest dimension, and what is <b>not</b> in the contract.",
+         "Read «Not in the contract» first when something is odd. A workload nobody "
+         "claims escapes the size policy, the network policies and the quota's intent, "
+         "and is drawn wrong. A volume nobody claims is named and is not: whether what is "
+         "inside matters, only its owner knows.",
+         "The tabs are anchors on one page. The contract is the one file in git that "
+         "says what the project is; everything the platform derives comes from it, and "
+         "«Edit the contract» writes that file and nothing else."),
+        ("Create a project", "/new", "New project",
+         "Your repositories that nothing runs yet, first. Picking one fills the form "
+         "with what was measured about it: its name, the URL GitHub returned, and one "
+         "suggestion for what it is, which the form says is a suggestion. Then three "
+         "cards (static site, web service, background worker), what it needs (a "
+         "PostgreSQL, a Redis, a bucket, the internet), its size and its plan.",
+         "Import a repository, tick what it needs, pick the plan by its sentence, press "
+         "«see the plan». A database ticked becomes a service the platform provides and "
+         "the web services get to reach it; you never write «usa: [postgres]».",
+         "The form puts 8080 in the port and / in the public path so the short path needs "
+         "no typing; a static site refuses a port, a worker a path, and those defaults "
+         "are left out for them. «Add another service» brings the form back with one "
+         "more row and everything typed in place. There is no limit but the plan."),
+        ("The plan, in plain words", "/new", "the plan",
+         "Before anything is written: the project as sentences, one per service («web: "
+         "static site, answering at /, built from …»), then what you changed as a diff, "
+         "then the files the platform would generate.",
+         "Read the sentences against what you meant. If they say it, press «write the "
+         "contract». If not, «change something» takes you back with everything in place.",
+         "Even the plan writes nothing. The button writes files in this instance: the "
+         "contract, its manifests, its missing secrets. No commit, no push, no cluster."),
+        ("What is left, and why", "/new", "after writing",
+         "Three commands, ready to paste, each left for a reason: your commit, because a "
+         "file in a working tree is harmless and ArgoCD reads the remote; `aegis sync "
+         "root`, because it speaks to the cluster; `aegis app apply`, because it creates "
+         "a repository, a deploy key and a webhook on GitHub.",
+         "Paste the three in a terminal, in that order. Then press «Read it again» and "
+         "the project is on the first screen.",
+         "aegis will never deploy on click. Its safety property is that a human commits; "
+         "that is not a gap in the console, it is the product."),
+        ("Deployments", "/deployments", "Deployments",
+         "Every push read, newest first, as a square wearing the state of its build: "
+         "green built, hatched built nothing (only manifests changed), red failed. Then "
+         "pushes per project, and the table: each push with its four links, built, "
+         "scanned, signed, pinned.",
+         "Look for a red square. Open the row: the link that broke is named, and «why» "
+         "says what the pipeline said.",
+         "A hatched link is one nobody measured, and it is drawn hatched on purpose: on "
+         "a row of ticks a missing link reads as fine. Scan and sign are the two links "
+         "no other platform shows you."),
+        ("Domains", "/domains", "Domains",
+         "The hostnames your contracts declare, whether each exists at the edge, which "
+         "service answers on each path, and the ones at the edge that no contract asks "
+         "for. Under it, what the round says about the edge and the certificates.",
+         "A hostname «missing at the edge» is a site nobody reaches and nothing else will "
+         "say so. A surplus one never moves the verdict; deleting it is by hand, with "
+         "the plan read.",
+         "The public hostname of a project is the one you typed on its form; the paths "
+         "come from each service's «public path»."),
+        ("Traffic", "/traffic", "Traffic",
+         "What actually reached each project in the last 24 hours, as the edge counted "
+         "it: requests, errors the server produced, and how slow the slowest tenth was, "
+         "as bars and as a table. Platform and unattributed traffic are counted apart "
+         "and the total reconciles, so nothing vanishes.",
+         "Errors above zero on a project are the first thing to open on it. A p95 far "
+         "above the others is a service that is slow for one in ten people.",
+         "The window is 24 hours because that is what the edge keeps; the same numbers "
+         "are `aegis traffic show` in a terminal."),
+        ("Storage", "/storage", "Storage",
+         "Disks live on this machine. Every project that holds data gets a copy sent "
+         "off-site on a clock; the bars say how old each copy is against two turns of "
+         "that clock, the table says what each project holds, and «Declared by the "
+         "contracts» lists every database, cache and bucket.",
+         "A copy older than two turns of the clock is a mechanism that stopped, not a "
+         "machine that was off. Check the clock is installed: `share/systemd/README.md` "
+         "says how, and nothing installs it for you.",
+         "A disk deliberately kept outside a contract is a decision its owner made; the "
+         "console names it and says nothing copies it."),
+        ("Plans", "/plans", "Plans",
+         "What a project may take: each plan's sentence, its seven numbers in words, who "
+         "names it, and how many more of it would still fit. The ones aegis ships keep "
+         "their numbers; the ones you add are yours.",
+         "When no plan fits, «New plan» copies the closest, you change the numbers you "
+         "mean, the preview says how many projects of it would fit today, and a button "
+         "writes it into the catalogue.",
+         "A contract names a plan and never a number, so changing the machine is one "
+         "file and not thirty contracts. A plan of your own is still a named step."),
+        ("Security", "/security", "Security",
+         "What the round says about the supply chain and the certificates; every push by "
+         "how its chain went; what each service may reach, which by default is nothing; "
+         "and what this console itself does and does not do.",
+         "If a service must call an API or send mail, it needs «reach the internet» on "
+         "its form. Nothing reaches out by default, and that is the whole point.",
+         "This console listens on 127.0.0.1 and nowhere else, has no login of its own, "
+         "serves no script and writes only files here. From another machine, an SSH "
+         "tunnel is the way in: `ssh -L 7391:127.0.0.1:7391 you@server`."),
+        ("Machine", "/machine", "Machine",
+         "The one machine everything runs on: memory and CPU free, what the running pods "
+         "asked for of what the node gives, and how many more projects of each plan "
+         "would still fit, with what runs out first.",
+         "Before creating a project, look here: if the plan you want fits «none», the "
+         "contract will validate and the pods will never schedule.",
+         "«Spoken for» is what the pods asked for, not what they use: a plan reserves "
+         "its ceiling the moment its project exists."),
+        ("Health", "/health", "Health",
+         "The round, whole: fourteen-odd sections, each a tile with its state, and under "
+         "them the measures. What is not fine is open; what is fine is a line with a "
+         "count. This is where every finding lives, including the ones the other "
+         "screens summarise.",
+         "Read the tiles; open a red one; read the measure's sentence. It is the same "
+         "text `aegis check` prints, so what you read here is what a terminal would say.",
+         "«Could not look» on a section is not «fine»: the round could not measure it, "
+         "and the thing it would have measured is in the dark."),
+        ("Read it again", "/measure?back=/", "Read it again",
+         "The console reads the instance once when it starts and serves what it has. "
+         "Every screen says when its readings were taken, on the page and not only in "
+         "the code, because a right number from forty minutes ago shown as if it were "
+         "now is the oldest lie a dashboard tells.",
+         "After a push, a commit or a change on the machine, press «Read it again» in "
+         "the menu. It takes a moment: the round alone is most of a minute.",
+         "To design or to show the console without a cluster, `aegis console draw DIR "
+         "--case instance-with-plans --case project-shop` writes every screen as files."),
+        ("Where the console stops", "/", "Projects",
+         "The console adds and changes; it never removes. It writes files here and never "
+         "commits, pushes, applies or touches the cluster. Removing a service or a "
+         "project, and everything that speaks to the cluster, is the command line, "
+         "which says what it is about to do first.",
+         "Keep a terminal beside it. Every screen has a command: the first screen is "
+         "`aegis org list`, a project is `aegis tenant show <name>`, Deployments is "
+         "`aegis builds show`, Domains `aegis edge check`, Traffic `aegis traffic show`, "
+         "Storage `aegis data remote status`, Plans `aegis quota list`, Machine `aegis "
+         "capacity show`, Health `aegis check`.",
+         "Every one of those takes `--json`, and that document is exactly what the "
+         "screen drew: the console has nothing you cannot see from a terminal."),
+    ]
+
+
+def tour(readings):
+    """The walk through the console, as a page of numbered steps."""
+    v = verdict_of(readings)
+    steps = _tour_steps(readings)
+    index = "".join(f'<a href="#step-{i + 1}"><b>{i + 1}</b>{_e(t)}</a>'
+                    for i, (t, *_r) in enumerate(steps))
+    cards = []
+    for i, (title, href, label, see, do, tip) in enumerate(steps, 1):
+        nxt = (f'<a class="act act--quiet small" href="#step-{i + 1}">next step</a>'
+               if i < len(steps) else '<a class="act act--quiet small" href="/">back to the first screen</a>')
+        cards.append(
+            f'<section class="block step" id="step-{i}"><header class="src-head">'
+            f'<span class="stepno">{i}</span><h2>{_e(title)}</h2>'
+            f'<a class="act small" href="{_e(href)}">Open {_e(label)}</a></header>'
+            f'<dl class="step-body">'
+            f'<dt>What you see</dt><dd>{see}</dd>'
+            f'<dt>What to do</dt><dd>{do}</dd>'
+            f'<dt>Tip</dt><dd>{tip}</dd></dl>'
+            f'<footer class="step-foot">{nxt}</footer></section>')
+    body = (f'<nav class="tour-index">{index}</nav>' + "".join(cards))
+    return _main("tour", v, [("Projects", "/"), ("Tour", None)], body,
+                 sentence="Fifteen steps, screen by screen. Nothing on this page writes anything.")
+
+
 VIEWS = {"projects": overview, "deployments": deployments, "domains": domains,
          "traffic": traffic, "storage": storage, "security": security,
-         "machine": machine, "health": health, "plans": plans}
+         "machine": machine, "health": health, "plans": plans, "tour": tour}
 
 
 def render(readings, subject=None, view=None, instance=None):

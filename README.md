@@ -294,7 +294,8 @@ hace inofensivo el fichero: ArgoCD lee el remoto, así que nada corre
 hasta que tú commitees. Y no quita nada: borrar un servicio es
 `aegis org` a mano.
 
-No se publica por el túnel (se entra con `ssh -L 7391:127.0.0.1:7391`)
+Trae su propio recorrido guiado, quince pasos pantalla por pantalla, en
+«Take the tour». No se publica por el túnel (se entra con `ssh -L 7391:127.0.0.1:7391`)
 y el porqué, junto con el modelo de seguridad y lo que falta, está en
 [La consola](docs/console.md).
 

@@ -89,6 +89,18 @@ shows some of them says **how many more there are on Health**, with the
 worst of their states, so that five sections drawn never read as if the
 other nine were fine. Health draws all of them.
 
+### The tour
+
+`/tour`, from «Take the tour» at the foot of the menu, is the walk
+through the console for somebody who has never seen it: fifteen steps,
+one per screen and per thing you can do, each saying where to go, what
+you will see there, what to do, and one tip. It is a page and not a
+script: no overlay, nothing that moves the page under you. It writes
+nothing and draws no reading, so it holds every invariant by having
+nothing to break; the four states are shown as examples with
+`data-demo`, never with `data-state`, so no check reads an example as a
+measurement.
+
 ### One project
 
 `/projects/<name>` is that project and nothing else. Its sources are

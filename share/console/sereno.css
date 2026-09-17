@@ -294,6 +294,35 @@ code.mono { background:var(--sunken); padding:1px 5px; border-radius:5px; font-s
 .stile[data-state] b, .stile[data-state] span { color:var(--ink); }
 .stile[data-state] span { color:var(--faint); }
 
+/* The tour: numbered steps, and the four states shown as examples
+ * (data-demo, never data-state: an example is not a measurement). */
+.tour-link { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600;
+             color:var(--mid); text-decoration:none; padding:4px 6px; }
+.tour-link:hover { color:var(--ink); }
+.tour-link .ico { color:var(--faint); }
+.tour-index { display:flex; flex-wrap:wrap; gap:6px; }
+.tour-index a { display:inline-flex; align-items:center; gap:6px; padding:5px 10px 5px 5px; border-radius:99px;
+                background:var(--panel); border:1px solid var(--line); color:var(--mid); text-decoration:none; font-size:12px; }
+.tour-index a b { width:20px; height:20px; border-radius:99px; background:var(--ink); color:var(--paper);
+                  display:inline-flex; align-items:center; justify-content:center; font-size:11px; }
+.tour-index a:hover { color:var(--ink); border-color:rgb(11 13 16 / .22); }
+.step .stepno { width:28px; height:28px; border-radius:99px; background:var(--ink); color:var(--paper);
+                display:inline-flex; align-items:center; justify-content:center; font-weight:800; font-size:13px; flex:none; }
+.step .src-head .act { margin-left:auto; }
+.step-body { margin:0; display:grid; grid-template-columns:110px 1fr; gap:8px 16px; font-size:13.5px; }
+.step-body dt { font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); padding-top:3px; }
+.step-body dd { margin:0; color:var(--mid); max-width:80ch; line-height:1.55; }
+.step-body dd b { color:var(--ink); }
+.step-body code { font-family:var(--mono); background:var(--sunken); padding:0 4px; border-radius:4px; font-size:12px; }
+.step-foot { display:flex; justify-content:flex-end; }
+.chip[data-demo="fine"]      { background:var(--fine-bg);      color:var(--fine-ink); }
+.chip[data-demo="wrong"]     { background:var(--wrong-bg);     color:var(--wrong-ink); }
+.chip[data-demo="attention"] { background:var(--attention-bg); color:var(--attention-ink); }
+.chip[data-demo="unseen"]    { background:var(--unseen-bg);    color:var(--unseen-ink); }
+.chip[data-demo="unseen"]::before { border-radius:2px; background:transparent; background-image:var(--hatch);
+                                    box-shadow:inset 0 0 0 1px currentColor; }
+@media (max-width: 560px) { .step-body { grid-template-columns:1fr; } }
+
 /* Cards: a project, a service. The state is a line along the top, the
  * surface stays neutral, and the whole card is the link. */
 .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:12px; align-items:start; }
