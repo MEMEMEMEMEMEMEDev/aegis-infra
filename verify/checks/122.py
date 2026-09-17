@@ -105,30 +105,52 @@ def states_in(readings):
         walk(r.get("documento"))
     return found
 
+def screens_of(readings):
+    """Every screen the console draws from these readings: the first
+    one, each category, and the project page when a project's readings
+    are among them. Since 2026-09-17 the first screen answers only «is
+    everything all right, and what do I have»; the numbers, and the
+    sources that carry them, live on the categories. So the invariant
+    «nothing is lost» is held over the UNION, and «the verdict is never
+    kinder» over the first screen, whose verdict is over everything."""
+    from aegis import screens
+    subject = next((r["comando"].split()[-1] for r in readings
+                    if (r.get("comando") or "").startswith("tenant show ")), None)
+    out = {"projects": console.render(readings)}
+    for view in getattr(screens, "VIEWS", {}) or {}:
+        if view != "projects":
+            out[view] = console.render(readings, view=view)
+    if subject:
+        out["project"] = console.render(readings, subject=subject)
+    return out
+
+
 cases = sorted(d for d in os.listdir(CASES) if os.path.isdir(os.path.join(CASES, d))) \
     if os.path.isdir(CASES) else []
 for name in cases:
     try:
         readings = console.readings_of_case(os.path.join(CASES, name))
-        html = console.render(readings)
+        pages = screens_of(readings)
     except Exception as e:                                # noqa: BLE001
         print(f"case {name} cannot be rendered ({type(e).__name__}: {e}): a case the console "
               f"cannot draw is a state of the world it would meet blind")
         continue
+    html = pages["projects"]
+    union = "".join(pages.values())
 
-    # I-1 also means NO READING DISAPPEARS. A page can name the right
-    # states at the top and still drop the source that could not be
-    # looked at, and then the operator knows something is unseen and
-    # not WHICH thing — which is the same loss one step later. Found by
-    # this check's own tooth red_6, which made a blind reading draw
-    # nothing while the verdict still said «unseen».
-    drawn = set(re.findall(r'data-command="([^"]*)"', html))
+    # I-1 also means NO READING DISAPPEARS: every command consulted is
+    # drawn as a source on SOME screen. A page can name the right
+    # states and still drop the source that could not be looked at,
+    # and then the operator knows something is unseen and not WHICH
+    # thing — the same loss one step later (found by this check's own
+    # tooth red_6).
+    drawn = set(re.findall(r'data-command="([^"]*)"', union))
     for r in readings:
         if _unescape(r["comando"]) not in {_unescape(d) for d in drawn}:
-            print(f"case {name}: `{r['comando']}` was consulted and no element of the screen "
-                  f"is about it (I-1): the reading vanished, whatever its answer was")
+            print(f"case {name}: `{r['comando']}` was consulted and no screen draws it "
+                  f"(I-1): the reading vanished, whatever its answer was")
 
-    on_screen = set(ATTR.findall(html))
+    on_screen = set(ATTR.findall(union))
     expected = {SCREEN[s] for s in states_in(readings) if s in SCREEN}
     # A reading with no document is a state of the world too, and the
     # screen has to say so.
@@ -136,15 +158,16 @@ for name in cases:
         expected.add(console.UNSEEN)
 
     for lost in sorted(expected - on_screen):
-        print(f"case {name}: the documents carry {lost!r} and no element of the screen shows it "
-              f"(I-1): a state that does not reach the screen was flattened on the way")
+        print(f"case {name}: the documents carry {lost!r} and no screen shows it (I-1): a "
+              f"state that does not reach the screen was flattened on the way")
     for invented in sorted(on_screen - expected):
-        print(f"case {name}: the screen shows {invented!r} and no document carries it (I-1)")
+        print(f"case {name}: a screen shows {invented!r} and no document carries it (I-1)")
 
-    # I-2 · the verdict cannot be kinder than the readings.
+    # I-2 · the verdict cannot be kinder than the readings, on the
+    # first screen, whose verdict is over every reading.
     verdict = re.search(r'data-veredicto="([a-z-]+)"', html)
     if not verdict:
-        print(f"case {name}: the rendered page declares no data-veredicto: there is no single "
+        print(f"case {name}: the first screen declares no data-veredicto: there is no single "
               f"place that says how the whole thing is (I-2)")
         continue
     blind = any(r.get("sin_documento") or r.get("rc") == 2 for r in readings)
@@ -156,5 +179,5 @@ for name in cases:
         print(f"case {name}: a reading came back wrong (rc 1) and the verdict is "
               f"{verdict.group(1)!r}, which says everything is fine (I-2)")
 
-print(f"SCOPE: {len(cases)} case(s) rendered, {len(words)} producer word(s) against "
+print(f"SCOPE: {len(cases)} case(s) rendered through every screen, {len(words)} producer word(s) against "
       f"{len(SCREEN)} translation(s)")

@@ -286,6 +286,76 @@ def _note(text, state=None):
     return (f'<p class="note"{f" data-state=\"{state}\"" if state else ""}>{_e(text)}</p>')
 
 
+# ── charts ───────────────────────────────────────────────────────────
+# Drawn with HTML and CSS, never a script. One hue for a magnitude (a
+# bar is longer, not redder); a STATUS colour only where a document
+# carries that state, so that a chart can never invent one. Every chart
+# sits beside the table it summarises, which is its accessible twin.
+def _hbars(rows, unit="", title=None, note=None):
+    """Horizontal bars for a magnitude per item. rows: (label, value,
+    words, state) with `state` None for plain magnitude."""
+    top = max((float(v or 0) for _l, v, _w, _st in rows), default=0) or 1
+    out = []
+    for label, value, words, state in rows:
+        pct = max(0.0, min(100.0, float(value or 0) / top * 100))
+        out.append(f'<div class="hbar"><span class="lbl">{_e(label)}</span>'
+                   f'<div class="track"><span class="fill" style="width:{pct:.1f}%"'
+                   + (f' data-state="{state}"' if state else "") + f'></span></div>'
+                   f'<span class="val mono">{_e(words)}</span></div>')
+    return (f'<figure class="chart">' + (f'<figcaption>{_e(title)}</figcaption>' if title else "")
+            + "".join(out) + (f'<p class="note">{_e(note)}</p>' if note else "") + '</figure>')
+
+
+def _meter(pct, label, words, state=None, title=None):
+    """One ratio against its limit. The fill wears the state the
+    document gave the thing, and nothing else."""
+    pct = max(0.0, min(100.0, float(pct or 0)))
+    return (f'<div class="meter"><span class="lbl">{_e(label)}</span>'
+            f'<div class="track"' + (f' title="{_e(title)}"' if title else "") + f'>'
+            f'<span class="fill" style="width:{pct:.1f}%"'
+            + (f' data-state="{state}"' if state else "") + f'></span></div>'
+            f'<span class="val mono">{_e(words)}</span></div>')
+
+
+def _squares(cells, title=None, note=None):
+    """A row of squares, one per thing, each wearing the state the
+    document gave it: the shape of a sequence at a glance. cells:
+    (state, tooltip, href)."""
+    out = "".join(
+        (f'<a class="sq" data-state="{st}" href="{_e(href)}" title="{_e(tip)}"></a>' if href
+         else f'<span class="sq" data-state="{st}" title="{_e(tip)}"></span>')
+        for st, tip, href in cells)
+    return (f'<figure class="chart"><figcaption>{_e(title or "")}</figcaption>'
+            f'<div class="squares">{out}</div>'
+            + (f'<p class="note">{_e(note)}</p>' if note else "") + '</figure>')
+
+
+def _stack(parts, title=None, note=None):
+    """A part-to-whole bar whose segments wear a state each. parts:
+    (state, count, words)."""
+    total = sum(n for _s, n, _w in parts) or 1
+    segs = "".join(f'<span class="seg" data-state="{st}" style="width:{n / total * 100:.1f}%" '
+                   f'title="{_e(words)}"></span>' for st, n, words in parts if n)
+    legend = " · ".join(f'{_pip(st)} {_e(words)}' for st, n, words in parts if n)
+    return (f'<figure class="chart"><figcaption>{_e(title or "")}</figcaption>'
+            f'<div class="stack">{segs}</div><p class="legend-line">{legend}</p>'
+            + (f'<p class="note">{_e(note)}</p>' if note else "") + '</figure>')
+
+
+def _status_grid(steps, href_prefix="#"):
+    """Every section of the round as a tile with its state and how
+    many of its measures are not fine: the shape of the whole platform
+    in one look, before any detail."""
+    tiles = []
+    for st in steps:
+        state = state_of(st)
+        bad = sum(1 for m in st.get("measures") or [] if state_of(m) != FINE)
+        tiles.append(f'<a class="stile" href="{href_prefix}{_e(st.get("step", ""))}" '
+                     f'data-state="{state}">{_pip(state)}<b>{_e(st.get("step", "?"))}</b>'
+                     f'<span>{f"{bad} not fine" if bad else "fine"}</span></a>')
+    return f'<div class="status-grid">{"".join(tiles)}</div>'
+
+
 # ── reading the readings ─────────────────────────────────────────────
 def reading_for(readings, prefix):
     for r in readings or []:
@@ -574,7 +644,7 @@ def _round_list(steps, all_open=False):
             body += f'<p class="rest">{hidden} measure{"s" if hidden != 1 else ""}, all fine</p>'
         opened = " open" if state != FINE else ""
         rows.append(
-            f'<details class="sect" data-state="{state}" data-step="{_e(st.get("step", ""))}"{opened}>'
+            f'<details class="sect" id="round-{_e(st.get("step", ""))}" data-state="{state}" data-step="{_e(st.get("step", ""))}"{opened}>'
             f'<summary>{_pip(state)}<b>{_e(st.get("step", "?"))}</b>'
             f'<span class="count">{len(st.get("measures") or [])} measured</span></summary>'
             f'{body}</details>')
@@ -666,31 +736,17 @@ def _service_pill(sv):
 
 
 def _project_card(p):
+    """A project, as a card you can read in a second: what it is
+    called, where it answers, how it is, what it is made of. The
+    numbers live on the project's own page and on each category."""
     name = p["name"]
     if not p["valid"]:
         return (f'<article class="card proj" data-state="{p["state"]}">'
-                f'<h3><a href="/projects/{_e(name)}">{_e(name)}</a></h3>'
-                f'{_chip(p["state"], "contract refused")}'
+                f'<header><h3><a href="/projects/{_e(name)}">{_e(name)}</a></h3>'
+                f'{_chip(p["state"], "contract refused")}</header>'
                 f'<p class="why">{_e(p.get("error") or "")}</p></article>')
     pills = "".join(_service_pill(sv) for sv in p["services"])
-    figs = ""
-    t = p.get("traffic")
-    if t and "requests" in t:
-        figs = (f'<div class="facts-row">{_fact("requests · 24h", _num(t.get("requests", 0)))}'
-                f'{_fact("errors", _num(t.get("errors", 0)))}'
-                f'{_fact("p95", "%.0f ms" % float(t.get("p95_ms") or 0))}</div>')
     push = p.get("push")
-    if push:
-        deploy = (f'<p class="push"><span class="lbl">last deployment</span>'
-                  f'<span class="mono">{_e(push.get("image"))} #{_e(push.get("build"))}</span>'
-                  f'<span class="when">{_e(_time(push.get("when")))}</span>'
-                  f'{_chain(push.get("links"), small=True)}'
-                  + (f'<span class="why">{_e(push["why"])}</span>' if push.get("why") else "")
-                  + '</p>')
-    elif p.get("window"):
-        deploy = f'<p class="push none">no deployment among the last {_e(p["window"])} read</p>'
-    else:
-        deploy = ""
     state = worst({p["state"], state_of(push)} if push else {p["state"]})
     extras = [f'plan <b class="mono">{_e(p["plan"])}</b>']
     if p["bucket"]:
@@ -703,7 +759,7 @@ def _project_card(p):
     return (f'<article class="card proj" data-state="{state}">'
             f'<header><h3><a href="/projects/{_e(name)}">{_e(name)}</a></h3>'
             f'{_chip(state, STATE_WORD[state])}</header>'
-            f'{domain}<div class="pills">{pills}</div>{figs}{deploy}'
+            f'{domain}<div class="pills">{pills}</div>'
             f'<p class="meta">{" · ".join(extras)} · {len(p["services"])} service'
             f'{"s" if len(p["services"]) != 1 else ""}</p></article>')
 
@@ -864,43 +920,100 @@ def import_box(reading, href="/new"):
                          "about it.", icon="rocket")
 
 
-def overview(readings):
-    """THE FIRST SCREEN: your projects, and one line per page of the
-    console with its state — so the whole instance is read in a glance
-    and the detail is one click away, never a scroll."""
-    v = verdict_of(readings)
-    peeks, drawn = [], set()
-    order = ("deployments", "domains", "traffic", "storage", "plans", "machine", "health")
-    labels = {k: (lbl, path) for k, lbl, path, _f in PAGES}
+def _asking(key, readings):
+    """How many things on a page are not fine, counted the way the
+    page counts them: its own reading's steps and measures, plus the
+    round's sections that belong to it."""
     feeds = {k: f for k, _l, _p, f in PAGES}
-    for key in order:
-        for prefix in feeds[key]:
-            r = reading_for(readings, prefix)
-            if r is None or id(r) in drawn:
+    n = 0
+    for prefix in feeds.get(key, ()):
+        r = reading_for(readings, prefix)
+        if r is None:
+            continue
+        if blind(r):
+            n += 1
+            continue
+        for st in steps_of(r):
+            if state_of(st) != FINE:
+                n += 1
+            n += sum(1 for m in st.get("measures") or [] if state_of(m) != FINE)
+    check = reading_for(readings, "check")
+    if check is not None and not blind(check):
+        names = ROUND_PAGES.get(key, ()) if key != "health" else None
+        for st in steps_of(check):
+            if names is not None and st.get("step") not in names:
                 continue
-            drawn.add(id(r))
-            label, path = labels[key]
-            extra = _round_line(readings, key)
-            if blind(r):
-                peeks.append(_peek(r, key, label, path, "could not look", {UNSEEN}, extra))
-                continue
-            st = states_in(r)
-            if not steps_of(r):
-                st.add(UNSEEN)
-            peeks.append(_peek(r, key, label, path, _peek_figure(key, r), st, extra))
+            if key == "health" or names is not None:
+                if state_of(st) != FINE:
+                    n += 1
+    return n
+
+
+def _categories(readings):
+    """One tile per category, with its state and a phrase a person
+    reads in a second. The numbers are on the category's own screen."""
+    dots = page_states(readings)
+    words = {FINE: "all fine", WRONG: "something is wrong", ATTENTION: "a decision to make",
+             UNSEEN: "could not look", BUSY: "working on it"}
+    tiles = []
+    for key, label, path, _f in PAGES:
+        if key == "projects":
+            continue
+        st = dots.get(key)
+        if st is None:
+            phrase = "not read"
+        else:
+            n = _asking(key, readings)
+            phrase = words[st] if st == FINE or not n else f'{n} asking' if st != UNSEEN else words[st]
+        tiles.append(f'<a class="cat" href="{path}">{_icon(PAGE_ICON[key])}<b>{_e(label)}</b>'
+                     f'<span class="phrase">{_e(phrase)}</span>{_pip(st)}</a>')
+    return f'<div class="cats">{"".join(tiles)}</div>'
+
+
+def _import_line(reading):
+    """The repositories nothing runs yet, in one line: the way in to a
+    new project, without the list. The list is on the new-project
+    screen."""
+    if blind(reading):
+        return _blind_section(reading, "Repositories", "import", icon="rocket")
+    states = states_in(reading)
+    total = free = 0
+    for st in steps_of(reading):
+        if st.get("step") == "repos":
+            total = st.get("total", 0)
+        elif st.get("step", "").startswith("repo:") and not st.get("sirve"):
+            free += 1
+    if not steps_of(reading):
+        states.add(UNSEEN)
+        body = (f'<p class="empty" data-state="{UNSEEN}">GitHub could not be asked, which is '
+                f'not the same as having no repositories</p>')
+    else:
+        body = (f'<p class="line"><b>{_num(free)}</b> of your {_num(total)} repositories run '
+                f'nothing here yet. <a class="act act--quiet small" href="/new">Import one</a></p>')
+    return _section(reading, "Repositories", body, states, "import line", icon="rocket")
+
+
+def overview(readings):
+    """THE FIRST SCREEN, and it answers two questions and no more: is
+    everything all right, and what do I have. Every number lives one
+    click away, on the category it belongs to — the operator's words:
+    «quizás asustamos en el panel mostrando las requests, los deploys».
+    The verdict at the top is still over every reading, and every
+    reading is still drawn as a source on SOME screen: check 122 holds
+    that across the whole console."""
+    v = verdict_of(readings)
+    drawn = set()
     org = reading_for(readings, "org list")
     projects = ""
     if org is not None:
         drawn.add(id(org))
         if blind(org):
-            projects = _blind_section(org, "Projects", "projects", icon="rocket")
+            projects = _blind_section(org, "Your projects", "projects", icon="rocket")
         else:
             ps = projects_of(readings)
             states = states_in(org)
             cards = "".join(_project_card(p) for p in ps)
             if not ps and steps_of(org):
-                # Contracts were read and none is a project: the honest
-                # empty state, with the two ways in.
                 cards = ('<div class="empty-state"><p>No projects yet. A project is one of '
                          'your applications, described in one file the platform derives '
                          'everything from.</p><p><a class="act" href="/new">Import a '
@@ -916,18 +1029,21 @@ def overview(readings):
     imports = ""
     if repos is not None:
         drawn.add(id(repos))
-        imports = import_box(repos)
-    # Anything else that was consulted and has no place designed for it
-    # is drawn in full: a reading may never vanish because nobody has
-    # designed its screen yet.
+        imports = _import_line(repos)
+    # The readings the categories draw are drawn THERE, once each. What
+    # has no category yet is drawn here in full, so that nothing read
+    # ever vanishes for lack of a designed screen.
+    feeds = {prefix for _k, _l, _p, f in PAGES for prefix in f}
+    for r in readings:
+        if any((r.get("comando") or "") == pf or (r.get("comando") or "").startswith(pf + " ")
+               for pf in feeds):
+            drawn.add(id(r))
     others = "".join(_dump(r) for r in readings if id(r) not in drawn)
-    body = ((f'<div class="strip">{"".join(peeks)}</div>' if peeks else "")
-            + projects + imports + others)
+    body = _categories(readings) + projects + imports + others
     actions = '<a class="act" href="/new">New project</a>'
     return _main("projects", v, [("Projects", "/")], body, actions, wheres=_wheres(readings))
 
 
-# ── one project ──────────────────────────────────────────────────────
 def _service_card(st, lang=None):
     kind, _, what = st.get("step", "").partition(":")
     state = state_of(st)
@@ -1075,7 +1191,26 @@ def _builds_section(reading, names, with_project=True, ident="deployments"):
               'for known vulnerabilities, <b>signed</b> so the cluster can refuse anything '
               'else, and <b>pinned</b> by digest so what runs is exactly what was signed. '
               'A hatched link is one nobody measured.</p>')
-    body = summary + table + (f'<ul class="tail">{"".join(gaps)}</ul>' if gaps else "") + legend
+    cells = []
+    for st in sorted(pushes, key=lambda x: x.get("when") or "", reverse=True):
+        link = (st.get("links") or {}).get("build")
+        # The square wears the BUILD link's state: a push that built
+        # nothing is hatched, one that failed is wrong, one that built
+        # is fine. Every one of those is a state the document carries.
+        st_sq = state_of(st) if state_of(st) != FINE else SCREEN.get(link, UNSEEN)
+        cells.append((st_sq, f'{st.get("image")} #{st.get("build")} · {_time(st.get("when"))}'
+                      + (f' · {st["why"]}' if st.get("why") else ""), None))
+    strip = _squares(cells, title="the pushes, newest first",
+                     note="a hatched square built nothing (only manifests changed); a red one "
+                          "failed") if cells else ""
+    by_project = {}
+    for st in pushes:
+        proj = project_of_image(st.get("image", ""), names) or "?"
+        by_project[proj] = by_project.get(proj, 0) + 1
+    per = (_hbars([(k, n, _num(n), None) for k, n in sorted(by_project.items(), key=lambda kv: -kv[1])],
+                  title="pushes per project") if with_project and len(by_project) > 1 else "")
+    body = (summary + (f'<div class="charts">{strip}{per}</div>' if strip else "") + table
+            + (f'<ul class="tail">{"".join(gaps)}</ul>' if gaps else "") + legend)
     window = window_read([reading])
     lead = (f'The last {window} pushes read, newest first.' if window else
             'The pushes read, newest first.')
@@ -1120,7 +1255,19 @@ def _traffic_section(reading, names=None, ident="traffic"):
         states.add(UNSEEN)
         body = f'<p class="empty" data-state="{UNSEEN}">nothing was measured</p>'
     else:
-        body = (f'<table class="rows traffic"><thead><tr><th>project</th><th class="num">requests</th>'
+        per = [st for st in steps_of(reading) if "errors" in st]
+        charts = ""
+        if len(per) > 1:
+            charts = ('<div class="charts">'
+                      + _hbars([(st["step"].split(":", 1)[-1], st.get("requests", 0),
+                                 _num(st.get("requests", 0)), None) for st in per], title="requests")
+                      + _hbars([(st["step"].split(":", 1)[-1], st.get("errors", 0),
+                                 _num(st.get("errors", 0)), None) for st in per], title="errors (5xx)")
+                      + _hbars([(st["step"].split(":", 1)[-1], st.get("p95_ms", 0),
+                                 f'{st.get("p95_ms", 0):.0f} ms', None) for st in per],
+                               title="p95, the slowest tenth")
+                      + '</div>')
+        body = charts + (f'<table class="rows traffic"><thead><tr><th>project</th><th class="num">requests</th>'
                 f'<th></th><th class="num">errors (5xx)</th><th class="num">p95</th>'
                 f'<th class="num">served</th><th></th></tr></thead>'
                 f'<tbody>{"".join(rows)}{"".join(tail)}</tbody></table>')
@@ -1216,7 +1363,23 @@ def _backup_section(reading, names=None, ident="storage", tenant=None):
         states.add(UNSEEN)
         body = f'<p class="empty" data-state="{UNSEEN}">nothing was measured</p>'
     else:
-        body = (_backup_facts(reading)
+        holding = [st for st in steps_of(reading)
+                   if st.get("step", "").startswith("backup:") and st.get("holds")]
+        meters = ""
+        if holding:
+            rows = []
+            for st in holding:
+                cad = st.get("cadence_seconds") or 0
+                age = st.get("age_hours")
+                limit = 2 * cad / 3600 if cad else 0
+                pct = (age / limit * 100) if (age is not None and limit) else (100 if age else 0)
+                words = (f'{age:g} h of {limit:g} h' if age is not None and limit else
+                         f'{age:g} h' if age is not None else "no readable age")
+                rows.append(_meter(pct, st["step"].split(":", 1)[1], words, state_of(st),
+                                   title="how old the newest copy is, against two turns of the clock"))
+            meters = (f'<figure class="chart"><figcaption>age of the newest copy, against two '
+                      f'turns of the clock</figcaption>{"".join(rows)}</figure>')
+        body = (_backup_facts(reading) + meters
                 + (f'<h3 class="sub">Off-site copy</h3>' if tenant is not None else "")
                 + f'<table class="rows backups"><thead><tr><th>project</th><th>holds</th>'
                 f'<th class="num">newest copy</th><th class="num">clock</th>'
@@ -1379,6 +1542,11 @@ def _hostnames_section(edge, projects):
     if not steps:
         states.add(UNSEEN)
     n = edge_step.get("hostnames") if edge_step else None
+    if n is not None:
+        table = (f'<div class="facts-row head">{_fact("at the edge", _num(n))}'
+                 f'{_fact("missing", _num(len(missing)))}'
+                 f'{_fact("nobody asked for", _num(len((surplus or {}).get("hostnames") or [])))}'
+                 f'{_fact("declared by contracts", _num(len(rows)))}</div>' + table)
     lead = (f"The edge holds {n} hostnames of this instance's. The ones below are the ones "
             f"your contracts declare." if n is not None else
             "The hostnames your contracts declare, as the edge answered about them.")
@@ -1473,6 +1641,11 @@ def _signing_summary(reading):
         states.add(UNSEEN)
         body = f'<p class="empty" data-state="{UNSEEN}">no build was read</p>'
     else:
+        parts = []
+        for k in ("build", "scan", "sign", "digest"):
+            for st_k, n in sorted((counts.get(k) or {}).items()):
+                parts.append((st_k, n, f'{n} {LINK_WORD[k]} {STATE_WORD[st_k] if st_k != FINE else ""}'.strip()))
+        bar = _stack(parts, title="every link of every push read, by how it went")
         cells = []
         for k in ("build", "scan", "sign", "digest"):
             c = counts.get(k) or {}
@@ -1480,7 +1653,7 @@ def _signing_summary(reading):
                               for s, n in c.items())
             cells.append(f'<div class="fact"><span class="figure">{bits or "—"}</span>'
                          f'<span class="label">{_e(LINK_WORD[k])}</span></div>')
-        body = (f'<div class="facts-row">{"".join(cells)}</div>'
+        body = (bar + f'<div class="facts-row">{"".join(cells)}</div>'
                 f'<p class="note">Of the last {len(pushes)} pushes read. A hatched count is '
                 f'pushes where that link was not measured, most often because nothing was '
                 f'built (only manifests changed). <a href="/deployments">Every push, link by '
@@ -1552,7 +1725,23 @@ def _capacity_section(reading):
         else:
             figures.append(_fact(name.split(":", 1)[-1], st.get("why", "not measured")))
     body = (f'<div class="facts-row head">{"".join(figures)}</div>' if figures else "")
+    meters = []
+    for st in steps_of(reading):
+        name = st.get("step", "")
+        if name in ("capacity:memory", "capacity:cpu") and st.get("allocatable"):
+            what = name.split(":", 1)[1]
+            asked, alloc = st.get("asked", 0), st["allocatable"]
+            words = (f'{_bytes(asked)} of {_bytes(alloc)}' if what == "memory"
+                     else f'{_cpu_words(asked)} of {_cpu_words(alloc)}')
+            meters.append(_meter(asked / alloc * 100, f"{what} spoken for", words))
+    if meters:
+        body += (f'<figure class="chart"><figcaption>what the running pods asked for, of what '
+                 f'the node can give</figcaption>{"".join(meters)}</figure>')
     if fits:
+        rooms = [(st["step"].split(":", 1)[1], st.get("room") or 0,
+                  "?" if st.get("room") is None else f'{st["room"]} more', state_of(st))
+                 for st in steps_of(reading) if st.get("step", "").startswith("fits:")]
+        body += _hbars(rooms, title="room for another project, per plan")
         body += (f'<h3 class="sub">Room for another project</h3><table class="rows"><thead><tr>'
                  f'<th>plan</th><th>asks for</th><th class="num">would still fit</th><th></th><th></th>'
                  f'</tr></thead><tbody>{"".join(fits)}</tbody></table>'
@@ -1586,7 +1775,9 @@ def _round_full(reading):
     unseen = sum(1 for st in steps if state_of(st) == UNSEEN)
     if unseen:
         facts.append(_fact("could not look", _num(unseen)))
-    body = f'<div class="facts-row head">{"".join(facts)}</div>' + _round_list(steps)
+    body = (f'<div class="facts-row head">{"".join(facts)}</div>'
+            + (_status_grid(steps, href_prefix="#round-") if steps else "")
+            + _round_list(steps))
     if not steps:
         states.add(UNSEEN)
     return _section(reading, "The round", body, states, "round", icon="pulse",
@@ -1655,7 +1846,13 @@ def _plans_section(reading, capacity, projects):
         states.add(UNSEEN)
         body = f'<p class="empty" data-state="{UNSEEN}">no plan was read</p>'
     else:
-        body = (f'<table class="rows plans"><thead><tr><th>plan</th><th>what it is for</th>'
+        rooms = [(n, (room.get(n) or {}).get("room") or 0,
+                  "?" if (room.get(n) or {}).get("room") is None else f'{room[n]["room"]} more',
+                  state_of(room[n]) if room.get(n) else None)
+                 for n in sorted(room)]
+        body = ((_hbars(rooms, title="room for another project of each plan, as Machine measured it")
+                 if rooms else "")
+                + f'<table class="rows plans"><thead><tr><th>plan</th><th>what it is for</th>'
                 f'<th class="num">reserves</th><th class="num">may take</th><th class="num">pods</th>'
                 f'<th class="num">disks</th><th class="num">disk</th><th>used by</th>'
                 f'<th>room for</th><th></th></tr></thead><tbody>{"".join(rows)}</tbody></table>'

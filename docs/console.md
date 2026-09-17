@@ -57,12 +57,30 @@ at the top, and under it the pages that are not fine, as links.
 | **Machine** | what is free, what is spoken for, how many more projects of each plan would fit | `capacity show`, and the round's sections about the node |
 | **Health** | the round, whole: every section with every measure | `check`, `edge check` |
 
-A project is one of your applications: its services, its domain, its
-data. The contract in git says what it is; everything else on the
-screen was measured. A **project card** carries the domain, one pill per
-service with the language GitHub measured for its repository (a dot in
-GitHub's own colour, never a logo), the requests and errors of the last
-24 hours, and the last deployment with its four links.
+**The first screen answers two questions and no more**: is everything
+all right, and what do I have. A row of categories, each with its state
+and a phrase («all fine», «4 asking», «could not look»); your projects as
+cards that say what each is called, where it answers, how it is and
+what it is made of; and one line about the repositories nothing runs
+yet. No request counts, no deployment chains: those scared more than
+they told, and they live one click away, on the category they belong
+to, where there is room to draw them.
+
+A **project card** carries the domain, one pill per service with the
+language GitHub measured for its repository (a dot in GitHub's own
+colour, never a logo), the plan and the number of services.
+
+**Each category leads with its picture.** Traffic draws requests, errors
+and the slowest tenth per project as bars; Deployments draws every push
+read as a square wearing the state of its build link (hatched when
+nothing was built, red when it failed) and the pushes per project;
+Storage draws the age of each copy against two turns of its clock;
+Machine draws what the pods asked for of what the node can give, and
+the room left per plan; Plans the room per plan; Security every link of
+every push by how it went; Health the round as a grid of sections
+before the detail. All of it is HTML and CSS, no script, one hue for a
+magnitude and a state colour only where a document carries that state.
+The table each chart summarises sits under it.
 
 The round has fourteen-odd sections and each belongs somewhere: the
 ones about CI are drawn on Deployments, the ones about the edge on
@@ -334,9 +352,11 @@ them were private work that merely lives in the same account.
 
 The checks over it hold two invariants for every case: **no state is
 lost and none is invented**, and **the verdict is never kinder than its
-readings**. They are held on the first screen, and then again on every
-screen and on the project page, because a rule measured on one screen
-is a rule the other eight can break quietly. A summary on the first
+readings**. Since the first screen carries no numbers, «nothing is lost» is held
+over the **union** of the screens (every reading is drawn, dated, on
+the screen it belongs to) and «never kinder» on the first, whose
+verdict is over every reading; and every screen, on its own, invents
+nothing and dates what it draws. A summary on the first
 screen therefore shows the **spread** of states of what it summarises,
 one dot with a count per state, and never only the worst one.
 

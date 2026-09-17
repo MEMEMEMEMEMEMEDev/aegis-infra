@@ -114,11 +114,11 @@ a { color:inherit; }
 .bar { height:7px; border-radius:99px; overflow:hidden; width:100%; background:rgb(11 13 16 / .09); }
 .bar > span { display:block; height:100%; background:currentColor; border-radius:99px; }
 
-.chip[data-state="fine"],      .pip[data-state="fine"],      .link[data-state="fine"],      .bar[data-state="fine"]      { background:var(--fine-bg);      color:var(--fine-ink); }
-.chip[data-state="busy"],      .pip[data-state="busy"],      .link[data-state="busy"],      .bar[data-state="busy"]      { background:var(--busy-bg);      color:var(--busy-ink); }
-.chip[data-state="attention"], .pip[data-state="attention"], .link[data-state="attention"], .bar[data-state="attention"] { background:var(--attention-bg); color:var(--attention-ink); }
-.chip[data-state="wrong"],     .pip[data-state="wrong"],     .link[data-state="wrong"],     .bar[data-state="wrong"]     { background:var(--wrong-bg);     color:var(--wrong-ink); }
-.chip[data-state="unseen"],    .pip[data-state="unseen"],    .link[data-state="unseen"],    .bar[data-state="unseen"]    { background:var(--unseen-bg);    color:var(--unseen-ink); }
+.chip[data-state="fine"], .fill[data-state="fine"], .sq[data-state="fine"], .seg[data-state="fine"], .stile[data-state="fine"] > .pip,      .pip[data-state="fine"],      .link[data-state="fine"],      .bar[data-state="fine"]      { background:var(--fine-bg);      color:var(--fine-ink); }
+.chip[data-state="busy"], .fill[data-state="busy"], .sq[data-state="busy"], .seg[data-state="busy"], .stile[data-state="busy"] > .pip,      .pip[data-state="busy"],      .link[data-state="busy"],      .bar[data-state="busy"]      { background:var(--busy-bg);      color:var(--busy-ink); }
+.chip[data-state="attention"], .fill[data-state="attention"], .sq[data-state="attention"], .seg[data-state="attention"], .stile[data-state="attention"] > .pip, .pip[data-state="attention"], .link[data-state="attention"], .bar[data-state="attention"] { background:var(--attention-bg); color:var(--attention-ink); }
+.chip[data-state="wrong"], .fill[data-state="wrong"], .sq[data-state="wrong"], .seg[data-state="wrong"], .stile[data-state="wrong"] > .pip,     .pip[data-state="wrong"],     .link[data-state="wrong"],     .bar[data-state="wrong"]     { background:var(--wrong-bg);     color:var(--wrong-ink); }
+.chip[data-state="unseen"], .fill[data-state="unseen"], .sq[data-state="unseen"], .seg[data-state="unseen"], .stile[data-state="unseen"] > .pip,    .pip[data-state="unseen"],    .link[data-state="unseen"],    .bar[data-state="unseen"]    { background:var(--unseen-bg);    color:var(--unseen-ink); }
 /* The pip is the state at a glance, so it takes the INK and not the pale
  * ground: an eight-pixel mint dot is a dot nobody sees. */
 .pip[data-state="fine"] { background:var(--fine-ink); }
@@ -136,7 +136,7 @@ a { color:inherit; }
 }
 .pip[data-state="unseen"] { border-radius:2px; background-image:var(--hatch);
                             box-shadow:inset 0 0 0 1px currentColor; }
-.link[data-state="unseen"], .bar[data-state="unseen"] { background-image:var(--hatch); }
+.link[data-state="unseen"], .bar[data-state="unseen"], .fill[data-state="unseen"], .sq[data-state="unseen"], .seg[data-state="unseen"] { background-image:var(--hatch); }
 /* Rule 5: busy is the one that moves, and only if the reader lets it. */
 @media (prefers-reduced-motion: no-preference) {
   .chip[data-state="busy"]::before, .pip[data-state="busy"] { animation:sereno-beat 2.4s ease-in-out infinite; }
@@ -247,6 +247,52 @@ code.mono { background:var(--sunken); padding:1px 5px; border-radius:5px; font-s
 .peek .spot.lbl { color:var(--faint); margin-left:2px; }
 .peek .round { display:flex; align-items:center; gap:5px; font-size:10.5px; color:var(--faint); margin-top:2px; }
 .peek .age { padding:0 12px 9px; font-size:10px; }
+
+/* The categories on the first screen: a tile each, a phrase, a dot. */
+.cats { display:grid; grid-template-columns:repeat(auto-fit, minmax(132px, 1fr)); gap:8px; }
+.cat { display:flex; flex-direction:column; gap:3px; padding:12px 13px 11px; position:relative;
+       background:var(--panel); border:1px solid var(--line); border-radius:var(--r-s);
+       text-decoration:none; color:inherit; }
+.cat:hover { border-color:rgb(11 13 16 / .22); }
+.cat b { font-size:13px; font-weight:700; }
+.cat .ico { color:var(--faint); }
+.cat .phrase { font-size:12px; color:var(--mid); }
+.cat .pip { position:absolute; top:13px; right:13px; }
+.line { margin:0; font-size:13.5px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.line b { font-size:18px; }
+
+/* Charts: HTML and CSS, one hue for a magnitude, a state only where
+ * the document gave one. Each sits beside the table it summarises. */
+.charts { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:12px 22px; }
+.chart { margin:0; display:flex; flex-direction:column; gap:6px; min-width:0; }
+.chart figcaption { font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); }
+.hbar, .meter { display:grid; grid-template-columns:minmax(64px, 30%) 1fr auto; gap:8px; align-items:center; font-size:12.5px; }
+.hbar .lbl, .meter .lbl { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hbar .val, .meter .val { font-size:11.5px; color:var(--mid); white-space:nowrap; }
+.track { height:12px; border-radius:4px; background:var(--sunken); overflow:hidden; }
+.fill { display:block; height:100%; border-radius:0 4px 4px 0; background:var(--mid); min-width:2px; }
+.meter .track { height:9px; }
+.squares { display:flex; flex-wrap:wrap; gap:3px; }
+.sq { width:14px; height:14px; border-radius:3px; display:inline-block; background:var(--sunken); }
+.sq[data-state="fine"] { background:var(--fine-ink); }
+.sq[data-state="wrong"] { background:var(--wrong-ink); }
+.sq[data-state="attention"] { background:var(--attention-ink); }
+.stack { display:flex; height:14px; border-radius:4px; overflow:hidden; gap:2px; background:var(--sunken); }
+.seg { display:block; height:100%; }
+.legend-line { margin:0; font-size:12px; color:var(--mid); display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+.status-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:6px; }
+.stile { display:flex; flex-direction:column; gap:2px; padding:9px 11px; border:1px solid var(--line);
+         border-radius:var(--r-s); text-decoration:none; color:inherit; font-size:12.5px; }
+.stile b { display:flex; align-items:center; gap:6px; font-size:12.5px; }
+.stile > .pip { margin-bottom:3px; }
+.stile span { color:var(--faint); font-size:11.5px; }
+.stile:hover { border-color:rgb(11 13 16 / .22); }
+.stile[data-state="wrong"], .stile[data-state="attention"], .stile[data-state="unseen"] { box-shadow:inset 0 2px 0 0 currentColor; }
+.stile[data-state="wrong"] { color:var(--wrong-ink); }
+.stile[data-state="attention"] { color:var(--attention-ink); }
+.stile[data-state="unseen"] { color:var(--unseen-ink); }
+.stile[data-state] b, .stile[data-state] span { color:var(--ink); }
+.stile[data-state] span { color:var(--faint); }
 
 /* Cards: a project, a service. The state is a line along the top, the
  * surface stays neutral, and the whole card is the link. */
