@@ -2,6 +2,7 @@
 # forgets: one file out of six, or a tag the chain does not build.
 J210="$AEGIS_ROOT/seed/platform/image-watch/Jenkinsfile"
 C210="$AEGIS_ROOT/seed/platform/ci-images/Jenkinsfile"
+M210="$AEGIS_ROOT/seed/platform/mirror-images/Jenkinsfile"
 
 # one file keeps the old agent: five bumped, one left behind
 red_1() { sed -i 's|jenkins/inbound-agent:[^ ]*|jenkins/inbound-agent:3200.v1111111a_11b_11-1|' "$J210"; }
@@ -24,8 +25,11 @@ assert n, "re-aim this tooth: no Jenkinsfile names aegis-ci-cosign"
 P
 }
 
-# the crane of the templates stops matching the one its Containerfile builds
-red_4() { sed -i 's|aegis-ci-crane:v[0-9.]*|aegis-ci-crane:v0.1.0|g' "$C210"; }
+# the crane of the templates stops matching the one its Containerfile
+# builds. It is aimed at the Jenkinsfile that PINS it in a pod template
+# and not at ci-images/, which is the one that BUILDS it and names it
+# without a tag: the first aim mutated nothing and the harness said so.
+red_4() { sed -i 's|aegis-ci-crane:v[0-9.]*|aegis-ci-crane:v0.1.0|g' "$M210"; }
 
 # ── controls ──
 # a comment in a Jenkinsfile is not a pin
