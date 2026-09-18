@@ -27,6 +27,11 @@ import ipaddress, sys
 try: ipaddress.ip_address('$1'); sys.exit(0)
 except ValueError: sys.exit(1)"; }
 _v_path()    { [[ "$1" == /* || "$1" == "\$HOME"* || "$1" == "$HOME"* ]]; }
+# A maintenance hook: any command, or nothing. «Nothing» is a complete
+# answer (the window then runs with the sites live and says so), which
+# is why this accepts the empty string instead of demanding a value
+# from an operator who has not built one yet.
+_v_hook()    { [[ "$1" != *$'\n'* ]]; }
 _v_svc_ip()  {  # inside k3s's default service CIDR (10.43/16)
     python3 -c "
 import ipaddress, sys
@@ -191,6 +196,36 @@ config_wizard() {
         AI_GATEWAY_REPO=""
     fi
 
+    # ── the maintenance window (optional, and empty is an answer) ───
+    # Asked last, with AI, because it is the only pair that describes
+    # something OUTSIDE aegis. The product runs two commands and
+    # measures their effect; what is behind them —a Worker, an nginx
+    # 503, a DNS flip— is none of its business and is deliberately not
+    # asked about.
+    printf '\n\033[1m── maintenance window (optional) ──\033[0m\n'
+    printf 'While an update window is open aegis can put a page of yours\n'
+    printf 'in front of the sites. It needs the command that raises it\n'
+    printf 'and the one that lowers it. Enter twice = no page: the window\n'
+    printf 'still runs, with the sites live, and it says so.\n'
+    ask MAINTENANCE_ON "" _v_hook \
+      "Command that RAISES the maintenance page (empty = there is none)." \
+      "  e.g.: cd ~/maintenance && npx wrangler deploy"
+    if [[ -n "$MAINTENANCE_ON" ]]; then
+        # Demanded, not offered: a way in with no way out is a trap,
+        # and the one time it would be discovered is the one time it
+        # matters.
+        while :; do
+            ask MAINTENANCE_OFF "" _v_hook \
+              "Command that LOWERS it again. It is REQUIRED: a window that" \
+              "can raise a page and cannot take it down leaves your sites" \
+              "behind it until somebody notices."
+            [[ -n "$MAINTENANCE_OFF" ]] && break
+            log_warn "MAINTENANCE_ON carries a command: the way back cannot be empty"
+        done
+    else
+        MAINTENANCE_OFF=""
+    fi
+
     if [[ "$EDGE" == local ]]; then
         # Asked for and left empty ON PURPOSE, not omitted: the conf has
         # ONE shape, and a variable that exists empty says "this profile
@@ -215,7 +250,8 @@ config_wizard() {
     local v
     for v in EDGE EDGE_BIND_IP GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN ACME_EMAIL \
              KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP AEGIS_WORKSPACE \
-             CF_ACCOUNT_ID CF_ZONE_ID AI AI_GATEWAY_REPO; do
+             CF_ACCOUNT_ID CF_ZONE_ID AI AI_GATEWAY_REPO \
+             MAINTENANCE_ON MAINTENANCE_OFF; do
         printf '  %-22s = %s\n' "$v" "${!v}"
     done
     local ok
@@ -231,7 +267,8 @@ config_wizard() {
         echo "# regenerate with: aegis init --configure"
         for v in EDGE EDGE_BIND_IP GH_OWNER PLATFORM_REPO APP_REPO ROOT_DOMAIN \
                  ACME_EMAIL KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP \
-                 CF_ACCOUNT_ID CF_ZONE_ID AI AI_GATEWAY_REPO; do
+                 CF_ACCOUNT_ID CF_ZONE_ID AI AI_GATEWAY_REPO \
+                 MAINTENANCE_ON MAINTENANCE_OFF; do
             # ${!v:-}: under EDGE=local the two Cloudflare ids and, under
             # cloudflare, EDGE_BIND_IP are deliberately EMPTY. They are
             # still WRITTEN, so the conf has one shape and no consumer has
@@ -290,6 +327,22 @@ config_validate() {
              KUBE_CONTEXT_EXPECTED REGISTRY_CLUSTER_IP; do
         [[ -n "${!v:-}" ]] || missing+=("$v")
     done
+    # The maintenance pair. Both empty is valid and is what a conf
+    # written before 2026-09-18 carries; ONE of the two is not, in
+    # either direction. A hook that raises with nothing to lower it
+    # leaves the sites behind a page; a hook that lowers something
+    # nothing raised is a command nobody will ever run and a promise
+    # the window would read as «there is a page» when there is not.
+    MAINTENANCE_ON="${MAINTENANCE_ON:-}"
+    MAINTENANCE_OFF="${MAINTENANCE_OFF:-}"
+    if [[ -n "$MAINTENANCE_ON" && -z "$MAINTENANCE_OFF" ]]; then
+        log_warn "MAINTENANCE_ON without MAINTENANCE_OFF — a way in with no way out: the window would leave the sites behind the page"
+        return 1
+    fi
+    if [[ -z "$MAINTENANCE_ON" && -n "$MAINTENANCE_OFF" ]]; then
+        log_warn "MAINTENANCE_OFF without MAINTENANCE_ON — nothing raises the page this command would take down"
+        return 1
+    fi
     # The two Cloudflare ids are REQUIRED under cloudflare and must be
     # EMPTY under local: a leftover zone id in a local conf is a phase
     # reaching for a zone nobody asked it to touch.

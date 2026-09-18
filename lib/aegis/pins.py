@@ -48,7 +48,14 @@ PLACEHOLDER = re.compile(r"__[A-Z0-9_]+__|VERIFICAR|CHANGEME")
 # (jenkins' values does exactly that) let the pattern walk to the
 # next line and capture the key under it as if it were a reference.
 _IMAGE_LINE = re.compile(r"^[^\S\n]*(?:-[^\S\n]+)?image:[^\S\n]*['\"]?([^'\"\s#]+)['\"]?", re.M)
-_FROM_LINE = re.compile(r"^\s*FROM\s+(\S+)", re.M | re.I)
+# `[^\S\n]*` and not `\s*`, for the second time: `\s` matches a newline,
+# so `^\s*FROM` starting at a BLANK line walks into the next one and the
+# match —and therefore the line number— belongs to the blank line above.
+# The first time was the image: of a yaml block (stage A); this one was
+# found on 2026-09-18 by the check that demands the recorded line
+# actually carry the version, on the one Containerfile with a blank line
+# between two FROMs.
+_FROM_LINE = re.compile(r"^[^\S\n]*FROM[^\S\n]+(\S+)", re.M | re.I)
 
 
 class Pin:
@@ -271,7 +278,16 @@ def _group_vars(root, platform, pins):
     if not m:
         return
     start = m.end()
-    for i, line in enumerate(text[start:].splitlines(), _lineno(text, start) + 1):
+    # `_lineno(text, start)` and NOT one more. The match of
+    # `^userland_pins:\s*$` ends BEFORE its newline, so the first
+    # element `.splitlines()` hands back is the empty tail of that same
+    # line: numbering it as the next one puts every pin below it one
+    # line too far down. Measured 2026-09-18 by check 207, which writes
+    # into the line the inventory points at — tofu was reported at the
+    # line of the comment beside it, and an edit would have gone into
+    # the comment. The inventory had been «right» for as long as nobody
+    # wrote anything.
+    for i, line in enumerate(text[start:].splitlines(), _lineno(text, start)):
         if line.strip() and not line.startswith((" ", "\t", "#")):
             break
         mm = re.match(r"^\s+([a-z0-9_]+):\s*[\"']?([^\"'\s#]+)", line)

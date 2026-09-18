@@ -52,3 +52,27 @@ AI="no"
 # With AI=no it stays EMPTY, and the validation demands it: empty is
 # also what makes the job-dsl skip seeding that job.
 AI_GATEWAY_REPO=""
+# ── the maintenance window's two orders ─────────────────────────────
+# What aegis runs to RAISE and to LOWER whatever you put in front of
+# your sites while an update window is open. Both empty is a valid,
+# complete answer: the window then runs with the sites live and says
+# so out loud, which is honest and is the default.
+#
+# The product knows nothing about what is behind them. On the author's
+# instance they are a Cloudflare Worker deployed and deleted with
+# wrangler; on another they could be an nginx `return 503`, a DNS
+# change, or a script that flips a flag. aegis only needs two things
+# from the command: that MAINTENANCE_ON makes the public sites stop
+# answering 200, and that MAINTENANCE_OFF undoes exactly that. It
+# MEASURES the first before touching anything — if the sites keep
+# answering after the hook ran, the window aborts having changed
+# nothing, because a maintenance page nobody can see is worse than
+# none at all.
+#
+# Either both carry a command or both are empty: a way in with no way
+# out is a trap, and the validation refuses it.
+#
+# They are run with `bash -lc`, as the operator, with no arguments and
+# no aegis variables of their own.
+MAINTENANCE_ON=""
+MAINTENANCE_OFF=""

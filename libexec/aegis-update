@@ -1,16 +1,29 @@
 #!/usr/bin/env python3
 # aegis-summary: What runs against what exists upstream, and the window that updates it
 # aegis-group:   operate
-# aegis-subcommands: inventory plan status
+# aegis-subcommands: inventory plan window rollback status
 # aegis-help:
 # Usage: aegis update inventory [--tree DIR] [--offline] [--fresh] [--json]
 #        aegis update plan [--fresh] [--json]
+#        aegis update window [--yes] [--budget MIN] [--no-verify]
+#                           [--allow-major <pin>]... [--k3s-minor] [--kernel]
+#                           [--layer N]... [--json]
+#        aegis update rollback [<window>] [--yes] [--json]
 #        aegis update status [--json]
 #
 # inventory  every pinned version of this instance, and what exists
 #            upstream today. Reads; touches nothing.
 # plan       what a window would raise, in which layer, and how each one
 #            would be undone. Proposes; touches nothing.
+# window     the protocol, whole: refusals, photo, maintenance page and
+#            the proof that it took, Jenkins quiet, the alerts about the
+#            sites silenced, the backup clock stopped, the nine layers in
+#            order with an acceptance after each one, the way back if any
+#            of them fails, and everything about the machine put back on
+#            the way out. DRY unless --yes, and the rehearsal chooses and
+#            prices exactly what the real one would.
+# rollback   undo a window's commits, newest first, and say whether the
+#            tree came back to what the photo saw. DRY unless --yes.
 # status     the last window: when, what changed, how it ended.
 #
 """aegis update — what runs here against what exists upstream.
@@ -38,6 +51,8 @@ import argparse
 import concurrent.futures
 import json
 import os
+import re
+import subprocess
 import sys
 import time
 
@@ -45,7 +60,7 @@ import time
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
-from aegis import cli, outcomes, paths, pins, upstream   # noqa: E402
+from aegis import cli, outcomes, paths, pins, upstream, window as win   # noqa: E402
 
 grey, off = ("\033[90m", "\033[0m") if sys.stderr.isatty() else ("", "")
 bold = "\033[1m" if sys.stderr.isatty() else ""
@@ -227,6 +242,895 @@ def plan(steps, fresh=False, narrate=True):
     steps.finish()
 
 
+# ══════════════════════════════════════════════════════════════════════
+#  the layers, applied
+# ══════════════════════════════════════════════════════════════════════
+#
+# Each layer gets a function with one shape: it is handed the window's
+# context and the bumps of its class, it writes, it commits, it pushes,
+# and it makes the platform converge. It returns what it did. It does
+# NOT judge itself — the acceptance is the caller's, and it reads the
+# round, because a layer that decided whether it had worked by looking
+# at its own return code is how «the sync was accepted» came to mean
+# «the API took the request».
+#
+# THE EDITS ARE ALWAYS THE SAME ONE. Every layer that changes the tree
+# goes through window.rewrite, which writes at the lines the inventory
+# recorded and refuses when the line does not read as expected. So a
+# layer is short, and the one dangerous operation is written once and
+# exercised by check 207 over a real tree.
+
+
+class Ctx:
+    """What every layer needs, so no layer goes looking for it."""
+
+    def __init__(self, steps, journal, budget, restore, platform, narrate,
+                 allow_major=(), k3s_minor=False, kernel=False):
+        self.steps, self.j, self.budget, self.restore = steps, journal, budget, restore
+        self.platform = platform
+        self.narrate = narrate
+        self.allow_major = set(allow_major)
+        self.k3s_minor = k3s_minor
+        self.kernel = kernel
+        self.pins = {}
+        self.bumps = []
+
+    def say(self, msg):
+        if self.narrate:
+            print(f"{grey}    {msg}{off}", file=sys.stderr)
+
+
+def _write_and_commit(ctx, bump, layer_number):
+    """The one edit, the one commit, and the one thing recorded.
+
+    Recorded BEFORE the push and before anything converges: if the push
+    fails, the commit exists and the rollback has to know about it. A
+    journal written after the fact is a journal that is missing exactly
+    the entries that matter.
+    """
+    pin, new = bump["pin"], bump["a"]
+    old = pin.current
+    files = win.rewrite(ctx.platform, pin, version=new)
+    subject = win.subject(pin, old, new)
+    sha = win.commit(ctx.platform, files, subject)
+    ctx.j.note("commit", sha=sha, subject=subject, pin=pin.key, layer=layer_number,
+               de=old, a=new, ficheros=files)
+    ctx.say(f"{sha[:12]}  {subject}")
+    return sha
+
+
+def _push(ctx):
+    """The platform converges through the remote, so a commit that is not
+    pushed has changed nothing but the disk. It is done ONCE per layer
+    rather than per commit: fewer webhooks, and a layer is the unit the
+    acceptance judges anyway."""
+    win.git(ctx.platform, "push", "--quiet")
+    ctx.j.note("push", head=win.head(ctx.platform))
+
+
+def _sync(ctx, app, timeout=900):
+    rc, out, err = cli.run("sync", app)
+    settled = win.argo_settled(app, timeout=timeout, narrate=ctx.narrate)
+    ctx.j.note("sync", app=app, rc=rc, **settled)
+    return settled
+
+
+def layer_apt(ctx, layer, before_round):
+    """The host's packages, minus the kernel and the driver.
+
+    THE ONLY LAYER WITH NO WAY BACK. `apt-get install --only-upgrade`
+    cannot be undone inside a window —downgrading a distribution package
+    is not an operation, it is a project— so the protection is not a
+    rollback, it is a refusal: this layer does not run at all if the
+    round came in with failures. Raising the floor under an instance
+    that is already broken removes the one thing that made the breakage
+    diagnosable, which is that nothing else had changed.
+    """
+    doc = before_round.get("doc") or {}
+    if before_round.get("rc") not in (0, None):
+        return {"aplicada": False, "por_que": "the round came in red, and this is the one "
+                                              "layer with no way back: it does not run on "
+                                              "top of an instance that is already wrong"}
+    data, why = upstream.apt_upgradable()
+    if data is None:
+        return {"aplicada": False, "por_que": f"apt could not be asked: {why}"}
+    pkgs = data["resto"]
+    if not pkgs:
+        return {"aplicada": True, "paquetes": 0, "nota": "nothing to upgrade"}
+    ctx.say(f"{len(pkgs)} package(s), kernel and driver left out")
+    r = subprocess.run(["sudo", "apt-get", "-o", "DPkg::Lock::Timeout=600",
+                        "install", "--only-upgrade", "-y", *pkgs],
+                       capture_output=True, text=True, timeout=3600)
+    ctx.j.note("apt", paquetes=pkgs, rc=r.returncode,
+               salida="\n".join((r.stdout or "").splitlines()[-10:]))
+    return {"aplicada": r.returncode == 0, "paquetes": len(pkgs),
+            "por_que": "" if r.returncode == 0 else (r.stderr or "").strip()[-300:]}
+
+
+def layer_host_phase(ctx, layer, bumps, phase):
+    """Layers 2 and 3: the pin moves in group_vars and a phase of the init
+    makes the host match it.
+
+    AEGIS_HOST_ALIGN=1 is what turns the phase's RED —«the installed
+    version is not the pin, decide»— into the job. Without it the phase
+    would stop and wait for a human who is not there, and with
+    --non-interactive it would be worse: the RED self-confirms, the old
+    binary stays, and the window reports a bump that did not happen.
+    """
+    if not bumps:
+        return {"aplicada": True, "cambios": 0}
+    for bump in bumps:
+        _write_and_commit(ctx, bump, layer.number)
+    _push(ctx)
+    init = str(paths.aegis_root() / "libexec" / "aegis-init")
+    env = {**os.environ, "AEGIS_HOST_ALIGN": "1"}
+    ctx.say(f"aegis init --only {phase} (aligning the host to the pins)")
+    r = subprocess.run([init, "--only", phase, "--non-interactive"],
+                       capture_output=True, text=True, timeout=5400, env=env)
+    ctx.j.note("phase", fase=phase, rc=r.returncode,
+               salida="\n".join((r.stdout or "").splitlines()[-15:]))
+    return {"aplicada": r.returncode == 0, "cambios": len(bumps), "fase": phase,
+            "por_que": "" if r.returncode == 0 else
+                       "\n".join((r.stderr or r.stdout or "").splitlines()[-6:])}
+
+
+def layer_charts(ctx, layer, bumps):
+    """One chart at a time, each rendered before a line is written.
+
+    ONE AT A TIME, and it is the whole reason this layer takes an hour
+    in the budget. Six charts raised in one commit and a cluster that
+    goes unhealthy afterwards is six suspects; six commits with a sync
+    and a wait between them is one.
+
+    And rendered first, which costs seconds: a version that does not
+    exist, a repo that moved, a values file whose shape changed — all
+    three are cheaper to find out from `helm template` than from a sync
+    that half applied.
+    """
+    done, failed = [], None
+    for bump in _in_dependency_order(bumps):
+        pin = bump["pin"]
+        # The pin is KEYED by the Application (pins.py:210), because that
+        # is what a window bumps and syncs; the chart's own name is in
+        # extra, and two Applications can ride the same chart.
+        app = pin.name
+        r = win.chart_renders(pin.extra.get("repo"), pin.extra.get("chart"), bump["a"])
+        ctx.j.note("render", app=app, version=bump["a"], **r)
+        if r.get("renderiza") is not True:
+            failed = {"app": app, "por_que": f"the candidate does not render: "
+                                             f"{r.get('por_que', '')[:200]}"}
+            break
+        _write_and_commit(ctx, bump, layer.number)
+        _push(ctx)
+        settled = _sync(ctx, app)
+        if settled.get("asentado") is not True:
+            failed = {"app": app, **settled}
+            break
+        done.append(app)
+    return {"aplicada": failed is None, "apps": done, "fallo": failed,
+            "cambios": len(done)}
+
+
+#: The order charts are raised in. It is not alphabetical and it is not
+#: the tree's: cert-manager issues the certificates everything else
+#: needs, argocd is what applies the rest, and the observability stack
+#: goes last because it is what watches the others and its own blind
+#: spot is the cheapest.
+CHART_ORDER = ("cert-manager", "argocd", "kyverno", "traefik", "jenkins", "trivy",
+               "observability")
+
+
+def _in_dependency_order(bumps):
+    def rank(b):
+        app = (b["pin"].name or "").lower()
+        for i, name in enumerate(CHART_ORDER):
+            if name in app:
+                return i
+        return len(CHART_ORDER)
+    return sorted(bumps, key=lambda b: (rank(b), b["pin"].name))
+
+
+def layer_files_then_sync(ctx, layer, bumps):
+    """Layer 5: the images written by hand. Edit, commit, push, sync every
+    Application that could be carrying them, and wait."""
+    if not bumps:
+        return {"aplicada": True, "cambios": 0}
+    for bump in bumps:
+        _write_and_commit(ctx, bump, layer.number)
+    _push(ctx)
+    rc, out, err = cli.run("sync", "--drifted")
+    ctx.j.note("sync-drifted", rc=rc, salida=(out or "").strip()[-400:])
+    return {"aplicada": rc == 0, "cambios": len(bumps),
+            "por_que": "" if rc == 0 else (err or out or "").strip()[-300:]}
+
+
+def layer_build(ctx, layer, bumps, job):
+    """Layers 6 and 7: the tree changes and the CI has to build it.
+
+    Jenkins comes OUT of quiet mode for these two and goes back in
+    afterwards, because a layer that needs to build cannot run in a
+    Jenkins that refuses to start builds. The restore stack still holds
+    the way back to quiet, so a window that dies here does not leave the
+    CI open on a half-changed platform.
+    """
+    if not bumps:
+        return {"aplicada": True, "cambios": 0}
+    for bump in bumps:
+        _write_and_commit(ctx, bump, layer.number)
+    _push(ctx)
+    ctx.say(f"Jenkins out of quiet mode for {job}")
+    rc_q, _, _ = cli.run("ci", "quiet", "off")
+    rc, out, err = cli.run("ci", "build", job)
+    ctx.j.note("build", job=job, rc=rc, salida=(out or "").strip()[-400:])
+    cli.run("ci", "quiet", "on")
+    return {"aplicada": rc == 0, "cambios": len(bumps), "job": job,
+            "por_que": "" if rc == 0 else (err or out or "").strip()[-300:]}
+
+
+def layer_jenkinsfiles(ctx, layer, bumps):
+    """Layer 8: the same image is written by hand in several Jenkinsfiles.
+
+    ONE COMMIT for all of them. Check 210 exists because they have to
+    agree, and a layer that raised five of six would leave the tree in
+    exactly the state that check forbids — red, and correctly so, but
+    red in the middle of a window instead of before it.
+    """
+    if not bumps:
+        return {"aplicada": True, "cambios": 0}
+    files, subjects = [], []
+    for bump in bumps:
+        pin, new = bump["pin"], bump["a"]
+        files += win.rewrite(ctx.platform, pin, version=new)
+        subjects.append(f"{pin.name} {pin.current} → {new}")
+    subject = "chore(update): the CI's pod templates — " + "; ".join(subjects)
+    sha = win.commit(ctx.platform, sorted(set(files)), subject)
+    ctx.j.note("commit", sha=sha, subject=subject, layer=layer.number,
+               pin="jenkinsfile:*", ficheros=sorted(set(files)))
+    _push(ctx)
+    return {"aplicada": True, "cambios": len(bumps), "ficheros": len(set(files))}
+
+
+def layer_kernel(ctx, layer):
+    """Layer 9: the kernel and the graphics driver. Installed, never booted.
+
+    A reboot takes the whole instance down for minutes and brings it
+    back in a state nothing here has measured. It is a decision with a
+    human in it, and the window's job is to leave it ready and say so —
+    not to take it.
+    """
+    if not ctx.kernel:
+        return {"aplicada": False, "saltada": True,
+                "por_que": "the kernel and the driver only move with --kernel"}
+    data, why = upstream.apt_upgradable()
+    if data is None:
+        return {"aplicada": False, "por_que": f"apt could not be asked: {why}"}
+    pkgs = data["nucleo"]
+    if not pkgs:
+        return {"aplicada": True, "paquetes": 0}
+    r = subprocess.run(["sudo", "apt-get", "-o", "DPkg::Lock::Timeout=600",
+                        "install", "--only-upgrade", "-y", *pkgs],
+                       capture_output=True, text=True, timeout=5400)
+    ctx.j.note("kernel", paquetes=pkgs, rc=r.returncode)
+    return {"aplicada": r.returncode == 0, "paquetes": len(pkgs),
+            "reinicio": "PENDING and NOT taken by this window",
+            "por_que": "" if r.returncode == 0 else (r.stderr or "").strip()[-300:]}
+
+
+def run_layer(ctx, layer, before_round):
+    """Apply one layer and hand back what it did. The judging is outside."""
+    mine = [b for b in ctx.bumps if b["clase"] in layer.classes]
+    if layer.number == 1:
+        return layer_apt(ctx, layer, before_round)
+    if layer.number == 2:
+        return layer_host_phase(ctx, layer, mine, "05-host")
+    if layer.number == 3:
+        return layer_host_phase(ctx, layer, mine, "20-k3s")
+    if layer.number == 4:
+        return layer_charts(ctx, layer, mine)
+    if layer.number == 5:
+        return layer_files_then_sync(ctx, layer, mine)
+    if layer.number == 6:
+        return layer_build(ctx, layer, mine, "mirror-images")
+    if layer.number == 7:
+        return layer_build(ctx, layer, mine, "base-images")
+    if layer.number == 8:
+        return layer_jenkinsfiles(ctx, layer, mine)
+    return layer_kernel(ctx, layer)
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  window — the protocol, dry by default
+# ══════════════════════════════════════════════════════════════════════
+#
+# WHAT IS HERE AND WHAT IS NOT. Everything a window does AROUND the
+# changes is here: the refusals, the photo, the maintenance page and
+# the measurement that it actually took effect, the second round, the
+# comparison and the report. The nine layers of change are not, and
+# their absence is deliberate rather than pending — a protocol whose
+# skeleton has never been run on the real instance is a protocol nobody
+# has tested, and the first time it runs should not also be the first
+# time anything is updated.
+#
+# So this opens an EMPTY window. It changes nothing, and it proves, on
+# your machine, in order: that the refusals refuse, that the photo can
+# be taken, that your maintenance hook actually takes the sites off the
+# air, that it comes back, and that the round afterwards reads the same
+# as the round before. When the layers arrive they go in one place, and
+# everything around them will already have been exercised.
+#
+# DRY BY DEFAULT, like `aegis destroy`. Without --yes not one hook runs.
+
+def _refusals(steps, hooks, budget, narrate):
+    bad = win.preflight(hooks=hooks, budget_minutes=budget)
+    for r in bad:
+        if narrate:
+            print(f"  {bold}refused{off} {r.name}: {r.why}", file=sys.stderr)
+            if r.remedy:
+                print(f"          {grey}{r.remedy}{off}", file=sys.stderr)
+        steps.wrong(f"refuse:{r.name}", **r.as_data())
+    return bad
+
+
+def _choose(steps, all_pins, answers, allow_major, k3s_minor, narrate):
+    """Which bumps this window will take, and which it refuses by name.
+
+    The refusals are the same ones `plan` prints, and they are repeated
+    here rather than trusted from there: `plan` may have been run
+    yesterday, and the thing that decides what a window touches has to
+    be the thing that touches it.
+    """
+    taken, refused = [], []
+    # Which host tools the phase actually downloads by version. A
+    # `userland` pin outside this set is installed by apt, which
+    # installs the distribution's line — so the number in group_vars is
+    # not delivered by anything and a bump of it would be committed,
+    # handed to the phase, and refused there, three commits too late.
+    # `None` means nobody could read the phase, and then nothing is
+    # refused on that ground: a window does not act on what it could not
+    # look at.
+    downloads = win.host_downloads()
+    for key in sorted(all_pins, key=lambda k: (all_pins[k].layer, all_pins[k].name)):
+        pin = all_pins[key]
+        a = answers.get(pin.key)
+        if pin.cls == "apt" or a is None or a.state != upstream.ATRASADO:
+            continue
+        cur, new_ = upstream.shape(pin.current), upstream.shape(a.latest)
+        if cur and new_ and cur[0][0] != new_[0][0] and pin.name not in allow_major:
+            refused.append({"pin": pin.key, "de": pin.current, "a": a.latest,
+                            "rechazo": "major",
+                            "por_que": f"a major jump carries migrations git does not "
+                                       f"undo. --allow-major {pin.name} to take it"})
+            continue
+        if pin.cls == "k3s" and cur and new_ and cur[0][:2] != new_[0][:2] and not k3s_minor:
+            refused.append({"pin": pin.key, "de": pin.current, "a": a.latest,
+                            "rechazo": "k3s-minor",
+                            "por_que": "a minor of k3s rewrites the service's ExecStart "
+                                       "and the node re-registers under another name. "
+                                       "--k3s-minor, and read it first"})
+            continue
+        if pin.cls == "userland" and downloads is not None and pin.name not in downloads:
+            refused.append({"pin": pin.key, "de": pin.current, "a": a.latest,
+                            "rechazo": "apt-managed",
+                            "por_que": f"phase 05 installs {pin.name} with apt, which "
+                                       f"installs whatever the distribution's line "
+                                       f"carries. The number in group_vars is not "
+                                       f"delivered by anything: write "
+                                       f"{pin.name}: \"apt\" there, or give the phase a "
+                                       f"download branch with a published checksum"})
+            continue
+        taken.append({"pin": pin, "de": pin.current, "a": a.latest, "clase": pin.cls,
+                      "capa": pin.layer})
+    for r in refused:
+        steps.already(f"refused:{r['pin']}", **r)
+        if narrate:
+            print(f"  {grey}refused{off} {r['pin']}: {r['de']} → {r['a']} ({r['rechazo']})",
+                  file=sys.stderr)
+    return taken, refused
+
+
+def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
+           allow_major=(), k3s_minor=False, kernel=False, only_layers=None):
+    hooks = win.Hooks()
+    # ── the refusals, ALL of them, before anything at all ────────────
+    bad = _refusals(steps, hooks, budget, narrate)
+    if bad:
+        # Not one hook has run and nothing has been written: this is the
+        # whole point of collecting the refusals first. The window is not
+        # even named, because a window that never opened should not leave
+        # a directory behind for `status` to report on.
+        if narrate:
+            print(f"\n{len(bad)} refusal(s): the window does not open, and nothing was "
+                  f"touched", file=sys.stderr)
+        steps.finish()
+    if not yes:
+        # THE REHEARSAL IS NOT A SHORTER VERSION. It asks upstream, it
+        # chooses and refuses exactly as the real one would, and it
+        # prices the layers against the budget — everything except
+        # touching anything. A dry run that only printed «it would run»
+        # would be a dry run nobody learns from.
+        all_pins = pins.read(str(paths.platform_dir()))
+        answers = _measure(all_pins, False, False, narrate)
+        take, refused = _choose(steps, all_pins, answers, set(allow_major), k3s_minor,
+                                narrate)
+        b = win.Budget(budget)
+        need = 0
+        for layer in win.LAYERS:
+            if only_layers and layer.number not in only_layers:
+                continue
+            mine = [x for x in take if x["clase"] in layer.classes]
+            if not mine and layer.number not in (1, 9):
+                continue
+            if layer.number == 9 and not kernel:
+                continue
+            need += layer.minutes
+            if narrate:
+                print(f"  layer {layer.number} {layer.name:<34} {len(mine)} change(s)"
+                      f"  ~{layer.minutes} min", file=sys.stderr)
+            steps.already(f"dry:layer:{layer.number}", **layer.as_data(),
+                          cambios=len(mine),
+                          cuales=[x["pin"].key for x in mine][:12])
+        if narrate:
+            page = ("configured" if hooks.configured else
+                    "NOT configured — the window would run with the sites live, "
+                    "and would say so")
+            print(f"\n  maintenance page: {page}", file=sys.stderr)
+            print(f"  {len(take)} change(s) in {need} minute(s) of estimate, budget "
+                  f"{budget}", file=sys.stderr)
+            print(f"  DRY: no hook ran, no photo was taken, nothing was committed.",
+                  file=sys.stderr)
+            print(f"  run it for real with: {cli.cmd('update window')} --yes",
+                  file=sys.stderr)
+        if need > budget:
+            steps.wrong("window:dry-budget", necesita_min=need, presupuesto_min=budget,
+                        por_que="the layers that have something to do do not fit in the "
+                                "budget. The window would stop partway, which is allowed "
+                                "and is better decided here")
+        else:
+            steps.already("window:dry", ganchos=hooks.configured, presupuesto_min=budget,
+                          estimado_min=need, cambios=len(take),
+                          nota="dry run: everything that refuses was asked, every bump "
+                               "was chosen, and nothing ran")
+        steps.finish()
+
+    j = win.Journal()
+    if narrate:
+        print(f"\n{bold}window {j.id}{off}", file=sys.stderr)
+    # ── the photo ───────────────────────────────────────────────────
+    try:
+        before = win.photograph(with_verify=with_verify, narrate=narrate)
+    except win.CouldNotPhotograph as e:
+        # No directory is left behind, for the same reason as above:
+        # nothing happened, and a report about nothing is noise in the
+        # one place the operator looks for signal.
+        steps.not_evaluable("window:photo", por_que=str(e),
+                            nota="the window did not open: with no before there is "
+                                 "nothing for a rollback to come back to")
+        steps.finish()
+    j.open(before, note=f"budget {budget} min, {'kernel included' if kernel else 'no kernel'}")
+    steps.done("window:photo", ventana=j.id, head=before.get("head", "")[:12],
+               ronda_rc=before["round"]["rc"],
+               verify_rc=(before.get("verify") or {}).get("rc"))
+
+    outcome, detail = "accepted", {}
+    raised = False
+    restore = win.Restore()
+    ctx = Ctx(steps, j, win.Budget(budget), restore, str(paths.platform_dir()), narrate,
+              allow_major=allow_major, k3s_minor=k3s_minor, kernel=kernel)
+    try:
+        # ── what this window will take, and what it refuses ─────────
+        # BEFORE the page goes up, and that order is the point. Choosing
+        # means asking upstream about fifty pins, which takes half a
+        # minute and touches nothing; doing it after would spend that
+        # half minute with the sites already off the air, and — worse —
+        # a window with nothing to do would have taken them down for no
+        # reason at all.
+        all_pins = pins.read(str(paths.platform_dir()))
+        answers = _measure(all_pins, False, False, narrate)
+        ctx.pins = all_pins
+        ctx.bumps, refused = _choose(steps, all_pins, answers, ctx.allow_major,
+                                     ctx.k3s_minor, narrate)
+        j.note("chosen", tomados=len(ctx.bumps), rechazados=len(refused),
+               cuales=[b["pin"].key for b in ctx.bumps])
+        steps.already("window:chosen", tomados=len(ctx.bumps), rechazados=len(refused))
+        if not ctx.bumps and not kernel:
+            # A measured zero, and no page. «Everything is already up to
+            # date» is a fine outcome and it is not worth a minute of
+            # downtime to announce it.
+            steps.already("window:nothing-to-do", rechazados=len(refused),
+                          nota="nothing this window is allowed to take is behind. The "
+                               "sites were never taken down")
+            raise _Stop()
+
+        # ── what the window changes ABOUT THE MACHINE ───────────────
+        # Three things, and every one of them is pushed onto the restore
+        # stack BEFORE it is done, not after: a window that dies between
+        # the doing and the recording leaves exactly the state nobody
+        # knows how to undo.
+        rc_q, was_quiet, _ = cli.run("ci", "quiet", "status")
+        was_quiet = (was_quiet or "").strip()
+        if rc_q == 0 and was_quiet in ("on", "off"):
+            if was_quiet == "off":
+                restore.push("jenkins-quiet", lambda: cli.run("ci", "quiet", "off"),
+                             "Jenkins goes back to taking builds")
+            cli.run("ci", "quiet", "on")
+            steps.done("window:jenkins-quiet", antes=was_quiet,
+                       nota="what is running finishes; nothing new starts")
+        else:
+            # NOT a silent carry-on. Jenkins unreachable means a push
+            # from a layer could fire a build on a half-changed tree and
+            # nobody would know, and that is said here rather than found
+            # in the logs afterwards.
+            steps.not_evaluable("window:jenkins-quiet", rc=rc_q,
+                                por_que="Jenkins could not be asked. The layers still run; "
+                                        "a push during them may fire a build on a "
+                                        "half-changed platform")
+        sil = win.Silences(hours=max(1, round(budget / 60) + 1))
+        restore.push("silences", lambda: sil.lift(), "the alerts about the sites speak again")
+        r = sil.raise_(j.id)
+        j.note("silences", **r)
+        steps.already("window:silences", **r)
+        clock = win.timer_stop()
+        j.note("timer", **clock)
+        if clock.get("parado"):
+            unit, scope = clock["unidad"], clock["ambito"]
+            restore.push("backup-timer", lambda: win.timer_start(unit, scope),
+                         f"{unit} runs again")
+            steps.done("window:backup-timer", **clock,
+                       nota="a backup taken mid-window would capture a half-updated "
+                            "instance and call it the day's copy")
+        else:
+            steps.already("window:backup-timer", **clock)
+
+        # ── the maintenance page, and the proof that it took ─────────
+        if hooks.configured:
+            r = hooks.run("on")
+            j.note("maintenance", **r)
+            raised = r.get("rc") == 0
+            if not raised:
+                steps.wrong("window:maintenance-on", **r,
+                            por_que="the hook that raises the page failed. Nothing has "
+                                    "been changed and the window closes here")
+                outcome = "refused"
+                raise _Stop()
+            if narrate:
+                _say_effect(narrate)
+            seen = _page_is_up(before)
+            j.note("maintenance-effect", **seen)
+            if seen["efecto"] is False:
+                steps.wrong("window:maintenance-no-effect", **seen,
+                            por_que="the hook ran and the public sites still answer. A "
+                                    "page nobody sees is worse than no page: the window "
+                                    "stops here, having changed nothing")
+                outcome = "refused"
+                raise _Stop()
+            # THE TWO «I COULD NOT READ IT» ARE NOT THE SAME.
+            # No contract declares a domain: there is nothing for the
+            # page to take off the air, the effect is irrelevant rather
+            # than unknown, and the window carries on saying so.
+            # The round could not be taken again: that is an instrument
+            # that did not reach its subject, and it is rc 2 territory —
+            # one leg of the acceptance is now blind, and a window that
+            # cannot measure itself should not be read as green.
+            clean = {k: v for k, v in seen.items() if k != "detalle"}
+            if seen["efecto"] is True:
+                steps.done("window:maintenance-on", **clean)
+            elif seen.get("sitios") == 0:
+                steps.already("window:maintenance-on", **clean)
+            else:
+                steps.not_evaluable("window:maintenance-on", **clean,
+                                    nota="the page went up and nobody could read whether "
+                                         "it took effect")
+        else:
+            steps.already("window:maintenance-off-by-choice",
+                          nota="no hook is configured: the window runs with the sites "
+                               "live, and this line is the instance saying so out loud")
+
+        # ── the layers, in order, each judged by its own sections ────
+        last_doc = before["round"]["doc"]
+        stopped = None
+        for layer in win.LAYERS:
+            if only_layers and layer.number not in only_layers:
+                continue
+            mine = [b for b in ctx.bumps if b["clase"] in layer.classes]
+            if not mine and layer.number not in (1, 9):
+                steps.already(f"layer:{layer.number}", nombre=layer.name, cambios=0,
+                              nota="nothing of this class is behind")
+                continue
+            # A LAYER DOES NOT START WHEN THERE IS NO TIME FOR IT. The
+            # decision is taken here, while everything is whole; the
+            # alternative is discovering it halfway through a chart sync,
+            # which is the one moment there is nothing good to do.
+            if not ctx.budget.room_for(layer):
+                steps.wrong(f"layer:{layer.number}", nombre=layer.name,
+                            **ctx.budget.as_data(), necesita_min=layer.minutes,
+                            por_que="not enough of the window is left to start this "
+                                    "layer. It is left for the next one, and what has "
+                                    "already been raised stays")
+                stopped = {"capa": layer.number, "por_que": "budget"}
+                break
+            if narrate:
+                print(f"\n{bold}layer {layer.number}{off} {layer.name}  "
+                      f"{grey}({len(mine)} change(s), ~{layer.minutes} min, "
+                      f"{ctx.budget.left:.0f} left){off}", file=sys.stderr)
+            did = run_layer(ctx, layer, before["round"])
+            j.note("layer", **layer.as_data(), **{k: v for k, v in did.items()
+                                                  if k != "fallo"})
+            if did.get("saltada"):
+                steps.already(f"layer:{layer.number}", nombre=layer.name, **did)
+                continue
+            if not did.get("aplicada"):
+                steps.wrong(f"layer:{layer.number}", nombre=layer.name, **did)
+                stopped = {"capa": layer.number, "por_que": "it did not apply"}
+                break
+            # ── the acceptance of THIS layer ────────────────────────
+            try:
+                _, after_doc = cli.run_json("check")
+            except cli.CouldNotEvaluate as e:
+                steps.not_evaluable(f"layer:{layer.number}:acceptance", por_que=str(e),
+                                    nota="a layer that cannot be measured is not accepted")
+                stopped = {"capa": layer.number, "por_que": "unmeasurable"}
+                break
+            verdict = win.accept_layer(layer, last_doc, after_doc)
+            j.note("layer-acceptance", **{k: v for k, v in verdict.items()
+                                          if k not in ("nuevos", "cegados")},
+                   nuevos=len(verdict["nuevos"]), cegados=len(verdict["cegados"]))
+            if verdict["acepta"]:
+                steps.done(f"layer:{layer.number}", nombre=layer.name,
+                           cambios=did.get("cambios", 0),
+                           secciones=verdict["secciones"])
+                last_doc = after_doc
+                continue
+            for n in (verdict["nuevos"] + verdict["cegados"])[:6]:
+                steps.wrong(f"layer:{layer.number}:new-failure", **n)
+            stopped = {"capa": layer.number, "por_que": "the acceptance of the layer",
+                       "nuevos": len(verdict["nuevos"]),
+                       "cegados": len(verdict["cegados"])}
+            break
+        detail["capas"] = {"detenida_en": stopped, **ctx.budget.as_data()}
+
+        # ── the way back, taken by the window itself ────────────────
+        # Everything, in reverse, and not only the layer that failed:
+        # the layers are ordered because they stand on one another, and
+        # leaving four of them raised while the fifth comes down is a
+        # combination nobody described and nobody has ever tested.
+        if stopped:
+            if narrate:
+                print(f"\n{bold}the acceptance did not pass at layer "
+                      f"{stopped['capa']}{off} — undoing", file=sys.stderr)
+            back = win.roll_back(j, platform=ctx.platform, narrate=narrate)
+            detail["vuelta_atras"] = back
+            for d in back["deshechos"]:
+                steps.done(f"revert:{d['sha'][:12]}", subject=d["subject"])
+            if back["atascado"]:
+                steps.wrong("window:rollback-stuck", **back["atascado"],
+                            por_que="reverting past a conflict would leave the tree in a "
+                                    "state nobody described. What is left is yours")
+                outcome = "needs-a-human"
+                raise _Stop()
+            if back["deshechos"]:
+                try:
+                    _push(ctx)
+                except win.GitTrouble as e:
+                    steps.wrong("window:rollback-push", por_que=str(e),
+                                nota="the reverts are committed here and the cluster "
+                                     "still converges on the old remote")
+                    outcome = "needs-a-human"
+                    raise _Stop()
+                cli.run("sync", "--drifted")
+                same = win.came_back_to(j, platform=ctx.platform)
+                detail["arbol"] = same
+                if same.get("igual") is not True:
+                    steps.wrong("window:rollback-tree", **same,
+                                por_que="every commit was reverted and the tree is still "
+                                        "not what the photo saw")
+                    outcome = "needs-a-human"
+                    raise _Stop()
+                steps.done("window:rollback-tree", **same)
+            # A layer whose changes lived OUTSIDE git —apt, the kernel—
+            # does not come back with them, and the report says so
+            # rather than implying a clean slate.
+            if stopped["capa"] in (1, 9):
+                steps.wrong("window:rollback-partial", capa=stopped["capa"],
+                            por_que="this layer installs packages, and a package "
+                                    "installed is not uninstalled by a window. The tree "
+                                    "came back; the host did not")
+            outcome = "rolled-back"
+
+        # ── the acceptance ──────────────────────────────────────────
+        if narrate:
+            _say("the round again…")
+        try:
+            rc_after, after_doc = cli.run_json("check")
+        except cli.CouldNotEvaluate as e:
+            steps.not_evaluable("window:acceptance", por_que=str(e),
+                                nota="the round after could not be taken: a window that "
+                                     "cannot measure itself is never accepted")
+            outcome = "needs-a-human"
+            raise _Stop()
+        cmp_ = win.compare(before["round"]["doc"], after_doc)
+        j.note("acceptance", **{k: v for k, v in cmp_.items()
+                                if k in ("medidas_antes", "medidas_despues")},
+               nuevos=len(cmp_["nuevos"]), cegados=len(cmp_["cegados"]))
+        detail["comparacion"] = cmp_
+        if win.accepted(cmp_):
+            steps.done("window:acceptance", nuevos=0, cegados=0,
+                       ya_venian=len(cmp_["ya_venian"]),
+                       medidas=cmp_["medidas_despues"])
+        else:
+            for n in cmp_["nuevos"][:8]:
+                steps.wrong("acceptance:new-failure", **n)
+            for n in cmp_["cegados"][:8]:
+                steps.wrong("acceptance:blinded", **n,
+                            por_que="this reading was fine before and nobody could take "
+                                    "it now. A window that blinds a measurement has not "
+                                    "passed it, it has stopped asking")
+            outcome = "rolled-back"
+    except _Stop:
+        pass
+    finally:
+        # ── the exit trap ───────────────────────────────────────────
+        # The page comes down on the way out ONLY when the window is
+        # ending green. A red that took the page down would put a broken
+        # instance back in front of the public, which is exactly the
+        # moment the page exists for.
+        if raised:
+            if outcome in ("accepted", "refused"):
+                r = hooks.run("off")
+                j.note("maintenance", **r)
+                if r.get("rc") == 0:
+                    steps.done("window:maintenance-off")
+                else:
+                    steps.wrong("window:maintenance-off", **r,
+                                por_que="the page did not come down: your sites are "
+                                        "still behind it. Run the MAINTENANCE_OFF "
+                                        "command by hand")
+                    outcome = "needs-a-human"
+            else:
+                steps.already("window:maintenance-stays",
+                              nota="the acceptance did not pass: the page STAYS UP on "
+                                   "purpose, and taking it down is a decision with a "
+                                   "human in it")
+                outcome = "needs-a-human"
+        # ── and everything the window changed about the MACHINE ──────
+        # Always, on every way out, including the ones nobody planned.
+        # Jenkins quiet, the silence and the backup timer are not part
+        # of the verdict: leaving them as the window left them means an
+        # instance that is deaf about its sites, has no backups and
+        # builds nothing, and none of the three announces itself.
+        for done in restore.run():
+            if done["ok"]:
+                steps.done(f"restore:{done['restored']}", que=done["what"])
+            else:
+                steps.wrong(f"restore:{done['restored']}", **done,
+                            por_que="the window changed this about the machine and could "
+                                    "not put it back. It does not fix itself")
+        rep = j.close(outcome, **detail)
+        if narrate:
+            print(f"\n{bold}{outcome}{off}  ({len(rep['commits'])} commit(s), "
+                  f"{ctx.budget.spent:.0f} min)", file=sys.stderr)
+    steps.finish()
+
+
+class _Stop(Exception):
+    """Leave the body of the window and go straight to the exit trap."""
+
+
+def _say(msg):
+    print(f"{grey}  {msg}{off}", file=sys.stderr)
+
+
+def _say_effect(narrate):
+    if narrate:
+        _say("reading whether the page actually took the sites off the air…")
+
+
+def _public_sites():
+    """How many contracts of this instance declare a domain.
+
+    Read from the contracts and not from the round's sentences. The
+    round narrates for people and its wording is allowed to change; a
+    command that decided anything by grepping that prose would be A3 of
+    the register all over again (`aegis-app` looking for the words
+    «webhook creado`). The contracts are the artifact, and this is the
+    same file the round itself counts.
+    """
+    d = paths.orgs_dir()
+    if not d.is_dir():
+        return 0
+    n = 0
+    for f in sorted(d.glob("*.yaml")):
+        try:
+            for line in f.read_text(encoding="utf-8").splitlines():
+                if re.match(r"^dominio:\s*\S", line):
+                    n += 1
+                    break
+        except OSError:
+            continue
+    return n
+
+
+def _page_is_up(before):
+    """Did raising the page change what this instance measures?
+
+    The measurement is the ROUND's own, because the round is what the
+    acceptance will be judged with, and a second instrument here would
+    be a second opinion nobody reconciles. What it asks is deliberately
+    not «are the probes red»: it is whether ANY reading that was fine
+    before has stopped being fine. That question needs no knowledge of
+    how the round words itself.
+
+    The one thing it does have to know is whether there are public
+    sites at all, because on an instance that publishes none there is
+    nothing for a page to take off the air and «no effect» would be a
+    true reading of nothing. That comes from the contracts.
+    """
+    sites = _public_sites()
+    b = win.readings(before["round"]["doc"])
+    try:
+        _, after = cli.run_json("check")
+    except cli.CouldNotEvaluate as e:
+        return {"efecto": None, "por_que": f"the round could not be taken again: {e}"}
+    a = win.readings(after)
+    changed = [k for k, v in b.items()
+               if v == win.FINE and a.get(k) not in (None, win.FINE)]
+    if sites == 0:
+        return {"efecto": None, "sitios": 0,
+                "por_que": "no contract of this instance declares a domain: there is "
+                           "nothing for the page to take off the air, so its effect "
+                           "cannot be read"}
+    return {"efecto": bool(changed), "sitios": sites,
+            "medidas_que_cambiaron": len(changed),
+            "detalle": [{"seccion": k[0], "medida": k[1]} for k in changed[:6]]}
+
+
+def rollback(steps, wid=None, yes=False, narrate=True):
+    """Undo a window's commits and say whether the tree came back."""
+    j = win.Journal(wid) if wid else win.Journal.last()
+    if j is None or not j.dir.is_dir():
+        steps.not_evaluable("rollback:which", por_que=(
+            f"there is no window {wid}" if wid else
+            "this instance has opened no window: there is nothing to undo"))
+        steps.finish()
+    made = j.commits()
+    if not made:
+        steps.already("rollback:nothing", ventana=j.id,
+                      nota="that window made no commit: there is nothing to undo, and "
+                           "that is a measured zero and not a silence")
+        steps.finish()
+    if narrate:
+        print(f"{bold}window {j.id}{off}: {len(made)} commit(s) to undo, newest first",
+              file=sys.stderr)
+        for c in reversed(made):
+            print(f"  {c['sha'][:12]}  {c.get('subject', '')[:70]}", file=sys.stderr)
+    if not yes:
+        steps.already("rollback:dry", ventana=j.id, commits=len(made),
+                      nota=f"dry: nothing was reverted. Run it with "
+                           f"{cli.cmd('update rollback')} --yes")
+        steps.finish()
+    r = win.roll_back(j, narrate=narrate)
+    for d in r["deshechos"]:
+        steps.done(f"revert:{d['sha'][:12]}", subject=d["subject"], revert=d["revert"][:12])
+    if r["atascado"]:
+        steps.wrong("rollback:stuck", **r["atascado"], quedan=r["quedan"],
+                    por_que="reverting past a conflict would leave the tree in a state "
+                            "nobody described. It stops here and the rest is yours")
+        j.close("needs-a-human", rollback=r)
+        steps.finish()
+    same = win.came_back_to(j)
+    if same["igual"] is True:
+        steps.done("rollback:tree", **same,
+                   nota="the tree is byte for byte what the photo saw")
+    elif same["igual"] is False:
+        steps.wrong("rollback:tree", **same,
+                    por_que="every commit reverted and the tree is still not what the "
+                            "photo saw: something outside the window's commits changed "
+                            "the platform repo")
+    else:
+        steps.not_evaluable("rollback:tree", **same)
+    j.close("rolled-back", rollback=r, arbol=same)
+    steps.finish()
+
+
 def status(steps, narrate=True):
     """The last window. None yet is a measured zero, not a silence."""
     d = paths.aegis_home() / ".init-state" / "updates"
@@ -271,6 +1175,28 @@ def main():
     i.add_argument("--fresh", action="store_true", help="ignore the cache")
     p = sub.add_parser("plan", parents=[flags], help="what a window would raise, and how it undoes")
     p.add_argument("--fresh", action="store_true", help="ignore the cache")
+    w = sub.add_parser("window", parents=[flags],
+                       help="the protocol: refusals, photo, page, acceptance, way back")
+    w.add_argument("--yes", action="store_true",
+                   help="act. Without it nothing runs: not one hook, not one commit")
+    w.add_argument("--budget", type=int, default=240, metavar="MIN",
+                   help="minutes the window may take (default 240)")
+    w.add_argument("--no-verify", action="store_true",
+                   help="leave verify out of the photo (faster, and one leg less to "
+                        "accept on)")
+    w.add_argument("--allow-major", action="append", default=[], metavar="<pin>",
+                   help="take the major jump of this pin, by name. Repeatable")
+    w.add_argument("--k3s-minor", action="store_true",
+                   help="allow a minor of k3s. Read what it does to the node's name first")
+    w.add_argument("--kernel", action="store_true",
+                   help="also install the kernel and the graphics driver. It NEVER reboots")
+    w.add_argument("--layer", action="append", default=[], type=int, metavar="N",
+                   help="only these layers, by number. Repeatable, and the order is "
+                        "still the protocol's")
+    b = sub.add_parser("rollback", parents=[flags], help="undo a window's commits")
+    b.add_argument("window", nargs="?", metavar="<window>",
+                   help="which one (default: the last)")
+    b.add_argument("--yes", action="store_true", help="act. Without it nothing is reverted")
     sub.add_parser("status", parents=[flags], help="the last window")
     a = ap.parse_args()
     # READ OFF THE NAMESPACE, never with getattr and a default: the
@@ -283,6 +1209,12 @@ def main():
         return inventory(steps, a.tree, a.offline, a.fresh, narrate)
     if a.verb == "plan":
         return plan(steps, a.fresh, narrate)
+    if a.verb == "window":
+        return window(steps, a.yes, a.budget, not a.no_verify, narrate,
+                      allow_major=a.allow_major, k3s_minor=a.k3s_minor,
+                      kernel=a.kernel, only_layers=set(a.layer) or None)
+    if a.verb == "rollback":
+        return rollback(steps, a.window, a.yes, narrate)
     return status(steps, narrate)
 
 

@@ -16,17 +16,25 @@
 k3s_version: "v1.35.4+k3s1"
 
 userland_pins:
-  # drift NOTE (run #10): tofu and age are installed by installers that
-  # pull THE LATEST of their line (deb repo from get.opentofu.org / apt
-  # from Ubuntu) — the pin here does NOT fix what gets installed, it
-  # fixes what is EXPECTED. The drift will come back over time; the
-  # gate_red of phase 05 is the decision point and the pin is realigned
-  # in the run that detects it. Realigned 2026-07: tofu 1.12.3 ran the
-  # whole of phase 25 (edge e2e) in run #10 — live evidence, not
-  # release notes.
+  # The drift NOTE of run #10 said tofu and age were installed by
+  # installers that pull THE LATEST of their line, so the pin fixed
+  # what was EXPECTED and not what got installed. Half of that stopped
+  # being true with the P1.10 audit (tofu became a versioned .deb) and
+  # the other half is settled here, on 2026-09-18, in the direction
+  # the evidence points: apt installs the version Ubuntu's line
+  # carries, and no number written here changes that. A pin that
+  # cannot be delivered is worse than no pin — `aegis update` would
+  # read it, measure it against upstream's releases and propose a bump
+  # that phase 05 has no way to install, and the window would report a
+  # change that never happened. So age says what is true: `apt`.
+  # Realigned 2026-07: tofu 1.12.3 ran the whole of phase 25 (edge
+  # e2e) in run #10 — live evidence, not release notes.
   tofu: "1.12.3"        # verify state-encryption against THIS binary
-  sops: "3.9.4"
-  age: "1.2.1"
+  sops: "3.9.4"         # the BINARY from releases: the .deb sops
+                        # publishes is not covered by its checksums
+  age: "apt"            # the line Ubuntu ships; apt's signature is
+                        # the proof, and there is no checksum file
+                        # published beside the tarball to pin against
   kubectl: "1.35.4"     # aligned to k3s
   helm: "3.17.0"
   gh: "apt"             # operator PREREQUISITE (installed and

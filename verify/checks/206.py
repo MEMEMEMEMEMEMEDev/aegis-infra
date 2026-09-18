@@ -111,6 +111,30 @@ for st in doc.get("steps") or []:
     if not st.get("donde"):
         findings.append(f"the pin {st.get('step')} is reported with no file and no line: an "
                         f"inventory that cannot say where a version is written cannot bump it")
+        continue
+    # AND THE LINE HAS TO CARRY IT. A file and a line that point at the
+    # comment beside the pin read as a complete answer and are a wrong
+    # one, and nothing notices until something WRITES there — which is
+    # exactly what an update window does. Measured on 2026-09-18: every
+    # userland pin was reported one line low, for as long as the
+    # inventory had only ever been read.
+    version = st.get("version") or st.get("digest")
+    for place in st["donde"]:
+        f = os.path.join(ROOT, place.get("fichero", ""))
+        n = place.get("linea")
+        if not os.path.isfile(f) or not isinstance(n, int):
+            findings.append(f"{st.get('step')} points at {place} and that is not a file "
+                            f"and a line of this tree")
+            continue
+        lines = open(f, encoding="utf-8").read().splitlines()
+        if not 1 <= n <= len(lines):
+            findings.append(f"{st.get('step')} points at {place.get('fichero')}:{n} and "
+                            f"the file has {len(lines)} line(s)")
+            continue
+        if version and version not in lines[n - 1]:
+            findings.append(f"{st.get('step')} says its version is written at "
+                            f"{place.get('fichero')}:{n} and that line does not carry "
+                            f"«{version}»: it says «{lines[n - 1].strip()[:70]}»")
 
 # The classes the doctrine names. A class with zero pins is not «this
 # tree has none»: every one of them exists in the seed, so an empty one

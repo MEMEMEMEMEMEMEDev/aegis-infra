@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # aegis-summary: The platform's image chain: fire the builds, read the digests
 # aegis-group:   infra
-# aegis-subcommands: build digests jobs
+# aegis-subcommands: build digests jobs quiet
 # aegis-help:
 # Usage: aegis ci build [--members "<m> ..."] [<job>[/<branch>]...]
 #        aegis ci jobs
 #        aegis ci digests
+#        aegis ci quiet on|off|status
 #
 # jobs     prints every job the job-dsl declares — the platform chain,
 #          the AI lanes, and the tenant multibranches `aegis org apply`
@@ -29,6 +30,11 @@
 #          (newest last) and every tag of every other repository, each
 #          with the digest the registry itself reports. This is what a
 #          human reads BEFORE bumping a consumer's FROM by hand.
+# quiet    puts Jenkins into (or out of) quiet mode: it finishes what
+#          is running and starts nothing new. An update window uses it
+#          so a webhook does not fire a build on top of a half-changed
+#          platform. `status` says which of the two it is in, and it is
+#          a READING (never a change) so it is safe to ask at any time.
 
 # aegis-ci — the platform's image chain, driven from the host.
 #
@@ -90,8 +96,8 @@ bad_usage() { printf '%s ci: %s\n' "${AEGIS_CMD:-aegis}" "$*" >&2; printf 'try: 
 VERB="${1:-}"; [[ $# -gt 0 ]] && shift
 case "$VERB" in
     -h|--help|"") usage; exit 0 ;;
-    build|digests|jobs) ;;
-    *) bad_usage "«$VERB» is not a subcommand (build | jobs | digests)" ;;
+    build|digests|jobs|quiet) ;;
+    *) bad_usage "«$VERB» is not a subcommand (build | jobs | digests | quiet)" ;;
 esac
 # The names are only COLLECTED here. Whether a name is a job is not a
 # question this file can answer on its own any more — the answer is in
@@ -110,6 +116,18 @@ if [[ "$VERB" == build ]]; then
             *)          ARGV_JOBS+=("$1"); shift ;;
         esac
     done
+elif [[ "$VERB" == quiet ]]; then
+    # The shape is checked here, before a single lib is sourced: a
+    # typo must not reach the cluster, and `quiet` with no word is a
+    # usage error and not a silent default — guessing `status` would
+    # be friendly right up until the day it guesses `on`.
+    QUIET_WHAT="${1:-}"
+    case "$QUIET_WHAT" in
+        -h|--help) usage; exit 0 ;;
+        on|off|status) (($# == 1)) || bad_usage "quiet $QUIET_WHAT takes no further arguments (got «$2»)" ;;
+        "") bad_usage "quiet needs a word: on, off or status" ;;
+        *)  bad_usage "«$QUIET_WHAT» is not one of on | off | status" ;;
+    esac
 elif [[ "$VERB" == jobs ]]; then
     (($# == 0)) || { [[ "$1" == -h || "$1" == --help ]] && { usage; exit 0; }; bad_usage "jobs takes no arguments (got «$1»)"; }
 else
@@ -512,8 +530,95 @@ do_digests() {
     return 0
 }
 
+# ═══════════════════════════════════════════════════════════════════
+#  quiet — Jenkins finishes what it is doing and starts nothing new
+# ═══════════════════════════════════════════════════════════════════
+#
+# WHY IT EXISTS. An update window rewrites the platform repo commit by
+# commit, and every one of those commits is a push that Jenkins hears.
+# A build that starts halfway through layer 4 builds an image out of a
+# tree that is half the old version and half the new one, and it says
+# SUCCESS: the worst kind of artifact, because nothing about it looks
+# wrong. Jenkins has had the answer since forever — quietDown — and
+# until today it could only be reached by clicking, which means it did
+# not exist for a protocol that has to run on its own at four in the
+# morning.
+#
+# It is NOT a pause and it does not kill anything: what is running runs
+# to the end, and the queue simply stops being consumed. That is the
+# behaviour the window wants, and it is why layer 6 has to take it off
+# again before it builds.
+#
+# The state is read from Jenkins itself (`quietingDown` in the root
+# api/json), never remembered here. A flag kept on the host would be
+# the one thing to disagree with the machine on the morning after a
+# window that died halfway.
+ci_quiet_state() {   # prints `on` or `off`; rc 2 if nobody could ask
+    local body
+    body="$(jenkins_get "/api/json?tree=quietingDown" 2>/dev/null)" \
+        || could_not "Jenkins did not answer /api/json (is the pod up? is the kubeconfig the right one?) — this is NOT «it is not quiet»"
+    # NOT `.quietingDown // empty`. jq's `//` takes the right-hand side
+    # when the left is null OR FALSE, so the one answer that means «it
+    # is not quiet» came out as «there is no such field» — measured
+    # against the live Jenkins on 2026-09-18, which answered
+    # {"quietingDown":false} and got a rc 2 for it. `has()` asks the
+    # question that was meant: is the field there.
+    case "$(jq -r 'if has("quietingDown") then (.quietingDown | tostring) else "absent" end' \
+            <<< "$body" 2>/dev/null)" in
+        true)  printf 'on' ;;
+        false) printf 'off' ;;
+        *)     could_not "Jenkins answered without a quietingDown field: $(head -c 120 <<< "$body")" ;;
+    esac
+}
+
+do_quiet() {
+    kubectl -n jenkins-system get sts jenkins -o name >/dev/null 2>&1 \
+        || could_not "jenkins-system/sts/jenkins is not readable — nothing to put into quiet mode, and that is not «it is already quiet»"
+    secrets_workdir
+    local before after
+    # `could_not` inside $( ) exits the SUBSHELL, so its rc arrives here
+    # as the rc of the assignment and errexit ends the run — which is
+    # the behaviour wanted, and it is said out loud because relying on
+    # it by accident is how a caller ends up acting on an empty string.
+    before="$(ci_quiet_state)" || could_not "the quiet state of Jenkins could not be read"
+    [[ -n "$before" ]] || could_not "the quiet state of Jenkins came back empty"
+    if [[ "$QUIET_WHAT" == status ]]; then
+        printf '%s\n' "$before"
+        [[ "$before" == on ]] && log_info "Jenkins IS in quiet mode: it starts nothing new" \
+                               || log_info "Jenkins is NOT in quiet mode: it takes builds normally"
+        return 0
+    fi
+    # Already there is a legitimate ending and not a failure: the
+    # window may be resuming, and `on` twice has to be as safe as `on`
+    # once. It is also the POST Jenkins refuses with a 405.
+    if [[ "$before" == "$QUIET_WHAT" ]]; then
+        log_ok "quiet was already «$QUIET_WHAT» (nothing to do)"
+        printf '%s\n' "$before"
+        return 0
+    fi
+    if [[ "$QUIET_WHAT" == on ]]; then
+        jenkins_post /quietDown >/dev/null \
+            || die "the POST /quietDown failed — Jenkins is still taking builds"
+    else
+        jenkins_post /cancelQuietDown >/dev/null \
+            || die "the POST /cancelQuietDown failed — Jenkins is still refusing to start builds"
+    fi
+    # PROVED, not assumed. The POST returning 200 and the state not
+    # changing is exactly the shape of bug this whole product is
+    # written against: an order that was given, acknowledged, and had
+    # no effect.
+    after="$(ci_quiet_state)"
+    [[ "$after" == "$QUIET_WHAT" ]] \
+        || die "the order was accepted and the state did not change: asked for «$QUIET_WHAT», Jenkins still reads «$after»"
+    printf '%s\n' "$after"
+    [[ "$after" == on ]] && log_ok "Jenkins is now in quiet mode: what is running finishes, nothing new starts" \
+                         || log_ok "Jenkins is out of quiet mode: it takes builds again"
+    return 0
+}
+
 case "$VERB" in
     build)   do_build ;;
     jobs)    do_jobs ;;
     digests) do_digests ;;
+    quiet)   do_quiet ;;
 esac
