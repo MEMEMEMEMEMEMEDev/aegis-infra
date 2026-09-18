@@ -1375,6 +1375,44 @@ except Exception:
                    "the probes derived from the contracts"
   fi
 
+  # (d bis) AND WHETHER THE SITE ANSWERS. Counting that a probe exists
+  #     says somebody is watching; it says nothing about what they see.
+  #     Until 2026-09-18 a tenant returning 500 to every visitor passed
+  #     this section with the probe present and green, and the only
+  #     place the truth lived was an alert nobody reads at 3am on a
+  #     laptop. The probe walks the whole path —DNS, edge, tunnel,
+  #     traefik, middlewares, app— so its verdict is the closest thing
+  #     the round has to «the product works», and it is what the update
+  #     window accepts or rolls back on.
+  if [[ -n "$probes" && "$probes" -gt 0 ]]; then
+      # THREE WAYS, and the middle one is why this is not one query.
+      # The module refuses a 302 on purpose (a tenant that ends up
+      # behind Access by mistake must not read as green). But a site
+      # that redirects to its OWN login, or one that is behind Access
+      # because its owner put it there, IS answering: DNS, edge, tunnel,
+      # traefik and the app all worked to produce that redirect.
+      # Reporting it as down would make this line permanently red on
+      # this instance, and a signal that never changes is a signal
+      # nobody reads.
+      #
+      #   no answer at all, or 4xx/5xx  → bad: the site is down
+      #   probe refused a 3xx           → notice: it answers, elsewhere
+      #   probe_success                 → ok
+      down=$(_vm_num 'count(probe_success{job=~"sitio-.*"} == 0 unless on(job) probe_http_status_code{job=~"sitio-.*"} >= 300 < 400) or vector(0)')
+      redir=$(_vm_num 'count(probe_success{job=~"sitio-.*"} == 0 and on(job) probe_http_status_code{job=~"sitio-.*"} >= 300 < 400) or vector(0)')
+      if [[ -z "$down" || -z "$redir" ]]; then
+          notice "COULD NOT EVALUATE: the probes exist and nobody could read what they see"
+      elif [[ "$down" -gt 0 ]]; then
+          bad "$down of the $probes public site(s) do not answer: no reply, or an error"
+          note "the probe walks DNS, edge, tunnel, traefik and the app: ${AEGIS_CMD:-aegis} traffic show, and the pods of that organization"
+      elif [[ "$redir" -gt 0 ]]; then
+          notice "$redir of the $probes public site(s) answer with a redirect the probe does not accept (their own login, or Cloudflare Access)"
+          note "the site IS up: the module demands a 200 so that a tenant behind Access by mistake cannot read as green"
+      else
+          ok "the $probes public site(s) answer their probe"
+      fi
+  fi
+
   # (e) the channel. It is not tested by sending a message (that would
   #     dirty the operator's topic on every run): it is verified that
   #     the chain is WHOLE and that the heartbeat keeps beating — if the

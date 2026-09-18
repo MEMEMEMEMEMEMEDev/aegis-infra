@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+# aegis-summary: What runs against what exists upstream, and the window that updates it
+# aegis-group:   operate
+# aegis-subcommands: inventory plan status
+# aegis-help:
+# Usage: aegis update inventory [--tree DIR] [--offline] [--fresh] [--json]
+#        aegis update plan [--fresh] [--json]
+#        aegis update status [--json]
+#
+# inventory  every pinned version of this instance, and what exists
+#            upstream today. Reads; touches nothing.
+# plan       what a window would raise, in which layer, and how each one
+#            would be undone. Proposes; touches nothing.
+# status     the last window: when, what changed, how it ended.
+#
+"""aegis update — what runs here against what exists upstream.
+
+WHY THIS COMMAND EXISTS. aegis pins a version or a digest for
+everything it runs, and until today there was no way to ask the one
+question that matters afterwards: what of all this is behind, and by
+how much. The vigía asks it every morning for the seven mirrored images
+and for the bases aegis owns; the charts, the images written by hand in
+the manifests, the pod templates of the CI, k3s and the host's own
+binaries were nobody's job. Fifty-three pins, thirty of them unwatched.
+
+WHAT IT DOES NOT DO, and it is the whole design: it never decides that
+a newer version is the right version. It measures, it proposes, it says
+how each change would be undone — and the window is what acts, later,
+with the operator's word and with a rollback that runs by itself when
+the acceptance fails.
+
+THE FOUR OUTCOMES, honoured to the letter. «Upstream did not answer» is
+never «up to date»: a class nobody could measure makes this command
+exit 2, because a green that means «I could not look» is the disease
+the whole product exists to eliminate.
+"""
+import argparse
+import concurrent.futures
+import json
+import os
+import sys
+import time
+
+# ── canonical python preamble (V-102) ────────────────────────────────
+_AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
+    os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
+from aegis import cli, outcomes, paths, pins, upstream   # noqa: E402
+
+grey, off = ("\033[90m", "\033[0m") if sys.stderr.isatty() else ("", "")
+bold = "\033[1m" if sys.stderr.isatty() else ""
+
+# What a window would do with each class, and what it would take to undo
+# it. It is written here, beside the command that proposes, because it
+# is a property of the PROTOCOL and not of the tree.
+LAYERS = {
+    1: ("the host's packages", "apt", "ninguna"),
+    2: ("the host's binaries", "userland", "revertir + aegis init --only 05-host"),
+    3: ("k3s", "k3s", "revertir + aegis init --only 20-k3s (mejor esfuerzo)"),
+    4: ("the platform's charts", "chart", "revertir + aegis sync"),
+    5: ("the images written by hand", "raw-image", "revertir + aegis sync"),
+    6: ("the mirrored images", "mirror", "revertir el commit de images.txt"),
+    7: ("the bases aegis owns", "containerfile", "revertir + aegis ci build base-images"),
+    8: ("the CI's pod templates", "jenkinsfile", "revertir"),
+}
+CLASS_LAYER = {c: n for n, (_l, c, _r) in LAYERS.items()}
+
+
+def _upstream_for(pin, same_major=True):
+    """The one question this pin asks upstream. A class with no upstream
+    to ask (an image of this instance's own registry) says so instead of
+    being reported as measured."""
+    if pin.cls in ("mirror", "containerfile", "raw-image", "jenkinsfile"):
+        if pin.extra.get("interno") or pin.name.startswith("registry.registry-system"):
+            return upstream.Answer(upstream.NO_MEDIBLE,
+                                   why="it is built by this instance: its version is a tag of "
+                                       "the chain, not a choice with an upstream")
+        return upstream.for_image(pin.name, pin.current, pin.digest)
+    if pin.cls == "chart":
+        return upstream.for_chart(pin.extra.get("repo"), pin.extra.get("chart"), pin.current)
+    if pin.cls in ("k3s", "userland"):
+        return upstream.for_tool(pin.name, pin.current)
+    return upstream.Answer(upstream.NO_MEDIBLE, why="measured against the machine, not upstream")
+
+
+def _measure(all_pins, offline=False, fresh=False, narrate=True):
+    """Every pin against upstream, in parallel, through the cache."""
+    answers, cache = {}, ({} if offline else upstream.load_cache(fresh))
+    todo = []
+    for pin in all_pins.values():
+        if pin.cls == "apt":
+            continue
+        # `pin.key` and nothing else: the reader keys its dict by the
+        # tuple (class, name) and this used to key answers by that same
+        # tuple while the drawing asked for the string. Every answer of
+        # the first live run was measured and then thrown away.
+        key = pin.key
+        ident = f"{key}:{pin.current}:{pin.digest or ''}"
+        if ident in cache:
+            c = cache[ident]
+            a = upstream.Answer(c["arriba"], c.get("ultima"), c.get("por_que"),
+                                c.get("digest_arriba"), c.get("candidatas"))
+            a.measured_at = c.get("medido_en") or a.measured_at
+            answers[key] = a
+            continue
+        if offline:
+            answers[key] = upstream.Answer(upstream.NO_MEDIBLE,
+                                           why="--offline: nothing was asked upstream")
+            continue
+        todo.append((key, pin, ident))
+    if todo and narrate:
+        print(f"{grey}asking upstream about {len(todo)} pin(s)…{off}", file=sys.stderr)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_upstream_for, pin): (key, ident) for key, pin, ident in todo}
+        for fut in concurrent.futures.as_completed(futures):
+            key, ident = futures[fut]
+            try:
+                a = fut.result()
+            except Exception as e:                        # noqa: BLE001
+                a = upstream.Answer(upstream.NO_MEDIBLE, why=f"{type(e).__name__}: {e}")
+            answers[key] = a
+            cache[ident] = {**a.as_data(), "epoch": time.time()}
+    if not offline:
+        upstream.save_cache(cache)
+    return answers
+
+
+def _apt_step(steps, narrate):
+    """The host's packages, measured against the machine itself."""
+    data, why = upstream.apt_upgradable()
+    if data is None:
+        steps.not_evaluable("apt", why="apt-could-not-be-asked", detalle=why, capa=1)
+        return
+    resto, nucleo = data["resto"], data["nucleo"]
+    if narrate:
+        print(f"  {'apt':<14} {len(resto)} package(s) + {len(nucleo)} of kernel/driver")
+    d = {"capa": 1, "paquetes": resto, "nucleo": nucleo,
+         "deshacer": "ninguna: un paquete instalado no se desinstala dentro de la ventana"}
+    if resto or nucleo:
+        steps.already("apt", estado="atrasado", **d)
+    else:
+        steps.already("apt", estado="al-dia", **d)
+
+
+def inventory(steps, tree=None, offline=False, fresh=False, narrate=True):
+    all_pins = pins.read(tree) if tree else pins.read(str(paths.platform_dir()))
+    if not all_pins:
+        steps.wrong("pins", error="this tree pins nothing: the derivation is broken, because "
+                                  "a platform with no pinned version does not exist")
+        steps.finish()
+    answers = _measure(all_pins, offline, fresh, narrate)
+    by_cls = pins.by_class(all_pins)
+    for cls in sorted(by_cls):
+        if cls == "apt":
+            continue
+        if narrate:
+            print(f"\n{bold}{cls}{off}  {grey}({len(by_cls[cls])}){off}", file=sys.stderr)
+        for pin in by_cls[cls]:
+            a = answers.get(pin.key) or upstream.Answer(upstream.NO_MEDIBLE, why="not measured")
+            data = {**pin.as_step(), **a.as_data()}
+            if narrate:
+                mark = {upstream.AL_DIA: " ", upstream.ATRASADO: "↑",
+                        upstream.DESAPARECIDO: "✗", upstream.NO_MEDIBLE: "?"}[a.state]
+                tail = f" → {a.latest}" if a.latest and a.latest != pin.current else ""
+                print(f"  {mark} {pin.name[:48]:<48} {str(pin.current or '—'):<24}{tail}",
+                      file=sys.stderr)
+            name = f"pin:{pin.cls}:{pin.name}"
+            if a.state == upstream.DESAPARECIDO:
+                steps.wrong(name, **data)
+            elif a.state == upstream.NO_MEDIBLE:
+                steps.not_evaluable(name, **data)
+            else:
+                steps.already(name, **data)
+    _apt_step(steps, narrate)
+    steps.finish()
+
+
+def plan(steps, fresh=False, narrate=True):
+    """What a window would raise, in which layer, and how it comes back.
+
+    It proposes and refuses out loud: a major jump and a minor of k3s
+    are named as refused with the flag that would allow them, because a
+    proposal that hides what it will not do is not a plan.
+    """
+    all_pins = pins.read(str(paths.platform_dir()))
+    answers = _measure(all_pins, False, fresh, narrate)
+    proposed = 0
+    for key in sorted(all_pins, key=lambda k: (CLASS_LAYER.get(all_pins[k].cls, 9),
+                                               all_pins[k].name)):
+        pin = all_pins[key]
+        a = answers.get(pin.key)
+        if pin.cls == "apt" or a is None or a.state != upstream.ATRASADO:
+            continue
+        layer = CLASS_LAYER.get(pin.cls, 9)
+        undo = LAYERS[layer][2]
+        name = f"bump:{pin.cls}:{pin.name}"
+        data = {**pin.as_step(), **a.as_data(), "deshacer": undo}
+        cur, new = upstream.shape(pin.current), upstream.shape(a.latest)
+        if cur and new and cur[0][0] != new[0][0]:
+            steps.wrong(name, **data, rechazo="major",
+                        por_que=f"a major jump ({pin.current} → {a.latest}) is never taken by a "
+                                f"window: it carries migrations git does not undo. Read the "
+                                f"release notes and pass --allow-major {pin.name}")
+            continue
+        if pin.cls == "k3s" and cur and new and cur[0][:2] != new[0][:2]:
+            steps.wrong(name, **data, rechazo="k3s-minor",
+                        por_que="a minor of k3s rewrites the service's ExecStart and the node "
+                                "re-registers under another name. It needs --k3s-minor and a "
+                                "human reading it")
+            continue
+        proposed += 1
+        if narrate:
+            print(f"  {layer} {pin.cls:<14} {pin.name[:40]:<40} {pin.current} → {a.latest}",
+                  file=sys.stderr)
+        steps.done(name, **data)
+    blind = [k for k, a in answers.items() if a.state == upstream.NO_MEDIBLE]
+    if blind:
+        steps.not_evaluable("plan:no-medibles", cuantos=len(blind),
+                            cuales=sorted(blind)[:12],
+                            por_que="nobody could measure these against upstream: a window that "
+                                    "called itself complete would be calling «I could not look» "
+                                    "«up to date»")
+    if narrate:
+        print(f"\n{proposed} bump(s) proposed{off}", file=sys.stderr)
+    if not proposed and not blind:
+        steps.already("plan", estado="al-dia", propuestos=0)
+    steps.finish()
+
+
+def status(steps, narrate=True):
+    """The last window. None yet is a measured zero, not a silence."""
+    d = paths.aegis_home() / ".init-state" / "updates"
+    last = d / "last"
+    if not last.is_file():
+        if narrate:
+            print("no window has been opened yet", file=sys.stderr)
+        steps.already("window:none", ventanas=0,
+                      nota="this instance has never opened an update window")
+        steps.finish()
+    wid = last.read_text(encoding="utf-8").strip()
+    report = d / wid / "report.json"
+    try:
+        doc = json.loads(report.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        steps.not_evaluable(f"window:{wid}", why="report-unreadable", detalle=str(e))
+        steps.finish()
+    outcome = doc.get("outcome") or "?"
+    if narrate:
+        print(f"window {wid}: {outcome}", file=sys.stderr)
+    state = {"accepted": "already", "rolled-back": "wrong", "needs-a-human": "wrong"}.get(outcome)
+    getattr(steps, {"already": "already", "wrong": "wrong"}.get(state, "not_evaluable"))(
+        f"window:{wid}", **{k: v for k, v in doc.items() if k != "steps"})
+    steps.finish()
+
+
+def main():
+    ap = cli.parser("update", __doc__.split("\n")[0],
+                    protocol="seed/platform/docs/protocols/updates.md")
+    flags = argparse.ArgumentParser(add_help=False)
+    flags.add_argument("--json", action="store_true", dest="json_mode",
+                       default=argparse.SUPPRESS, help="the document of states")
+    ap.add_argument("--json", action="store_true", dest="json_mode",
+                    help="the document of states")
+    sub = ap.add_subparsers(dest="verb", required=True)
+    i = sub.add_parser("inventory", parents=[flags],
+                       help="every pin of this instance against what exists upstream")
+    i.add_argument("--tree", metavar="DIR",
+                   help="read another tree (the product's seed, for instance)")
+    i.add_argument("--offline", action="store_true",
+                   help="do not ask upstream: the pins alone")
+    i.add_argument("--fresh", action="store_true", help="ignore the cache")
+    p = sub.add_parser("plan", parents=[flags], help="what a window would raise, and how it undoes")
+    p.add_argument("--fresh", action="store_true", help="ignore the cache")
+    sub.add_parser("status", parents=[flags], help="the last window")
+    a = ap.parse_args()
+    # READ OFF THE NAMESPACE, never with getattr and a default: the
+    # top-level flag declares it, so it is always there, and a default
+    # in the reader is a flag that can be declared and then quietly
+    # ignored. Check 118 exists for exactly that.
+    steps = outcomes.Steps(json_mode=a.json_mode)
+    narrate = not a.json_mode
+    if a.verb == "inventory":
+        return inventory(steps, a.tree, a.offline, a.fresh, narrate)
+    if a.verb == "plan":
+        return plan(steps, a.fresh, narrate)
+    return status(steps, narrate)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -458,7 +458,7 @@ verificador).
 |---|---|
 | setup | `aegis preflight`, `aegis init`, `aegis init-log`, `aegis verify`, `aegis destroy` |
 | apps | `aegis app`, `aegis org`, `aegis quota`, `aegis repos`, `aegis image`, `aegis secret` |
-| operate | `aegis check`, `aegis console`, `aegis tenant`, `aegis traffic`, `aegis capacity`, `aegis builds`, `aegis host`, `aegis sync`, `aegis ai` |
+| operate | `aegis check`, `aegis console`, `aegis update`, `aegis tenant`, `aegis traffic`, `aegis capacity`, `aegis builds`, `aegis host`, `aegis sync`, `aegis ai` |
 | infra | `aegis ci`, `aegis edge`, `aegis registry`, `aegis rotate`, `aegis webhook` |
 | backup | `aegis data`, `aegis state` |
 
@@ -492,6 +492,7 @@ verificador).
 |---|---|
 | `aegis check` | La ronda rutinaria. Sin argumentos y sin escribir nada: mide el clúster vivo contra lo declarado (firma en Enforce, respaldos por organización, desincronías). |
 | `aegis console serve` / `capture` / `list` / `draw` | La consola visual, en loopback y sobre el CLI: dibuja los documentos que los comandos ya emiten, organizados en Projects, Deployments, Domains, Traffic, Storage, Security, Machine y Health. `capture` guarda un estado del mundo como caso; `list` muestra el corpus; `draw` escribe todas las pantallas de un caso como ficheros HTML, sin servidor. Ver [La consola](docs/console.md). |
+| `aegis update inventory` / `plan` / `status` | Qué versión corre de cada cosa que la plataforma fija, y qué existe hoy río arriba: charts, imágenes de los manifiestos, espejos, bases propias, plantillas del CI, k3s y los binarios del anfitrión. `inventory` mide y no toca nada; `plan` propone qué subiría una ventana, en qué capa y cómo se desharía cada cambio, y rechaza en voz alta un salto mayor o un menor de k3s; `status` cuenta la última ventana. Lo que no pudo medirse nunca se cuenta como al día. Ver [el protocolo de actualización](seed/platform/docs/protocols/updates.md). |
 | `aegis tenant show` | Una organización **como el clúster la tiene**, contra lo que su contrato declara: sus servicios, el volumen de cada base, si cada camino público tiene a alguien detrás, su cuota, y lo que el contrato no declara. `aegis org` es el lado contrato y no toca el clúster; éste no escribe un fichero. |
 | `aegis traffic show` | Lo que de verdad llegó a cada organización, leído de las métricas de traefik. Atribuye por organización, reporta lo de la plataforma aparte, y **reconcilia contra el total** para que nada desaparezca. `--org` lo acota a una. |
 | `aegis capacity show` | ¿Entra otra organización? El allocatable del nodo contra la suma de los requests vivos, y cuántas de cada plan caben — diciendo **qué se acaba primero**. Si el apiserver no contesta dice que no pudo mirar, nunca cero. |
