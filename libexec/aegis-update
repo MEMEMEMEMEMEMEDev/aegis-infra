@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # aegis-summary: What runs against what exists upstream, and the window that updates it
 # aegis-group:   operate
-# aegis-subcommands: inventory plan window rollback status
+# aegis-subcommands: inventory plan window rollback status metrics
 # aegis-help:
 # Usage: aegis update inventory [--tree DIR] [--offline] [--fresh] [--json]
 #        aegis update plan [--fresh] [--json]
@@ -10,6 +10,7 @@
 #                           [--layer N]... [--json]
 #        aegis update rollback [<window>] [--yes] [--json]
 #        aegis update status [--json]
+#        aegis update metrics [--fresh] [--offline] [--json]
 #
 # inventory  every pinned version of this instance, and what exists
 #            upstream today. Reads; touches nothing.
@@ -25,6 +26,9 @@
 # rollback   undo a window's commits, newest first, and say whether the
 #            tree came back to what the photo saw. DRY unless --yes.
 # status     the last window: when, what changed, how it ended.
+# metrics    the same measurement in the exposition format, for the timer
+#            that pushes it to vmsingle. stdout carries the exposition
+#            and nothing else.
 #
 """aegis update — what runs here against what exists upstream.
 
@@ -49,6 +53,7 @@ the whole product exists to eliminate.
 """
 import argparse
 import concurrent.futures
+import datetime
 import json
 import os
 import re
@@ -82,20 +87,16 @@ CLASS_LAYER = {c: n for n, (_l, c, _r) in LAYERS.items()}
 
 
 def _upstream_for(pin, same_major=True):
-    """The one question this pin asks upstream. A class with no upstream
-    to ask (an image of this instance's own registry) says so instead of
-    being reported as measured."""
-    if pin.cls in ("mirror", "containerfile", "raw-image", "jenkinsfile"):
-        if pin.extra.get("interno") or pin.name.startswith("registry.registry-system"):
-            return upstream.Answer(upstream.NO_MEDIBLE,
-                                   why="it is built by this instance: its version is a tag of "
-                                       "the chain, not a choice with an upstream")
-        return upstream.for_image(pin.name, pin.current, pin.digest)
-    if pin.cls == "chart":
-        return upstream.for_chart(pin.extra.get("repo"), pin.extra.get("chart"), pin.current)
-    if pin.cls in ("k3s", "userland"):
-        return upstream.for_tool(pin.name, pin.current)
-    return upstream.Answer(upstream.NO_MEDIBLE, why="measured against the machine, not upstream")
+    """The one question this pin asks upstream.
+
+    IT LIVES IN `upstream.py` and this is the thin call to it. It was
+    written here first, which meant the one decision worth testing —
+    «is there anybody to ask about this pin at all» — could only be
+    exercised by running the whole command against the network. A tooth
+    that folded «built here» back into «I could not look» mutated it
+    and nothing went red.
+    """
+    return upstream.for_pin(pin, same_major)
 
 
 def _measure(all_pins, offline=False, fresh=False, narrate=True):
@@ -175,7 +176,8 @@ def inventory(steps, tree=None, offline=False, fresh=False, narrate=True):
             data = {**pin.as_step(), **a.as_data()}
             if narrate:
                 mark = {upstream.AL_DIA: " ", upstream.ATRASADO: "↑",
-                        upstream.DESAPARECIDO: "✗", upstream.NO_MEDIBLE: "?"}[a.state]
+                        upstream.DESAPARECIDO: "✗", upstream.NO_MEDIBLE: "?",
+                        upstream.SIN_ARRIBA: "·", upstream.SIN_ORDEN: "~"}[a.state]
                 tail = f" → {a.latest}" if a.latest and a.latest != pin.current else ""
                 print(f"  {mark} {pin.name[:48]:<48} {str(pin.current or '—'):<24}{tail}",
                       file=sys.stderr)
@@ -183,6 +185,12 @@ def inventory(steps, tree=None, offline=False, fresh=False, narrate=True):
             if a.state == upstream.DESAPARECIDO:
                 steps.wrong(name, **data)
             elif a.state == upstream.NO_MEDIBLE:
+                # ONLY this one. «Nobody to ask» and «the tags cannot be
+                # ordered» are answers with reasons attached, and they
+                # will read the same tomorrow: reporting them as «I
+                # could not look» made this command exit 2 for ever and
+                # the console say «something could not be looked at» on
+                # every page of a healthy instance.
                 steps.not_evaluable(name, **data)
             else:
                 steps.already(name, **data)
@@ -229,12 +237,24 @@ def plan(steps, fresh=False, narrate=True):
                   file=sys.stderr)
         steps.done(name, **data)
     blind = [k for k, a in answers.items() if a.state == upstream.NO_MEDIBLE]
+    unactionable = [k for k, a in answers.items() if a.state in upstream.UNACTIONABLE]
     if blind:
         steps.not_evaluable("plan:no-medibles", cuantos=len(blind),
                             cuales=sorted(blind)[:12],
                             por_que="nobody could measure these against upstream: a window that "
                                     "called itself complete would be calling «I could not look» "
                                     "«up to date»")
+    if unactionable:
+        # SAID, and said as a measured fact rather than a doubt: these
+        # are the pins no window will ever move, each for a reason that
+        # will read the same next month. A plan that left them out
+        # silently would be a plan whose «everything is up to date»
+        # covered twelve things nobody can update.
+        steps.already("plan:sin-accion", cuantos=len(unactionable),
+                      cuales=sorted(unactionable)[:12],
+                      por_que="no window can act on these: either this instance builds "
+                              "them, or their tags carry no order anybody can follow. "
+                              "They are measured, and a human is what moves them")
     if narrate:
         print(f"\n{proposed} bump(s) proposed{off}", file=sys.stderr)
     if not proposed and not blind:
@@ -1131,6 +1151,167 @@ def rollback(steps, wid=None, yes=False, narrate=True):
     steps.finish()
 
 
+# ══════════════════════════════════════════════════════════════════════
+#  metrics — what is behind, in the exposition format
+# ══════════════════════════════════════════════════════════════════════
+#
+# WHY A METRIC AND NOT A REPORT. `inventory` answers when somebody asks,
+# and the question «what of all this is behind» is one nobody thinks to
+# ask until something has been behind for five months. The vigía already
+# watches seven mirrored images every morning; this is the same idea
+# widened to all eight classes, and it costs one timer.
+#
+# It is PUSHED, not scraped, for the same reason `aegis host metrics`
+# is: the subject lives outside the cluster. Deriving the pins means
+# reading the instance's platform checkout and asking public registries
+# from the host, and no pod does either.
+#
+# THE MEASURED ZERO AND THE SILENCE ARE DIFFERENT SERIES. A class where
+# nothing is behind publishes `behind 0`, which is a measurement. A
+# class nobody could ask publishes its count under `unmeasurable`, and
+# its `behind` does NOT absorb those: a zero that means «I could not
+# look» is the disease this whole command was written against, and it
+# would be invisible on a dashboard.
+
+def metrics(steps, fresh=False, narrate=True, json_mode=False, offline=False):
+    all_pins = pins.read(str(paths.platform_dir()))
+    if not all_pins:
+        steps.wrong("metrics:pins", error="this tree pins nothing: nothing would be "
+                                          "published, and a dashboard with no series "
+                                          "looks exactly like a platform with no drift")
+        steps.finish()
+    # `--offline` asks nothing and is HONEST about it rather than fast:
+    # every pin comes back `no-medible`, so `unmeasurable` carries the
+    # whole count and `behind` is a true zero — zero were found behind,
+    # because none were asked. Nothing downstream can misread that:
+    # UpdateWindowDue needs `behind > 0` and would never fire, and
+    # UpdatePinsUnmeasurable would, correctly. It exists for a machine
+    # with no egress, and for check 215, which needs the SHAPE of the
+    # exposition and would otherwise ask fifty public registries once
+    # per mutation of its teeth.
+    answers = _measure(all_pins, offline, fresh, narrate=False)
+    by_cls = {}
+    for pin in all_pins.values():
+        d = by_cls.setdefault(pin.cls, {"total": 0, "behind": 0, "unmeasurable": 0,
+                                        "gone": 0, "current": 0, "unactionable": 0})
+        d["total"] += 1
+        if pin.cls == "apt":
+            # apt is measured against the machine and not upstream, so
+            # asking a registry about it would be a category error. It
+            # is `unactionable` and NOT `unmeasurable`: nobody failed to
+            # look, and a dashboard that counted it as a blind spot
+            # would carry five permanent ones.
+            d["unactionable"] += 1
+            continue
+        a = answers.get(pin.key)
+        state = a.state if a else upstream.NO_MEDIBLE
+        if state == upstream.ATRASADO:
+            d["behind"] += 1
+        elif state == upstream.DESAPARECIDO:
+            d["gone"] += 1
+        elif state == upstream.NO_MEDIBLE:
+            d["unmeasurable"] += 1
+        elif state in upstream.UNACTIONABLE:
+            d["unactionable"] += 1
+        else:
+            d["current"] += 1
+
+    lines, described = [], set()
+
+    def emit(name, value, labels=None, help_=None, typ="gauge"):
+        # The same shape as `aegis host metrics`, deliberately: HELP and
+        # TYPE once per metric NAME and not once per label set, because
+        # repeating them is malformed exposition and the parser that
+        # tolerates it today is not a contract.
+        if value is None:
+            return
+        if help_ and name not in described:
+            described.add(name)
+            lines.append(f"# HELP {name} {help_}")
+            lines.append(f"# TYPE {name} {typ}")
+        lab = ""
+        if labels:
+            lab = "{" + ",".join(f'{k}="{v}"' for k, v in sorted(labels.items())) + "}"
+        lines.append(f"{name}{lab} {value}")
+
+    # WHAT IS PUBLISHED IS WHAT SOMETHING READS, and nothing else. The
+    # first draft also published `total`, `current` and `unactionable`,
+    # because they are interesting — and interesting is exactly how a
+    # series with no consumer gets born. The doctrine that forbids a
+    # pin index forbids this too: a number nobody reads drifts, and it
+    # drifts looking like coverage. Check 215 joins these against the
+    # alert family in both directions, so adding a series here without
+    # a reader is red, and so is a rule reading one that is not here.
+    # The whole picture stays available where it is actually looked at:
+    # `aegis update inventory`, and the console's Updates page.
+    for cls in sorted(by_cls):
+        d = by_cls[cls]
+        lab = {"class": cls}
+        emit("aegis_update_pins_behind", d["behind"], lab,
+             "pins with a newer candidate upstream that a window would take")
+        emit("aegis_update_pins_unmeasurable", d["unmeasurable"], lab,
+             "pins nobody could compare against upstream — NOT counted as up to date")
+        emit("aegis_update_pins_gone", d["gone"], lab,
+             "pins whose tag no longer exists upstream: what runs here cannot be rebuilt")
+
+    # ── the last window ─────────────────────────────────────────────
+    j = win.Journal.last()
+    rep = j.report() if j else None
+    # `ever` exists so that «no window has ever run» is a SERIES and not
+    # an absence. An instance that has never opened one is exactly the
+    # instance that most needs telling, and an alert written on
+    # `absent()` alone would fire the same way for a timer that stopped.
+    emit("aegis_update_window_ever", 1 if rep else 0, None,
+         "1 when this instance has closed at least one update window")
+    if rep:
+        try:
+            closed = datetime.datetime.fromisoformat(rep.get("closed_at", "")).timestamp()
+        except (ValueError, TypeError):
+            closed = None
+        emit("aegis_update_window_timestamp_seconds", int(closed) if closed else None, None,
+             "when the last update window closed")
+        for name in win.OUTCOMES:
+            emit("aegis_update_window_outcome", 1 if rep.get("outcome") == name else 0,
+                 {"outcome": name}, "how the last update window ended, one series per outcome")
+    # The staleness sibling, and the reason it is separate: a gauge
+    # nobody writes any more keeps its last value for ever, so «0
+    # behind» would stay green while nothing was being measured. This
+    # is the series that turns that silence into something visible.
+    emit("aegis_update_measured_timestamp_seconds", int(time.time()), None,
+         "when these numbers were taken — a gauge nobody updates stays green for ever")
+
+    out = "\n".join(lines) + "\n"
+    if json_mode:
+        steps.done("metrics", clases=len(by_cls),
+                   atrasados=sum(d["behind"] for d in by_cls.values()),
+                   no_medibles=sum(d["unmeasurable"] for d in by_cls.values()),
+                   series=len([l for l in lines if not l.startswith("#")]),
+                   exposicion=out)
+        steps.finish()
+    # STDOUT CARRIES THE EXPOSITION AND NOTHING ELSE. This is piped
+    # straight into vmsingle's import endpoint by the timer, and the
+    # house narration line —`aegis: metrics done …`— in the middle of it
+    # is a parse error on the other end. So the summary goes to stderr,
+    # which is where every other narration in this command already
+    # goes, and the exit code is the contract's: 0 when it was measured,
+    # 2 when a whole class could not be.
+    sys.stdout.write(out)
+    behind = sum(d["behind"] for d in by_cls.values())
+    blind = sum(d["unmeasurable"] for d in by_cls.values())
+    gone = sum(d["gone"] for d in by_cls.values())
+    print(f"{len([l for l in lines if not l.startswith('#')])} series: {behind} behind, "
+          f"{gone} gone, {blind} not measurable", file=sys.stderr)
+    # rc 2 when NOTHING of a measurable class could be asked. Not when
+    # `apt` is unmeasurable — that one is measured against the machine
+    # and is unmeasurable by definition here, and letting it colour the
+    # exit code would make every run of this command exit 2 for ever.
+    measurable = [c for c in by_cls if c != "apt"]
+    if measurable and all(by_cls[c]["unmeasurable"] == by_cls[c]["total"]
+                          for c in measurable):
+        sys.exit(2)
+    sys.exit(1 if gone else 0)
+
+
 def status(steps, narrate=True):
     """The last window. None yet is a measured zero, not a silence."""
     d = paths.aegis_home() / ".init-state" / "updates"
@@ -1198,6 +1379,12 @@ def main():
                    help="which one (default: the last)")
     b.add_argument("--yes", action="store_true", help="act. Without it nothing is reverted")
     sub.add_parser("status", parents=[flags], help="the last window")
+    m = sub.add_parser("metrics", parents=[flags],
+                       help="what is behind, in the exposition format")
+    m.add_argument("--fresh", action="store_true", help="ignore the cache")
+    m.add_argument("--offline", action="store_true",
+                   help="ask nothing: every pin comes back unmeasurable, and the "
+                        "exposition says so")
     a = ap.parse_args()
     # READ OFF THE NAMESPACE, never with getattr and a default: the
     # top-level flag declares it, so it is always there, and a default
@@ -1215,6 +1402,8 @@ def main():
                       kernel=a.kernel, only_layers=set(a.layer) or None)
     if a.verb == "rollback":
         return rollback(steps, a.window, a.yes, narrate)
+    if a.verb == "metrics":
+        return metrics(steps, a.fresh, narrate, a.json_mode, a.offline)
     return status(steps, narrate)
 
 

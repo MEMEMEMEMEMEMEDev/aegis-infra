@@ -23,3 +23,9 @@ __pycache__/
 # adentro viaja el tfstate del borde con el token del túnel EN CLARO.
 # El resguardo va FUERA del árbol (misma regla que v2).
 *.age
+
+# La caché de `aegis update` (lo que contestó río arriba, con 6 h de
+# vigencia). Vive en $AEGIS_HOME/.cache/, y en la forma v2 —AEGIS_HOME
+# == AEGIS_ROOT— eso cae aquí adentro. No es artefacto: son respuestas
+# medidas, con fecha, que envejecen solas.
+/.cache/

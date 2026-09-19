@@ -35,7 +35,39 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-AL_DIA, ATRASADO, DESAPARECIDO, NO_MEDIBLE = "al-dia", "atrasado", "desaparecido", "no-medible"
+# ── the six answers, and why there are six and not four ──────────────
+# The first four were the plan's. Writing the console's Updates page
+# found that the fourth was carrying three different things under one
+# name, and the difference matters more here than almost anywhere:
+#
+#   al-dia        the pin is on the newest candidate
+#   atrasado      there is a newer one, and it is named
+#   desaparecido  the pinned tag no longer exists upstream
+#   sin-arriba    THERE IS NOBODY TO ASK. An image this instance builds
+#                 has no upstream: its version is a tag of the chain.
+#                 That is an ANSWER, complete and permanent.
+#   sin-orden     upstream answered and its tags cannot be ordered
+#                 (`3355.v388858a_47b_33-23`, `nonroot`). Also an
+#                 answer: we know exactly why no window can bump it, and
+#                 the reason will be the same tomorrow.
+#   no-medible    the instrument never reached the subject: a timeout, a
+#                 429, a repository that would not talk. THIS one, and
+#                 only this one, is rc 2.
+#
+# Collapsing the middle two into «I could not look» is what the product
+# exists to prevent, one level up: it made `inventory` exit 2 for ever
+# on a healthy instance, and a verdict that never changes is a verdict
+# nobody reads. Each of the two is a measurement with a reason attached,
+# and neither will ever become measurable by trying again.
+AL_DIA, ATRASADO, DESAPARECIDO = "al-dia", "atrasado", "desaparecido"
+SIN_ARRIBA, SIN_ORDEN, NO_MEDIBLE = "sin-arriba", "sin-orden", "no-medible"
+
+#: The answers that mean «this was measured», whatever they measured.
+#: `inventory` reports these as `already`; only NO_MEDIBLE is rc 2.
+MEASURED = (AL_DIA, SIN_ARRIBA, SIN_ORDEN)
+#: The answers a window can never act on, each for its own written
+#: reason. They are not failures and they do not wait for a retry.
+UNACTIONABLE = (SIN_ARRIBA, SIN_ORDEN)
 
 OCI_ACCEPT = ", ".join((
     "application/vnd.oci.image.index.v1+json",
@@ -252,9 +284,15 @@ def for_image(name, tag, digest=None, same_major=True):
     if ahead:
         return Answer(ATRASADO, latest=ahead[-1], digest=d, candidates=ahead)
     if not shape(tag):
-        return Answer(NO_MEDIBLE, digest=d,
+        # SIN_ORDEN and not NO_MEDIBLE: upstream answered, its tags were
+        # read, and the thing that cannot be done is ordering them.
+        # Calling that «I could not look» made this line permanently rc
+        # 2 on an instance whose CI agent is pinned at
+        # `3355.v388858a_47b_33-23`, which is a tag scheme, not a fault.
+        return Answer(SIN_ORDEN, digest=d,
                       why=f"the tag {tag!r} has no orderable shape: upstream publishes "
-                          f"{len(every)} tags and nobody can say which is «newer»")
+                          f"{len(every)} tags and nobody can say which is «newer». A "
+                          f"window will never bump this one; a human chooses it")
     if digest and d and d != digest:
         return Answer(ATRASADO, latest=tag, digest=d,
                       why="the same tag now points at other content upstream")
@@ -341,6 +379,38 @@ def for_tool(tool, current, same_major=True):
     return a
 
 
+#: The name of the registry this instance runs. An image whose name
+#: starts with it is an OUTPUT of the supply chain, not a choice with an
+#: upstream: its tag moves when the chain is rebuilt.
+OWN_REGISTRY = "registry.registry-system.svc.cluster.local"
+
+
+def for_pin(pin, same_major=True):
+    """What upstream says about one pin — or that there is nobody to ask.
+
+    THE FIRST QUESTION IS WHETHER THERE IS A QUESTION. Three of the pins
+    on the author's instance are images aegis builds itself, and one
+    class (`apt`) is measured against the machine rather than against a
+    registry. Neither is «I could not look»: they are complete answers,
+    and reporting them as failures to measure made `inventory` exit 2
+    every day on an instance where nothing was wrong. Check 216 drives
+    this function for exactly that.
+    """
+    if pin.cls in ("mirror", "containerfile", "raw-image", "jenkinsfile"):
+        if pin.extra.get("interno") or pin.name.startswith(OWN_REGISTRY):
+            return Answer(SIN_ARRIBA,
+                          why="it is built by this instance: its version is a tag of the "
+                              "chain, not a choice with an upstream. It moves when the "
+                              "chain is rebuilt, never by a bump")
+        return for_image(pin.name, pin.current, pin.digest, same_major=same_major)
+    if pin.cls == "chart":
+        return for_chart(pin.extra.get("repo"), pin.extra.get("chart"), pin.current,
+                         same_major=same_major)
+    if pin.cls in ("k3s", "userland"):
+        return for_tool(pin.name, pin.current, same_major=same_major)
+    return Answer(SIN_ARRIBA, why="measured against the machine, not upstream")
+
+
 def apt_upgradable():
     """What the machine says it could upgrade, and which of those touch
     the kernel or the graphics driver — the two that cannot be undone
@@ -365,6 +435,17 @@ def cache_path():
     return pathlib.Path(paths.aegis_home()) / ".cache" / "aegis-update" / "upstream.json"
 
 
+#: The vocabulary the cached answers are written in. A cache holds the
+#: WORD upstream's answer was given, so when the words change an old
+#: entry is not stale, it is in another language — and it would be read
+#: back for six hours as if it still meant what it said. Bump this
+#: whenever a state is added, removed or renamed. Measured the day
+#: `no-medible` became three answers: every entry of the old cache came
+#: back saying «I could not look» about pins that had just been
+#: reclassified.
+CACHE_VOCABULARY = 2
+
+
 def load_cache(fresh=False):
     if fresh:
         return {}
@@ -372,6 +453,8 @@ def load_cache(fresh=False):
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
+        return {}
+    if data.get("vocabulario") != CACHE_VOCABULARY:
         return {}
     import time
     cut = time.time() - CACHE_TTL
@@ -385,7 +468,8 @@ def save_cache(entries):
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         stamped = {k: {**v, "epoch": v.get("epoch") or time.time()} for k, v in entries.items()}
-        p.write_text(json.dumps({"entries": stamped}, ensure_ascii=False), encoding="utf-8")
+        p.write_text(json.dumps({"vocabulario": CACHE_VOCABULARY, "entries": stamped},
+                                ensure_ascii=False), encoding="utf-8")
     except OSError:
         # A cache that cannot be written is a slower command, never a
         # wrong one.

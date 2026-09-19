@@ -59,6 +59,14 @@ READ_ONLY = {
     "tenant show", "traffic show", "capacity show", "builds show",
     "check", "edge check", "data remote status", "builds show --org",
     "quota list",
+    # The two the Updates page draws (2026-09-18). `update inventory`
+    # derives the pins from the platform checkout and asks public
+    # registries; `update status` reads one file this instance wrote.
+    # Neither writes, commits or touches the cluster — and the two verbs
+    # of that command that DO (`window`, `rollback`) are deliberately
+    # not here, and are caught by the blunt half below if the console
+    # ever builds a call to them out of variables.
+    "update inventory", "update status",
 }
 WRITES_FILES_HERE = {"org apply", "secret create", "quota add", "quota set"}
 ALLOWED = READ_ONLY | WRITES_FILES_HERE
@@ -76,7 +84,16 @@ ALLOWED = READ_ONLY | WRITES_FILES_HERE
 # stops. `aegis init` from a console would be caught by the list above
 # anyway, which sees every literal invocation.
 FORBIDDEN_WORDS = {"delete", "destroy", "restore", "rotate", "sync", "move",
-                   "app", "backup"}
+                   "app", "backup", "rollback"}
+# `window` is NOT here, and the reason is worth writing down rather than
+# leaving as an omission somebody later "fixes". `aegis update window`
+# is exactly the kind of change this list exists to keep out — but the
+# word is also ordinary English on the screen that draws what the last
+# update window did, and a blunt rule that fires on its own page is a
+# rule somebody switches off. It is covered by the list of allowed
+# invocations above, which sees every literal call; what the blunt half
+# adds is only the calls built out of variables, and `rollback` is the
+# one of the pair that is not also a noun.
 # Programs that change something outside this process. They are looked
 # for in CALLS and never in the text: the first version of this check
 # grepped the source for the words and went red on its own comment,

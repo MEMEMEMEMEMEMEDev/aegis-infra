@@ -253,7 +253,23 @@ def capture(name, what, runs):
         parts = line.split()
         if not parts:
             continue
-        filename = f"{parts[0]}.json"
+        # NAMED AFTER THE WHOLE COMMAND, not its first word. Until
+        # 2026-09-18 it was `parts[0]`, and `--run "update inventory"`
+        # with `--run "update status"` wrote both documents to
+        # `update.json`: the second silently overwrote the first, the
+        # case.yaml listed two readings pointing at one file, and the
+        # screen drew the same document twice. It had never bitten
+        # because no case had ever captured two subcommands of one
+        # command. Flags are left out so the name stays a name.
+        filename = "-".join(w for w in parts if not w.startswith("-")) + ".json"
+        if any(pr.get("documento") == filename for pr in produced):
+            # LOUD, not clever. Two commands that would land on one file
+            # is the bug above, and inventing a suffix would make it
+            # survive as something nobody reads.
+            raise SystemExit(
+                f"aegis console capture: «{' '.join(parts)}» would write {filename}, "
+                f"which another command in this capture already wrote. Two readings "
+                f"pointing at one document is a case that draws the same thing twice.")
         entry = {"comando": " ".join(parts), "documento": filename}
         try:
             rc, doc = cli.run_json(*parts)
@@ -350,7 +366,14 @@ def listing():
 # in one listing of the destination; it is what the Storage page reads.
 SOURCES = ("org list", "repos list", "traffic show", "capacity show",
            "builds show --last 60", "check", "edge check", "data remote status",
-           "quota list")
+           "quota list",
+           # The two the Updates page draws. `update status` reads a file
+           # and is instant; `update inventory` asks fifty-odd public
+           # registries, and it leans on the six-hour cache the daily
+           # notice timer keeps warm — about a second when the cache is
+           # there, half a minute when it is not. That cost is paid ONCE
+           # per server, at start-up, and not per page.
+           "update inventory", "update status")
 
 
 # AND WHAT ONE ORGANIZATION'S SCREEN READS. Three commands, each one
@@ -620,8 +643,15 @@ def _read_instance(sources=SOURCES):
     return readings
 
 
-PAGES = ("deployments", "domains", "traffic", "storage", "plans", "security", "machine",
-         "health", "tour")
+# DERIVED FROM THE SCREENS THEMSELVES, not written out. This list is
+# what the server routes, what `draw` writes a file for, and what a
+# `?back=` is allowed to name — and it was a literal until 2026-09-18,
+# when a new screen was added to `screens.VIEWS` and was reachable from
+# the menu, drawn by nothing and routed to nothing. The one page that is
+# not here is `projects`, because it is served at `/`.
+from aegis import screens as _screens        # noqa: E402
+
+PAGES = tuple(k for k in _screens.VIEWS if k != "projects")
 
 
 def _back(query, readings, default="/"):

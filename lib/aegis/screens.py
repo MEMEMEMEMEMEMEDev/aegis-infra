@@ -111,6 +111,7 @@ PAGES = (
     ("security", "Security", "/security", ()),
     ("machine", "Machine", "/machine", ("capacity show",)),
     ("health", "Health", "/health", ("check",)),
+    ("updates", "Updates", "/updates", ("update inventory", "update status")),
 )
 
 # The menu in three groups, the way the consoles people know are laid
@@ -118,7 +119,7 @@ PAGES = (
 # platform under it. A flat list of nine is a list somebody scans twice.
 MENU = (("Build & ship", ("projects", "deployments", "domains")),
         ("Run", ("traffic", "storage", "plans")),
-        ("Platform", ("security", "machine", "health")))
+        ("Platform", ("security", "machine", "updates", "health")))
 
 LEAD = {
     "projects": "Each project is one of your applications: its services, its domain, "
@@ -148,6 +149,9 @@ LEAD = {
              "burst to, how many pods and disks. A contract names a plan and never a "
              "number, so changing the machine is one file and not thirty contracts. "
              "The plans aegis ships keep their numbers; the ones you add are yours.",
+    "updates": "Fifty-odd versions are pinned across this platform, and this is where "
+               "you find out what of all that is behind. Nothing on this page changes "
+               "anything: a window is a command you run when you have the time for it.",
 }
 QUOTA_LABEL = {
     "requests.cpu": "CPU reserved", "requests.memory": "memory reserved",
@@ -208,6 +212,11 @@ def _icon(name):
                   '<path d="M5 10.5 3 13l2.2-.5M11 10.5 13 13l-2.2-.5M8 10.5v3"/>',
         "traffic": '<path d="M2 13V9M6 13V5M10 13V7M14 13V3"/>',
         "steps": '<path d="M1.5 14h4v-4h4V6h4V2" stroke-linejoin="round"/>',
+        # An arrow going up out of a tray: what an update is, drawn the
+        # way every console people already know draws it.
+        "upgrade": '<path d="M8 10.5V2M4.5 5.5 8 2l3.5 3.5" stroke-linejoin="round"/>'
+                   '<path d="M2 10.5v3h12v-3"/>',
+        "clock": '<circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 1.5"/>',
     }
     body = paths.get(name) or '<circle cx="8" cy="8" r="6"/>'
     return (f'<svg class="ico" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" '
@@ -217,7 +226,8 @@ def _icon(name):
 
 PAGE_ICON = {"projects": "rocket", "deployments": "rocket", "domains": "globe",
              "traffic": "traffic", "storage": "database", "security": "shield",
-             "machine": "chip", "health": "pulse", "plans": "steps"}
+             "machine": "chip", "health": "pulse", "plans": "steps",
+             "updates": "upgrade"}
 
 
 def _pip(state):
@@ -1793,6 +1803,199 @@ def machine(readings):
     return _main("machine", v, [("Machine", "/machine")], "".join(parts))
 
 
+# ── updates ──────────────────────────────────────────────────────────
+# WHAT THIS PAGE IS FOR. Fifty-odd versions are pinned across this
+# platform and until the vigía nobody watched most of them; the console
+# is where «what of all this is behind» stops being a question somebody
+# has to think to ask. It draws two readings and nothing else: what the
+# inventory measured, and how the last window ended.
+#
+# WHAT IT REFUSES TO DO. It has no button. Opening a window changes the
+# platform, takes the sites off the air and can roll itself back, and a
+# page that could start that with a click would be a page that starts it
+# by accident. The commands are written out to be typed.
+
+#: The word for each of the six answers upstream gives. A WORD AND NOT
+#: A STATE, and that is I-1 rather than a style choice: the states on
+#: this page come from the steps of the document, and «behind» is not
+#: one the document carries. The first draft coloured it `attention`,
+#: which is a state no reading here holds — the console would have been
+#: inventing, on the one page whose whole subject is not pretending to
+#: know things. A pin that is behind is not a fault: the platform works,
+#: and the page says so in words and numbers instead of in hue.
+UPSTREAM_WORD = {
+    "al-dia": "up to date",
+    "atrasado": "behind",
+    "desaparecido": "gone upstream",
+    "sin-arriba": "built here",
+    "sin-orden": "no order to follow",
+    "no-medible": "nobody could ask",
+}
+
+#: What each layer of an update window is, in the words of the page.
+#: The numbers come from the documents; only the names live here.
+LAYER_WORD = {
+    1: "the host's packages", 2: "the host's binaries", 3: "k3s",
+    4: "the platform's charts", 5: "images written by hand",
+    6: "mirrored images", 7: "the bases aegis owns", 8: "the CI's pod templates",
+    9: "kernel and driver",
+}
+
+
+def _pin_rows(steps):
+    """One row per pin, worst first, each carrying where its version is
+    written — because the next thing anybody does with this table is go
+    and look at that line."""
+    order = {ATTENTION: 0, WRONG: 0, UNSEEN: 1, FINE: 2}
+    def rank(st):
+        up = st.get("arriba")
+        return (0 if up in ("atrasado", "desaparecido") else
+                1 if up == "no-medible" else 2,
+                st.get("capa") or 99, st.get("nombre") or "")
+    rows = []
+    for st in sorted(steps, key=rank):
+        up = st.get("arriba")
+        word = UPSTREAM_WORD.get(up, up or "?")
+        # THE STATE COMES FROM THE STEP, always. `desaparecido` is a
+        # `wrong` step and `no-medible` is `not-evaluable`, so the two
+        # that deserve a colour already have one, from the document.
+        state = state_of(st)
+        where = st.get("donde") or []
+        place = (f'<span class="mono faint">{_e(where[0]["fichero"])}'
+                 f':{_e(where[0]["linea"])}</span>' if where else
+                 '<span class="faint">nowhere anybody could name</span>')
+        if len(where) > 1:
+            place += f' <span class="faint">+{len(where) - 1} more</span>'
+        to = (f'<b class="mono">{_e(st.get("ultima"))}</b>'
+              if st.get("ultima") and st.get("ultima") != st.get("version") else
+              '<span class="faint">—</span>')
+        why = st.get("por_que")
+        rows.append(
+            f'<tr class="{"behind" if up == "atrasado" else ""}">'
+            f'<td>{_pip(state)}<b>{_e(st.get("nombre") or "?")}</b>'
+            + (f'<br><span class="note">{_e(why)}</span>' if why else "")
+            + f'</td>'
+            f'<td><span class="badge">{_e(st.get("clase") or "?")}</span></td>'
+            f'<td class="mono">{_e(st.get("version") or "—")}</td>'
+            f'<td>{to}</td>'
+            f'<td>{_e(word)}</td>'
+            f'<td class="num mono">{_e(st.get("capa") or "—")}</td>'
+            f'<td>{place}</td></tr>')
+    return rows
+
+
+def _updates_section(reading):
+    if blind(reading):
+        return _blind_section(reading, "What is behind", "updates", icon="upgrade")
+    steps = [st for st in steps_of(reading) if st.get("step", "").startswith("pin:")]
+    states = states_in(reading)
+    if not steps:
+        states.add(UNSEEN)
+        return _section(reading, "What is behind",
+                        f'<p class="empty" data-state="{UNSEEN}">no pin was read</p>',
+                        states, "updates", icon="upgrade")
+    by_word = {}
+    for st in steps:
+        word = UPSTREAM_WORD.get(st.get("arriba"), "?")
+        by_word[word] = by_word.get(word, 0) + 1
+    behind = sum(1 for st in steps if st.get("arriba") == "atrasado")
+    gone = sum(1 for st in steps if st.get("arriba") == "desaparecido")
+    blindn = sum(1 for st in steps if st.get("arriba") == "no-medible")
+    facts = [_fact("pinned", _num(len(steps))), _fact("behind", _num(behind))]
+    if gone:
+        facts.append(_fact("gone upstream", _num(gone)))
+    if blindn:
+        facts.append(_fact("nobody could ask", _num(blindn)))
+    # The spread, as plain magnitude: `_hbars` with no state draws the
+    # size of a thing and claims nothing about how it is. Which is
+    # exactly right here — «thirty-four behind» is a quantity, and the
+    # only colours on this page belong to the two answers the document
+    # itself calls wrong or unmeasured.
+    spread = _hbars([(k, n, str(n), None)
+                     for k, n in sorted(by_word.items(), key=lambda kv: -kv[1])],
+                    title="every version this platform pins, by what upstream says")
+    # And what a window would raise, by layer: the same grouping the
+    # protocol walks, so the page and the command agree about the order.
+    per_layer = {}
+    for st in steps:
+        if st.get("arriba") == "atrasado":
+            per_layer[st.get("capa") or 99] = per_layer.get(st.get("capa") or 99, 0) + 1
+    bars = _hbars([(f'{n} · {LAYER_WORD.get(n, "?")}', per_layer[n], f'{per_layer[n]}',
+                    None) for n in sorted(per_layer)],
+                  title="what a window would raise, by layer",
+                  note="A window walks these in order and asks the round after each "
+                       "one. It stops and undoes itself if a layer breaks something."
+                  ) if per_layer else ""
+    body = (f'<div class="facts-row head">{"".join(facts)}</div>' + spread + bars
+            + f'<table class="rows updates"><thead><tr><th>pinned thing</th><th>class</th>'
+            f'<th>here</th><th>upstream</th><th>what that means</th>'
+            f'<th class="num">layer</th><th>written at</th></tr></thead>'
+            f'<tbody>{"".join(_pin_rows(steps))}</tbody></table>'
+            f'<p class="note legend"><b>Built here</b> and <b>no order to follow</b> are '
+            f'answers, not blind spots: the first has no upstream to ask and the second '
+            f'has tags nobody can order. A window never moves either of them. '
+            f'<b>Nobody could ask</b> is the one that means the measurement failed.</p>')
+    return _section(reading, "What is behind", body, states, "updates", icon="upgrade",
+                    lead="Every version this platform pins, against what exists upstream "
+                         "today. Nothing here changes anything: the window is a command "
+                         "you run.")
+
+
+def _window_section(reading):
+    if blind(reading):
+        return _blind_section(reading, "The last update window", "window", icon="clock")
+    steps = steps_of(reading)
+    states = states_in(reading)
+    if not steps:
+        states.add(UNSEEN)
+        return _section(reading, "The last update window",
+                        f'<p class="empty" data-state="{UNSEEN}">nothing was read</p>',
+                        states, "window", icon="clock")
+    st = steps[0]
+    if st.get("step") == "window:none":
+        body = (f'<p class="empty">This instance has never opened an update window.</p>'
+                f'<p class="note">That is not a fault; it is a thing that has not '
+                f'happened yet. <code class="mono">aegis update window</code> rehearses '
+                f'one without touching anything, and only <code class="mono">--yes</code> '
+                f'opens it.</p>')
+        return _section(reading, "The last update window", body, states, "window",
+                        icon="clock")
+    outcome = st.get("outcome") or "?"
+    commits = st.get("commits") or []
+    facts = [_fact("ended", outcome, mono=False),
+             _fact("commits", _num(len(commits)))]
+    if st.get("closed_at"):
+        facts.append(_fact("closed", str(st["closed_at"])[:16], mono=False))
+    rows = "".join(
+        f'<tr><td class="mono">{_e((c.get("sha") or "")[:12])}</td>'
+        f'<td>{_e(c.get("subject") or "")}</td>'
+        f'<td class="num mono">{_e(c.get("layer") if c.get("layer") is not None else "—")}</td>'
+        f'</tr>' for c in commits)
+    table = (f'<table class="rows"><thead><tr><th>commit</th><th>what it changed</th>'
+             f'<th class="num">layer</th></tr></thead><tbody>{rows}</tbody></table>'
+             if rows else
+             '<p class="note">That window made no commit: it changed nothing.</p>')
+    warn = ('<p class="why">The page your visitors see may still be up: after an '
+            'acceptance that did not pass, the window leaves it there on purpose. Read '
+            '<code class="mono">aegis update status</code> before taking it down.</p>'
+            if outcome == "needs-a-human" else "")
+    body = f'<div class="facts-row head">{"".join(facts)}</div>{warn}{table}'
+    return _section(reading, "The last update window", body, states, "window", icon="clock",
+                    lead="What the last window did, commit by commit, and how it ended.")
+
+
+def updates(readings):
+    v = verdict_of(readings)
+    parts = []
+    inv = reading_for(readings, "update inventory")
+    parts.append(_updates_section(inv) if inv is not None else
+                 '<p class="empty">the inventory was not read on this page</p>')
+    w = reading_for(readings, "update status")
+    parts.append(_window_section(w) if w is not None else
+                 '<p class="empty">no window was read on this page</p>')
+    return _main("updates", v, [("Updates", "/updates")], "".join(parts))
+
+
 def _round_full(reading):
     if blind(reading):
         return _blind_section(reading, "The round", "round", icon="pulse")
@@ -2062,6 +2265,20 @@ def _tour_steps(readings):
          "text `aegis check` prints, so what you read here is what a terminal would say.",
          "«Could not look» on a section is not «fine»: the round could not measure it, "
          "and the thing it would have measured is in the dark."),
+        ("Updates", "/updates", "Updates",
+         "Fifty-odd versions are pinned across this platform —charts, images written by "
+         "hand in the manifests, the mirrors, the bases aegis owns, the CI's pod "
+         "templates, k3s and the host's own binaries— and this page is what of all that "
+         "is behind, against what exists upstream today. Under it, what the last update "
+         "window did, commit by commit.",
+         "Read the two bars first: how the pins break down, and what a window would "
+         "raise in each layer. Then rehearse one with `aegis update window`, which asks "
+         "everything and touches nothing. Only `--yes` opens it.",
+         "«Built here» and «no order to follow» are ANSWERS, not blind spots: the first "
+         "has no upstream to ask, the second has tags nobody can order, and no window "
+         "will ever move either. Only «nobody could ask» means the measurement failed. "
+         "And nothing on this page has a button: a window takes your sites off the air "
+         "and can roll itself back, and that does not start with a click."),
         ("Read it again", "/measure?back=/", "Read it again",
          "The console reads the instance once when it starts and serves what it has. "
          "Every screen says when its readings were taken, on the page and not only in "
@@ -2080,7 +2297,7 @@ def _tour_steps(readings):
          "`aegis org list`, a project is `aegis tenant show <name>`, Deployments is "
          "`aegis builds show`, Domains `aegis edge check`, Traffic `aegis traffic show`, "
          "Storage `aegis data remote status`, Plans `aegis quota list`, Machine `aegis "
-         "capacity show`, Health `aegis check`.",
+         "capacity show`, Health `aegis check`, Updates `aegis update inventory`.",
          "Every one of those takes `--json`, and that document is exactly what the "
          "screen drew: the console has nothing you cannot see from a terminal."),
     ]
@@ -2112,7 +2329,8 @@ def tour(readings):
 
 VIEWS = {"projects": overview, "deployments": deployments, "domains": domains,
          "traffic": traffic, "storage": storage, "security": security,
-         "machine": machine, "health": health, "plans": plans, "tour": tour}
+         "machine": machine, "updates": updates, "health": health, "plans": plans,
+         "tour": tour}
 
 
 def render(readings, subject=None, view=None, instance=None):

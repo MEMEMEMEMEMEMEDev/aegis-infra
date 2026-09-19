@@ -32,26 +32,36 @@ with no edit, and a class that comes back empty is a reader that broke
 
 Upstream is asked with the registry's own protocol (the same anonymous
 token dance `aegis image` does), with the chart repository's index, and
-with the releases of the projects that publish binaries. Four answers,
-and the fourth is why this is careful:
+with the releases of the projects that publish binaries. **Six
+answers**, and the last three are why this is careful:
 
 | answer | what it means |
 |---|---|
 | **al día** | the pin is on the newest candidate |
 | **atrasado** | there is a newer one, named |
 | **desaparecido** | the pinned tag no longer exists upstream |
-| **no medible** | unreachable, rate-limited, or a tag scheme nobody can order |
+| **sin arriba** | there is nobody to ask: this instance builds it |
+| **sin orden** | upstream answered and its tags carry no order anybody can follow |
+| **no medible** | the instrument never reached the subject: a timeout, a 429, a repository that would not talk |
+
+The first plan had four of these, with the last three under one name.
+Writing the console's Updates page is what showed the cost: `inventory`
+exited 2 on a perfectly healthy instance, every day, because three
+images it builds itself and two tag schemes nobody can order were being
+reported as «I could not look». A verdict that never changes is a
+verdict nobody reads, and it is the same disease one level up.
+
+**Sin arriba** and **sin orden** are ANSWERS. They have reasons attached
+and they will read the same next month; no retry makes them better and
+no window will ever act on them. **No medible** is the third outcome,
+it is usually transient, and **only that one makes the command exit 2**.
 
 A newer candidate has to carry the **same shape**: `3.22` is a series
 and `3.24.2` is a point release of another one, so the second is never
 offered to somebody who pinned the first. A tag with a build number and
-a git hash in it — `3355.v388858a_47b_33-23` — is reported as
-**unorderable**, because sorting it is inventing an order the publisher
-never promised, and a window that acts on an invented order updates to
-something nobody chose.
-
-**A class nobody could measure makes the command exit 2.** «Upstream did
-not answer» is never «up to date».
+a git hash in it — `3355.v388858a_47b_33-23` — is **sin orden**, because
+sorting it is inventing an order the publisher never promised, and a
+window that acts on an invented order updates to something nobody chose.
 
 ## The layers, and how each one comes undone
 
@@ -369,12 +379,42 @@ aegis update window --yes --layer 4 --layer 5          # only these, in protocol
 Every refusal is printed with the flag that would lift it. A proposal
 that hides what it will not do is not a plan.
 
-## What is not here yet
+## The clock, and where it is read
 
-The monthly clock and the console page: a user timer that **only
-notices** that a window is due, the metric
-`aegis_update_pins_behind{class}` beside the vigía's own, and an
-«Updates» page fed by `update status`.
+```bash
+aegis update metrics     # the same measurement, in the exposition format
+```
+
+A user timer runs that once a day and pushes it to vmsingle
+(`share/systemd/aegis-update-notice.*`). **It notices; it does not
+act.** aegis never opens a window because a clock said so.
+
+The reminder is an **alert**, not the timer, and that is a deliberate
+departure from «fire on the first Sunday»: a timer that fires once a
+month and misses —the machine was off, nobody was logged in— is silent
+for another month, and its silence looks exactly like a month with
+nothing to do. `aegis_update_window_timestamp_seconds` carries the age
+of the last window, `UpdateWindowDue` reads it, and it keeps firing
+until one actually closes.
+
+| alert | what it means |
+|---|---|
+| `UpdateWindowDue` | more than a month since the last window, and there is something to raise |
+| `UpdateWindowNeverRun` | this instance has never opened one |
+| `UpdateWindowNeedsAHuman` | **critical**: the last window could not finish, and the page may still be up |
+| `UpdatePinGone` | a pinned version no longer exists upstream: this platform cannot be rebuilt from its own sources |
+| `UpdateMeasurementStopped` | nobody has measured in three days, so every rule above is mute rather than green |
+
+And the console has an **Updates** page: every pin against what upstream
+says, what a window would raise in each layer, and what the last window
+did commit by commit. It has no button. A window takes the sites off the
+air and can roll itself back, and that does not start with a click.
+
+## What is not here yet
 
 Tenant application images are outside all of this, as they are outside
 the vigía: that gap is named in `images.md` §7 and is not closed here.
+
+Nothing in the init installs the notice timer, which is the same gap the
+backup timer had until 2026-09-16. `share/systemd/README.md` has the
+five commands.

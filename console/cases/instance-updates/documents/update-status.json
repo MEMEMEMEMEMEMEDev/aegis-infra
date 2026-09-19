@@ -1,0 +1,11 @@
+{
+  "steps": [
+    {
+      "step": "window:none",
+      "state": "already",
+      "ventanas": 0,
+      "nota": "this instance has never opened an update window"
+    }
+  ],
+  "rc": 0
+}

@@ -113,3 +113,80 @@ be there. Without it the bundle is written and the credential of the
 destination does not decrypt, and the run fails after the capture.
 `aegis data remote status` says how old each copy is, and the console's
 Storage screen reads the same document.
+
+## aegis-update-notice.service / .timer
+
+What of everything this platform pins is behind, measured once a day on
+the host and pushed to vmsingle.
+
+**It notices. It does not act.** That is the operator's decision and it
+is the whole contract of the unit: aegis never opens an update window on
+its own. A window changes the platform, takes the public sites off the
+air behind the operator's maintenance page, and can roll itself back —
+none of that happens because a clock said so. What runs here is `aegis
+update metrics`, which reads the platform checkout, asks public
+registries and prints numbers. It writes nothing, commits nothing and
+touches no cluster object.
+
+It pushes rather than being scraped, for the same reason the other two
+host units do: the subject lives outside the cluster. Deriving the pins
+means reading the instance's platform checkout and asking registries
+from the host, and no pod does either.
+
+### Why the reminder is an alert and not this timer
+
+The plan this came from said «a user timer that only notices that a
+window is due, on the first Sunday». It is a daily measurement and an
+alert instead, and the reason is the one this whole product keeps
+running into: **a timer that fires once a month and misses is silent for
+another month, and its silence looks exactly like a month with nothing
+to do.** The machine was off, or nobody was logged in, and nothing says
+so.
+
+`aegis_update_window_timestamp_seconds` carries the age of the last
+window, and `UpdateWindowDue` reads it. An age is true whenever anybody
+looks at it, it keeps firing until a window actually closes, and the
+same series feeds the console's Updates page.
+
+### What it publishes
+
+| series | what it says |
+|---|---|
+| `aegis_update_pins_total{class}` | versions pinned, by class |
+| `aegis_update_pins_behind{class}` | a newer candidate exists, and a window would take it |
+| `aegis_update_pins_current{class}` | measured and already newest |
+| `aegis_update_pins_gone{class}` | the pinned tag no longer exists upstream |
+| `aegis_update_pins_unactionable{class}` | built here, or tagged with no order anybody follows |
+| `aegis_update_pins_unmeasurable{class}` | **nobody could ask** — the only blind one |
+| `aegis_update_window_ever` | 1 once this instance has closed a window |
+| `aegis_update_window_timestamp_seconds` | when the last one closed |
+| `aegis_update_window_outcome{outcome}` | how it ended, one series per outcome |
+| `aegis_update_measured_timestamp_seconds` | when these numbers were taken |
+
+The last one is not decoration: a gauge nobody writes any more keeps its
+last value for ever, so «0 behind» would stay green while nothing was
+being measured. `UpdateMeasurementStopped` watches it.
+
+The difference between `unactionable` and `unmeasurable` is the reason
+this family exists at all. An image aegis builds itself has no upstream
+to ask, and a tag like `3355.v388858a_47b_33-23` carries no order
+anybody can follow. Those are **answers**, and they will read the same
+next month. Only `unmeasurable` means the instrument did not reach the
+subject.
+
+### Installing it
+
+Nothing in the init installs these units — the same gap the backup timer
+had, found on 2026-09-16. Until a phase does:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp /usr/local/share/aegis/systemd/aegis-update-notice.* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now aegis-update-notice.timer
+loginctl enable-linger $USER      # or it only runs while you are logged in
+```
+
+The first run measures fifty-odd registries with a cold cache and takes
+about half a minute. After that it is seconds, and the console's Updates
+page leans on the same six-hour cache.

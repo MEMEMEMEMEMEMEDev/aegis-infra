@@ -526,3 +526,92 @@ data:
             annotations:
               summary: "this machine stopped reporting on itself"
               description: "The host timer pushes every minute; nothing has arrived in fifteen. Until it does, every alert in this family is MUTE and not green — the machine could be swapping itself to death and the panel would look calm. The usual cause is a user timer without lingering: `loginctl enable-linger $USER`, then `systemctl --user status aegis-host-metrics.timer`."
+  actualizaciones.yaml: |
+    groups:
+      # ── what is behind, and whether anybody is still looking ──────
+      # These read what `aegis update metrics` publishes from the host
+      # once a day. Same shape as the backup and host families, and for
+      # the same reason: the subject lives OUTSIDE the cluster. Deriving
+      # the pins means reading the instance's platform checkout and
+      # asking public registries, and no pod does either.
+      #
+      # THEY ONLY EVER TELL. Not one of them triggers anything: aegis
+      # does not open an update window because a clock or a rule said
+      # so. The window changes the platform, takes the sites off the
+      # air and can roll itself back, and that is the operator's to
+      # start.
+      - name: actualizaciones
+        rules:
+          # THIS IS THE REMINDER, and it is a gauge rather than a
+          # calendar. A timer that fires on the first Sunday and misses
+          # —the machine was off, nobody was logged in— is silent for
+          # another month, and that silence looks exactly like a month
+          # with nothing to do. An age is true whenever it is read, and
+          # this keeps firing until a window actually closes.
+          - alert: UpdateWindowDue
+            expr: (last_over_time(aegis_update_window_ever[2d]) == 1) and ((time() - last_over_time(aegis_update_window_timestamp_seconds[2d])) > 2764800) and (sum(last_over_time(aegis_update_pins_behind[2d])) > 0)
+            for: 6h
+            labels: {severity: warning}
+            annotations:
+              summary: "it has been more than a month since the last update window, and there is something to raise"
+              description: "Nothing is broken. `aegis update plan` says what would go up and in which layer; `aegis update window` rehearses it without touching anything, and only `--yes` opens one. The window takes the sites off the air behind your maintenance page, raises one layer at a time, and rolls itself back if the acceptance fails."
+          # The instance that most needs telling is the one that has
+          # never run one, and `absent()` alone could not say so: it
+          # would fire the same way for a timer that stopped. So the
+          # producer publishes `ever` as a series, and this reads it.
+          - alert: UpdateWindowNeverRun
+            expr: (last_over_time(aegis_update_window_ever[2d]) == 0) and (sum(last_over_time(aegis_update_pins_behind[2d])) > 0)
+            for: 24h
+            labels: {severity: warning}
+            annotations:
+              summary: "this instance has never opened an update window and there is something behind"
+              description: "The first one is meant to be watched: run `aegis update window` with no flags to see what it would do, and open it with `--yes` when you have the time the budget asks for. The protocol is in seed/platform/docs/protocols/updates.md."
+          # A WINDOW THAT ENDED BADLY MAY HAVE LEFT YOUR SITES BEHIND
+          # THE PAGE. That is the design —after a red the page STAYS UP
+          # on purpose, because putting a broken instance back in front
+          # of the public is what the page exists to prevent— and it is
+          # precisely why this is critical and fires fast.
+          - alert: UpdateWindowNeedsAHuman
+            expr: (last_over_time(aegis_update_window_outcome{outcome="needs-a-human"}[2d]) == 1) and on() (last_over_time(aegis_update_measured_timestamp_seconds[2d]) > 0)
+            for: 5m
+            labels: {severity: critical}
+            annotations:
+              summary: "the last update window could not finish on its own"
+              description: "The acceptance failed and the rollback did not complete, so the maintenance page was deliberately LEFT UP: your sites may be behind it right now. Read `aegis update status`, then `aegis update rollback --yes`. Take the page down by hand only once the round is clean."
+          # A pinned tag that no longer exists upstream is not a version
+          # behind: it is a platform that cannot be rebuilt from its own
+          # sources. It is separated from the count of «behind» because
+          # the answer is different — this one does not wait for a
+          # window.
+          - alert: UpdatePinGone
+            expr: (sum(last_over_time(aegis_update_pins_gone[2d])) > 0) and on() (last_over_time(aegis_update_measured_timestamp_seconds[2d]) > 0)
+            for: 1h
+            labels: {severity: critical}
+            annotations:
+              summary: "{{ $value }} pinned version(s) no longer exist upstream"
+              description: "What runs here still runs, and it can no longer be rebuilt from what it says it is made of. `aegis update inventory` names them with their class and the file and line where the version is written. This does not wait for a window."
+          # A BLIND SPOT THAT LASTS IS A BLIND SPOT NOBODY KNOWS ABOUT.
+          # «Nobody could ask» is the one answer of the six that means
+          # the instrument failed, and it is usually a 429 that clears
+          # on the next run. One that does NOT clear is a pin that has
+          # quietly left the watch, and until this fires it looks
+          # exactly like a pin that is fine.
+          - alert: UpdatePinsUnmeasurable
+            expr: (sum(last_over_time(aegis_update_pins_unmeasurable[2d])) > 0) and on() (last_over_time(aegis_update_measured_timestamp_seconds[2d]) > 0)
+            for: 48h
+            labels: {severity: warning}
+            annotations:
+              summary: "{{ $value }} pinned version(s) have not been comparable against upstream for two days"
+              description: "Not «up to date» and not «behind»: nobody could ask. A rate limit clears by itself and this will not fire; what fires here is a pin whose registry stopped answering, whose name moved, or that no reader can reach any more. `aegis update inventory` names each one with the reason it came back with."
+          # THE SIBLING OF THE FAMILY. Every rule above compares against
+          # a value, so every one goes EMPTY rather than false if the
+          # host stops publishing — and an empty rule looks exactly like
+          # a platform with nothing to update. The producer emits a
+          # measured timestamp separate from the counts for this.
+          - alert: UpdateMeasurementStopped
+            expr: absent(last_over_time(aegis_update_measured_timestamp_seconds[7d])) or absent(last_over_time(aegis_update_pins_behind[7d])) or absent(last_over_time(aegis_update_pins_unmeasurable[7d])) or absent(last_over_time(aegis_update_pins_gone[7d])) or absent(last_over_time(aegis_update_window_ever[7d])) or ((time() - last_over_time(aegis_update_measured_timestamp_seconds[7d])) > 259200)
+            for: 2h
+            labels: {severity: warning}
+            annotations:
+              summary: "nobody has measured what is behind in three days"
+              description: "NOT the same as «nothing is behind»: the measurement itself stopped, so every rule in this family is mute rather than green. The usual cause is a user timer without lingering: `loginctl enable-linger $USER`, then `systemctl --user status aegis-update-notice.timer`. Until it clears, the counts on the panel are the last ones anybody saw."

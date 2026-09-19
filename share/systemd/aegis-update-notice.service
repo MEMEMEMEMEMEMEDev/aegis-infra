@@ -1,0 +1,67 @@
+[Unit]
+Description=aegis: notice what is behind, and never act on it
+Documentation=file:///usr/local/share/aegis/systemd/README.md
+# Same condition, and the same reason, as the other two host units: with
+# no cluster there is nowhere to send this, and a unit that fails every
+# day from boot is how a real failure stops being read.
+ConditionPathExists=%h/.kube/config
+
+[Service]
+Type=oneshot
+
+# IT NOTICES. IT DOES NOT ACT.
+#
+# This is the whole contract of this unit and it is the operator's
+# decision, written here where somebody editing the ExecStart will read
+# it: aegis never opens an update window on its own. The window changes
+# the platform, takes the sites off the air and can roll itself back,
+# and none of that happens because a clock said so. What runs here is
+# `aegis update metrics`, which reads the platform checkout, asks public
+# registries, and prints numbers. It writes nothing, commits nothing and
+# touches no cluster object.
+#
+# The reminder itself is an ALERT, not this timer. That is a deliberate
+# departure from «a timer that fires on the first Sunday»: a timer that
+# fires once a month and misses —the machine was off, the user was
+# logged out— is silent for another month, and its silence looks exactly
+# like a month with nothing to do. A gauge that carries the age of the
+# last window is true whenever anybody reads it, and UpdateWindowDue
+# fires on it and keeps firing until a window closes.
+#
+# A USER unit, like the backup and the host metrics, and for the same
+# reason as the metrics one: it needs the operator's kubeconfig to find
+# vmsingle, and it needs to read the platform checkout under their home.
+# The consequence is the same and is silent, so it is said a third time:
+#   loginctl enable-linger $USER
+# Without lingering, a user timer only runs while the user has a
+# session.
+
+# THE ADDRESS IS ASKED FOR, NEVER WRITTEN DOWN, and the Service is
+# headless — so a ClusterIP of the string "None" is answered with an
+# endpoint, exactly as aegis-host-metrics.service does.
+#
+# `rc <= 1` PUBLISHES. rc 1 means a pinned tag has VANISHED upstream,
+# which is a finding and not a failure of the measurement: the numbers
+# are good and the alert wants them. rc 2 means nothing of a measurable
+# class could be asked, and then there is nothing worth importing — the
+# unit fails loudly rather than pushing a page of zeroes that would read
+# as «everything is up to date».
+ExecStart=/bin/sh -c 'm=$(/usr/local/bin/aegis update metrics); rc=$?; [ "$rc" -le 1 ] || exit "$rc"; ip=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.clusterIP}") && [ "$ip" = "None" ] && ip=$(kubectl get endpointslice -n observability -l kubernetes.io/service-name=vmsingle -o jsonpath="{.items[0].endpoints[0].addresses[0]}"); pt=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.ports[0].port}") && printf "%s" "$m" | curl -sS --fail --max-time 20 --data-binary @- "http://$ip:$pt/api/v1/import/prometheus"'
+
+# It asks fifty-odd public registries. It shares the machine with
+# everything else and should never be the reason something else waited.
+Nice=10
+IOSchedulingClass=idle
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+
+# Fifty registries over a domestic connection, with the retries the
+# reader already does. Ten minutes is generous and it is a cap, not a
+# target: a run that hangs is worse than one that fails, because the
+# next one never starts and a gauge that stopped looks like a platform
+# with nothing to update.
+TimeoutStartSec=600

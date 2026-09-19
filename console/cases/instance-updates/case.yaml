@@ -1,0 +1,27 @@
+version: 1
+caso: instance-updates
+que: lo que esta plataforma fija contra lo que existe rio arriba, y la ultima ventana
+  de actualizacion
+procedencia: medido
+producido_por:
+- comando: update inventory
+  documento: update-inventory.json
+  rc: 0
+- comando: update status
+  documento: update-status.json
+  rc: 0
+medido_en: '2026-09-18T21:15:12-03:00'
+aegis: 2fbd0a0e486efda4b3f12d7607ea9dbb2972bf08
+forma:
+  update-inventory.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  update-status.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already

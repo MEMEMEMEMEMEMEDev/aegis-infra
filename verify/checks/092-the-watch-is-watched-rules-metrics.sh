@@ -226,14 +226,26 @@ for svc in sorted(SYSTEMD.glob("*.service")):
     if "/api/v1/import/prometheus" not in txt:
         continue
     timer = svc.with_suffix(".timer")
-    m = re.search(r"^OnUnitActiveSec=(\d+)\s*(s|m|h)\s*$", timer.read_text(), re.M) \
-        if timer.is_file() else None
-    if not m:
-        bad.append(f"{svc.name} pushes metrics and its timer declares no readable "
-                   "OnUnitActiveSec: with no period there is no minimum window to "
-                   "demand of whoever reads what it publishes")
+    # TWO WAYS OF SAYING HOW OFTEN, because both are legitimate and the
+    # choice between them is about the subject. `OnUnitActiveSec` is for
+    # a sampler where regularity IS the measurement (the host's memory,
+    # read every minute); `OnCalendar` is for one where a late reading
+    # is still true and a missed one should be caught up (what is behind
+    # upstream, read once a day). Refusing the second would have pushed
+    # the update timer into the wrong shape to satisfy a check.
+    ttext = timer.read_text() if timer.is_file() else ""
+    m = re.search(r"^OnUnitActiveSec=(\d+)\s*(s|m|h)\s*$", ttext, re.M)
+    cal = re.search(r"^OnCalendar=(hourly|daily|weekly)\s*$", ttext, re.M)
+    if m:
+        per = int(m.group(1)) * {"s": 1, "m": 60, "h": 3600}[m.group(2)]
+    elif cal:
+        per = {"hourly": 3600, "daily": 86400, "weekly": 604800}[cal.group(1)]
+    else:
+        bad.append(f"{svc.name} pushes metrics and its timer declares neither a readable "
+                   "OnUnitActiveSec nor a plain OnCalendar (hourly/daily/weekly): with no "
+                   "period there is no minimum window to demand of whoever reads what it "
+                   "publishes")
         continue
-    per = int(m.group(1)) * {"s": 1, "m": 60, "h": 3600}[m.group(2)]
     # Only the ExecStart* lines, and the whole verb chain. Reading the
     # unit's PROSE cost one iteration of this very check: a comment
     # that mentioned `aegis check` made it believe the timer published

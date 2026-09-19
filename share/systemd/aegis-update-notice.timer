@@ -1,0 +1,36 @@
+[Unit]
+Description=aegis: notice once a day what is behind
+Documentation=file:///usr/local/share/aegis/systemd/README.md
+
+[Timer]
+Unit=aegis-update-notice.service
+
+# DAILY, and the window is MONTHLY. The two cadences are different on
+# purpose: the window is when things change, and this is how often the
+# operator's dashboard is allowed to be wrong. A monthly measurement
+# would mean that «nine charts behind» could be twenty-nine days stale
+# on the morning somebody decides whether to open a window.
+OnCalendar=daily
+
+# The first run waits: at boot the cluster is coming up, kubectl answers
+# nothing useful, and the push would fail loudly for a reason that is
+# not a failure.
+OnBootSec=15min
+
+# JITTER, unlike the host metrics timer, and the difference is the
+# subject. There, regularity IS the measurement, because an alert reads
+# a rate between samples. Here the numbers are versions, which do not
+# move between 03:00 and 03:30, and half an hour of spread is ordinary
+# politeness towards fifty public registries that are answering for
+# free.
+RandomizedDelaySec=30min
+
+# AND IT CATCHES UP, unlike the host metrics timer, for the same reason
+# read the other way. A late sample of memory is a lie about a machine
+# that no longer exists; a late reading of what is behind is still true
+# when it is taken. A laptop that was closed for four days should
+# measure on the fifth rather than wait for midnight.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
