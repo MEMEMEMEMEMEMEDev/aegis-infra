@@ -63,9 +63,9 @@ import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
 old = '''MENU = (("Build & ship", ("projects", "deployments", "domains")),
         ("Run", ("traffic", "storage", "plans")),
-        ("Platform", ("security", "machine", "health")))'''
-assert s.count(old) == 1
-p.write_text(s.replace(old, '''MENU = (("Platform", ("security", "machine", "health")),
+        ("Platform", ("security", "machine", "updates", "health")))'''
+assert s.count(old) == 1, "re-aim this control: the menu's groups have moved"
+p.write_text(s.replace(old, '''MENU = (("Platform", ("security", "machine", "updates", "health")),
         ("Build & ship", ("projects", "deployments", "domains")),
         ("Run", ("traffic", "storage", "plans")))''', 1))
 P
