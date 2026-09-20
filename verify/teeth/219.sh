@@ -68,3 +68,13 @@ P
 }
 # a comment showing the forbidden shape is prose
 control_3() { printf '\n# note: never write steps.wrong(name, **payload, por_que="…") — see check 219.\n' >> "$U219"; }
+
+# and the call that died, put back as it was
+red_5() { python3 - "$U219" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = '    ctx.j.note("sync", **{**settled, "app": app, "rc": rc})'
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, '    ctx.j.note("sync", app=app, rc=rc, **settled)', 1))
+P
+}

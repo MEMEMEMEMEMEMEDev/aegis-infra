@@ -31,10 +31,17 @@ import sys
 ROOT = sys.argv[1]
 findings = []
 
-#: The receivers whose keyword arguments are DATA rather than
-#: parameters: everything they are handed ends up in a document.
-SINKS = {"steps": ("done", "already", "wrong", "not_evaluable", "step"),
-         "j": ("note", "close"), "ctx": ("say",)}
+#: The METHODS whose keyword arguments are DATA rather than parameters:
+#: everything they are handed ends up in a document.
+#:
+#: Matched by NAME, whatever the receiver is. The first version of this
+#: check demanded the receiver be a plain name —`steps.wrong`, `j.note`—
+#: and so it never looked at `ctx.j.note(...)`, which is an attribute
+#: chain. That blind spot cost a window: `ctx.j.note("sync", app=app,
+#: rc=rc, **settled)` raised TypeError halfway through the charts,
+#: because `settled` had come to carry `app` of its own. A check with a
+#: hole in it is worse than no check, because everybody believes it.
+SINK_METHODS = ("done", "already", "wrong", "not_evaluable", "step", "note", "close")
 
 libexec = pathlib.Path(ROOT) / "libexec"
 if not libexec.is_dir():
@@ -61,23 +68,21 @@ for f in files:
         if not isinstance(node, ast.Call):
             continue
         fn = node.func
-        if not (isinstance(fn, ast.Attribute) and isinstance(fn.value, ast.Name)):
-            continue
-        if fn.attr not in SINKS.get(fn.value.id, ()):
+        if not isinstance(fn, ast.Attribute) or fn.attr not in SINK_METHODS:
             continue
         calls += 1
         splat = [k for k in node.keywords if k.arg is None]
         named = [k.arg for k in node.keywords if k.arg is not None]
         if splat and named:
             findings.append(
-                f"{f.name}:{node.lineno} {fn.value.id}.{fn.attr}() splats a dictionary "
+                f"{f.name}:{node.lineno} .{fn.attr}() splats a dictionary "
                 f"and also names {named}: the day that dictionary learns one of those "
                 f"keys, this raises TypeError instead of emitting a verdict. Write "
                 f"**{{**payload, \"key\": value}}, which cannot collide and says which "
                 f"one wins")
         if len(splat) > 1:
             findings.append(
-                f"{f.name}:{node.lineno} {fn.value.id}.{fn.attr}() splats {len(splat)} "
+                f"{f.name}:{node.lineno} .{fn.attr}() splats {len(splat)} "
                 f"dictionaries: two payloads sharing a key raise, and nothing here says "
                 f"which was meant to win")
 

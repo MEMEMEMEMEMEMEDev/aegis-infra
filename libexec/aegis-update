@@ -329,7 +329,7 @@ def _push(ctx):
 def _sync(ctx, app, timeout=900):
     rc, out, err = cli.run("sync", app)
     settled = win.argo_settled(app, timeout=timeout, narrate=ctx.narrate)
-    ctx.j.note("sync", app=app, rc=rc, **settled)
+    ctx.j.note("sync", **{**settled, "app": app, "rc": rc})
     return settled
 
 
@@ -413,7 +413,7 @@ def layer_charts(ctx, layer, bumps):
         # extra, and two Applications can ride the same chart.
         app = pin.name
         r = win.chart_renders(pin.extra.get("repo"), pin.extra.get("chart"), bump["a"])
-        ctx.j.note("render", app=app, version=bump["a"], **r)
+        ctx.j.note("render", **{**r, "app": app, "version": bump["a"]})
         if r.get("renderiza") is not True:
             failed = {"app": app, "por_que": f"the candidate does not render: "
                                              f"{r.get('por_que', '')[:200]}"}

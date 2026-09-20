@@ -325,6 +325,18 @@ failures. Raising the floor under an instance that is already broken
 removes the one thing that made the breakage diagnosable, which is that
 nothing else had changed.
 
+**A chart that DROPS a resource leaves an orphan.** This platform does
+not prune automatically — deleting is not something a sync should
+decide on its own — so when an upgrade stops rendering something the
+old version created, the object stays in the cluster and the
+Application reads `OutOfSync` for ever. cert-manager 1.20.2 → 1.21.2
+did exactly that on 2026-09-20, with every pod healthy on the new
+version: two RBAC objects the new chart no longer writes.
+
+The window does not delete them. It names them —kind, namespace and
+name— and hands the decision over, because removing a resource is
+irreversible and belongs to a person.
+
 **Layer 4 goes one chart at a time,** each rendered with `helm template`
 before a line is written, then committed, pushed, synced, and waited on
 until Synced **and** Healthy. That is why it costs an hour. Six charts

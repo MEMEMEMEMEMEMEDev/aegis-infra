@@ -1156,9 +1156,26 @@ def argo_settled(app, timeout=900, poll=10, narrate=False):
         if narrate:
             _say(f"{app}: {sync}/{health}…")
         time.sleep(poll)
+    # AND IT NAMES WHAT IS STILL OUT, because «OutOfSync» on its own
+    # sends the reader to the UI. Measured on 2026-09-20: cert-manager
+    # rolled to 1.21.2, every pod healthy, and the app stayed OutOfSync
+    # for ever over two RBAC objects the new chart no longer renders.
+    # This platform does not prune automatically —deleting is not
+    # something a sync should decide— so an upgrade that DROPS a
+    # resource leaves it orphaned, and a window that only said
+    # «OutOfSync» would have nothing useful to hand over.
+    rc, out, _ = _kubectl(
+        "get", "application", app, "-n", "argocd", "-o",
+        "jsonpath={range .status.resources[?(@.status=='OutOfSync')]}{.kind}/{.namespace}/"
+        "{.name}{\"\\n\"}{end}")
+    fuera = [ln for ln in out.splitlines() if ln.strip()] if rc == 0 else []
     return {"asentado": False, "app": app, "segundos": round(time.time() - t0), **last,
+            "fuera_de_sincronia": fuera[:10],
             "por_que": "it did not reach Synced+Healthy inside the wait. A wait that "
-                       "ran out is a failure, never a «probably fine»"}
+                       "ran out is a failure, never a «probably fine». If the resources "
+                       "named here are ones the new chart no longer renders, they are "
+                       "orphans of the old one: this platform does not prune by itself, "
+                       "and removing them is a decision with a person in it"}
 
 
 def argo_all_settled(timeout=900, poll=15, narrate=False):
