@@ -174,6 +174,20 @@ anybody can follow. Those are **answers**, and they will read the same
 next month. Only `unmeasurable` means the instrument did not reach the
 subject.
 
+### The per cent that cost a silent run
+
+The first real run of this unit, on 2026-09-20, finished green and
+stored nothing. Its ExecStart piped the measurement into curl with
+`printf "%s" "$m"` — and in a unit file `%` opens a systemd
+**specifier**, where `%s` is the user's login shell. What reached
+/bin/sh was `printf "/bin/bash" "$m"`: nine characters instead of the
+exposition. curl posted them, VictoriaMetrics answered 204, and the
+timer reported «26 series: 33 behind» over an empty panel.
+
+A per cent meant for the shell is written `%%`. Check 217 refuses any
+other one that systemd would expand, and the only specifier these units
+ask for on purpose is `%h`.
+
 ### Installing it
 
 Nothing in the init installs these units — the same gap the backup timer

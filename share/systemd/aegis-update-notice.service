@@ -40,13 +40,23 @@ Type=oneshot
 # headless — so a ClusterIP of the string "None" is answered with an
 # endpoint, exactly as aegis-host-metrics.service does.
 #
+# `%%s` AND NOT `%s`, and it cost a silent run to learn. In a unit file
+# `%` opens a systemd SPECIFIER, and `%s` is the user's shell: the line
+# reached /bin/sh as `printf "/bin/bash" "$m"`, which prints the literal
+# string and drops the measurement. curl posted those nine characters,
+# VictoriaMetrics answered 204, and the unit finished with status 0.
+# Measured 2026-09-20 on the first real run: «26 series: 33 behind», a
+# green unit, and not one sample stored. Exactly the shape this whole
+# command exists to prevent, in the command's own timer. Check 217 now
+# refuses an unescaped `%` that systemd would expand.
+#
 # `rc <= 1` PUBLISHES. rc 1 means a pinned tag has VANISHED upstream,
 # which is a finding and not a failure of the measurement: the numbers
 # are good and the alert wants them. rc 2 means nothing of a measurable
 # class could be asked, and then there is nothing worth importing — the
 # unit fails loudly rather than pushing a page of zeroes that would read
 # as «everything is up to date».
-ExecStart=/bin/sh -c 'm=$(/usr/local/bin/aegis update metrics); rc=$?; [ "$rc" -le 1 ] || exit "$rc"; ip=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.clusterIP}") && [ "$ip" = "None" ] && ip=$(kubectl get endpointslice -n observability -l kubernetes.io/service-name=vmsingle -o jsonpath="{.items[0].endpoints[0].addresses[0]}"); pt=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.ports[0].port}") && printf "%s" "$m" | curl -sS --fail --max-time 20 --data-binary @- "http://$ip:$pt/api/v1/import/prometheus"'
+ExecStart=/bin/sh -c 'm=$(/usr/local/bin/aegis update metrics); rc=$?; [ "$rc" -le 1 ] || exit "$rc"; ip=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.clusterIP}") && [ "$ip" = "None" ] && ip=$(kubectl get endpointslice -n observability -l kubernetes.io/service-name=vmsingle -o jsonpath="{.items[0].endpoints[0].addresses[0]}"); pt=$(kubectl get svc -n observability vmsingle -o jsonpath="{.spec.ports[0].port}") && printf "%%s" "$m" | curl -sS --fail --max-time 20 --data-binary @- "http://$ip:$pt/api/v1/import/prometheus"'
 
 # It asks fifty-odd public registries. It shares the machine with
 # everything else and should never be the reason something else waited.
