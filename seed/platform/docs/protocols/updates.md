@@ -399,6 +399,7 @@ until one actually closes.
 
 | alert | what it means |
 |---|---|
+| `UpdatePageLeftUp` | **critical**: a window raised the maintenance page and never recorded taking it down |
 | `UpdateWindowDue` | more than a month since the last window, and there is something to raise |
 | `UpdateWindowNeverRun` | this instance has never opened one |
 | `UpdateWindowNeedsAHuman` | **critical**: the last window could not finish, and the page may still be up |
@@ -409,6 +410,34 @@ And the console has an **Updates** page: every pin against what upstream
 says, what a window would raise in each layer, and what the last window
 did commit by commit. It has no button. A window takes the sites off the
 air and can roll itself back, and that does not start with a click.
+
+## When a window is killed
+
+Not «fails» — **killed**, the kind of death that carries no signal a
+process can handle. It happened on the first day this ran for real.
+
+Three of the four things a window changes about the machine come back
+anyway: the silences carry an expiry of their own (that is what the
+expiry is for), and Jenkins and the backup clock are restored by other
+means. **The maintenance page has no expiry**, and on 2026-09-20 five
+public sites answered 503 until a human happened to look.
+
+So the page is the one thing that is watched from outside the process:
+
+```bash
+aegis update status     # names the window, and prints the command that undoes it
+```
+
+It reads the journal, which records every hook with its exit code, and
+answers «is the page up» from that alone — never from a marker beside
+it, which would be the one thing that disagrees with the record the
+morning after. A hook that FAILED to take the page down counts as the
+page being up, because that is exactly when it is.
+
+`UpdatePageLeftUp` carries the same fact to the phone, because the
+person who needs to know is not the one reading a terminal. Nothing
+takes the page down automatically: a window that is genuinely still
+running would lose its page mid-flight, which is worse than leaving it.
 
 ## What is not here yet
 

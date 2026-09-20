@@ -571,6 +571,33 @@ class Journal:
         report account for."""
         return [e for e in self.entries() if e.get("kind") == "commit" and e.get("sha")]
 
+    def page_is_up(self):
+        """Did this window raise the maintenance page and never record
+        taking it down?
+
+        DERIVED FROM WHAT IS WRITTEN, not from a second marker file: the
+        journal already records every hook with its exit code, and a
+        flag beside it would be the one thing that disagrees with the
+        record on the morning after.
+
+        WHY IT MATTERS, with a date on it. On 2026-09-20 a window was
+        killed outright while it was measuring — no signal it could
+        handle, so the exit trap never ran. The silences it had raised
+        expired on their own, which is why they carry an expiry. The
+        backup clock and Jenkins came back by other means. The PAGE has
+        no expiry and nothing noticed: the operator's five sites served
+        503 until a human happened to look.
+        """
+        up = False
+        for e in self.entries():
+            if e.get("kind") != "maintenance" or e.get("rc") != 0:
+                continue
+            if e.get("hook") == "on":
+                up = True
+            elif e.get("hook") == "off":
+                up = False
+        return up
+
     def close(self, outcome, **data):
         if outcome not in OUTCOMES:
             raise ValueError(f"unknown outcome: {outcome!r} (one of {OUTCOMES})")

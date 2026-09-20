@@ -578,6 +578,21 @@ data:
             annotations:
               summary: "the last update window could not finish on its own"
               description: "The acceptance failed and the rollback did not complete, so the maintenance page was deliberately LEFT UP: your sites may be behind it right now. Read `aegis update status`, then `aegis update rollback --yes`. Take the page down by hand only once the round is clean."
+          # THE ONE THING THAT DOES NOT EXPIRE BY ITSELF. A window
+          # killed outright —no signal it can handle— never runs its
+          # exit trap. The silences it raised expire on their own,
+          # which is exactly why they carry an expiry; Jenkins and the
+          # backup clock come back by other means. The maintenance page
+          # does not, and on 2026-09-20 five sites served 503 until
+          # somebody happened to look. This is what makes that reach a
+          # phone instead of a terminal nobody is watching.
+          - alert: UpdatePageLeftUp
+            expr: last_over_time(aegis_update_page_raised[2d]) == 1
+            for: 10m
+            labels: {severity: critical}
+            annotations:
+              summary: "an update window raised the maintenance page and never recorded taking it down"
+              description: "Your public sites may be behind it RIGHT NOW. The window was killed, or it is still running. `aegis update status` names it and prints the command that takes the page down. Nothing here does it for you: if a window is genuinely still running, taking its page down mid-flight is worse than leaving it."
           # A pinned tag that no longer exists upstream is not a version
           # behind: it is a platform that cannot be rebuilt from its own
           # sources. It is separated from the count of «behind» because
@@ -609,7 +624,7 @@ data:
           # a platform with nothing to update. The producer emits a
           # measured timestamp separate from the counts for this.
           - alert: UpdateMeasurementStopped
-            expr: absent(last_over_time(aegis_update_measured_timestamp_seconds[7d])) or absent(last_over_time(aegis_update_pins_behind[7d])) or absent(last_over_time(aegis_update_pins_unmeasurable[7d])) or absent(last_over_time(aegis_update_pins_gone[7d])) or absent(last_over_time(aegis_update_window_ever[7d])) or ((time() - last_over_time(aegis_update_measured_timestamp_seconds[7d])) > 259200)
+            expr: absent(last_over_time(aegis_update_measured_timestamp_seconds[7d])) or absent(last_over_time(aegis_update_pins_behind[7d])) or absent(last_over_time(aegis_update_pins_unmeasurable[7d])) or absent(last_over_time(aegis_update_pins_gone[7d])) or absent(last_over_time(aegis_update_window_ever[7d])) or absent(last_over_time(aegis_update_page_raised[7d])) or ((time() - last_over_time(aegis_update_measured_timestamp_seconds[7d])) > 259200)
             for: 2h
             labels: {severity: warning}
             annotations:

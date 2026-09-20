@@ -1252,6 +1252,12 @@ def metrics(steps, fresh=False, narrate=True, json_mode=False, offline=False):
     # `absent()` alone would fire the same way for a timer that stopped.
     emit("aegis_update_window_ever", 1 if rep else 0, None,
          "1 when this instance has closed at least one update window")
+    # THE ONE THAT DOES NOT EXPIRE. A window killed outright leaves the
+    # operator's sites behind a page and nothing notices: the silences
+    # carry an expiry, the page does not. This is what carries it to the
+    # phone by the path that already exists.
+    emit("aegis_update_page_raised", 1 if (j and j.page_is_up()) else 0, None,
+         "1 when a window raised the maintenance page and never recorded taking it down")
     if rep:
         try:
             closed = datetime.datetime.fromisoformat(rep.get("closed_at", "")).timestamp()
@@ -1301,6 +1307,35 @@ def metrics(steps, fresh=False, narrate=True, json_mode=False, offline=False):
     sys.exit(1 if gone else 0)
 
 
+def _page_still_up(steps, j, narrate):
+    """THE ONE THING THAT DOES NOT EXPIRE.
+
+    A window killed outright —the kind of death that carries no signal
+    a process can handle— never runs its exit trap. The silences it
+    raised expire by themselves, which is exactly why they are given an
+    expiry; Jenkins and the backup clock come back by other means. The
+    page does not, and until 2026-09-20 nothing noticed: five public
+    sites answered 503 until a human happened to look at them.
+
+    Derived from the journal, never from a marker beside it: a flag
+    would be the one thing that disagrees with the record the morning
+    after.
+    """
+    if not j.page_is_up():
+        return
+    hooks = win.Hooks()
+    if narrate:
+        print(f"\n  {bold}THE MAINTENANCE PAGE MAY STILL BE UP{off}: window {j.id} raised "
+              f"it and never recorded taking it down.", file=sys.stderr)
+        if hooks.off:
+            print(f"  take it down with: {hooks.off}", file=sys.stderr)
+    steps.wrong("window:page-left-up", **{
+        "ventana": j.id, "orden": hooks.off or "(none configured)",
+        "por_que": "this window raised the maintenance page and its journal never records "
+                   "it coming down. Your public sites may be behind it right now: the "
+                   "silences a window raises expire on their own, and the page does not"})
+
+
 def status(steps, narrate=True):
     """The last window. None yet is a measured zero, not a silence."""
     d = paths.aegis_home() / ".init-state" / "updates"
@@ -1313,14 +1348,23 @@ def status(steps, narrate=True):
         steps.finish()
     wid = last.read_text(encoding="utf-8").strip()
     report = d / wid / "report.json"
+    j = win.Journal(wid)
     try:
         doc = json.loads(report.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
-        steps.not_evaluable(f"window:{wid}", why="report-unreadable", detalle=str(e))
+        # A window with no report never reached its own ending: it was
+        # killed, or it is running right now. Either way the page is the
+        # first thing to ask about, BEFORE giving up on the report.
+        _page_still_up(steps, j, narrate)
+        steps.not_evaluable(f"window:{wid}", **{
+            "why": "report-unreadable", "detalle": str(e),
+            "nota": "this window never wrote its report: it was killed, or it is "
+                    "running now"})
         steps.finish()
     outcome = doc.get("outcome") or "?"
     if narrate:
         print(f"window {wid}: {outcome}", file=sys.stderr)
+    _page_still_up(steps, j, narrate)
     state = {"accepted": "already", "rolled-back": "wrong", "needs-a-human": "wrong"}.get(outcome)
     getattr(steps, {"already": "already", "wrong": "wrong"}.get(state, "not_evaluable"))(
         f"window:{wid}", **{k: v for k, v in doc.items() if k != "steps"})
