@@ -2726,16 +2726,16 @@ def _remote_status_step(org, owed, steps, inventory, cad_s):
         # purpose, because this command reads contracts and saying so
         # is what makes the gap findable. `aegis tenant show` is the
         # one holding the other instrument.
-        steps.already(f"backup:{org}", note="no service of the CONTRACT holds "
-                      "state: there is nothing a copy would carry", **data)
+        steps.already(f"backup:{org}", **{**data, "note": "no service of the CONTRACT holds "
+                      "state: there is nothing a copy would carry"})
         return
     if not items:
-        steps.wrong(f"backup:{org}", why="no-copy-at-the-destination", **data)
+        steps.wrong(f"backup:{org}", **{**data, "why": "no-copy-at-the-destination"})
         return
     if not epochs:
         # There ARE objects and none of them has a readable date. That
         # is not freshness: it is a copy whose age nobody can state.
-        steps.not_evaluable(f"backup:{org}", why="no-readable-date", **data)
+        steps.not_evaluable(f"backup:{org}", **{**data, "why": "no-readable-date"})
         return
     age = int(time.time()) - int(max(epochs))
     data["age_seconds"] = age

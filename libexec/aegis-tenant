@@ -252,8 +252,7 @@ def show(org, steps, narrate):
             if narrate:
                 print(f"  {red}✗{off} {sv['nombre']:<12} {grey}declared, and there "
                       f"is no workload with label app={app}{off}")
-            steps.wrong(f"service:{sv['nombre']}", why="no-workload",
-                        ready=0, desired=None, **data)
+            steps.wrong(f"service:{sv['nombre']}", **{**data, "why": "no-workload", "ready": 0, "desired": None})
             continue
         data.update({"kind": w["kind"], "workload": w["name"],
                      "ready": w["ready"], "desired": w["desired"],

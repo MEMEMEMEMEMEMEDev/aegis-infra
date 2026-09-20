@@ -464,8 +464,16 @@ def effect_of_page(before_doc, read, interval=30, tries=4, sleep=time.sleep):
             return {"efecto": None, "intentos": n,
                     "por_que": f"the round could not be taken again: {e}"}
         a = readings(after)
-        changed = [k for k, v in b.items()
-                   if v == FINE and a.get(k) not in (None, FINE)]
+        # `!= FINE` AND NOT `not in (None, FINE)`. A reading that
+        # DISAPPEARS is the commonest shape of the effect, and the first
+        # version excluded exactly that. The round does not flip a
+        # measure's state when the sites go behind a page: it stops
+        # emitting «the N public site(s) answer their probe» and starts
+        # emitting «N of the N public site(s) do not answer», which is a
+        # different sentence and therefore a different key. Measured on
+        # 2026-09-20 with the page verifiably up —portafolio answering
+        # 503— and this function insisting nothing had changed.
+        changed = [k for k, v in b.items() if v == FINE and a.get(k) != FINE]
         seen.append(len(changed))
         if changed:
             return {"efecto": True, "intentos": n, "espera_s": interval + 5,

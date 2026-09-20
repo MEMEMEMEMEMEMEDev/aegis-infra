@@ -148,8 +148,7 @@ def listing(steps, narrate=True):
             if spec.get("descripcion"):
                 print(f"               {grey}{spec['descripcion']}{off}")
         if missing:
-            steps.wrong(f"plan:{name}", error=f"the plan does not declare {', '.join(missing)}",
-                        **data)
+            steps.wrong(f"plan:{name}", **{**data, "error": f"the plan does not declare {', '.join(missing)}"})
         else:
             steps.already(f"plan:{name}", **data)
     if not cuota:

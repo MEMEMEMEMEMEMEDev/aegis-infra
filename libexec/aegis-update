@@ -153,9 +153,9 @@ def _apt_step(steps, narrate):
     d = {"capa": 1, "paquetes": resto, "nucleo": nucleo,
          "deshacer": "ninguna: un paquete instalado no se desinstala dentro de la ventana"}
     if resto or nucleo:
-        steps.already("apt", estado="atrasado", **d)
+        steps.already("apt", **{**d, "estado": "atrasado"})
     else:
-        steps.already("apt", estado="al-dia", **d)
+        steps.already("apt", **{**d, "estado": "al-dia"})
 
 
 def inventory(steps, tree=None, offline=False, fresh=False, narrate=True):
@@ -220,16 +220,14 @@ def plan(steps, fresh=False, narrate=True):
         data = {**pin.as_step(), **a.as_data(), "deshacer": undo}
         cur, new = upstream.shape(pin.current), upstream.shape(a.latest)
         if cur and new and cur[0][0] != new[0][0]:
-            steps.wrong(name, **data, rechazo="major",
-                        por_que=f"a major jump ({pin.current} → {a.latest}) is never taken by a "
+            steps.wrong(name, **{**data, "rechazo": "major", "por_que": f"a major jump ({pin.current} → {a.latest}) is never taken by a "
                                 f"window: it carries migrations git does not undo. Read the "
-                                f"release notes and pass --allow-major {pin.name}")
+                                f"release notes and pass --allow-major {pin.name}"})
             continue
         if pin.cls == "k3s" and cur and new and cur[0][:2] != new[0][:2]:
-            steps.wrong(name, **data, rechazo="k3s-minor",
-                        por_que="a minor of k3s rewrites the service's ExecStart and the node "
+            steps.wrong(name, **{**data, "rechazo": "k3s-minor", "por_que": "a minor of k3s rewrites the service's ExecStart and the node "
                                 "re-registers under another name. It needs --k3s-minor and a "
-                                "human reading it")
+                                "human reading it"})
             continue
         proposed += 1
         if narrate:
@@ -686,9 +684,7 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
             if narrate:
                 print(f"  layer {layer.number} {layer.name:<34} {len(mine)} change(s)"
                       f"  ~{layer.minutes} min", file=sys.stderr)
-            steps.already(f"dry:layer:{layer.number}", **layer.as_data(),
-                          cambios=len(mine),
-                          cuales=[x["pin"].key for x in mine][:12])
+            steps.already(f"dry:layer:{layer.number}", **{**layer.as_data(), "cambios": len(mine), "cuales": [x["pin"].key for x in mine][:12]})
         if narrate:
             page = ("configured" if hooks.configured else
                     "NOT configured — the window would run with the sites live, "
@@ -795,9 +791,8 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
             unit, scope = clock["unidad"], clock["ambito"]
             restore.push("backup-timer", lambda: win.timer_start(unit, scope),
                          f"{unit} runs again")
-            steps.done("window:backup-timer", **clock,
-                       nota="a backup taken mid-window would capture a half-updated "
-                            "instance and call it the day's copy")
+            steps.done("window:backup-timer", **{**clock, "nota": "a backup taken mid-window would capture a half-updated "
+                            "instance and call it the day's copy"})
         else:
             steps.already("window:backup-timer", **clock)
 
@@ -807,9 +802,8 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
             j.note("maintenance", **r)
             raised = r.get("rc") == 0
             if not raised:
-                steps.wrong("window:maintenance-on", **r,
-                            por_que="the hook that raises the page failed. Nothing has "
-                                    "been changed and the window closes here")
+                steps.wrong("window:maintenance-on", **{**r, "por_que": "the hook that raises the page failed. Nothing has "
+                                    "been changed and the window closes here"})
                 outcome = "refused"
                 raise _Stop()
             if narrate:
@@ -817,10 +811,18 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
             seen = _page_is_up(before, narrate)
             j.note("maintenance-effect", **seen)
             if seen["efecto"] is False:
-                steps.wrong("window:maintenance-no-effect", **seen,
-                            por_que="the hook ran and the public sites still answer. A "
-                                    "page nobody sees is worse than no page: the window "
-                                    "stops here, having changed nothing")
+                # ONE DICTIONARY, and the reason comes from the reading
+                # itself. Passing `**seen` beside a literal `por_que=`
+                # was a TypeError the moment the reading started
+                # carrying its own reason — and it fired in the middle
+                # of a real window, with the page up. The exit trap
+                # brought everything back, which is the only reason this
+                # reads as a bug and not as an incident.
+                steps.wrong("window:maintenance-no-effect",
+                            **{**seen,
+                               "consecuencia": "a page nobody sees is worse than no "
+                                               "page: the window stops here, having "
+                                               "changed nothing"})
                 outcome = "refused"
                 raise _Stop()
             # THE TWO «I COULD NOT READ IT» ARE NOT THE SAME.
@@ -837,9 +839,8 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
             elif seen.get("sitios") == 0:
                 steps.already("window:maintenance-on", **clean)
             else:
-                steps.not_evaluable("window:maintenance-on", **clean,
-                                    nota="the page went up and nobody could read whether "
-                                         "it took effect")
+                steps.not_evaluable("window:maintenance-on", **{**clean, "nota": "the page went up and nobody could read whether "
+                                         "it took effect"})
         else:
             steps.already("window:maintenance-off-by-choice",
                           nota="no hook is configured: the window runs with the sites "
@@ -861,11 +862,9 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
             # alternative is discovering it halfway through a chart sync,
             # which is the one moment there is nothing good to do.
             if not ctx.budget.room_for(layer):
-                steps.wrong(f"layer:{layer.number}", nombre=layer.name,
-                            **ctx.budget.as_data(), necesita_min=layer.minutes,
-                            por_que="not enough of the window is left to start this "
+                steps.wrong(f"layer:{layer.number}", **{**ctx.budget.as_data(), "nombre": layer.name, "necesita_min": layer.minutes, "por_que": "not enough of the window is left to start this "
                                     "layer. It is left for the next one, and what has "
-                                    "already been raised stays")
+                                    "already been raised stays"})
                 stopped = {"capa": layer.number, "por_que": "budget"}
                 break
             if narrate:
@@ -873,13 +872,13 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
                       f"{grey}({len(mine)} change(s), ~{layer.minutes} min, "
                       f"{ctx.budget.left:.0f} left){off}", file=sys.stderr)
             did = run_layer(ctx, layer, before["round"])
-            j.note("layer", **layer.as_data(), **{k: v for k, v in did.items()
-                                                  if k != "fallo"})
+            j.note("layer", **{**layer.as_data(), **{k: v for k, v in did.items()
+                                                  if k != "fallo"}})
             if did.get("saltada"):
-                steps.already(f"layer:{layer.number}", nombre=layer.name, **did)
+                steps.already(f"layer:{layer.number}", **{**did, "nombre": layer.name})
                 continue
             if not did.get("aplicada"):
-                steps.wrong(f"layer:{layer.number}", nombre=layer.name, **did)
+                steps.wrong(f"layer:{layer.number}", **{**did, "nombre": layer.name})
                 stopped = {"capa": layer.number, "por_que": "it did not apply"}
                 break
             # ── the acceptance of THIS layer ────────────────────────
@@ -891,9 +890,8 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
                 stopped = {"capa": layer.number, "por_que": "unmeasurable"}
                 break
             verdict = win.accept_layer(layer, last_doc, after_doc)
-            j.note("layer-acceptance", **{k: v for k, v in verdict.items()
-                                          if k not in ("nuevos", "cegados")},
-                   nuevos=len(verdict["nuevos"]), cegados=len(verdict["cegados"]))
+            j.note("layer-acceptance", **{**{k: v for k, v in verdict.items()
+                                          if k not in ("nuevos", "cegados")}, "nuevos": len(verdict["nuevos"]), "cegados": len(verdict["cegados"])})
             if verdict["acepta"]:
                 steps.done(f"layer:{layer.number}", nombre=layer.name,
                            cambios=did.get("cambios", 0),
@@ -922,9 +920,8 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
             for d in back["deshechos"]:
                 steps.done(f"revert:{d['sha'][:12]}", subject=d["subject"])
             if back["atascado"]:
-                steps.wrong("window:rollback-stuck", **back["atascado"],
-                            por_que="reverting past a conflict would leave the tree in a "
-                                    "state nobody described. What is left is yours")
+                steps.wrong("window:rollback-stuck", **{**back["atascado"], "por_que": "reverting past a conflict would leave the tree in a "
+                                    "state nobody described. What is left is yours"})
                 outcome = "needs-a-human"
                 raise _Stop()
             if back["deshechos"]:
@@ -940,9 +937,8 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
                 same = win.came_back_to(j, platform=ctx.platform)
                 detail["arbol"] = same
                 if same.get("igual") is not True:
-                    steps.wrong("window:rollback-tree", **same,
-                                por_que="every commit was reverted and the tree is still "
-                                        "not what the photo saw")
+                    steps.wrong("window:rollback-tree", **{**same, "por_que": "every commit was reverted and the tree is still "
+                                        "not what the photo saw"})
                     outcome = "needs-a-human"
                     raise _Stop()
                 steps.done("window:rollback-tree", **same)
@@ -968,9 +964,8 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
             outcome = "needs-a-human"
             raise _Stop()
         cmp_ = win.compare(before["round"]["doc"], after_doc)
-        j.note("acceptance", **{k: v for k, v in cmp_.items()
-                                if k in ("medidas_antes", "medidas_despues")},
-               nuevos=len(cmp_["nuevos"]), cegados=len(cmp_["cegados"]))
+        j.note("acceptance", **{**{k: v for k, v in cmp_.items()
+                                if k in ("medidas_antes", "medidas_despues")}, "nuevos": len(cmp_["nuevos"]), "cegados": len(cmp_["cegados"])})
         detail["comparacion"] = cmp_
         if win.accepted(cmp_):
             steps.done("window:acceptance", nuevos=0, cegados=0,
@@ -980,10 +975,9 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
             for n in cmp_["nuevos"][:8]:
                 steps.wrong("acceptance:new-failure", **n)
             for n in cmp_["cegados"][:8]:
-                steps.wrong("acceptance:blinded", **n,
-                            por_que="this reading was fine before and nobody could take "
+                steps.wrong("acceptance:blinded", **{**n, "por_que": "this reading was fine before and nobody could take "
                                     "it now. A window that blinds a measurement has not "
-                                    "passed it, it has stopped asking")
+                                    "passed it, it has stopped asking"})
             outcome = "rolled-back"
     except _Stop:
         pass
@@ -1000,10 +994,9 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
                 if r.get("rc") == 0:
                     steps.done("window:maintenance-off")
                 else:
-                    steps.wrong("window:maintenance-off", **r,
-                                por_que="the page did not come down: your sites are "
+                    steps.wrong("window:maintenance-off", **{**r, "por_que": "the page did not come down: your sites are "
                                         "still behind it. Run the MAINTENANCE_OFF "
-                                        "command by hand")
+                                        "command by hand"})
                     outcome = "needs-a-human"
             else:
                 steps.already("window:maintenance-stays",
@@ -1021,9 +1014,8 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
             if done["ok"]:
                 steps.done(f"restore:{done['restored']}", que=done["what"])
             else:
-                steps.wrong(f"restore:{done['restored']}", **done,
-                            por_que="the window changed this about the machine and could "
-                                    "not put it back. It does not fix itself")
+                steps.wrong(f"restore:{done['restored']}", **{**done, "por_que": "the window changed this about the machine and could "
+                                    "not put it back. It does not fix itself"})
         rep = j.close(outcome, **detail)
         if narrate:
             print(f"\n{bold}{outcome}{off}  ({len(rep['commits'])} commit(s), "
@@ -1131,20 +1123,17 @@ def rollback(steps, wid=None, yes=False, narrate=True):
     for d in r["deshechos"]:
         steps.done(f"revert:{d['sha'][:12]}", subject=d["subject"], revert=d["revert"][:12])
     if r["atascado"]:
-        steps.wrong("rollback:stuck", **r["atascado"], quedan=r["quedan"],
-                    por_que="reverting past a conflict would leave the tree in a state "
-                            "nobody described. It stops here and the rest is yours")
+        steps.wrong("rollback:stuck", **{**r["atascado"], "quedan": r["quedan"], "por_que": "reverting past a conflict would leave the tree in a state "
+                            "nobody described. It stops here and the rest is yours"})
         j.close("needs-a-human", rollback=r)
         steps.finish()
     same = win.came_back_to(j)
     if same["igual"] is True:
-        steps.done("rollback:tree", **same,
-                   nota="the tree is byte for byte what the photo saw")
+        steps.done("rollback:tree", **{**same, "nota": "the tree is byte for byte what the photo saw"})
     elif same["igual"] is False:
-        steps.wrong("rollback:tree", **same,
-                    por_que="every commit reverted and the tree is still not what the "
+        steps.wrong("rollback:tree", **{**same, "por_que": "every commit reverted and the tree is still not what the "
                             "photo saw: something outside the window's commits changed "
-                            "the platform repo")
+                            "the platform repo"})
     else:
         steps.not_evaluable("rollback:tree", **same)
     j.close("rolled-back", rollback=r, arbol=same)
