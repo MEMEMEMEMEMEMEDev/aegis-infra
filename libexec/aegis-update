@@ -935,6 +935,21 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
         # always taken: a round costs a minute.
         baseline = before["round"]["doc"]
         if raised:
+            # AND IT WAITS FIRST. The page's effect is read over HTTP and
+            # is visible at once; the ROUND reads it through probes that
+            # run every thirty seconds, so a baseline taken the moment
+            # the page goes up still describes a world where the sites
+            # answered. Measured on 2026-09-20: the global acceptance
+            # then found «N of the N public site(s) do not answer» as a
+            # NEW failure, which was the page, and undid five good
+            # charts for it.
+            wait, note = win.probe_interval_or_guess()
+            wait = wait * 2 + 15
+            if narrate:
+                _say(f"waiting {wait}s for the probes to see the page…")
+            if note:
+                steps.already("window:baseline-wait", nota=note)
+            time.sleep(wait)
             if narrate:
                 _say("the round under the page, as the baseline…")
             try:
@@ -1010,10 +1025,12 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
         detail["capas"] = {"detenida_en": stopped, **ctx.budget.as_data()}
 
         # ── the way back, taken by the window itself ────────────────
+        undone = False
         if stopped:
             outcome = _undo(ctx, steps, j, detail, narrate,
                             f"the acceptance of layer {stopped['capa']}",
                             partial_layer=stopped["capa"])
+            undone = True
             if outcome == "needs-a-human":
                 raise _Stop()
 
@@ -1048,7 +1065,18 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
             # that failed its global acceptance kept every commit it had
             # made and reported the outcome as though it had not. The
             # name of a thing is not the thing.
-            outcome = _undo(ctx, steps, j, detail, narrate, "the global acceptance")
+            # NOT TWICE. If a layer already failed and was undone, its
+            # commits are reverted and the tree is back; running the way
+            # back again asks git to revert commits it has already
+            # reverted, which conflicts, and the window ends
+            # «needs-a-human» over a rollback that had worked. Measured
+            # 2026-09-20, with the page left up for it.
+            if undone:
+                steps.already("window:already-undone",
+                              nota="the layer's own rollback had already put the tree "
+                                   "back; this acceptance only confirms it")
+            else:
+                outcome = _undo(ctx, steps, j, detail, narrate, "the global acceptance")
     except _Stop:
         pass
     finally:

@@ -84,3 +84,26 @@ control_1() { sed -i 's/taken with the page up and nothing else changed yet/take
 control_2() { sed -i 's/def argo_all_settled(timeout=900, poll=15,/def argo_all_settled(timeout=900, poll=16,/' "$W221"; }
 # a comment naming the three mistakes is not the three mistakes
 control_3() { printf '\n# note: the page lives at the edge, and a sync is a request.\n' >> "$W221"; }
+
+# the baseline stops waiting for the probes: it is taken while the round
+# still describes a world where the sites answered, and the acceptance
+# blames the window for its own page
+red_8() { python3 - "$U221" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = '            wait, note = win.probe_interval_or_guess()'
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, '            wait, note = 0, None', 1))
+P
+}
+
+# the window undoes twice: git is asked to revert commits it has already
+# reverted, conflicts, and a rollback that worked ends needing a human
+red_9() { python3 - "$U221" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = '            undone = True'
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, '            undone = False', 1))
+P
+}

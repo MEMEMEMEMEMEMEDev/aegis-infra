@@ -119,6 +119,59 @@ for m in re.finditer(r'outcome\s*=\s*"rolled-back"', code):
                     f"a thing is not the thing, and that is exactly how a window came to "
                     f"report a rollback it had not performed")
 
+# ── the baseline waits for the probes, and nothing undoes twice ──────
+if "baseline" in code:
+    seg = code[code.index("if raised:"):][:1200]
+    if "probe_interval_or_guess" not in seg or "sleep" not in seg:
+        findings.append("the baseline is taken the moment the page goes up: the page's "
+                        "effect is visible over HTTP at once, and the ROUND reads it "
+                        "through probes that run every thirty seconds — so that baseline "
+                        "still describes a world where the sites answered, and the "
+                        "acceptance blames the window for the page")
+if "undone" not in code:
+    findings.append("nothing stops the window undoing twice: a layer that failed has "
+                    "already had its commits reverted, and asking git to revert them "
+                    "again conflicts — the window then ends «needs-a-human» over a "
+                    "rollback that had worked")
+else:
+    # READ AS A TREE, not as four hundred characters: the guard's ELSE
+    # branch is exactly where the way back belongs, and a text window
+    # wide enough to see the guard also sees the else. The first version
+    # of this check said so about correct code.
+    guard = None
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.If) and isinstance(node.test, ast.Name) \
+           and node.test.id == "undone":
+            guard = node
+            break
+    if guard is None:
+        findings.append("`undone` exists and nothing branches on it")
+    else:
+        body = "\n".join(ast.get_source_segment(src, st) or "" for st in guard.body)
+        orelse = "\n".join(ast.get_source_segment(src, st) or "" for st in guard.orelse)
+        if "_undo(" in body:
+            findings.append("the branch taken when the tree has ALREADY come back calls "
+                            "the way back again: that is the double revert")
+        if "_undo(" not in orelse:
+            findings.append("the branch taken when nothing has been undone yet does NOT "
+                            "call the way back: a failed global acceptance would keep "
+                            "every commit")
+    # AND THE FLAG IS ACTUALLY RAISED. A guard that is never true is a
+    # guard that is not there, and it looks exactly like one that is.
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.If) and isinstance(node.test, ast.Name)
+                and node.test.id == "stopped"):
+            continue
+        body = "\n".join(ast.get_source_segment(src, st) or "" for st in node.body)
+        if "_undo(" not in body:
+            continue
+        if not re.search(r"^\s*undone\s*=\s*True\s*$", body, re.M):
+            findings.append("a layer that failed is undone and nothing records that it "
+                            "was: the global acceptance then undoes it a second time, "
+                            "git conflicts on commits it has already reverted, and a "
+                            "rollback that worked ends «needs-a-human»")
+        break
+
 # ── the wait itself, driven against a fake kubectl ───────────────────
 import shutil
 import tempfile
