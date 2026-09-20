@@ -1062,37 +1062,33 @@ def _public_sites():
 
 
 def _page_is_up(before, narrate=True):
-    """Did raising the page change what this instance measures?
+    """Did raising the page change what the world sees?
 
-    Two halves, and the second one was learned the hard way. WHAT is
-    asked lives in window.effect_of_page, which waits for the probes;
-    WHETHER there is anything to ask about lives here, because it comes
-    from the contracts: on an instance that publishes no domain there is
-    nothing for a page to take off the air, and «no effect» would be a
-    true reading of nothing.
+    The looking lives in window.effect_of_page, which asks the public
+    URLs from this machine, through the edge, where the page lives.
+    What lives here is the BEFORE: the codes the photo took, so the
+    comparison is against the world the window photographed rather than
+    one measured after the hook had already run.
     """
-    sites = _public_sites()
-    if sites == 0:
+    codes = before.get("sitios") or {}
+    if not codes:
         return {"efecto": None, "sitios": 0,
-                "por_que": "no contract of this instance declares a domain: there is "
-                           "nothing for the page to take off the air, so its effect "
-                           "cannot be read"}
-    interval, note = win.probe_interval_or_guess()
+                "por_que": "the photo recorded no public site: either no contract of this "
+                           "instance declares a domain, or nobody could ask"}
 
-    def read():
-        _rc, doc = cli.run_json("check")
-        return doc
+    def look():
+        got = win.reach(list(codes))
+        if narrate:
+            _say("  " + ", ".join(f"{u.split('//')[1].split('/')[0]}={c}"
+                                  for u, c in sorted(got.items())))
+        return got
 
     def nap(secs):
         if narrate:
-            _say(f"waiting {secs}s for the probes to run again…")
+            _say(f"looking again in {secs}s…")
         time.sleep(secs)
 
-    out = win.effect_of_page(before["round"]["doc"], read, interval=interval, sleep=nap)
-    out["sitios"] = sites
-    if note:
-        out["nota"] = note
-    return out
+    return win.effect_of_page(codes, look, sleep=nap)
 
 
 def rollback(steps, wid=None, yes=False, narrate=True):

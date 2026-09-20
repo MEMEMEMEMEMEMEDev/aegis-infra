@@ -357,6 +357,13 @@ def photograph(platform=None, with_verify=True, narrate=True):
     except cli.CouldNotEvaluate as e:
         raise CouldNotPhotograph(f"the inventory could not be taken: {e}")
     doc["inventory"] = {"rc": rc, "doc": inv}
+    # WHAT THE WORLD SEES, taken as part of the photo. It is the only
+    # reading here that comes from OUTSIDE this machine, and it is the
+    # one the maintenance page is judged against: the round measures the
+    # origin, and the page lives at the edge.
+    if narrate:
+        _say("what the public sites answer…")
+    doc["sitios"] = reach(public_urls(root))
     try:
         doc["head"] = head(root)
         doc["tree"] = tree_hash(root)
@@ -462,62 +469,100 @@ def probe_interval_or_guess(platform=None, fallback=30):
                       f"out loud rather than made quietly")
 
 
-def effect_of_page(before_doc, read, interval=30, tries=4, sleep=time.sleep):
-    """Did raising the maintenance page change what this instance measures?
+def public_urls(platform=None):
+    """The hostnames this instance publishes, from the contracts.
 
-    THE FIRST VERSION OF THIS ASKED IMMEDIATELY AND IT WAS WRONG. Dated
-    2026-09-20, on the first real window ever opened: the hook deployed
-    the page in 5.5 seconds, the round was taken at once, and the answer
-    came back «the hook ran and the public sites still answer». The page
-    was up. The probes run every thirty seconds and had simply not run
-    again yet, so the round was reporting a world that no longer existed
-    — and the window stopped, correctly refusing to trust a measurement,
-    for a reason that was not true.
-
-    So it WAITS, and the wait is derived from how often the probes
-    actually run rather than written down. It asks again until it sees
-    the change or the tries run out, and a «no effect» that arrives
-    after all of them is a real one.
-
-    `read` returns a round document and `sleep` is injectable, so check
-    218 can drive the whole thing in milliseconds without a cluster.
+    From the contracts and not from the round's sentences: the round
+    narrates for people and its wording is allowed to change, and a
+    command that decided anything by grepping that prose would be A3 of
+    the register all over again.
     """
-    b = readings(before_doc)
-    seen = []
-    for n in range(1, tries + 1):
-        # BEFORE the first read, not only between retries: the probe
-        # that matters is the one that has yet to run.
-        sleep(interval + 5)
+    d = (pathlib.Path(platform) / "orgs") if platform else paths.orgs_dir()
+    if not d.is_dir():
+        return []
+    out = []
+    for f in sorted(d.glob("*.yaml")):
         try:
-            after = read()
-        except Exception as e:                            # noqa: BLE001
-            return {"efecto": None, "intentos": n,
-                    "por_que": f"the round could not be taken again: {e}"}
-        a = readings(after)
-        # `!= FINE` AND NOT `not in (None, FINE)`. A reading that
-        # DISAPPEARS is the commonest shape of the effect, and the first
-        # version excluded exactly that. The round does not flip a
-        # measure's state when the sites go behind a page: it stops
-        # emitting «the N public site(s) answer their probe» and starts
-        # emitting «N of the N public site(s) do not answer», which is a
-        # different sentence and therefore a different key. Measured on
-        # 2026-09-20 with the page verifiably up —portafolio answering
-        # 503— and this function insisting nothing had changed.
-        changed = [k for k, v in b.items() if got_worse(v, a.get(k))]
-        seen.append(len(changed))
+            for line in f.read_text(encoding="utf-8").splitlines():
+                m = re.match(r"^dominio:\s*(\S+)", line)
+                if m:
+                    out.append("https://" + m.group(1).strip().strip("\"'") + "/")
+                    break
+        except OSError:
+            continue
+    return out
+
+
+def reach(urls, timeout=12):
+    """What each public URL answers, asked from OUTSIDE. `None` when
+    nothing answered at all, which is a different thing from a status
+    code and is kept different."""
+    import urllib.error
+    import urllib.request
+    out = {}
+    for url in urls:
+        req = urllib.request.Request(url, method="GET",
+                                     headers={"User-Agent": "aegis-update/1"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                out[url] = r.status
+        except urllib.error.HTTPError as e:
+            out[url] = e.code
+        except Exception:                                 # noqa: BLE001
+            out[url] = None
+    return out
+
+
+def effect_of_page(before_codes, look, interval=5, tries=6, sleep=time.sleep):
+    """Did raising the maintenance page change what the world sees?
+
+    IT ASKS THE SITES, and it took four windows to get here. The first
+    three versions asked the ROUND, and the round is the wrong
+    instrument for this in a way worth writing down rather than
+    rediscovering:
+
+      · it measures the ORIGIN, through probes that run every thirty
+        seconds, so it answers about a world up to a minute old;
+      · its readings are keyed on the SHAPE of a sentence with the
+        digits flattened, because that is what makes two rounds
+        comparable at all — and «1 of the 5 public site(s) do not
+        answer» and «5 of the 5» are then the same key with the same
+        state. The page's whole effect is that number.
+
+    So this asks the URLs themselves, from the machine the window runs
+    on, through the edge, which is where the page lives. What it demands
+    is only that SOMETHING CHANGED: aegis knows nothing about what the
+    operator's page returns, and two of this instance's sites answer 302
+    on an ordinary day because they sit behind their own login. The
+    weakest true statement is the right one here.
+
+    `look` and `sleep` are injectable, so check 218 drives all of it in
+    milliseconds with no network.
+    """
+    if not before_codes:
+        return {"efecto": None, "sitios": 0,
+                "por_que": "no contract of this instance declares a domain: there is "
+                           "nothing for the page to take off the air, so its effect "
+                           "cannot be read"}
+    for n in range(1, tries + 1):
+        # BEFORE the first look, not only between retries: the edge does
+        # not pick a deployment up instantly.
+        sleep(interval)
+        after = look()
+        changed = {u: (before_codes.get(u), c) for u, c in after.items()
+                   if before_codes.get(u) != c}
         if changed:
-            return {"efecto": True, "intentos": n, "espera_s": interval + 5,
-                    "medidas_que_cambiaron": len(changed),
-                    "detalle": [{"seccion": k[0], "medida": k[1]} for k in changed[:6]]}
-    return {"efecto": False, "intentos": tries, "espera_s": interval + 5,
-            "medidas_que_cambiaron": 0, "por_que":
-            f"the page was raised and after {tries} reading(s), each one a probe "
-            f"interval apart, nothing that was fine had stopped being fine"}
+            return {"efecto": True, "intentos": n, "sitios": len(before_codes),
+                    "cambiaron": len(changed),
+                    "detalle": [{"url": u, "antes": a, "ahora": b}
+                                for u, (a, b) in sorted(changed.items())][:6]}
+    return {"efecto": False, "intentos": tries, "sitios": len(before_codes),
+            "cambiaron": 0,
+            "antes": {u: c for u, c in sorted(before_codes.items())},
+            "por_que": f"the page was raised and after {tries} look(s) every public site "
+                       f"still answers exactly what it answered before"}
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  the journal
-# ══════════════════════════════════════════════════════════════════════
 class Journal:
     """Everything one window did, written down as it happens.
 

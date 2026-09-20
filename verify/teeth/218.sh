@@ -1,107 +1,78 @@
-# teeth for 218 — each red brings back the bug of 2026-09-20 or one of
-# its neighbours: an answer given before the world could show it.
+# teeth for 218 — each red is one of the four ways this was wrong, or a
+# neighbour of them. The page is judged by asking the sites.
 W218="$AEGIS_ROOT/lib/aegis/window.py"
-U218="$AEGIS_ROOT/libexec/aegis-update"
 
-# the bug itself: ask first, wait afterwards
+# ask first, wait afterwards: the edge has not picked it up yet
 red_1() { python3 - "$W218" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-old = '''        sleep(interval + 5)
-        try:
-            after = read()'''
+old = '''        sleep(interval)
+        after = look()'''
 assert s.count(old) == 1, "re-aim this tooth"
-p.write_text(s.replace(old, '''        try:
-            after = read()''', 1))
+p.write_text(s.replace(old, '''        after = look()''', 1))
 P
 }
 
-# it asks once and gives up: one missed probe cycle becomes «the page
-# does nothing», which is the answer that stops a window
+# one look and give up
 red_2() { python3 - "$W218" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-old = 'def effect_of_page(before_doc, read, interval=30, tries=4, sleep=time.sleep):'
+old = 'def effect_of_page(before_codes, look, interval=5, tries=6, sleep=time.sleep):'
 assert s.count(old) == 1, "re-aim this tooth"
-p.write_text(s.replace(old, 'def effect_of_page(before_doc, read, interval=30, tries=1, sleep=time.sleep):', 1))
+p.write_text(s.replace(old, 'def effect_of_page(before_codes, look, interval=5, tries=1, sleep=time.sleep):', 1))
 P
 }
 
-# it waits, but less than one turn of the probes
+# a site that stops answering ALTOGETHER stops counting as a change:
+# `None` is treated as «nothing to compare» instead of «nobody answered»
 red_3() { python3 - "$W218" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-old = '        sleep(interval + 5)'
+old = '''        changed = {u: (before_codes.get(u), c) for u, c in after.items()
+                   if before_codes.get(u) != c}'''
 assert s.count(old) == 1, "re-aim this tooth"
-p.write_text(s.replace(old, '        sleep(1)', 1))
+p.write_text(s.replace(old, '''        changed = {u: (before_codes.get(u), c) for u, c in after.items()
+                   if c is not None and before_codes.get(u) != c}''', 1))
 P
 }
 
-# the interval stops being derived: the day somebody moves the scrape
-# interval, this keeps waiting the old one
+# an instance with no public site is reported as «the page did nothing»
 red_4() { python3 - "$W218" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-old = '''    m = re.search(r"^\\s*scrape_interval:\\s*(\\d+)\\s*([smh])\\s*$",
-                  f.read_text(encoding="utf-8"), re.M)
-    if not m:
-        return None
-    return int(m.group(1)) * {"s": 1, "m": 60, "h": 3600}[m.group(2)]'''
+old = '''    if not before_codes:
+        return {"efecto": None, "sitios": 0,'''
 assert s.count(old) == 1, "re-aim this tooth"
-p.write_text(s.replace(old, '    return 30', 1))
+p.write_text(s.replace(old, '''    if not before_codes:
+        return {"efecto": False, "sitios": 0,''', 1))
 P
 }
 
-# a round nobody could take becomes «the page did nothing»
+# the URLs stop coming from the contracts
 red_5() { python3 - "$W218" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-old = '''            return {"efecto": None, "intentos": n,
-                    "por_que": f"the round could not be taken again: {e}"}'''
+old = '                m = re.match(r"^dominio:\\s*(\\S+)", line)'
 assert s.count(old) == 1, "re-aim this tooth"
-p.write_text(s.replace(old, '''            return {"efecto": False, "intentos": n,
-                    "por_que": f"the round could not be taken again: {e}"}''', 1))
+p.write_text(s.replace(old, '                m = re.match(r"^domain:\\s*(\\S+)", line)', 1))
 P
 }
 
-# the window guesses the interval in silence
+# the photo stops recording what the sites answered: the page gets
+# compared against a world measured AFTER the hook ran
 red_6() { python3 - "$W218" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-old = '    return fallback, (f"the probes\' interval could not be read from the platform: "'
+old = '    doc["sitios"] = reach(public_urls(root))'
 assert s.count(old) == 1, "re-aim this tooth"
-i = s.index(old); j = s.index('out loud rather than made quietly")', i) + len('out loud rather than made quietly")')
-p.write_text(s[:i] + '    return fallback, None' + s[j:])
+p.write_text(s.replace(old, '    doc["los_sitios"] = reach(public_urls(root))', 1))
 P
 }
 
 # ── controls ──
-# one more second of margin is still a wait longer than the interval
-control_1() { sed -i 's/        sleep(interval + 5)/        sleep(interval + 6)/' "$W218"; }
+# one more second of margin between looks
+control_1() { sed -i 's/def effect_of_page(before_codes, look, interval=5,/def effect_of_page(before_codes, look, interval=6,/' "$W218"; }
 # the sentence that travels with «no effect» is prose
-control_2() { sed -i 's/nothing that was fine had stopped being fine/nothing that used to be fine had stopped being fine/' "$W218"; }
-# a comment about the thirty seconds is not the thirty seconds
-control_3() { printf '\n# note: the probes run every 30s on this instance; the wait is derived.\n' >> "$W218"; }
-
-# the effect goes back to «something green stopped being green»: on an
-# instance whose sites already carry a notice, nothing green is ever
-# involved and the page is declared useless while it is up
-red_7() { python3 - "$W218" <<'P'
-import sys, pathlib
-p = pathlib.Path(sys.argv[1]); s = p.read_text()
-old = '        changed = [k for k, v in b.items() if got_worse(v, a.get(k))]'
-assert s.count(old) == 1, "re-aim this tooth"
-p.write_text(s.replace(old, '        changed = [k for k, v in b.items() if v == FINE and a.get(k) != FINE]', 1))
-P
-}
-
-# `not-evaluated` stops being the floor: a reading that went from broken
-# to unmeasurable reads as an improvement
-red_8() { python3 - "$W218" <<'P'
-import sys, pathlib
-p = pathlib.Path(sys.argv[1]); s = p.read_text()
-old = 'RANK = {"not-evaluated": 0, "not-evaluable": 0,'
-assert s.count(old) == 1, "re-aim this tooth"
-p.write_text(s.replace(old, 'RANK = {"not-evaluated": 9, "not-evaluable": 9,', 1))
-P
-}
+control_2() { sed -i 's/still answers exactly what it answered before/still answers precisely what it answered before/' "$W218"; }
+# a comment about the round being the wrong instrument is not the instrument
+control_3() { printf '\n# note: the round measures the origin; the page lives at the edge.\n' >> "$W218"; }

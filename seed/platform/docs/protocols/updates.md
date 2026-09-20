@@ -153,16 +153,26 @@ answer**, and then the window runs with the sites live and says so out
 loud in its own document.
 
 What the product does insist on is proof. After running
-`MAINTENANCE_ON` it takes the round again and asks whether any reading
-that was fine has stopped being fine. If nothing changed, the hook did
-not do what it says, and the window **stops there having changed
-nothing** — a maintenance page nobody can see is worse than none at
-all, because it is the false belief that the sites are shielded.
+`MAINTENANCE_ON` it **asks the public sites**, from the machine it runs
+on, and compares against the codes it took as part of its photo. If
+nothing moved, the hook did not do what it says, and the window **stops
+there having changed nothing** — a maintenance page nobody can see is
+worse than none at all, because it is the false belief that the sites
+are shielded.
 
-It asks that question through the round and not by grepping the round's
-prose: on an instance whose contracts declare no domain there is
-nothing to take off the air, and that is reported as «the effect cannot
-be read», not as «no effect».
+It asks the sites and not the round, and that took four windows to
+learn. The round measures the ORIGIN through probes that run every
+thirty seconds, and its readings are keyed on the shape of a sentence
+with the digits flattened — which is what makes two rounds comparable
+at all, and which makes «1 of the 5 public site(s) do not answer» and
+«5 of the 5» the same key with the same state. The page's whole effect
+is that number, and the page lives at the edge, not at the origin.
+
+What is demanded is only that **something changed**. aegis knows
+nothing about what your page returns, and a site that sits behind its
+own login answers 302 on an ordinary day. On an instance whose
+contracts declare no domain there is nothing to take off the air, and
+that is reported as «the effect cannot be read», never as «no effect».
 
 ## Jenkins goes quiet
 

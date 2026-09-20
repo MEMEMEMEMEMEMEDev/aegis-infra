@@ -1,30 +1,33 @@
-"""Check 218 — the page is not judged before anybody could have seen it.
+"""Check 218 — the maintenance page is judged by asking the sites.
 
-WITH A DATE ON IT: 2026-09-20, the first update window ever opened on a
-real instance. The hook deployed the maintenance page in 5.5 seconds,
-the window read the round at once, and answered «the hook ran and the
-public sites still answer». The page was up. The tenant probes run
-every thirty seconds and had not run again yet, so the round was
-describing a world that no longer existed.
+FOUR WINDOWS IN A ROW got this wrong, each in a different way, and the
+four are worth naming because every one of them looked reasonable:
 
-The window stopped, which was the right thing to do with a measurement
-it could not trust — but the reason it printed was false, and a
-protocol that stops for false reasons is one nobody lets run
-unattended.
+  1. it read the round the instant the hook returned — the tenant
+     probes run every thirty seconds and had not run again;
+  2. it counted only a reading that went from fine to NOT fine, and
+     ignored one that DISAPPEARED, which is the commonest shape;
+  3. it watched only readings that had been GREEN, and this instance's
+     line about its sites was already a notice (two of five sit behind
+     their own login);
+  4. and then, with all of that fixed, the round's readings are keyed
+     on the SHAPE of a sentence with its digits flattened — that is
+     what makes two rounds comparable at all — so «1 of the 5 public
+     site(s) do not answer» and «5 of the 5» are the same key with the
+     same state, and the page's whole effect is that number.
 
-So the reading WAITS, and the wait comes from how often the probes
-actually run rather than from a number somebody typed. Four properties,
-all driven in milliseconds with an injected clock and an injected
-reader:
+The round is simply the wrong instrument: it measures the ORIGIN,
+through probes, with a minute of lag, and the page lives at the EDGE.
+So the window asks the public URLs itself, from the machine it runs on,
+and compares against the codes it took as part of its photo.
 
-  1. it waits before the FIRST read, not only between retries — the
-     probe that matters is the one that has yet to run;
-  2. a change that only shows up on a later reading is still seen;
-  3. a page that genuinely does nothing comes back False, after having
-     asked more than once;
-  4. the interval is DERIVED from the platform's own config, and a
-     config it cannot read is said out loud instead of guessed at
-     quietly.
+What is demanded of the comparison is only that SOMETHING CHANGED.
+aegis knows nothing about what the operator's page returns, and two of
+these sites answer 302 on an ordinary day; the weakest true statement
+is the right one here.
+
+Everything below is driven with an injected clock and an injected
+lookup: no network, no cluster, milliseconds.
 """
 import os
 import sys
@@ -41,162 +44,141 @@ except Exception as e:                                    # noqa: BLE001
     print("SCOPE: nothing was driven")
     sys.exit(0)
 
-if not hasattr(win, "effect_of_page"):
-    print("the window has no effect_of_page: whether the maintenance page did anything "
-          "is decided somewhere that cannot be exercised without a cluster")
-    print("SCOPE: nothing was driven")
-    sys.exit(0)
+for name in ("effect_of_page", "public_urls", "reach"):
+    if not hasattr(win, name):
+        print(f"the window has no {name}: whether the maintenance page did anything is "
+              f"decided somewhere that cannot be exercised without a network")
+        print("SCOPE: nothing was driven")
+        sys.exit(0)
 
+#: The instance that found this: five sites, two of them answering 302
+#: on an ordinary day because they sit behind a login, and one already
+#: down before the window started. A tidy fixture of five 200s would
+#: have passed three of the four broken versions.
+#: The domain is `example.com` and not the one this was found on: the
+#: artifact is for anybody, and check 117 is right to refuse a product
+#: that carries the login of whoever happens to be building it.
+BEFORE = {"https://uno.example.com/": 302,
+          "https://dos.example.com/": 200,
+          "https://tres.example.com/": 200,
+          "https://cuatro.example.com/": None,
+          "https://cinco.example.com/": 302}
+BEHIND_PAGE = {u: 503 for u in BEFORE}
 
-def _round(*measures):
-    return {"steps": [{"step": "observability",
-                       "measures": [{"measure": m, "state": st} for m, st in measures]}]}
+driven = 0
 
-
-#: THE FIXTURE IS THE INSTANCE THAT FOUND THE BUG, not a tidy one. Its
-#: line about the public sites was already a NOTICE — two of five answer
-#: with a redirect the probe refuses, because they sit behind their own
-#: login — so raising a page over all five turns a notice into a
-#: failure, and nothing green is involved anywhere. A fixture built out
-#: of «good» and «bad» would have passed the version that could not see
-#: this, three windows in a row.
-UP = _round(("the N public organizations have a probe", "good"),
-            ("N of the N public site(s) answer with a redirect the probe does not accept",
-             "notice"))
-DOWN = _round(("the N public organizations have a probe", "good"),
-              ("N of the N public site(s) do not answer: no reply, or an error", "bad"))
-
-# ── 1 + 2: a change that only appears later is still seen ────────────
+# ── 1: it waits before the FIRST look ────────────────────────────────
 slept, calls = [], {"n": 0}
 
 
-def read_flips_on_third():
+def look_flips_on_third():
     calls["n"] += 1
-    return UP if calls["n"] < 3 else DOWN
+    return dict(BEFORE) if calls["n"] < 3 else dict(BEHIND_PAGE)
 
 
-r = win.effect_of_page(UP, read_flips_on_third, interval=30,
+r = win.effect_of_page(BEFORE, look_flips_on_third, interval=5,
                        sleep=lambda s: slept.append(s))
+driven += 1
 if r.get("efecto") is not True:
-    findings.append(f"a page whose effect shows up on the third reading was reported as "
-                    f"{r.get('efecto')!r}: the window would stop for a reason that is not "
-                    f"true, which is what happened on 2026-09-20")
+    findings.append(f"a page whose effect appears on the third look was reported as "
+                    f"{r.get('efecto')!r}: the edge takes a moment, and a window that "
+                    f"asks once stops for a reason that is not true")
 if not slept:
-    findings.append("nothing waited at all: the round was read the instant the hook "
-                    "returned, and the probes had not run again")
+    findings.append("nothing waited at all: the URLs were asked the instant the hook "
+                    "returned, before the edge could have picked the change up")
 elif calls["n"] != len(slept):
-    findings.append(f"it waited {len(slept)} time(s) for {calls['n']} reading(s): the "
-                    f"wait has to come BEFORE each read, including the first")
-if slept and min(slept) < 30:
-    findings.append(f"it waited {min(slept)}s for probes that run every 30s: shorter than "
-                    f"one interval is no wait at all")
+    findings.append(f"it waited {len(slept)} time(s) for {calls['n']} look(s): the wait "
+                    f"belongs BEFORE each look, including the first")
 
-# ── the notion of «worse» itself, over both vocabularies ────────────
-if hasattr(win, "got_worse"):
-    for was, now, want in (("good", "bad", True), ("notice", "bad", True),
-                           ("good", "notice", True), ("good", None, True),
-                           ("bad", "not-evaluated", True), ("already", "wrong", True),
-                           ("bad", "good", False), ("notice", "notice", False),
-                           ("good", "good", False)):
-        if win.got_worse(was, now) is not want:
-            findings.append(f"«{was} → {now}» is reported as "
-                            f"{'not worse' if want else 'worse'}: the page's effect is "
-                            f"anything that got WORSE, and a rule that only watches green "
-                            f"is blind on an instance whose sites already carry a notice")
-else:
-    findings.append("nothing says what «worse» means: the effect was decided by comparing "
-                    "against one state, which is how three windows in a row said the page "
-                    "had done nothing while it was up")
-
-# ── 3: a page that does nothing is still a False, after asking twice ─
+# ── 2: a page that changes nothing is False, after looking more than
+#       once ──────────────────────────────────────────────────────────
 calls2 = {"n": 0}
 
 
-def read_never_changes():
+def look_never_changes():
     calls2["n"] += 1
-    return UP
+    return dict(BEFORE)
 
 
-r2 = win.effect_of_page(UP, read_never_changes, interval=1, sleep=lambda s: None)
+r2 = win.effect_of_page(BEFORE, look_never_changes, interval=0, sleep=lambda s: None)
+driven += 1
 if r2.get("efecto") is not False:
     findings.append(f"a page that changed nothing came back {r2.get('efecto')!r}: the "
                     f"window would take the sites off the air behind a page nobody sees")
 if calls2["n"] < 2:
-    findings.append(f"it gave up after {calls2['n']} reading(s): one probe cycle can be "
-                    f"missed, and «no effect» is the answer that stops a window")
+    findings.append(f"it gave up after {calls2['n']} look(s): the edge is not instant, "
+                    f"and «no effect» is the answer that stops a window")
 if not r2.get("por_que"):
     findings.append("«no effect» comes back with no reason attached")
 
-# ── and a reader that cannot answer is «could not look», never False ─
-def read_explodes():
-    raise RuntimeError("the round could not be taken")
+# ── 3: the shapes the round could not tell apart ─────────────────────
+# One site already down, and the page takes the rest: the number is the
+# whole difference, and the round's keys flatten numbers.
+worse = {**BEFORE, "https://dos.example.com/": 503,
+         "https://tres.example.com/": 503}
+r3 = win.effect_of_page(BEFORE, lambda: worse, interval=0, sleep=lambda s: None)
+driven += 1
+if r3.get("efecto") is not True:
+    findings.append("a page that took two more sites off the air, on an instance where "
+                    "one was already down, was not seen: that is the exact shape the "
+                    "round's flattened keys could not tell apart")
 
+# A site that stops answering AT ALL is a change too, not an absence.
+r4 = win.effect_of_page(BEFORE, lambda: {**BEFORE, "https://dos.example.com/": None},
+                        interval=0, sleep=lambda s: None)
+driven += 1
+if r4.get("efecto") is not True:
+    findings.append("a site that stopped answering at all was not counted as a change")
 
-r3 = win.effect_of_page(UP, read_explodes, interval=1, sleep=lambda s: None)
-if r3.get("efecto") is not None:
-    findings.append(f"a round that could not be taken came back {r3.get('efecto')!r} "
-                    f"instead of «nobody could look»")
+# And a site that RECOVERS is a change: the comparison is «something
+# moved», not «everything got worse».
+r5 = win.effect_of_page(BEFORE, lambda: {**BEFORE, "https://cuatro.example.com/": 200},
+                        interval=0, sleep=lambda s: None)
+driven += 1
+if r5.get("efecto") is not True:
+    findings.append("a site whose answer changed in the other direction was not counted: "
+                    "the demand is that something moved, which is the weakest true "
+                    "statement and therefore the right one")
 
-# ── 4: the interval is derived, and an unreadable one says so ────────
-if not hasattr(win, "probe_interval"):
-    findings.append("nothing derives how often the probes run: the wait would be a "
-                    "number typed here, and the day somebody moves the scrape interval "
-                    "this would keep waiting the old one")
-else:
-    import tempfile
-    import pathlib as _pl
-    tmp = _pl.Path(tempfile.mkdtemp(prefix="aegis-218-"))
-    d = tmp / "k8s" / "base" / "observability" / "vmagent"
-    d.mkdir(parents=True)
-    (d / "values.yaml").write_text("scrape:\n    scrape_interval: 45s\n", encoding="utf-8")
-    got = win.probe_interval(tmp)
-    if got != 45:
-        findings.append(f"the probes' interval was read as {got!r} from a config that "
-                        f"says 45s")
-    if win.probe_interval(tmp / "nada") is not None:
-        findings.append("a config that cannot be read came back as a number instead of "
-                        "None: the caller could not tell a measurement from a guess")
-    import shutil
+# ── 4: no site at all is «cannot be read», never «no effect» ─────────
+r6 = win.effect_of_page({}, lambda: {}, interval=0, sleep=lambda s: None)
+driven += 1
+if r6.get("efecto") is not None:
+    findings.append(f"an instance that publishes no site came back {r6.get('efecto')!r}: "
+                    f"there is nothing for a page to take off the air, and that is not "
+                    f"the same as a page that did nothing")
+
+# ── 5: the URLs come from the contracts ──────────────────────────────
+import shutil
+import tempfile
+import pathlib as _pl
+
+tmp = _pl.Path(tempfile.mkdtemp(prefix="aegis-218-"))
+try:
+    (tmp / "orgs").mkdir()
+    (tmp / "orgs" / "uno.yaml").write_text("# a contract\ndominio: uno.example.com\n",
+                                           encoding="utf-8")
+    (tmp / "orgs" / "dos.yaml").write_text("tipo: estatico\n", encoding="utf-8")
+    got = win.public_urls(tmp)
+    driven += 1
+    if got != ["https://uno.example.com/"]:
+        findings.append(f"the public URLs were read as {got!r} from a tree with one "
+                        f"contract that declares a domain and one that does not")
+    if win.public_urls(tmp / "nada") != []:
+        findings.append("a tree with no contracts came back with URLs")
+finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
-# ── and a guess is handed back AS a guess, not as a number ───────────
-# Driven rather than grepped: the caller has to be able to tell the
-# config's answer from a default, and a function that returns a bare
-# number makes that impossible no matter how carefully the caller is
-# written.
-if not hasattr(win, "probe_interval_or_guess"):
-    findings.append("nothing hands back the interval together with whether it was "
-                    "measured: a silent default about WHEN to measure is how the first "
-                    "window stopped for a reason that was not true")
-else:
-    import tempfile as _tf
-    import pathlib as _pl2
-    import shutil as _sh
-    t2 = _pl2.Path(_tf.mkdtemp(prefix="aegis-218b-"))
-    d2 = t2 / "k8s" / "base" / "observability" / "vmagent"
-    d2.mkdir(parents=True)
-    (d2 / "values.yaml").write_text("    scrape_interval: 45s\n", encoding="utf-8")
-    val, note = win.probe_interval_or_guess(t2)
-    if (val, note) != (45, None):
-        findings.append(f"a readable config came back as {(val, note)!r}: a measured "
-                        f"interval must arrive with no note, or every caller learns to "
-                        f"ignore the note")
-    val2, note2 = win.probe_interval_or_guess(t2 / "nada")
-    if not note2:
-        findings.append("an unreadable config came back with no note: the window would "
-                        "wait on a guess and report it as a measurement")
-    if not val2:
-        findings.append("an unreadable config came back with no interval either: the "
-                        "window would not wait at all")
-    _sh.rmtree(t2, ignore_errors=True)
-
-upd = open(os.path.join(ROOT, "libexec", "aegis-update"), encoding="utf-8").read()
-code = "\n".join(ln for ln in upd.splitlines() if not ln.lstrip().startswith("#"))
-if "probe_interval_or_guess" not in code:
-    findings.append("the window does not ask for the interval together with whether it "
-                    "was measured")
+# ── and the photo carries them, so the comparison is against the world
+#     the window photographed ──────────────────────────────────────────
+wsrc = open(os.path.join(ROOT, "lib", "aegis", "window.py"), encoding="utf-8").read()
+code = "\n".join(ln for ln in wsrc.splitlines() if not ln.lstrip().startswith("#"))
+if 'doc["sitios"]' not in code:
+    findings.append("the photo does not record what the public sites answered: the page "
+                    "would be compared against a world measured after the hook ran, which "
+                    "is not a before")
 
 for f in findings:
     print(f)
-print(f"SCOPE: 4 reading(s) driven with an injected clock ({len(slept)} wait(s) of "
-      f"{slept[0] if slept else '-'}s), and the interval read from a config")
+print(f"SCOPE: {driven} reading(s) driven with an injected clock and an injected lookup, "
+      f"over the five sites of the instance that found this")
