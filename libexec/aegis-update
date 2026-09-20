@@ -292,6 +292,12 @@ class Ctx:
         self.kernel = kernel
         self.pins = {}
         self.bumps = []
+        #: Applications that were NOT Synced+Healthy when the photo was
+        #: taken. A window is judged on «no new failures», so it is not
+        #: asked to fix what was already adrift — and cannot be, when
+        #: what holds one out is an orphan the platform declines to
+        #: prune by itself.
+        self.adrift = frozenset()
 
     def say(self, msg):
         if self.narrate:
@@ -405,7 +411,7 @@ def layer_charts(ctx, layer, bumps):
     three are cheaper to find out from `helm template` than from a sync
     that half applied.
     """
-    done, failed = [], None
+    done, refused, failed = [], [], None
     for bump in _in_dependency_order(bumps):
         pin = bump["pin"]
         # The pin is KEYED by the Application (pins.py:210), because that
@@ -415,9 +421,23 @@ def layer_charts(ctx, layer, bumps):
         r = win.chart_renders(pin.extra.get("repo"), pin.extra.get("chart"), bump["a"])
         ctx.j.note("render", **{**r, "app": app, "version": bump["a"]})
         if r.get("renderiza") is not True:
-            failed = {"app": app, "por_que": f"the candidate does not render: "
-                                             f"{r.get('por_que', '')[:200]}"}
-            break
+            # A CANDIDATE THAT DOES NOT RENDER IS A REFUSAL, NOT A
+            # FAILURE, and the difference is the whole layer. Nothing
+            # was written: the pre-check ran before a line changed. So
+            # it is named, skipped, and the charts that DO render carry
+            # on — undoing five good ones because a sixth needs a values
+            # change would be punishing the instance for a migration
+            # somebody has to read. Measured 2026-09-20: vmagent's new
+            # chart wants a `remoteWrite` that this instance's values do
+            # not declare, and argocd, kyverno, jenkins, trivy-server
+            # and vector were reverted for it.
+            refused.append({"app": app, "a": bump["a"],
+                            "por_que": f"the candidate does not render against this "
+                                       f"instance's values: {r.get('por_que', '')[:200]}",
+                            "remedio": "read what the chart wants, change the values, and "
+                                       "take this one by hand"})
+            ctx.say(f"refused {app} → {bump['a']}: the candidate does not render")
+            continue
         _write_and_commit(ctx, bump, layer.number)
         _push(ctx)
         settled = _sync(ctx, app)
@@ -425,8 +445,10 @@ def layer_charts(ctx, layer, bumps):
             failed = {"app": app, **settled}
             break
         done.append(app)
+    for r in refused:
+        ctx.steps.already(f"refused:chart:{r['app']}", **r)
     return {"aplicada": failed is None, "apps": done, "fallo": failed,
-            "cambios": len(done)}
+            "rechazados": [r["app"] for r in refused], "cambios": len(done)}
 
 
 #: The order charts are raised in. It is not alphabetical and it is not
@@ -467,7 +489,7 @@ def layer_files_then_sync(ctx, layer, bumps):
     # still rolling. On 2026-09-20 that made a window call a restarting
     # Jenkins «no build at all on fourteen jobs» and stop.
     ctx.say("waiting for every app to settle…")
-    settled = win.argo_all_settled(narrate=ctx.narrate)
+    settled = win.argo_all_settled(narrate=ctx.narrate, exempt=ctx.adrift)
     ctx.j.note("settled", **settled)
     return {"aplicada": settled.get("asentado") is True, "cambios": len(bumps),
             **{k: v for k, v in settled.items() if k != "asentado"}}
@@ -587,7 +609,7 @@ def _undo(ctx, steps, j, detail, narrate, why, partial_layer=None):
         # AND WAIT FOR IT, for the same reason the layer had to: a sync
         # is a request. A rollback that reports «the tree came back»
         # while the cluster is still rolling has measured nothing.
-        settled = win.argo_all_settled(narrate=narrate)
+        settled = win.argo_all_settled(narrate=narrate, exempt=ctx.adrift)
         j.note("rollback-settled", **settled)
         same = win.came_back_to(j, platform=ctx.platform)
         detail["arbol"] = same
@@ -806,6 +828,11 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
     restore = win.Restore()
     ctx = Ctx(steps, j, win.Budget(budget), restore, str(paths.platform_dir()), narrate,
               allow_major=allow_major, k3s_minor=k3s_minor, kernel=kernel)
+    ctx.adrift = frozenset(before.get("apps_a_la_deriva") or ())
+    if ctx.adrift:
+        steps.already("window:already-adrift", apps=sorted(ctx.adrift),
+                      nota="these were not Synced+Healthy before this window started. It "
+                           "is not asked to fix them, and it will not wait for them")
     try:
         # ── what this window will take, and what it refuses ─────────
         # BEFORE the page goes up, and that order is the point. Choosing

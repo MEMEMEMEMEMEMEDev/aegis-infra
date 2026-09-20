@@ -28,7 +28,7 @@ P
 red_3() { python3 - "$U221" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-old = '    settled = win.argo_all_settled(narrate=ctx.narrate)'
+old = '    settled = win.argo_all_settled(narrate=ctx.narrate, exempt=ctx.adrift)'
 assert s.count(old) == 1, "re-aim this tooth"
 p.write_text(s.replace(old, '    settled = {"asentado": True, "apps": 0}', 1))
 P
@@ -49,7 +49,7 @@ P
 red_5() { python3 - "$U221" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-old = '''        settled = win.argo_all_settled(narrate=narrate)
+old = '''        settled = win.argo_all_settled(narrate=narrate, exempt=ctx.adrift)
         j.note("rollback-settled", **settled)'''
 assert s.count(old) == 1, "re-aim this tooth"
 p.write_text(s.replace(old, '        j.note("rollback-settled", asentado=True)', 1))
@@ -105,5 +105,29 @@ p = pathlib.Path(sys.argv[1]); s = p.read_text()
 old = '            undone = True'
 assert s.count(old) == 1, "re-aim this tooth"
 p.write_text(s.replace(old, '            undone = False', 1))
+P
+}
+
+# the waits stop exempting what was already adrift: one app that was
+# OutOfSync before the window started times out every window from now on
+red_10() { python3 - "$U221" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = 'exempt=ctx.adrift)\n        j.note("rollback-settled"'
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, ')\n        j.note("rollback-settled"', 1))
+P
+}
+
+# a chart whose candidate does not render stops the layer again: five
+# good charts undone because a sixth needs a values change
+red_11() { python3 - "$U221" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = '''            ctx.say(f"refused {app} → {bump['a']}: the candidate does not render")
+            continue'''
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, '''            failed = {"app": app, "por_que": "the candidate does not render"}
+            break''', 1))
 P
 }

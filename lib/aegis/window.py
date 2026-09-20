@@ -364,6 +364,11 @@ def photograph(platform=None, with_verify=True, narrate=True):
     if narrate:
         _say("what the public sites answer…")
     doc["sitios"] = reach(public_urls(root))
+    # WHICH APPS WERE ALREADY ADRIFT. The acceptance's rule is «no new
+    # failures», and an app that was out before the window started is
+    # not the window's to fix — nor can it be, when what holds it out is
+    # an orphan the platform declines to prune by itself.
+    doc["apps_a_la_deriva"] = sorted(unsettled_apps() or [])
     try:
         doc["head"] = head(root)
         doc["tree"] = tree_hash(root)
@@ -1178,7 +1183,32 @@ def argo_settled(app, timeout=900, poll=10, narrate=False):
                        "and removing them is a decision with a person in it"}
 
 
-def argo_all_settled(timeout=900, poll=15, narrate=False):
+def unsettled_apps():
+    """Which Applications are NOT Synced+Healthy right now.
+
+    Taken as part of the photo so the window knows what was already out
+    before it touched anything. The acceptance's rule is «no NEW
+    failures»; demanding that an app which was already adrift become
+    healthy is a stricter rule than the protocol's, and it is one no
+    window can satisfy. Measured 2026-09-20: cert-manager sat
+    permanently OutOfSync over two RBAC objects its new chart no longer
+    renders, and every window after that timed out waiting for it.
+    """
+    rc, out, _ = _kubectl(
+        "get", "applications", "-n", "argocd", "-o",
+        "jsonpath={range .items[*]}{.metadata.name}|{.status.sync.status}|"
+        "{.status.health.status}{\"\\n\"}{end}")
+    if rc != 0:
+        return None
+    out_ = set()
+    for ln in out.splitlines():
+        parts = ln.split("|")
+        if len(parts) == 3 and (parts[1] != "Synced" or parts[2] != "Healthy"):
+            out_.add(parts[0])
+    return out_
+
+
+def argo_all_settled(timeout=900, poll=15, narrate=False, exempt=()):
     """Wait until EVERY Application is Synced and Healthy.
 
     A SYNC IS A REQUEST, NOT AN ARRIVAL, and that is what cost a window
@@ -1206,16 +1236,20 @@ def argo_all_settled(timeout=900, poll=15, narrate=False):
                                                  "this is «could not look», not «it is "
                                                  "not ready»"}
         last = [ln.split("|") for ln in out.splitlines() if ln.strip()]
-        unsettled = [a for a in last if len(a) == 3 and (a[1] != "Synced" or a[2] != "Healthy")]
+        unsettled = [a for a in last if len(a) == 3 and (a[1] != "Synced" or a[2] != "Healthy")
+                     and a[0] not in exempt]
         if not unsettled:
-            return {"asentado": True, "apps": len(last), "segundos": round(time.time() - t0)}
+            return {"asentado": True, "apps": len(last), "segundos": round(time.time() - t0),
+                    "exentas": sorted(exempt)}
         if narrate:
             _say(f"{len(unsettled)} app(s) still moving: "
                  + ", ".join(f"{a[0]}={a[1]}/{a[2]}" for a in unsettled[:4]))
         time.sleep(poll)
-    unsettled = [a for a in last if len(a) == 3 and (a[1] != "Synced" or a[2] != "Healthy")]
+    unsettled = [a for a in last if len(a) == 3 and (a[1] != "Synced" or a[2] != "Healthy")
+                 and a[0] not in exempt]
     return {"asentado": False, "apps": len(last), "segundos": round(time.time() - t0),
             "moviendose": [f"{a[0]}={a[1]}/{a[2]}" for a in unsettled[:8]],
+            "exentas": sorted(exempt),
             "por_que": "they did not all reach Synced+Healthy inside the wait. A wait that "
                        "ran out is a failure, never a «probably fine»"}
 

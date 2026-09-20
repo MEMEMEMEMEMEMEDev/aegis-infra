@@ -206,6 +206,49 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
+# ── a window is not asked to fix what was already adrift ─────────────
+# Nor can it be: what holds an app out may be an orphan the platform
+# declines to prune by itself, and the acceptance's rule is «no NEW
+# failures». Demanding more than that is a rule no window can satisfy.
+if not hasattr(win, "unsettled_apps"):
+    findings.append("nothing records which apps were already adrift when the photo was "
+                    "taken: a window then waits for one it did not break and cannot fix")
+# EVERY call, not one of them: the window waits twice —after a layer
+# and after a rollback— and one that forgets is one window in two.
+calls_wait = re.findall(r"argo_all_settled\(([^)]*)\)", code)
+if not calls_wait:
+    findings.append("the window never waits for the apps to settle")
+for args in calls_wait:
+    if "exempt" not in args:
+        findings.append(f"a wait for the apps does not exempt what was already adrift "
+                        f"(`argo_all_settled({args.strip()})`): an app that was OutOfSync "
+                        f"before the window started would time it out every time")
+if 'doc["apps_a_la_deriva"]' not in "\n".join(
+        ln for ln in open(os.path.join(ROOT, "lib", "aegis", "window.py"),
+                          encoding="utf-8").read().splitlines()
+        if not ln.lstrip().startswith("#")):
+    findings.append("the photo does not record which apps were adrift, so the window has "
+                    "nothing to exempt")
+
+# ── a candidate that does not render is refused, not a failure ───────
+# Nothing was written: the pre-check runs before a line changes. Undoing
+# the charts that DID render, because a later one needs a values change,
+# punishes the instance for a migration somebody has to read.
+charts = [n for n in ast.walk(ast.parse(src))
+          if isinstance(n, ast.FunctionDef) and n.name == "layer_charts"]
+if charts:
+    body = ast.get_source_segment(src, charts[0]) or ""
+    body = "\n".join(l for l in body.splitlines() if not l.lstrip().startswith("#"))
+    m_render = re.search(r'renderiza.*?\n(.*?)(?=\n        [a-z_]+ = |\Z)', body, re.S)
+    if m_render and re.search(r"^\s*break\s*$", m_render.group(1), re.M):
+        findings.append("a chart whose candidate does not render stops the layer: nothing "
+                        "was written, so that is a refusal and not a failure, and the "
+                        "charts that did render are undone for it")
+    if "refused" not in body:
+        findings.append("layer_charts has no way to refuse a chart by name: a candidate "
+                        "that cannot render is either a failure or invisible, and it is "
+                        "neither")
+
 for f in findings:
     print(f)
 print(f"SCOPE: the baseline, the wait and the two red endings read out of the window, and "

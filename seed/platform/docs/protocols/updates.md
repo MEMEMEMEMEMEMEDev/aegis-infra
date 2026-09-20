@@ -337,6 +337,22 @@ The window does not delete them. It names them —kind, namespace and
 name— and hands the decision over, because removing a resource is
 irreversible and belongs to a person.
 
+And it does not wait for them either. The photo records which
+Applications were **already adrift** before the window started, and
+every wait exempts those: the acceptance's rule is «no NEW failures»,
+and asking a window to fix something it did not break —something it
+CANNOT fix, when what holds the app out is an orphan the platform
+declines to prune— is a rule no window can satisfy. One permanently
+OutOfSync app would otherwise time out every window from then on.
+
+**A candidate that does not render is a refusal, not a failure.** The
+`helm template` pre-check runs before a line is written, so a chart
+whose new version wants values this instance does not declare is named,
+skipped, and the rest of the layer carries on. Undoing five charts that
+rendered and settled because a sixth needs a migration somebody has to
+read would be punishing the instance for the migration. vmagent 0.46 →
+0.47 is exactly that: the new chart wants a `remoteWrite` block.
+
 **Layer 4 goes one chart at a time,** each rendered with `helm template`
 before a line is written, then committed, pushed, synced, and waited on
 until Synced **and** Healthy. That is why it costs an hour. Six charts
