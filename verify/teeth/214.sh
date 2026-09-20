@@ -50,17 +50,12 @@ P
 red_4() { python3 - "$U214" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-block = '''        for done in restore.run():
-            if done["ok"]:
-                steps.done(f"restore:{done[\'restored\']}", que=done["what"])
-            else:
-                steps.wrong(f"restore:{done[\'restored\']}", **done,
-                            por_que="the window changed this about the machine and could "
-                                    "not put it back. It does not fix itself")
-'''
-assert s.count(block) == 1, "re-aim this tooth"
-s = s.replace(block, "", 1)
-anchor = '''            steps.done("window:acceptance", nuevos=0, cegados=0,'''
+i = s.index('        for done in restore.run():')
+j = s.index('        rep = j.close(outcome', i)
+block = s[i:j]
+assert 'restore:' in block, "re-aim this tooth"
+s = s[:i] + s[j:]
+anchor = '            steps.done("window:acceptance", nuevos=0, cegados=0,'
 assert s.count(anchor) == 1, "re-aim this tooth"
 p.write_text(s.replace(anchor, block + anchor, 1))
 P
@@ -71,7 +66,7 @@ P
 red_5() { python3 - "$U214" <<'P'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-old = '''            if outcome in ("accepted", "refused"):'''
+old = '''            if outcome in ("accepted", "refused", "rolled-back"):'''
 assert s.count(old) == 1, "re-aim this tooth"
 p.write_text(s.replace(old, '''            if True:''', 1))
 P
@@ -123,3 +118,15 @@ P
 }
 # a comment about the three things is not the three things
 control_3() { printf '\n# note: quiet, the silence and the clock are the three that stay silent.\n' >> "$W214"; }
+
+# a completed rollback keeps the page up: the tree came back byte for
+# byte, the acceptance passed, and the instance sits behind its own
+# maintenance page until a human notices
+red_8() { python3 - "$U214" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = '            if outcome in ("accepted", "refused", "rolled-back"):'
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, '            if outcome in ("accepted", "refused"):', 1))
+P
+}

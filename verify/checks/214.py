@@ -116,10 +116,30 @@ if "restore.push" not in code:
 # The page is the one thing that must NOT come back automatically after
 # a red. A broken instance put back in front of the public is the moment
 # the page exists for.
-if not re.search(r'if outcome in \("accepted", "refused"\)', code):
+# THE PAGE COMES DOWN WHEN THE INSTANCE IS WELL, not when the window is
+# happy with itself. `rolled-back` is the protocol WORKING: the tree
+# came back byte for byte and the acceptance passed, which is exactly
+# the state the page is not needed in. Leaving it up there cost an
+# instance twenty minutes behind its own page on 2026-09-20. The one
+# outcome that keeps it is `needs-a-human`, which is the only one that
+# means the instance may be broken.
+m_page = re.search(r'if outcome in \(([^)]*)\):', code)
+if not m_page:
     findings.append("the maintenance page comes down without asking what the outcome "
                     "was: after a red that puts a broken instance back in front of the "
                     "public, which is the one moment the page exists for")
+else:
+    comes_down = {w.strip().strip('"\'') for w in m_page.group(1).split(",") if w.strip()}
+    if "needs-a-human" in comes_down:
+        findings.append("the page comes down even when the window ended needing a human: "
+                        "that is the one outcome where the instance may be broken, and "
+                        "the one the page exists for")
+    for good in ("accepted", "rolled-back"):
+        if good not in comes_down:
+            findings.append(f"the page does NOT come down on «{good}»: the instance is "
+                            f"well —a rollback that completed left it byte for byte as "
+                            f"it was— and it would sit behind its own page until a human "
+                            f"noticed")
 
 # The heartbeat is never silenced, and that is a value, not a comment.
 if "DeadmanAegis" in win.SILENCEABLE:

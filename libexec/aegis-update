@@ -1053,12 +1053,24 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
         pass
     finally:
         # ── the exit trap ───────────────────────────────────────────
-        # The page comes down on the way out ONLY when the window is
-        # ending green. A red that took the page down would put a broken
-        # instance back in front of the public, which is exactly the
-        # moment the page exists for.
+        # THE PAGE COMES DOWN WHEN THE INSTANCE IS WELL, not when the
+        # window is happy with itself. Those are different, and the
+        # difference cost an instance twenty minutes behind its own
+        # maintenance page on 2026-09-20: a window whose layer failed,
+        # whose rollback then reverted every commit, whose tree came
+        # back byte for byte and whose acceptance passed with zero new
+        # failures — and which left the page up because the word for
+        # what happened was «rolled-back».
+        #
+        # `rolled-back` is the protocol working. What it means is that
+        # the instance is exactly as it was before, which is precisely
+        # the state the page is not needed in. The one outcome that
+        # keeps it up is `needs-a-human`: the tree did not come back, or
+        # nobody could measure whether it had. Putting a broken instance
+        # in front of the public is what the page exists to prevent, and
+        # that is the only case where it is broken.
         if raised:
-            if outcome in ("accepted", "refused"):
+            if outcome in ("accepted", "refused", "rolled-back"):
                 r = hooks.run("off")
                 j.note("maintenance", **r)
                 if r.get("rc") == 0:
@@ -1070,10 +1082,10 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
                     outcome = "needs-a-human"
             else:
                 steps.already("window:maintenance-stays",
-                              nota="the acceptance did not pass: the page STAYS UP on "
-                                   "purpose, and taking it down is a decision with a "
-                                   "human in it")
-                outcome = "needs-a-human"
+                              nota="this window ended needing a human: the tree did not "
+                                   "come back, or nobody could measure whether it had. "
+                                   "The page STAYS UP on purpose, and taking it down is "
+                                   "a decision with a person in it")
         # ── and everything the window changed about the MACHINE ──────
         # Always, on every way out, including the ones nobody planned.
         # Jenkins quiet, the silence and the backup timer are not part

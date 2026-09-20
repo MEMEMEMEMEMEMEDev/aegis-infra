@@ -399,12 +399,18 @@ because they stand on one another, and leaving four raised while the
 fifth comes down is a combination nobody described and nobody has ever
 tested.
 
-The window reverts its own commits newest first, pushes, lets ArgoCD
-converge, and then checks the **tree** against the photo. If a commit
-does not revert cleanly, or the tree does not come back, the outcome is
-`needs-a-human` and **the maintenance page stays up**: putting a broken
-instance back in front of the public is the one thing the page exists to
-prevent.
+The window reverts its own commits newest first, pushes, waits for
+ArgoCD to settle, and then checks the **tree** against the photo.
+
+If that works, the outcome is `rolled-back` and **the page comes down**.
+`rolled-back` is the protocol working: the instance is byte for byte
+what it was, which is exactly the state the page is not needed in.
+
+The page stays up for one outcome only: `needs-a-human`, which means a
+commit did not revert cleanly, the tree did not come back, or nobody
+could measure whether it had. Putting a broken instance in front of the
+public is the one thing the page exists to prevent, and that is the only
+case where it might be broken.
 
 And if the layer that failed was 1 or 9, the report says so plainly: the
 tree came back, the host did not.
