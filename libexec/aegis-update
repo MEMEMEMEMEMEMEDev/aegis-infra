@@ -458,8 +458,19 @@ def layer_files_then_sync(ctx, layer, bumps):
     _push(ctx)
     rc, out, err = cli.run("sync", "--drifted")
     ctx.j.note("sync-drifted", rc=rc, salida=(out or "").strip()[-400:])
-    return {"aplicada": rc == 0, "cambios": len(bumps),
-            "por_que": "" if rc == 0 else (err or out or "").strip()[-300:]}
+    if rc != 0:
+        return {"aplicada": False, "cambios": len(bumps),
+                "por_que": (err or out or "").strip()[-300:]}
+    # AND THEN WAIT. A sync is a request, not an arrival: these images
+    # live in the init containers of half the platform, so asking
+    # ArgoCD to converge and judging at once measures a cluster that is
+    # still rolling. On 2026-09-20 that made a window call a restarting
+    # Jenkins «no build at all on fourteen jobs» and stop.
+    ctx.say("waiting for every app to settle…")
+    settled = win.argo_all_settled(narrate=ctx.narrate)
+    ctx.j.note("settled", **settled)
+    return {"aplicada": settled.get("asentado") is True, "cambios": len(bumps),
+            **{k: v for k, v in settled.items() if k != "asentado"}}
 
 
 def layer_build(ctx, layer, bumps, job):
@@ -532,6 +543,69 @@ def layer_kernel(ctx, layer):
     return {"aplicada": r.returncode == 0, "paquetes": len(pkgs),
             "reinicio": "PENDING and NOT taken by this window",
             "por_que": "" if r.returncode == 0 else (r.stderr or "").strip()[-300:]}
+
+
+def _undo(ctx, steps, j, detail, narrate, why, partial_layer=None):
+    """Put the tree back, and say honestly what could not come back.
+
+    EVERYTHING, IN REVERSE, and not only the layer that failed: the
+    layers are ordered because they stand on one another, and leaving
+    four raised while the fifth comes down is a combination nobody
+    described and nobody has ever tested.
+
+    ONE FUNCTION, because there are two ways to get here —a layer's own
+    acceptance, and the global one— and until 2026-09-20 only the first
+    of them actually reverted. The second set the word «rolled-back» on
+    a window that kept every commit it had made. The name of a thing is
+    not the thing.
+
+    Returns the outcome: `rolled-back` when the tree came back,
+    `needs-a-human` when it did not.
+    """
+    if narrate:
+        print(f"\n{bold}{why} did not pass{off} — undoing", file=sys.stderr)
+    back = win.roll_back(j, platform=ctx.platform, narrate=narrate)
+    detail["vuelta_atras"] = back
+    for d in back["deshechos"]:
+        steps.done(f"revert:{d['sha'][:12]}", subject=d["subject"])
+    if back["atascado"]:
+        steps.wrong("window:rollback-stuck", **{
+            **back["atascado"],
+            "por_que": "reverting past a conflict would leave the tree in a state nobody "
+                       "described. What is left is yours"})
+        return "needs-a-human"
+    if back["deshechos"]:
+        try:
+            _push(ctx)
+        except win.GitTrouble as e:
+            steps.wrong("window:rollback-push", **{
+                "por_que": str(e),
+                "nota": "the reverts are committed here and the cluster still converges "
+                        "on the old remote"})
+            return "needs-a-human"
+        cli.run("sync", "--drifted")
+        # AND WAIT FOR IT, for the same reason the layer had to: a sync
+        # is a request. A rollback that reports «the tree came back»
+        # while the cluster is still rolling has measured nothing.
+        settled = win.argo_all_settled(narrate=narrate)
+        j.note("rollback-settled", **settled)
+        same = win.came_back_to(j, platform=ctx.platform)
+        detail["arbol"] = same
+        if same.get("igual") is not True:
+            steps.wrong("window:rollback-tree", **{
+                **same, "por_que": "every commit was reverted and the tree is still not "
+                                   "what the photo saw"})
+            return "needs-a-human"
+        steps.done("window:rollback-tree", **same)
+    # A layer whose changes lived OUTSIDE git —apt, the kernel— does not
+    # come back with them, and the report says so rather than implying a
+    # clean slate.
+    if partial_layer in (1, 9):
+        steps.wrong("window:rollback-partial", **{
+            "capa": partial_layer,
+            "por_que": "this layer installs packages, and a package installed is not "
+                       "uninstalled by a window. The tree came back; the host did not"})
+    return "rolled-back"
 
 
 def run_layer(ctx, layer, before_round):
@@ -846,8 +920,37 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
                           nota="no hook is configured: the window runs with the sites "
                                "live, and this line is the instance saying so out loud")
 
+        # ── the baseline every acceptance is measured against ───────
+        # A ROUND TAKEN WITH THE PAGE UP AND NOTHING ELSE CHANGED YET.
+        # It is not the photo, and the difference cost a window its
+        # verdict on 2026-09-20: the round measures the tenant sites
+        # through the edge, so with the page up they stop answering —
+        # and comparing against the photo reads the page doing its job
+        # as damage the window caused. The plan said this in its own
+        # words: the acceptance under the page is «at the origin», and
+        # the edge is accepted afterwards, once the page is down.
+        #
+        # With no page there is nothing to re-baseline and the photo IS
+        # the baseline, which is why this is conditional rather than
+        # always taken: a round costs a minute.
+        baseline = before["round"]["doc"]
+        if raised:
+            if narrate:
+                _say("the round under the page, as the baseline…")
+            try:
+                _rc, baseline = cli.run_json("check")
+                j.note("baseline", medidas=len(win.readings(baseline)),
+                       nota="taken with the page up and nothing else changed yet")
+            except cli.CouldNotEvaluate as e:
+                steps.not_evaluable("window:baseline", por_que=str(e),
+                                    nota="with the page up and no baseline, every layer "
+                                         "would be judged against a world where the "
+                                         "sites still answered")
+                outcome = "needs-a-human"
+                raise _Stop()
+
         # ── the layers, in order, each judged by its own sections ────
-        last_doc = before["round"]["doc"]
+        last_doc = baseline
         stopped = None
         for layer in win.LAYERS:
             if only_layers and layer.number not in only_layers:
@@ -907,50 +1010,12 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
         detail["capas"] = {"detenida_en": stopped, **ctx.budget.as_data()}
 
         # ── the way back, taken by the window itself ────────────────
-        # Everything, in reverse, and not only the layer that failed:
-        # the layers are ordered because they stand on one another, and
-        # leaving four of them raised while the fifth comes down is a
-        # combination nobody described and nobody has ever tested.
         if stopped:
-            if narrate:
-                print(f"\n{bold}the acceptance did not pass at layer "
-                      f"{stopped['capa']}{off} — undoing", file=sys.stderr)
-            back = win.roll_back(j, platform=ctx.platform, narrate=narrate)
-            detail["vuelta_atras"] = back
-            for d in back["deshechos"]:
-                steps.done(f"revert:{d['sha'][:12]}", subject=d["subject"])
-            if back["atascado"]:
-                steps.wrong("window:rollback-stuck", **{**back["atascado"], "por_que": "reverting past a conflict would leave the tree in a "
-                                    "state nobody described. What is left is yours"})
-                outcome = "needs-a-human"
+            outcome = _undo(ctx, steps, j, detail, narrate,
+                            f"the acceptance of layer {stopped['capa']}",
+                            partial_layer=stopped["capa"])
+            if outcome == "needs-a-human":
                 raise _Stop()
-            if back["deshechos"]:
-                try:
-                    _push(ctx)
-                except win.GitTrouble as e:
-                    steps.wrong("window:rollback-push", por_que=str(e),
-                                nota="the reverts are committed here and the cluster "
-                                     "still converges on the old remote")
-                    outcome = "needs-a-human"
-                    raise _Stop()
-                cli.run("sync", "--drifted")
-                same = win.came_back_to(j, platform=ctx.platform)
-                detail["arbol"] = same
-                if same.get("igual") is not True:
-                    steps.wrong("window:rollback-tree", **{**same, "por_que": "every commit was reverted and the tree is still "
-                                        "not what the photo saw"})
-                    outcome = "needs-a-human"
-                    raise _Stop()
-                steps.done("window:rollback-tree", **same)
-            # A layer whose changes lived OUTSIDE git —apt, the kernel—
-            # does not come back with them, and the report says so
-            # rather than implying a clean slate.
-            if stopped["capa"] in (1, 9):
-                steps.wrong("window:rollback-partial", capa=stopped["capa"],
-                            por_que="this layer installs packages, and a package "
-                                    "installed is not uninstalled by a window. The tree "
-                                    "came back; the host did not")
-            outcome = "rolled-back"
 
         # ── the acceptance ──────────────────────────────────────────
         if narrate:
@@ -963,7 +1028,7 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
                                      "cannot measure itself is never accepted")
             outcome = "needs-a-human"
             raise _Stop()
-        cmp_ = win.compare(before["round"]["doc"], after_doc)
+        cmp_ = win.compare(baseline, after_doc)
         j.note("acceptance", **{**{k: v for k, v in cmp_.items()
                                 if k in ("medidas_antes", "medidas_despues")}, "nuevos": len(cmp_["nuevos"]), "cegados": len(cmp_["cegados"])})
         detail["comparacion"] = cmp_
@@ -978,7 +1043,12 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
                 steps.wrong("acceptance:blinded", **{**n, "por_que": "this reading was fine before and nobody could take "
                                     "it now. A window that blinds a measurement has not "
                                     "passed it, it has stopped asking"})
-            outcome = "rolled-back"
+            # AND IT ACTUALLY COMES BACK. Until 2026-09-20 this branch
+            # set the word «rolled-back» and reverted nothing: a window
+            # that failed its global acceptance kept every commit it had
+            # made and reported the outcome as though it had not. The
+            # name of a thing is not the thing.
+            outcome = _undo(ctx, steps, j, detail, narrate, "the global acceptance")
     except _Stop:
         pass
     finally:

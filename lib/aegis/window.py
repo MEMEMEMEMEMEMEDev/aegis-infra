@@ -1161,6 +1161,48 @@ def argo_settled(app, timeout=900, poll=10, narrate=False):
                        "ran out is a failure, never a «probably fine»"}
 
 
+def argo_all_settled(timeout=900, poll=15, narrate=False):
+    """Wait until EVERY Application is Synced and Healthy.
+
+    A SYNC IS A REQUEST, NOT AN ARRIVAL, and that is what cost a window
+    its verdict on 2026-09-20. Layer 5 bumped seven images written by
+    hand, asked ArgoCD to converge, and judged at once — but bumping
+    `busybox` and `curl` changes the init containers of half the
+    platform, so Jenkins was rolling while the round was being taken,
+    and a Jenkins that is restarting has «no build at all» on every one
+    of its fourteen jobs. The window called that damage and stopped.
+    Nothing was wrong: the instance healed itself in four minutes.
+
+    A timeout counts as NOT settled, never as settled: a wait that ran
+    out is the one case where carrying on is guaranteed to measure the
+    wrong world.
+    """
+    t0 = time.time()
+    last = []
+    while time.time() - t0 < timeout:
+        rc, out, _ = _kubectl(
+            "get", "applications", "-n", "argocd", "-o",
+            "jsonpath={range .items[*]}{.metadata.name}|{.status.sync.status}|"
+            "{.status.health.status}{\"\\n\"}{end}")
+        if rc != 0:
+            return {"asentado": None, "por_que": "the Applications could not be read: "
+                                                 "this is «could not look», not «it is "
+                                                 "not ready»"}
+        last = [ln.split("|") for ln in out.splitlines() if ln.strip()]
+        unsettled = [a for a in last if len(a) == 3 and (a[1] != "Synced" or a[2] != "Healthy")]
+        if not unsettled:
+            return {"asentado": True, "apps": len(last), "segundos": round(time.time() - t0)}
+        if narrate:
+            _say(f"{len(unsettled)} app(s) still moving: "
+                 + ", ".join(f"{a[0]}={a[1]}/{a[2]}" for a in unsettled[:4]))
+        time.sleep(poll)
+    unsettled = [a for a in last if len(a) == 3 and (a[1] != "Synced" or a[2] != "Healthy")]
+    return {"asentado": False, "apps": len(last), "segundos": round(time.time() - t0),
+            "moviendose": [f"{a[0]}={a[1]}/{a[2]}" for a in unsettled[:8]],
+            "por_que": "they did not all reach Synced+Healthy inside the wait. A wait that "
+                       "ran out is a failure, never a «probably fine»"}
+
+
 def chart_renders(repo, chart, version):
     """Does the candidate chart render at all, before a line is written?
 

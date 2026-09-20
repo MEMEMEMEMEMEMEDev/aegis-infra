@@ -360,6 +360,38 @@ The rehearsal prices the whole thing in advance:
   32 change(s) in 215 minute(s) of estimate, budget 240
 ```
 
+## What every acceptance is measured against
+
+Not the photo. **A round taken with the page up and nothing else
+changed yet.**
+
+The round measures the tenant sites through their probes, and those go
+out through the edge — which is exactly where the maintenance page
+lives. With the page raised the sites stop answering, so comparing
+against the photo reads the page doing its job as damage the window
+caused. That is the plan's own distinction: the acceptance under the
+page is **at the origin**, and the edge is accepted afterwards, once
+the page is down.
+
+With no page configured there is nothing to re-baseline and the photo
+is the baseline.
+
+## A sync is a request, not an arrival
+
+Every layer that asks ArgoCD to converge then **waits for every
+Application to be Synced and Healthy** before anything judges it. A
+timeout counts as not settled, never as settled.
+
+It is not a theoretical care. Layer 5 bumps images written by hand, and
+`busybox` and `curl` live in the init containers of half the platform:
+raising them rolls Jenkins, and a Jenkins that is restarting has «no
+build at all» on every one of its fourteen jobs. A window that judged
+at once called that damage and stopped. Nothing was wrong — the
+instance healed in four minutes.
+
+The rollback waits too, for the same reason: reporting that the tree
+came back while the cluster is still rolling has measured nothing.
+
 ## When a layer fails
 
 Everything comes down, not only that layer. The layers are ordered
