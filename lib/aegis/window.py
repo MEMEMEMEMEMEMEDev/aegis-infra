@@ -1396,6 +1396,38 @@ def proposals(plan_doc, all_pins):
     return out, lost
 
 
+def unlanded(all_pins):
+    """The chart pins the TREE has already decided and the cluster has
+    never been told.
+
+    A window's whole vocabulary used to be «the tree against upstream».
+    That is one gap of two. The other is the tree against the CLUSTER,
+    and it is the one a window can open by itself: a bump lands in git,
+    something goes wrong between git and the Application object, and
+    from then on every `plan` reads the tree, sees the new version
+    written there, and reports the pin up to date for ever. The
+    instance keeps running the old one and nothing will ever say so.
+
+    Measured 2026-09-20 on six charts at once. The commits were right,
+    the pushes were right, and the cluster never heard about any of it.
+
+    Returns (gaps, blind). A chart nobody could read goes to `blind` and
+    never to `gaps`: «I could not look» is not «they agree».
+    """
+    gaps, blind = [], []
+    for (cls, name) in sorted(all_pins):
+        if cls != "chart":
+            continue
+        pin = all_pins[(cls, name)]
+        live = live_chart_version(name)
+        if live is None:
+            blind.append(pin.key)
+            continue
+        if live != pin.current:
+            gaps.append({"pin": pin, "de": live, "a": pin.current})
+    return gaps, blind
+
+
 def host_downloads(root=None):
     """Which host tools phase 05 downloads by version, as opposed to
     handing to apt.

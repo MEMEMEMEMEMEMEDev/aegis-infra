@@ -147,7 +147,63 @@ try:
 finally:
     win._kubectl = real
 
-# ── 3. the order and the read-back, out of the source ────────────────
+# ── 3. the gap against the cluster is named and never closed ─────────
+# The fix above stops a window opening this hole. It does nothing for
+# the six that were already in it, and nothing ever would: every later
+# reading of the tree finds the new version written there and reports
+# the pin up to date. So the disagreement itself has to be a thing the
+# product can say — and one it refuses to act on, because a window's way
+# back is the photo, and the photo already found them disagreeing.
+PINS = {("chart", "argocd"): type("P", (), {
+            "cls": "chart", "name": "argocd", "current": "9.7.1",
+            "key": "chart:argocd"})()}
+try:
+    win._kubectl = fake([(("spec.sources[*]",), (0, "argo-cd|9.5.20", ""))])
+    gaps, blind = win.unlanded(PINS)
+    driven += 1
+    if len(gaps) != 1 or gaps[0]["de"] != "9.5.20" or gaps[0]["a"] != "9.7.1":
+        findings.append(f"a chart written at one version and running another is not "
+                        f"reported as a gap: {gaps!r}")
+    win._kubectl = fake([])
+    gaps, blind = win.unlanded(PINS)
+    driven += 1
+    if gaps or blind != ["chart:argocd"]:
+        findings.append("a chart whose live version could not be read is counted as "
+                        "agreeing with the tree: «I could not look» is not «they agree»")
+finally:
+    win._kubectl = real
+
+if "unlanded" not in src:
+    findings.append("nothing in aegis update compares the tree with the cluster, so a "
+                    "version written and never applied reads as up to date for ever")
+else:
+    chosen = [n for n in ast.walk(ast.parse(src))
+              if isinstance(n, ast.FunctionDef) and n.name == "_choose"]
+    body = ast.get_source_segment(src, chosen[0]) if chosen else ""
+    body = "\n".join(l for l in (body or "").splitlines()
+                      if not l.lstrip().startswith("#"))
+    if "unlanded" not in body:
+        findings.append("the window never looks for charts the cluster was not told "
+                        "about, so it neither closes them nor names them")
+    elif "refused" not in body.split("unlanded", 1)[1][:800]:
+        findings.append("the window treats a tree/cluster disagreement as something it "
+                        "can act on: it cannot undo a state it did not create, and its "
+                        "way back is a photo that already found them disagreeing")
+
+RULES = os.path.join(ROOT, "seed", "platform", "k8s", "base", "observability",
+                     "rules", "vmalert-rules.yaml")
+if os.path.isfile(RULES):
+    rules = open(RULES, encoding="utf-8").read()
+    # BOTH label sets, by name AND by label: a rule that reads the
+    # metric under one state does not make the other one read, and a
+    # published series nobody reads drifts looking like coverage.
+    for state, what in (("disagree", "the disagreement"),
+                        ("unreadable", "the blind spot")):
+        if f'aegis_update_charts_unlanded{{state="{state}"}}' not in rules:
+            findings.append(f"{what} is published and no alert reads it: a series with "
+                            f"no reader drifts, and it drifts looking like coverage")
+
+# ── 4. the order and the read-back, out of the source ────────────────
 charts = [n for n in ast.walk(ast.parse(src))
           if isinstance(n, ast.FunctionDef) and n.name == "layer_charts"]
 if not charts:

@@ -234,6 +234,31 @@ def plan(steps, fresh=False, narrate=True):
             print(f"  {layer} {pin.cls:<14} {pin.name[:40]:<40} {pin.current} → {a.latest}",
                   file=sys.stderr)
         steps.done(name, **data)
+    # ── and the other gap: the tree against the CLUSTER ──────────────
+    # A plan that only compares the tree with upstream reports a pin up
+    # to date the moment the number is WRITTEN, whether or not anything
+    # is running it. Six charts sat like that on 2026-09-20.
+    gaps, gap_blind = win.unlanded(all_pins)
+    for g in gaps:
+        pin = g["pin"]
+        steps.wrong(f"unlanded:{pin.key}", **{**pin.as_step(), "vivo": g["de"],
+                    "escrito": g["a"],
+                    "deshacer": "revertir + aegis sync",
+                    "por_que": f"the tree says {g['a']} and the Application is running "
+                               f"{g['de']}: the version was written and the cluster was "
+                               f"never told. A window will not close it: its way back "
+                               f"is the photo, and the photo already found them "
+                               f"disagreeing. Sync it by hand, or write {g['de']} back "
+                               f"into the tree"})
+        if narrate:
+            print(f"  4 {'unlanded':<14} {pin.name[:40]:<40} {g['de']} → {g['a']} "
+                  f"({grey}written, not running{off})", file=sys.stderr)
+    if gap_blind:
+        steps.not_evaluable("plan:charts-no-leidos", cuantos=len(gap_blind),
+                            cuales=sorted(gap_blind)[:12],
+                            por_que="the live version of these charts could not be read, "
+                                    "so whether the tree and the cluster agree is unknown "
+                                    "— which is not the same as «they agree»")
     blind = [k for k, a in answers.items() if a.state == upstream.NO_MEDIBLE]
     unactionable = [k for k, a in answers.items() if a.state in upstream.UNACTIONABLE]
     if blind:
@@ -767,6 +792,30 @@ def _choose(steps, all_pins, answers, allow_major, k3s_minor, narrate):
             continue
         taken.append({"pin": pin, "de": pin.current, "a": a.latest, "clase": pin.cls,
                       "capa": pin.layer})
+    # ── the gap a window must NOT close on its own ──────────────────
+    # A chart whose version is written in the tree and not running in
+    # the cluster is a disagreement this window did not create and
+    # cannot undo: the way back is «put the instance as the photo found
+    # it», and the photo found the tree saying one thing and the cluster
+    # another. Syncing it would be a change with no way back, which is
+    # the one thing this protocol does not do. So it is named, every
+    # time, like the majors and the k3s minors — a refusal with the
+    # remedy written out.
+    gaps, gap_blind = win.unlanded(all_pins)
+    for g in gaps:
+        refused.append({"pin": g["pin"].key, "de": g["de"], "a": g["a"],
+                        "rechazo": "unlanded",
+                        "por_que": f"the tree says {g['a']} and the Application is "
+                                   f"running {g['de']}: the version was written and the "
+                                   f"cluster was never told. A window cannot close this "
+                                   f"— its way back is the photo, and the photo already "
+                                   f"found them disagreeing. Sync it by hand, or write "
+                                   f"{g['de']} back into the tree"})
+    if gap_blind:
+        steps.not_evaluable("window:charts-no-leidos", cuantos=len(gap_blind),
+                            cuales=sorted(gap_blind)[:12],
+                            por_que="the live version of these charts could not be read, "
+                                    "so whether the tree and the cluster agree is unknown")
     for r in refused:
         steps.already(f"refused:{r['pin']}", **r)
         if narrate:
@@ -1408,6 +1457,20 @@ def metrics(steps, fresh=False, narrate=True, json_mode=False, offline=False):
              "pins nobody could compare against upstream — NOT counted as up to date")
         emit("aegis_update_pins_gone", d["gone"], lab,
              "pins whose tag no longer exists upstream: what runs here cannot be rebuilt")
+
+    # THE GAP THAT IS NOT AGAINST UPSTREAM. Everything above compares
+    # the tree with what exists out there. This one compares the tree
+    # with the CLUSTER, and it is the gap an instance can open by
+    # itself: a version written, pushed, and never applied, which every
+    # later reading of the tree reports as up to date for ever. Six of
+    # them at once on 2026-09-20. It is a series and not a note because
+    # an absence statement that nobody publishes ages in silence.
+    gaps, gap_blind = win.unlanded(all_pins)
+    if gaps or not gap_blind:
+        emit("aegis_update_charts_unlanded", len(gaps), {"state": "disagree"},
+             "charts whose version is written in the tree and not running in the cluster")
+    if gap_blind:
+        emit("aegis_update_charts_unlanded", len(gap_blind), {"state": "unreadable"})
 
     # ── the last window ─────────────────────────────────────────────
     j = win.Journal.last()

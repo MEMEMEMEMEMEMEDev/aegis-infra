@@ -462,6 +462,28 @@ own source routes to that app, which is what the other layers were
 already doing, and a file nobody applies is a refusal rather than a
 silent success.
 
+### And the six that were already in the hole
+
+The fix stops a window opening it. It does nothing for a chart already
+there, and nothing ever would: every later reading of the tree finds
+the new version written and reports the pin up to date, for ever,
+because nothing else compares the two.
+
+So the disagreement itself became something the product says. `aegis
+update plan` reports each one as **wrong**, with what is written and
+what is running; the metrics publish
+`aegis_update_charts_unlanded{state="disagree"}` and, separately,
+`{state="unreadable"}`, because a reader that lost its way to the API
+must not publish a clean zero; and two alerts carry both to the phone.
+
+**A window will not close it.** It is named as a refusal, beside the
+major jumps and the k3s minors, and for a reason worth stating: a
+window's way back is the photo, and the photo already found the tree
+and the cluster disagreeing. There is no state to return to that the
+protocol could promise. Syncing it is an ordinary operation with a
+person in it — `aegis sync <the App-of-Apps>`, one at a time, watching
+— or the running version goes back into the tree.
+
 ## When a layer fails
 
 Everything comes down, not only that layer. The layers are ordered

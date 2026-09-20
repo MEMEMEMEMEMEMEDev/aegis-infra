@@ -112,3 +112,47 @@ old = '        appliers = win.appliers_of(wrote["ficheros"])'
 p.write_text(s.replace(old, old + '\n        appliers = list(appliers or []) or appliers', 1))
 P
 }
+
+# el árbol y el clúster dejan de compararse: una versión escrita y nunca
+# aplicada se lee «al día» para siempre
+red_8() { python3 - "$W222" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = '''        if live != pin.current:
+            gaps.append({"pin": pin, "de": live, "a": pin.current})'''
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, '''        if False:
+            gaps.append({"pin": pin, "de": live, "a": pin.current})''', 1))
+P
+}
+
+# un chart que nadie pudo leer cuenta como de acuerdo con el árbol
+red_9() { python3 - "$W222" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = '''        if live is None:
+            blind.append(pin.key)
+            continue'''
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, '''        if live is None:
+            continue''', 1))
+P
+}
+
+# la ventana deja de nombrar el desacuerdo: nada lo dice nunca
+red_10() { python3 - "$U222" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = '    gaps, gap_blind = win.unlanded(all_pins)\n    for g in gaps:\n        refused.append('
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, '    gaps, gap_blind = [], []\n    for g in gaps:\n        refused.append(', 1))
+P
+}
+
+# la serie se publica y ninguna alerta la lee
+red_11() { sed -i 's/aegis_update_charts_unlanded{state="disagree"}/aegis_update_charts_sin_lector{state="disagree"}/' \
+    "$AEGIS_ROOT/seed/platform/k8s/base/observability/rules/vmalert-rules.yaml"; }
+
+# el punto ciego se queda sin alerta: un lector que pierde la API publica un cero limpio
+red_12() { sed -i '/UpdateChartVersionUnreadable/,/count of unlanded charts above is incomplete/d' \
+    "$AEGIS_ROOT/seed/platform/k8s/base/observability/rules/vmalert-rules.yaml"; }

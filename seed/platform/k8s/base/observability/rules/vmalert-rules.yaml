@@ -618,6 +618,31 @@ data:
             annotations:
               summary: "{{ $value }} pinned version(s) have not been comparable against upstream for two days"
               description: "Not «up to date» and not «behind»: nobody could ask. A rate limit clears by itself and this will not fire; what fires here is a pin whose registry stopped answering, whose name moved, or that no reader can reach any more. `aegis update inventory` names each one with the reason it came back with."
+          # THE QUIETEST FAILURE THIS PROTOCOL HAS PRODUCED. A chart's
+          # version lives in the Application object, which the
+          # App-of-Apps applies and which carries no automated policy on
+          # purpose. A bump that reaches git and never reaches that
+          # object leaves the instance running the old chart while every
+          # reading of the tree reports it up to date — for ever, because
+          # nothing else ever compares the two. Six at once on
+          # 2026-09-20, all of them green.
+          - alert: UpdateChartUnlanded
+            expr: (last_over_time(aegis_update_charts_unlanded{state="disagree"}[2d]) > 0) and on() (last_over_time(aegis_update_measured_timestamp_seconds[2d]) > 0)
+            for: 6h
+            labels: {severity: warning}
+            annotations:
+              summary: "{{ $value }} chart(s) are written at one version and running another"
+              description: "The version is in git and the cluster was never told, so every `aegis update plan` will report these up to date while the old chart runs. `aegis update plan` names each one with what is written and what is running. A window will NOT close this by itself: its way back is the photo, and the photo already found them disagreeing. Sync the App-of-Apps by hand, or write the running version back into the tree."
+          # And the other half: «I could not read the cluster» is not
+          # «the cluster agrees». Without this, a kubectl that stopped
+          # answering would publish a clean zero above.
+          - alert: UpdateChartVersionUnreadable
+            expr: (last_over_time(aegis_update_charts_unlanded{state="unreadable"}[2d]) > 0) and on() (last_over_time(aegis_update_measured_timestamp_seconds[2d]) > 0)
+            for: 24h
+            labels: {severity: warning}
+            annotations:
+              summary: "{{ $value }} chart(s) could not be compared between the tree and the cluster"
+              description: "The live version of these Applications could not be read, so whether what is written is what runs is unknown — which is not the same as «they agree». Usually the reader lost its way to the API. Until it clears, the count of unlanded charts above is incomplete."
           # THE SIBLING OF THE FAMILY. Every rule above compares against
           # a value, so every one goes EMPTY rather than false if the
           # host stops publishing — and an empty rule looks exactly like
