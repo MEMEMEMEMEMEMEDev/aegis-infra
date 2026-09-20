@@ -48,13 +48,23 @@ if not hasattr(win, "effect_of_page"):
     sys.exit(0)
 
 
-def _round(state):
+def _round(*measures):
     return {"steps": [{"step": "observability",
-                       "measures": [{"measure": "the N public site(s) answer their probe",
-                                     "state": state}]}]}
+                       "measures": [{"measure": m, "state": st} for m, st in measures]}]}
 
 
-UP, DOWN = _round("good"), _round("bad")
+#: THE FIXTURE IS THE INSTANCE THAT FOUND THE BUG, not a tidy one. Its
+#: line about the public sites was already a NOTICE — two of five answer
+#: with a redirect the probe refuses, because they sit behind their own
+#: login — so raising a page over all five turns a notice into a
+#: failure, and nothing green is involved anywhere. A fixture built out
+#: of «good» and «bad» would have passed the version that could not see
+#: this, three windows in a row.
+UP = _round(("the N public organizations have a probe", "good"),
+            ("N of the N public site(s) answer with a redirect the probe does not accept",
+             "notice"))
+DOWN = _round(("the N public organizations have a probe", "good"),
+              ("N of the N public site(s) do not answer: no reply, or an error", "bad"))
 
 # ── 1 + 2: a change that only appears later is still seen ────────────
 slept, calls = [], {"n": 0}
@@ -80,6 +90,23 @@ elif calls["n"] != len(slept):
 if slept and min(slept) < 30:
     findings.append(f"it waited {min(slept)}s for probes that run every 30s: shorter than "
                     f"one interval is no wait at all")
+
+# ── the notion of «worse» itself, over both vocabularies ────────────
+if hasattr(win, "got_worse"):
+    for was, now, want in (("good", "bad", True), ("notice", "bad", True),
+                           ("good", "notice", True), ("good", None, True),
+                           ("bad", "not-evaluated", True), ("already", "wrong", True),
+                           ("bad", "good", False), ("notice", "notice", False),
+                           ("good", "good", False)):
+        if win.got_worse(was, now) is not want:
+            findings.append(f"«{was} → {now}» is reported as "
+                            f"{'not worse' if want else 'worse'}: the page's effect is "
+                            f"anything that got WORSE, and a rule that only watches green "
+                            f"is blind on an instance whose sites already carry a notice")
+else:
+    findings.append("nothing says what «worse» means: the effect was decided by comparing "
+                    "against one state, which is how three windows in a row said the page "
+                    "had done nothing while it was up")
 
 # ── 3: a page that does nothing is still a False, after asking twice ─
 calls2 = {"n": 0}

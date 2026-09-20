@@ -82,3 +82,26 @@ control_1() { sed -i 's/        sleep(interval + 5)/        sleep(interval + 6)/
 control_2() { sed -i 's/nothing that was fine had stopped being fine/nothing that used to be fine had stopped being fine/' "$W218"; }
 # a comment about the thirty seconds is not the thirty seconds
 control_3() { printf '\n# note: the probes run every 30s on this instance; the wait is derived.\n' >> "$W218"; }
+
+# the effect goes back to «something green stopped being green»: on an
+# instance whose sites already carry a notice, nothing green is ever
+# involved and the page is declared useless while it is up
+red_7() { python3 - "$W218" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = '        changed = [k for k, v in b.items() if got_worse(v, a.get(k))]'
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, '        changed = [k for k, v in b.items() if v == FINE and a.get(k) != FINE]', 1))
+P
+}
+
+# `not-evaluated` stops being the floor: a reading that went from broken
+# to unmeasurable reads as an improvement
+red_8() { python3 - "$W218" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = 'RANK = {"not-evaluated": 0, "not-evaluable": 0,'
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, 'RANK = {"not-evaluated": 9, "not-evaluable": 9,', 1))
+P
+}

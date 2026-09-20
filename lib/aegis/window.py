@@ -244,6 +244,36 @@ def readings(round_doc):
 #: is NOT a failure by itself but IS one when it replaces a good reading.
 BAD, BLIND, FINE = "bad", "not-evaluated", "good"
 
+#: How bad each state is, worst first, over BOTH vocabularies a document
+#: can carry: the round's own words and the house's four. Higher is
+#: better. `not-evaluated` is the floor, below `bad`, for the same
+#: reason it outranks it everywhere else here — a thing known to be
+#: broken is better news than a thing nobody could look at.
+RANK = {"not-evaluated": 0, "not-evaluable": 0,
+        "bad": 1, "wrong": 1,
+        "notice": 2,
+        "good": 3, "done": 3, "already": 3}
+
+
+def got_worse(before_state, after_state):
+    """Did this reading get worse, in either vocabulary?
+
+    THE FIRST VERSION ASKED «DID SOMETHING GREEN STOP BEING GREEN», and
+    on the instance that found it, nothing green was involved. The
+    round's line about the public sites was already a NOTICE —two of
+    five answer with a redirect the probe refuses, because they sit
+    behind their own login— so raising a page over all five turned a
+    notice into a failure, and a rule watching only green never looked
+    at it. Three windows in a row stopped saying the page had done
+    nothing while it was demonstrably up.
+
+    A reading that vanishes counts as worse: it was measurable and is
+    not any more.
+    """
+    if after_state is None:
+        return True
+    return RANK.get(after_state, 0) < RANK.get(before_state, 0)
+
 
 def compare(before, after):
     """What changed between two rounds, in the only vocabulary that matters.
@@ -473,7 +503,7 @@ def effect_of_page(before_doc, read, interval=30, tries=4, sleep=time.sleep):
         # different sentence and therefore a different key. Measured on
         # 2026-09-20 with the page verifiably up —portafolio answering
         # 503— and this function insisting nothing had changed.
-        changed = [k for k, v in b.items() if v == FINE and a.get(k) != FINE]
+        changed = [k for k, v in b.items() if got_worse(v, a.get(k))]
         seen.append(len(changed))
         if changed:
             return {"efecto": True, "intentos": n, "espera_s": interval + 5,
