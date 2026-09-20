@@ -814,7 +814,7 @@ def window(steps, yes=False, budget=240, with_verify=True, narrate=True,
                 raise _Stop()
             if narrate:
                 _say_effect(narrate)
-            seen = _page_is_up(before)
+            seen = _page_is_up(before, narrate)
             j.note("maintenance-effect", **seen)
             if seen["efecto"] is False:
                 steps.wrong("window:maintenance-no-effect", **seen,
@@ -1069,38 +1069,38 @@ def _public_sites():
     return n
 
 
-def _page_is_up(before):
+def _page_is_up(before, narrate=True):
     """Did raising the page change what this instance measures?
 
-    The measurement is the ROUND's own, because the round is what the
-    acceptance will be judged with, and a second instrument here would
-    be a second opinion nobody reconciles. What it asks is deliberately
-    not «are the probes red»: it is whether ANY reading that was fine
-    before has stopped being fine. That question needs no knowledge of
-    how the round words itself.
-
-    The one thing it does have to know is whether there are public
-    sites at all, because on an instance that publishes none there is
-    nothing for a page to take off the air and «no effect» would be a
-    true reading of nothing. That comes from the contracts.
+    Two halves, and the second one was learned the hard way. WHAT is
+    asked lives in window.effect_of_page, which waits for the probes;
+    WHETHER there is anything to ask about lives here, because it comes
+    from the contracts: on an instance that publishes no domain there is
+    nothing for a page to take off the air, and «no effect» would be a
+    true reading of nothing.
     """
     sites = _public_sites()
-    b = win.readings(before["round"]["doc"])
-    try:
-        _, after = cli.run_json("check")
-    except cli.CouldNotEvaluate as e:
-        return {"efecto": None, "por_que": f"the round could not be taken again: {e}"}
-    a = win.readings(after)
-    changed = [k for k, v in b.items()
-               if v == win.FINE and a.get(k) not in (None, win.FINE)]
     if sites == 0:
         return {"efecto": None, "sitios": 0,
                 "por_que": "no contract of this instance declares a domain: there is "
                            "nothing for the page to take off the air, so its effect "
                            "cannot be read"}
-    return {"efecto": bool(changed), "sitios": sites,
-            "medidas_que_cambiaron": len(changed),
-            "detalle": [{"seccion": k[0], "medida": k[1]} for k in changed[:6]]}
+    interval, note = win.probe_interval_or_guess()
+
+    def read():
+        _rc, doc = cli.run_json("check")
+        return doc
+
+    def nap(secs):
+        if narrate:
+            _say(f"waiting {secs}s for the probes to run again…")
+        time.sleep(secs)
+
+    out = win.effect_of_page(before["round"]["doc"], read, interval=interval, sleep=nap)
+    out["sitios"] = sites
+    if note:
+        out["nota"] = note
+    return out
 
 
 def rollback(steps, wid=None, yes=False, narrate=True):

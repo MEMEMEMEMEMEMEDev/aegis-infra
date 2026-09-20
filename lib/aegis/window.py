@@ -395,6 +395,88 @@ class Hooks:
                 "error": "\n".join((r.stderr or "").splitlines()[-12:])}
 
 
+def probe_interval(platform=None, fallback=30):
+    """How often the tenant probes actually run, read from the config the
+    platform deploys.
+
+    DERIVED, because a number written here would be a second copy of a
+    decision that lives in vmagent's values, and the day somebody moves
+    it this would keep saying the old one. When it cannot be read the
+    fallback is used AND said out loud by the caller: guessing quietly
+    is how the page ends up being judged before anybody could see it.
+    """
+    root = pathlib.Path(platform) if platform else paths.platform_dir()
+    f = root / "k8s" / "base" / "observability" / "vmagent" / "values.yaml"
+    if not f.is_file():
+        return None
+    m = re.search(r"^\s*scrape_interval:\s*(\d+)\s*([smh])\s*$",
+                  f.read_text(encoding="utf-8"), re.M)
+    if not m:
+        return None
+    return int(m.group(1)) * {"s": 1, "m": 60, "h": 3600}[m.group(2)]
+
+
+def probe_interval_or_guess(platform=None, fallback=30):
+    """The interval, and whether it was measured or guessed.
+
+    TWO RETURN VALUES ON PURPOSE. A caller handed a bare number cannot
+    tell the config's answer from a default, and a silent default about
+    WHEN to measure is exactly how the first real window came to stop
+    for a reason that was not true. The note is None when it was read.
+    """
+    got = probe_interval(platform)
+    if got:
+        return got, None
+    return fallback, (f"the probes' interval could not be read from the platform: "
+                      f"waiting as if it were {fallback}s, which is a guess and is said "
+                      f"out loud rather than made quietly")
+
+
+def effect_of_page(before_doc, read, interval=30, tries=4, sleep=time.sleep):
+    """Did raising the maintenance page change what this instance measures?
+
+    THE FIRST VERSION OF THIS ASKED IMMEDIATELY AND IT WAS WRONG. Dated
+    2026-09-20, on the first real window ever opened: the hook deployed
+    the page in 5.5 seconds, the round was taken at once, and the answer
+    came back «the hook ran and the public sites still answer». The page
+    was up. The probes run every thirty seconds and had simply not run
+    again yet, so the round was reporting a world that no longer existed
+    — and the window stopped, correctly refusing to trust a measurement,
+    for a reason that was not true.
+
+    So it WAITS, and the wait is derived from how often the probes
+    actually run rather than written down. It asks again until it sees
+    the change or the tries run out, and a «no effect» that arrives
+    after all of them is a real one.
+
+    `read` returns a round document and `sleep` is injectable, so check
+    218 can drive the whole thing in milliseconds without a cluster.
+    """
+    b = readings(before_doc)
+    seen = []
+    for n in range(1, tries + 1):
+        # BEFORE the first read, not only between retries: the probe
+        # that matters is the one that has yet to run.
+        sleep(interval + 5)
+        try:
+            after = read()
+        except Exception as e:                            # noqa: BLE001
+            return {"efecto": None, "intentos": n,
+                    "por_que": f"the round could not be taken again: {e}"}
+        a = readings(after)
+        changed = [k for k, v in b.items()
+                   if v == FINE and a.get(k) not in (None, FINE)]
+        seen.append(len(changed))
+        if changed:
+            return {"efecto": True, "intentos": n, "espera_s": interval + 5,
+                    "medidas_que_cambiaron": len(changed),
+                    "detalle": [{"seccion": k[0], "medida": k[1]} for k in changed[:6]]}
+    return {"efecto": False, "intentos": tries, "espera_s": interval + 5,
+            "medidas_que_cambiaron": 0, "por_que":
+            f"the page was raised and after {tries} reading(s), each one a probe "
+            f"interval apart, nothing that was fine had stopped being fine"}
+
+
 # ══════════════════════════════════════════════════════════════════════
 #  the journal
 # ══════════════════════════════════════════════════════════════════════
