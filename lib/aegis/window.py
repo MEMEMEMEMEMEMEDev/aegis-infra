@@ -1183,6 +1183,87 @@ def argo_settled(app, timeout=900, poll=10, narrate=False):
                        "and removing them is a decision with a person in it"}
 
 
+def appliers_of(files):
+    """Which live Application APPLIES each of these repo paths.
+
+    A window edits a file and then syncs «the app». For almost every
+    file that is right: the file IS the app's contents. For anything
+    under `k8s/argocd-apps` it is WRONG, and wrong in the quietest way
+    there is: those files are the Application OBJECTS. `targetRevision`
+    lives in the object, not in what the object deploys, so syncing the
+    bumped app syncs the CONSUMER of the chart against the version the
+    object still names. Nothing fails. The app reports Synced and
+    Healthy, because it genuinely is —against the old chart— and the
+    acceptance, which asks the round and not the pin, agrees.
+
+    MEASURED 2026-09-20. Six charts (argocd, jenkins, kyverno,
+    trivy-server, vector, vmsingle) were committed, pushed, synced,
+    accepted and closed rc 0, and every one of them was still running
+    its old version afterwards. The App-of-Apps that owns those objects
+    has no `automated` policy —by design: nothing creates or retargets
+    an Application without a person— so the bump sat in git, correct
+    and inert, while the window reported the layer raised.
+
+    So: whoever applies the file gets synced FIRST, and the app second.
+    Derived from the live Applications, never a hardcoded «root»: the
+    name of the App-of-Apps is an instance's choice, and a constant here
+    would be a promise this module cannot keep.
+    """
+    rc, out, _ = _kubectl("get", "applications", "-n", "argocd", "-o", "json")
+    if rc != 0:
+        return None
+    try:
+        items = json.loads(out).get("items", [])
+    except ValueError:
+        return None
+    owners = []
+    for a in items:
+        name = (a.get("metadata") or {}).get("name")
+        spec = a.get("spec") or {}
+        for s in (spec.get("sources") or [spec.get("source") or {}]):
+            path = (s.get("path") or "").strip("/")
+            # A source carries `chart` OR `path`, never both, so an
+            # empty path is the whole of «this source applies no file».
+            if not path:
+                continue
+            for f in files:
+                f = str(f).strip("/")
+                # A prefix on PATH SEGMENTS, not on characters: `k8s/base`
+                # must not claim `k8s/base-images/alpine/Containerfile`.
+                if f == path or f.startswith(path + "/"):
+                    if name not in owners:
+                        owners.append(name)
+                    break
+    return owners
+
+
+def live_chart_version(app):
+    """The chart version the LIVE Application carries, or None when
+    nobody could ask.
+
+    This is the question the chart layer has to put to the cluster after
+    it syncs, and the reason is in `appliers_of`: «Synced+Healthy» is an
+    answer about the app's contents, and the version is not in the
+    contents. Asking for it separately is what turns a bump that never
+    landed from a green layer into a failed one.
+    """
+    rc, out, _ = _kubectl(
+        "get", "application", app, "-n", "argocd", "-o",
+        "jsonpath={range .spec.sources[*]}{.chart}|{.targetRevision}{\"\\n\"}{end}")
+    if rc != 0:
+        return None
+    for ln in out.splitlines():
+        chart, _, rev = ln.partition("|")
+        if chart.strip():
+            return rev.strip()
+    rc, out, _ = _kubectl("get", "application", app, "-n", "argocd", "-o",
+                          "jsonpath={.spec.source.chart}|{.spec.source.targetRevision}")
+    if rc != 0:
+        return None
+    chart, _, rev = out.partition("|")
+    return rev.strip() if chart.strip() else None
+
+
 def unsettled_apps():
     """Which Applications are NOT Synced+Healthy right now.
 

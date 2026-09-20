@@ -320,7 +320,7 @@ def _write_and_commit(ctx, bump, layer_number):
     ctx.j.note("commit", sha=sha, subject=subject, pin=pin.key, layer=layer_number,
                de=old, a=new, ficheros=files)
     ctx.say(f"{sha[:12]}  {subject}")
-    return sha
+    return {"sha": sha, "ficheros": files}
 
 
 def _push(ctx):
@@ -438,11 +438,44 @@ def layer_charts(ctx, layer, bumps):
                                        "take this one by hand"})
             ctx.say(f"refused {app} → {bump['a']}: the candidate does not render")
             continue
-        _write_and_commit(ctx, bump, layer.number)
+        wrote = _write_and_commit(ctx, bump, layer.number)
         _push(ctx)
+        # WHOEVER APPLIES THE FILE GOES FIRST. A chart's targetRevision
+        # lives in the Application OBJECT, and that object is applied by
+        # the App-of-Apps, not by the app being bumped. Syncing only the
+        # app syncs the chart's CONSUMER against the version the object
+        # still names: green, and inert. See window.appliers_of.
+        appliers = win.appliers_of(wrote["ficheros"])
+        if appliers is None:
+            failed = {"app": app, "asentado": None,
+                      "por_que": "nobody could be asked who applies this file, and a "
+                                 "bump that cannot be routed is not a bump that landed"}
+            break
+        for owner in appliers:
+            if owner == app:
+                continue
+            settled = _sync(ctx, owner)
+            if settled.get("asentado") is not True:
+                failed = {"app": owner, "por_el_fichero_de": app, **settled}
+                break
+        if failed:
+            break
         settled = _sync(ctx, app)
         if settled.get("asentado") is not True:
             failed = {"app": app, **settled}
+            break
+        # AND THE VERSION IS ASKED OF THE CLUSTER. «Synced+Healthy» is an
+        # answer about the app's CONTENTS; the version is not in the
+        # contents, so it has to be read off the live object or it is
+        # not read at all.
+        live = win.live_chart_version(app)
+        ctx.j.note("chart-landed", **{"app": app, "escrito": bump["a"], "vivo": live})
+        if live != bump["a"]:
+            failed = {"app": app, "asentado": False, "vivo": live, "escrito": bump["a"],
+                      "por_que": f"the commit says {bump['a']} and the live Application "
+                                 f"still says {live}: the bump is in git and nowhere "
+                                 f"else. A layer that cannot show the version it wrote "
+                                 f"running is not a layer that was raised"}
             break
         done.append(app)
     for r in refused:

@@ -420,6 +420,48 @@ instance healed in four minutes.
 The rollback waits too, for the same reason: reporting that the tree
 came back while the cluster is still rolling has measured nothing.
 
+## A bump that only reached git is not a bump
+
+A sync applies a file. The question nobody asked for a long time is
+**who applies the file that was edited**.
+
+For almost everything the answer is «the app itself»: the file is the
+app's contents, and `aegis sync <app>` puts it in place. For a chart it
+is not. A chart's `targetRevision` is written in the **Application
+object**, under `k8s/argocd-apps`, and that directory is the source of
+the App-of-Apps — which carries no `automated` policy on purpose:
+nothing on this platform creates or retargets an Application without a
+person.
+
+So a chart layer that edits git, pushes, and syncs the app asks the app
+to reconcile its contents against the version its object *still names*.
+It does. Perfectly. Synced, Healthy, no new failures in the round,
+because the instance has not changed. The layer reports itself raised.
+
+Measured 2026-09-20: argocd 9.5.20 → 9.7.1, kyverno 3.8.1 → 3.9.1,
+jenkins 5.9.29 → 5.9.63, trivy-server 0.24.0 → 0.26.0, vector
+0.57.0 → 0.58.0 and vmsingle 0.45.0 → 0.46.0 were all committed,
+pushed, synced, accepted, and the window closed rc 0. All six were
+still running their old versions afterwards. Nothing failed anywhere:
+the green was real and it was about the wrong thing.
+
+Two rules come out of it, and check 222 holds both:
+
+- **Whoever applies the file is synced first**, derived from the live
+  Applications by asking which one's source path contains the edited
+  file. Never hardcoded to a name: what an instance calls its
+  App-of-Apps is the instance's business.
+- **The version is read back off the live object.** «Synced+Healthy» is
+  an answer about an app's contents, and the version is not in the
+  contents. A layer that cannot show the version it wrote running is
+  not a layer that was raised, and it fails and comes undone like any
+  other.
+
+The same shape guards the rest by construction: a file under an app's
+own source routes to that app, which is what the other layers were
+already doing, and a file nobody applies is a refusal rather than a
+silent success.
+
 ## When a layer fails
 
 Everything comes down, not only that layer. The layers are ordered
