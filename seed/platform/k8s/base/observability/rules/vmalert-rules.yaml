@@ -346,6 +346,23 @@ data:
             annotations:
               summary: "{{ $labels.repo }} is still on the old {{ $labels.image }}"
               description: "The base was rebuilt and signed, but the FROM bump in this consumer repo FAILED or found nothing to bump: what it deploys is still built on the vulnerable base, and nothing in its own pipeline will say so. Check the base-images console for {{ $labels.repo }}; the fix is the bump (by hand if need be) and a build."
+          # THE FAN-OUT, SEEN. One base rebuilt is one commit on every
+          # consumer and two builds per consumer; on 2026-09-13 one
+          # member iterated ten times rewrote eleven repositories ten
+          # times each, and nobody saw it until somebody read build.xml
+          # by hand. The producer already exists — a sample of
+          # aegis_base_propagated_timestamp_seconds per propagation — so
+          # the storm is a COUNT of samples: a consumer rewritten more
+          # than three times in a week for the same base is a human
+          # iterating with PROPAGATE=true, not a CVE. The window is the
+          # family's floor (a base can go weeks without a build); the
+          # threshold is what a legitimate week never reaches.
+          - alert: BasePropagationStorm
+            expr: count_over_time(aegis_base_propagated_timestamp_seconds[7d]) > 3
+            labels: {severity: warning}
+            annotations:
+              summary: "{{ $labels.repo }} was rewritten {{ $value }} times this week for {{ $labels.image }}"
+              description: "Each propagation of a base commits to this consumer and queues two builds. More than three in a week for one base is somebody iterating with PROPAGATE=true (or a caller that passes it without meaning it): build with `aegis ci build base-images --members <m>` and propagate once, when the base is green. Check 223 keeps PROPAGATE off by default."
           # One series per exception id; when there are no exceptions
           # there is no series, and that is health. Negative = already
           # expired — it stays under the threshold until somebody
