@@ -458,7 +458,7 @@ verificador).
 |---|---|
 | setup | `aegis preflight`, `aegis init`, `aegis init-log`, `aegis verify`, `aegis destroy` |
 | apps | `aegis app`, `aegis org`, `aegis quota`, `aegis repos`, `aegis image`, `aegis secret` |
-| operate | `aegis check`, `aegis console`, `aegis update`, `aegis tenant`, `aegis traffic`, `aegis capacity`, `aegis builds`, `aegis host`, `aegis sync`, `aegis ai` |
+| operate | `aegis check`, `aegis console`, `aegis update`, `aegis tenant`, `aegis traffic`, `aegis capacity`, `aegis builds`, `aegis host`, `aegis sync`, `aegis seed`, `aegis ai` |
 | infra | `aegis ci`, `aegis edge`, `aegis registry`, `aegis rotate`, `aegis webhook` |
 | backup | `aegis data`, `aegis state` |
 
@@ -499,6 +499,7 @@ verificador).
 | `aegis builds show` | Qué le pasó a cada push, eslabón por eslabón: construir, escanear, firmar, anotar el digest. Los dos que pasan después y en otros componentes (el sync y la admisión) viajan marcados como **no medidos acá**. |
 | `aegis host measure` / `show` / `floor` / `budget` / `metrics` / `reservation` / `requires` | Mide la máquina en la que aegis aterrizó y lo anota. `floor` es el piso de memoria que le deja al escritorio si compartís la máquina (`--set` para elegirlo, `--apply` para ponerlo en manos del kernel); `budget` dice si lo que la plataforma reserva entra en lo que esa máquina deja; `metrics` exporta lo que sólo el anfitrión puede ver. |
 | `aegis sync` | Dispara un sync de ArgoCD de las apps nombradas sin pasar `syncOptions`; `--drifted` sincroniza todo lo que no esté Synced. |
+| `aegis seed diff` / `apply` | Lo que la semilla del producto cambió y esta instancia no tiene todavía: `diff` compara cada fichero de la semilla (renderizado como el init lo haría) con la copia de la instancia y separa lo que es de la instancia (contratos, planes, digests, secretos, lo que `aegis org apply` escribe), lo que sólo difiere en versiones fijadas (la ventana de actualización las mueve) y lo que la semilla cambió de verdad; `apply` lo trae copiando **y** renderizando, conservando los pines y los bloques derivados de la instancia, y lo deja en un commit que tú lees y empujas. Un `git pull` del producto trae el arreglo a la máquina; esto lo trae a la instancia. |
 | `aegis ai` | El control del operador sobre el sustrato de IA; queda fuera de este documento. |
 
 **infra**

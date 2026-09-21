@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# aegis-summary: The seed's changes this instance lacks, and how to bring them over
+# aegis-group:   operate
+# aegis-subcommands: diff apply
+# aegis-help:
+# Usage: aegis seed diff [--json]
+#        aegis seed apply <path relative to platform/>... [--yes]
+#
+# diff   compares every file the product's seed ships with this
+#        instance's copy, AFTER rendering the seed's placeholders the
+#        way the init does, and says which differ, which the seed added
+#        and the instance lacks, and which the INSTANCE owns (its
+#        contracts, its plans, its derived blocks, its digests): those
+#        are never brought over. Reads; touches nothing. Exit 1 when
+#        something the seed owns differs, 0 when nothing does.
+# apply  brings the named files over, copy AND render in one act (a bare
+#        cp puts the seed's placeholders back into a rendered tree —
+#        measured 2026-09-01), and commits them in the instance's
+#        platform repo. DRY unless --yes. Refuses files the instance
+#        owns. It never pushes: the commit is yours to read and push.
+#
+# WHY. A fix made in the product used to never reach a live instance,
+# and said nothing while not reaching it (measured three times on
+# 2026-09-01; named as the missing verb in docs/journeys). The house
+# instance carried 32 alert rules while the seed shipped 41. A `git
+# pull` in a clone of the product brings the fix to the machine; this
+# is what brings it into the instance.
+
+set -euo pipefail
+red=$'\033[31m'; green=$'\033[32m'; yellow=$'\033[33m'; gray=$'\033[90m'; bold=$'\033[1m'; reset=$'\033[0m'
+[[ -t 1 ]] || { red=""; green=""; yellow=""; gray=""; bold=""; reset=""; }
+AEGIS_ROOT="${AEGIS_ROOT:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)}"
+usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
+for a in "$@"; do case "$a" in -h|--help) usage; exit 0 ;; esac; done
+VERB="${1:-}"; shift || true
+case "$VERB" in
+    diff|apply) ;;
+    "") usage >&2; exit 3 ;;
+    *)  echo "aegis seed: «$VERB» is not a subcommand (diff | apply)" >&2; exit 3 ;;
+esac
+
+source "$AEGIS_ROOT/lib/paths.sh"
+[[ -d "$AEGIS_ROOT/seed/platform" ]] || { echo "aegis seed: this product ships no seed/platform" >&2; exit 2; }
+[[ -d "$PLATFORM_DIR/.git" ]] || { echo "aegis seed: there is no instance here ($PLATFORM_DIR has no .git): nothing to compare the seed against" >&2; exit 2; }
+[[ -f "$AEGIS_CONF" ]] || { echo "aegis seed: no aegis.conf at $AEGIS_CONF: the seed cannot be rendered the way this instance is" >&2; exit 2; }
+
+# The libs the render needs. CHECK_MODE keeps run_cmd honest below.
+export CHECK_MODE="${CHECK_MODE:-false}"
+source "$AEGIS_ROOT/lib/common.sh"
+source "$AEGIS_ROOT/lib/config.sh"
+source "$AEGIS_CONF"
+PROFILE="${PROFILE:-greenfield}"
+
+# Who owns what, which lines are pins, and where the derived blocks
+# are, all live in lib/aegis/seed.py: one place, read by this command
+# and by check 225.
+PY_SEED="PYTHONPATH=$AEGIS_ROOT/lib python3 -m aegis.seed"
+
+# ── the seed, rendered the way this instance is, in a scratch tree ──
+SCRATCH="$(mktemp -d)"
+trap 'rm -rf "$SCRATCH"' EXIT
+render_seed_into_scratch() {
+    cp -a "$AEGIS_ROOT/seed/platform/." "$SCRATCH/"
+    # render_platform_placeholders writes into $PLATFORM_DIR; point it
+    # at the scratch copy for the length of this call.
+    local real="$PLATFORM_DIR"
+    PLATFORM_DIR="$SCRATCH" CHECK_MODE=false render_platform_placeholders >/dev/null 2>&1 || {
+        echo "aegis seed: the seed could not be rendered with this instance's aegis.conf" >&2; exit 2; }
+    PLATFORM_DIR="$real"
+}
+
+# FROM lines are the instance's: `aegis ai bases` resolves them against
+# the internal registry, so a resolved FROM is agreement, not drift.
+normalised() { sed -E 's|^FROM .*|FROM __NORMALISED__|' "$1"; }
+# A PIN LINE is a version or a digest the update window moves. A file
+# whose only differences are pin lines is not a seed change the instance
+# lacks: it is the instance being newer than the seed, on purpose.
+PIN_RE='^[[:space:]]*(-[[:space:]]*)?(image|targetRevision|tag|version|digest):|@sha256:[0-9a-f]{64}|executor:v[0-9]'
+only_pins_differ() {   # <seed-rendered> <instance>
+    ! diff <(normalised "$1") <(normalised "$2") | grep -E '^[<>]' | sed -E 's/^[<>] //' | grep -vqE "$PIN_RE"
+}
+
+do_diff() {
+    local json=0; [[ "${1:-}" == "--json" ]] && json=1
+    render_seed_into_scratch
+    local doc; doc="$(PYTHONPATH="$AEGIS_ROOT/lib" python3 -m aegis.seed classify "$SCRATCH" "$PLATFORM_DIR")"
+    if (( json )); then printf '%s' "$doc" | PYTHONPATH="$AEGIS_ROOT/lib" python3 -m aegis.seed steps - -
+    else               printf '%s' "$doc" | PYTHONPATH="$AEGIS_ROOT/lib" python3 -m aegis.seed report - -
+    fi
+}
+
+do_apply() {
+    local yes=0 paths=()
+    for a in "$@"; do case "$a" in --yes) yes=1 ;; -*) echo "aegis seed apply: unknown flag «$a»" >&2; exit 3 ;; *) paths+=("$a") ;; esac; done
+    (( ${#paths[@]} )) || { echo "aegis seed apply: name at least one path relative to platform/ (the ones «seed diff» printed)" >&2; exit 3; }
+    local p
+    for p in "${paths[@]}"; do
+        [[ -f "$AEGIS_ROOT/seed/platform/$p" ]] || { echo "aegis seed apply: the seed ships no platform/$p" >&2; exit 3; }
+    done
+    if owned="$(PYTHONPATH="$AEGIS_ROOT/lib" python3 -m aegis.seed owns "$PLATFORM_DIR" "${paths[@]}")"; then :; else
+        echo "aegis seed apply: the INSTANCE owns $(echo $owned | tr '\n' ' ')(its contracts, plans, digests, secrets, the files aegis org apply writes): the seed's copy is a sample and bringing it over would overwrite this instance" >&2; exit 1
+    fi
+    if [[ -n "$(git -C "$PLATFORM_DIR" status --porcelain)" ]]; then
+        echo "aegis seed apply: the platform repo has uncommitted changes; commit or stash them first so this commit carries only what the seed brought" >&2; exit 1
+    fi
+    if (( ! yes )); then
+        printf '%s[DRY-RUN] would copy AND render, then commit in %s:%s\n' "$gray" "$PLATFORM_DIR" "$reset"
+        printf '  %s\n' "${paths[@]}"
+        printf '%s--yes to do it%s\n' "$gray" "$reset"; return 0
+    fi
+    # THE INSTANCE'S PINS SURVIVE THE COPY. The seed's file carries the
+    # seed's versions; the instance may have moved them (the update
+    # window does). Snapshot, copy and render, then write every moved
+    # pin back through the same edit the window uses.
+    # AND SO DO ITS DERIVED BLOCKS (the tenant jobs, the tenant probes,
+    # the base consumers): the seed's structure, the instance's block.
+    local state blocks; state="$(mktemp)"; blocks="$(mktemp)"
+    PYTHONPATH="$AEGIS_ROOT/lib" python3 -m aegis.seed snapshot "$PLATFORM_DIR" "$state"
+    PYTHONPATH="$AEGIS_ROOT/lib" python3 -m aegis.seed block-snapshot "$PLATFORM_DIR" "$blocks" "${paths[@]}"
+    seed_fetch "${paths[@]}"
+    PYTHONPATH="$AEGIS_ROOT/lib" python3 -m aegis.seed block-splice "$PLATFORM_DIR" "$blocks"
+    PYTHONPATH="$AEGIS_ROOT/lib" python3 -m aegis.seed repin "$PLATFORM_DIR" "$state" "${paths[@]}" \
+        || echo "aegis seed apply: some pin could not be written back (see above): read the diff before committing" >&2
+    rm -f "$state" "$blocks"
+    git -C "$PLATFORM_DIR" add -- "${paths[@]}"
+    if git -C "$PLATFORM_DIR" diff --cached --quiet; then
+        printf '%snothing changed after the render: the instance already had this%s\n' "$green" "$reset"; return 0
+    fi
+    git -C "$PLATFORM_DIR" commit -q -m "chore(seed): brought over from the product's seed
+
+$(printf '  %s\n' "${paths[@]}")
+
+Copied and rendered by \`aegis seed apply\` from $(git -C "$AEGIS_ROOT" rev-parse --short HEAD 2>/dev/null || echo 'the installed product')."
+    printf '%scommitted in the platform repo: %s%s\n' "$green" "$(git -C "$PLATFORM_DIR" rev-parse --short HEAD)" "$reset"
+    printf '%sread it (git -C %s show), then push it: ArgoCD reads the remote%s\n' "$gray" "$PLATFORM_DIR" "$reset"
+}
+
+case "$VERB" in
+    diff)  do_diff "$@" ;;
+    apply) do_apply "$@" ;;
+esac
