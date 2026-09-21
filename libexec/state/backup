@@ -132,7 +132,20 @@ if [[ -n "${AEGIS_BACKUP_SINK:-}" ]]; then
   else
     die "sink FAILED — the bundle exists at $OUT but did NOT leave the machine (put it somewhere safe by hand)"
   fi
+elif [[ -f "$AEGIS_HOME/.state-secrets/r2_access_key_id.enc" ]]; then
+  # THE OTHER HALF LEAVES ON ITS OWN. Until 2026-09-20 the tenants' data
+  # went to R2 every night and the platform's state — the store, the
+  # markers, the tunnel's tfstate — stayed on the disk it was meant to
+  # survive, with a line in the protocol saying to push it by hand. An
+  # adopted destination is the whole precondition; the same push the
+  # data uses, under the prefix the protocol reserves for the state.
+  say "R2 destination adopted — sending the state bundle offsite (platform/)…"
+  if "${AEGIS_CMD:-aegis}" data remote push "$OUT" --prefix platform; then
+    say "offsite OK — the state bundle is at the destination under platform/"
+  else
+    die "the push to R2 FAILED — the bundle exists at $OUT and did NOT leave the machine (aegis data remote status says what the destination answered)"
+  fi
 else
-  say "no AEGIS_BACKUP_SINK — the bundle stays LOCAL at $OUT; put it offsite (or configure the sink)."
+  say "no AEGIS_BACKUP_SINK and no R2 destination adopted — the bundle stays LOCAL at $OUT; put it offsite (aegis data remote adopt, or configure the sink)."
 fi
 
