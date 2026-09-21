@@ -77,6 +77,10 @@ clear_state() {
 # run_cmd: in CHECK_MODE it shows without executing. ONLY for commands
 # that MUTATE. Reads are always executed (a dry-run that does not read
 # validates nothing — the check_mode lesson from Ansible, 2026-05-01).
+# The systemd readings live in their own small lib: the round sources
+# it without dragging the rest of this file behind it.
+source "${AEGIS_ROOT:?}/lib/systemd.sh"
+
 run_cmd() {
     if [[ "$CHECK_MODE" == "true" ]]; then
         log_info "[check] $*"

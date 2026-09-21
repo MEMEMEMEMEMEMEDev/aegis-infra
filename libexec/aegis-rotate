@@ -2,6 +2,25 @@
 # aegis-summary: The rotation protocol, made executable
 # aegis-group:   infra
 # aegis-subcommands: list check run continue
+# aegis-help:
+# Usage: aegis rotate list
+#        aegis rotate check [<credential>...]
+#        aegis rotate run <credential>... [--yes]
+#        aegis rotate continue
+#
+# list      every credential the store holds, its age, its third party
+#           and the blast radius if it fails; and the ones this command
+#           refuses to rotate (the cosign keypair and the age key, each
+#           with its own protocol).
+# check     exercises each credential against its real consumer and
+#           says whether it works, in the four outcomes.
+# run       the protocol for the named credentials: invalidate the old,
+#           regenerate with the phase that owns it, apply, verify, and
+#           name where each half lives if anything fails. DRY unless
+#           --yes. A journal under .init-state/rotacion lets `continue`
+#           resume a batch.
+# continue  resumes the last batch where it stopped.
+
 # aegis-rotate — THE ROTATION PROTOCOL, MADE EXECUTABLE.
 #
 # ── what changed and why ────────────────────────────────────────────
@@ -1405,7 +1424,8 @@ finish() {   # <failed>
 # --help BEFORE touching anything: until 2026-08-27 asking for help on a
 # machine with no store died with "the store does not exist" (same class
 # as `preflight --help`, fixed the day before).
-for a in "$@"; do case "$a" in -h|--help) sed -n '1,56p' "$0"; exit 0 ;; esac; done
+usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
+for a in "$@"; do case "$a" in -h|--help) usage; exit 0 ;; esac; done
 [[ -d "$STATE_SECRETS" ]] || die "the store $STATE_SECRETS does not exist (did you run the init?)"
 
 YES=0; NAMES=(); CONTINUE=0; CHECK=0
@@ -1420,7 +1440,7 @@ for a in "$@"; do
     list)        inventory; echo; exit 0 ;;
     check)       CHECK=1 ;;
     run)         : ;;
-    -h|--help)   sed -n '1,56p' "$0"; exit 0 ;;
+    -h|--help)   usage; exit 0 ;;
     -*)          die "unknown flag: $a" ;;
     *)           NAMES+=("$a") ;;
   esac

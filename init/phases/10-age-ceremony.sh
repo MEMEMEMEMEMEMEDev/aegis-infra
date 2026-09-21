@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PHASE 10 — the age key ceremony (the root of trust).
-# Generalizes rotate-age-key.md §A: generation + 3 backups + REAL
+# Generalizes rotate-age-key.md §A: generation + a backup in your hands + REAL
 # ROUNDTRIP VALIDATION (not a verbal confirmation) + an operational
 # workspace (custom path ADR-0003 + direnv + .envrc).
 # RED by design: it is the only phase that SHOWS a secret (once, for
@@ -113,5 +113,5 @@ fi
 render_platform_placeholders
 log_ok "platform/ rendered from aegis-init.conf (a single step)"
 
-log_ok "age ceremony complete: 3 backups validated, operational copy \
+log_ok "age ceremony complete: ONE copy validated by roundtrip from your hand (keep it in two places; the init validates the one you paste), operational copy \
 600, workspace configured"

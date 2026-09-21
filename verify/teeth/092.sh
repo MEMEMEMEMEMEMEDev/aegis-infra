@@ -107,7 +107,10 @@ red_5() { sed -i '/api\/v1\/import\/prometheus/d' "$AEGIS_ROOT/share/systemd/aeg
 # and the cadence taken away: a producer with no readable period leaves
 # no minimum window to demand of whoever reads it, and a rule with a
 # window shorter than the push interval returns empty, not false.
-red_6() { sed -i '/^OnUnitActiveSec=/d' "$AEGIS_ROOT/share/systemd/aegis-backup.timer"; }
+# both lines, since 2026-09-20: the timer carries OnCalendar beside the
+# interval, and either one is a cadence the check can read. Deleting one
+# is legal (the other stays); deleting both is the regression.
+red_6() { sed -i '/^OnUnitActiveSec=/d; /^OnCalendar=/d' "$AEGIS_ROOT/share/systemd/aegis-backup.timer"; }
 
 # control: a comment in the unit is not a command. This is the mistake
 # the check itself made on the day it learned this class — it read the

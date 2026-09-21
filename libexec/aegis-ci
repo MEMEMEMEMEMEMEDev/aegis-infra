@@ -3,7 +3,7 @@
 # aegis-group:   infra
 # aegis-subcommands: build digests jobs quiet
 # aegis-help:
-# Usage: aegis ci build [--members "<m> ..."] [<job>[/<branch>]...]
+# Usage: aegis ci build [--members "<m> ..."] [--propagate] [<job>[/<branch>]...]
 #        aegis ci jobs
 #        aegis ci digests
 #        aegis ci quiet on|off|status
@@ -23,8 +23,17 @@
 #          A multibranch job is built by BRANCH (`<job>` means
 #          `<job>/main`, which is the item Jenkins builds); name
 #          `<job>/<branch>` to build another one.
-#          --members "<m> ..." is passed to base-images as MEMBERS
-#          (space-separated member directories; empty = all of them).
+#          --members "<m> ..." names the members base-images builds.
+#          Without it, base-images is given EVERY member the platform
+#          tree has, and the command prints which: the job itself
+#          refuses an empty MEMBERS (nothing rebuilds every member by
+#          default; check 223), so the list is always said out loud,
+#          never implied.
+#          --propagate tells base-images to rewrite the FROM of every
+#          consumer of what it built (one commit per consumer repo,
+#          which makes each one rebuild). Without it the bases are
+#          built, scanned, signed and pushed and NOBODY is told — the
+#          right default while a member is being iterated on.
 # digests  prints image@digest for what the internal registry holds:
 #          every aegis-base-* tag of the shape <major>.<minor>-<yymmdd>
 #          (newest last) and every tag of every other repository, each
@@ -104,7 +113,7 @@ esac
 # the job-dsl, and reading it needs libs that are not sourced yet. So
 # the SHAPE is checked here and the MEMBERSHIP in ci_resolve_jobs,
 # still before anything is fired and still without a cluster.
-ARGV_JOBS=(); MEMBERS=""; MEMBERS_GIVEN=0
+ARGV_JOBS=(); MEMBERS=""; MEMBERS_GIVEN=0; PROPAGATE_GIVEN=0
 if [[ "$VERB" == build ]]; then
     while (($#)); do
         case "$1" in
@@ -112,6 +121,7 @@ if [[ "$VERB" == build ]]; then
             --members)  [[ $# -ge 2 ]] || bad_usage "--members needs a value (space-separated member directories under base-images/)"
                         MEMBERS="$2"; MEMBERS_GIVEN=1; shift 2 ;;
             --members=*) MEMBERS="${1#--members=}"; MEMBERS_GIVEN=1; shift ;;
+            --propagate) PROPAGATE_GIVEN=1; shift ;;
             -*)         bad_usage "unknown flag «$1»" ;;
             *)          ARGV_JOBS+=("$1"); shift ;;
         esac
@@ -333,12 +343,30 @@ ci_resolve_jobs() {
         fi
         NAMES+=("$head"); ITEMS+=("$(ci_item_of "$head" "$kind" "$rest")")
     done
-    if (( MEMBERS_GIVEN )); then
+    if (( MEMBERS_GIVEN || PROPAGATE_GIVEN )); then
         has_base=0
         for a in "${NAMES[@]}"; do [[ "$a" == base-images ]] && has_base=1; done
         (( has_base )) \
-            || bad_usage "--members only means something for base-images, and base-images is not among the jobs to fire (${NAMES[*]})"
+            || bad_usage "--members and --propagate only mean something for base-images, and base-images is not among the jobs to fire (${NAMES[*]})"
     fi
+}
+
+# ci_members_of_tree — every member base-images/ carries, read from the
+# platform tree (the instance's, or the seed's when there is none).
+# This is how «all of them» is spelled: as a list that is printed,
+# never as an empty parameter the job would have to interpret. A tree
+# with no member is an error here, before anything is fired.
+ci_members_of_tree() {
+    local root f out=""
+    for root in "$PLATFORM_DIR" "$AEGIS_ROOT/seed/platform"; do
+        [[ -d "$root/base-images" ]] || continue
+        for f in "$root"/base-images/*/Containerfile; do
+            [[ -f "$f" ]] || continue
+            out="${out:+$out }$(basename "$(dirname "$f")")"
+        done
+        [[ -n "$out" ]] && { printf '%s' "$out"; return 0; }
+    done
+    return 1
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -429,9 +457,20 @@ do_build() {
         first="$(jenkins_next_build "$item")" \
             || could_not "no nextBuildNumber for $item — the Jenkins API stopped answering"
         q=""
-        if [[ "$name" == base-images && $MEMBERS_GIVEN == 1 ]]; then
-            q="MEMBERS=$(jq -rn --arg m "$MEMBERS" '$m|@uri')"
-            log_info "firing $item with MEMBERS='${MEMBERS:-<all>}' (timeout ${timeout}s) → build #$first  $root/job/$(_jenkins_job "$item")/$first/"
+        if [[ "$name" == base-images ]]; then
+            # NEVER AN EMPTY MEMBERS: the job refuses it (check 223). When
+            # the operator did not name them, every member of the tree
+            # is named here, out loud. PROPAGATE only when asked.
+            local m="$MEMBERS" p=false
+            if (( ! MEMBERS_GIVEN )); then
+                m="$(ci_members_of_tree)" \
+                    || could_not "base-images/ has no member with a Containerfile in the platform tree — nothing to name"
+                log_info "base-images: --members not given → every member of the tree: $m"
+            fi
+            (( PROPAGATE_GIVEN )) && p=true
+            q="MEMBERS=$(jq -rn --arg m "$m" '$m|@uri')&PROPAGATE=$p"
+            log_info "firing $item with MEMBERS='$m' PROPAGATE=$p (timeout ${timeout}s) → build #$first  $root/job/$(_jenkins_job "$item")/$first/"
+            [[ $p == true ]] || log_info "base-images: consumers will NOT be told (no --propagate)"
         else
             log_info "firing $item (timeout ${timeout}s) → build #$first  $root/job/$(_jenkins_job "$item")/$first/"
         fi

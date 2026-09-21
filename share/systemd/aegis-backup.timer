@@ -15,6 +15,17 @@ Unit=aegis-backup.service
 # trail.
 OnUnitActiveSec=24h
 
+# AND A CALENDAR, because the line above alone re-arms only from a
+# service run: restart the TIMER (an update window does, to keep a
+# half-updated instance out of the day's copy) and systemd shows
+# «NextElapse: n/a» until the service happens to run again — which,
+# with no next run scheduled, it never does. Measured on 2026-09-20:
+# the house clock sat active, enabled and healthy-looking with no next
+# run for the rest of the day. OnCalendar is a wall-clock appointment
+# that survives a restart; `data remote cadence` still shortens the
+# interval through its drop-in, and a run from either line counts.
+OnCalendar=daily
+
 # The first run after a boot waits: at minute zero the cluster is still
 # coming up, kubectl answers nothing useful, and a capture that finds no
 # StatefulSets aborts saying the contracts and the cluster disagree —

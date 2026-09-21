@@ -355,6 +355,10 @@ NO_GUARD = {
         "build-cadence, absent until the first base rebuild. Same family as "
         "ImagenSinEscaneo: the series is born with the first propagation, and a newborn "
         "platform has had none",
+    "BasePropagationStorm":
+        "same producer and same cadence as BasePropagationFailed: a COUNT of samples in the "
+        "family's window, absent until the first propagation and correctly empty when there "
+        "is no storm — an absent() sibling would fire on every quiet week",
 }
 METRIC = re.compile(r"\b([a-z][a-z0-9_]+)\s*(?:\{|\[|\)|\s|$)")
 WORDS = {"time", "sum", "max", "min", "avg", "count", "rate", "increase", "absent",
@@ -436,8 +440,8 @@ for m, (src, cadence, minimum) in sorted(producers.items()):
         # counter would force the alert to be written wrong in order to
         # satisfy the check.
         window = re.findall(
-            rf"(?:last_over_time|max_over_time|min_over_time|avg_over_time"
-            rf"|rate|irate|increase|delta|idelta)\(\s*{m}[^)]*\[(\d+)([smhd])\]",
+            rf"(?:last_over_time|max_over_time|min_over_time|avg_over_time|count_over_time"
+            rf"|rate|irate|increase|delta|idelta|changes)\(\s*{m}[^)]*\[(\d+)([smhd])\]",
             expr)
         if not window:
             bad.append(f"{where} reads {m} with no explicit window: {src} pushes it {cadence} and "

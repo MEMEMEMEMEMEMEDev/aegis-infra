@@ -3,5 +3,6 @@ kind: Kustomization
 resources:
   - bundle.yaml
   - netpol.yaml          # W-07 iter2: aislamiento de ingress de jenkins-system
+  - rbac-base-images-agent.yaml   # the base-images agent may run ONE test pod here, before it signs
 generators:
   - secret-generator.yaml

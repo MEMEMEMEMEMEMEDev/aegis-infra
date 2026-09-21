@@ -584,6 +584,4 @@ running would lose its page mid-flight, which is worse than leaving it.
 Tenant application images are outside all of this, as they are outside
 the vigía: that gap is named in `images.md` §7 and is not closed here.
 
-Nothing in the init installs the notice timer, which is the same gap the
-backup timer had until 2026-09-16. `share/systemd/README.md` has the
-five commands.
+Phase 05 installs the notice timer with the other two user clocks (since 2026-09-20), enables linger, and gates on a next run rather than on «enabled».

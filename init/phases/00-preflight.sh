@@ -201,6 +201,25 @@ gate "disco-suficiente" bash -c '
 gate "perfil-del-anfitrion" bash -c \
     '"$AEGIS_ROOT/libexec/aegis-host" measure >/dev/null'
 
+# ── the GPU, when the conf asks for one ─────────────────────────────
+# AI=gpu means phase 20 will install the NVIDIA container runtime and
+# phase 87 will schedule engines on a card. Neither can conjure a
+# driver: that is the operating system's, and a machine whose driver
+# is missing or fell off the bus answers nothing to nvidia-smi. Asked
+# HERE, before a single phase runs, so the answer is a sentence and
+# not a pod that never schedules two hours later. AI=cpu and AI=no
+# ask nothing: the CPU lane needs no card.
+if [[ "${AI:-no}" == "gpu" ]]; then
+    gate_diag "gpu-responde" \
+      'echo "  AI=gpu in aegis.conf, and no GPU answered nvidia-smi.";
+       echo "  The driver is the operating system'"'"'s, not aegis'"'"'s: install it (Ubuntu: sudo ubuntu-drivers install),";
+       echo "  reboot, and run the init again — or set AI=cpu (aegis init --configure) to run the CPU lane only.";
+       echo "  A card that answered yesterday and not today has usually fallen off the bus: journalctl -k | grep Xid";
+       command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi 2>&1 | head -20 || echo "  nvidia-smi is not installed"' \
+      bash -c 'command -v nvidia-smi >/dev/null 2>&1 \
+               && nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>/dev/null | grep -qE "[0-9]+ MiB"'
+fi
+
 # 5. Greenfield on a host with a previous kubeconfig: confirm that
 #    nothing live is being stepped on (A11 inverted: here the danger
 #    is TRAMPLING).

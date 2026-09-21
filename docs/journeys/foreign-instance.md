@@ -102,7 +102,8 @@ pipelines.
 
 - A fix to the seed does not reach an instance that already seeded
   itself (the `.git` guard is right; a verb that re-seeds a living
-  instance from a newer seed does not exist yet).
+  instance from a newer seed did not exist until 2026-09-20: it is
+  `aegis seed diff` / `aegis seed apply` now).
 - `aegis data restore` does not restore objects; after `--force` the
   database role is realigned by hand.
 - `aegis secret create <contract>` does not derive the per-namespace

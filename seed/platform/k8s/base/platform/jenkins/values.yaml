@@ -164,9 +164,10 @@ controller:
           - script: >
               pipelineJob('base-images') {
                 displayName('base-images (bases aegis owns: build + contract + scan + sign + propagate)')
-                description('Builds the base images aegis OWNS (base-images/<member>/Containerfile) with kaniko, asserts their contract (UID 101, port 8080), scans them (blocking, no exceptions), pushes and signs them, then commits the new digest into the FROM of every consumer listed in base-images/consumers.txt. MEMBERS empty = every member; image-watch passes only the members with a fixable CVE.')
+                description('Builds the base images aegis OWNS (base-images/<member>/Containerfile) with kaniko, asserts their contract (the UID the Containerfile declares, port 8080), scans them (blocking, no exceptions), pushes and signs them, and only with PROPAGATE=true commits the new digest into the FROM of every consumer listed in base-images/consumers.txt. MEMBERS names what to rebuild and is never empty; image-watch passes only the members with a fixable CVE, with PROPAGATE=true.')
                 parameters {
-                  stringParam('MEMBERS', '', 'space-separated member directories under base-images/ (e.g. "nginx"); empty = all of them')
+                  stringParam('MEMBERS', '', 'space-separated member directories under base-images/ (e.g. "nginx"). REQUIRED: an empty value is refused, nothing rebuilds every member by default')
+                  booleanParam('PROPAGATE', false, 'rewrite the FROM of every consumer of the members built (one commit per consumer repository). OFF by default: the bases are built, scanned, signed and pushed, and nobody is told until asked')
                 }
                 definition {
                   cpsScm {

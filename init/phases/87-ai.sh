@@ -528,7 +528,11 @@ gate_diag "ai-gateway-responds" \
    kubectl -n ai-system get pods -l app=ai-gateway 2>/dev/null;
    kubectl -n ai-system describe pods -l app=ai-gateway 2>/dev/null | tail -n 30;
    echo "  the gateway mounts four ConfigMaps and one Secret; all must exist or the pod";
-   echo "  does not start. ai-ruteo and ai-registro come out of the contract generator."' \
+   echo "  does not start. ai-ruteo and ai-registro come out of the contract generator.";
+   echo "  An EMPTY task registry is fine since ai-gateway accepted one (2026-09-02): a";
+   echo "  platform with no organizations yet starts its gateway with zero tasks. If the";
+   echo "  log says «registro sin tareas», the gateway image predates that fix.";
+   kubectl -n ai-system logs deploy/ai-gateway --tail=20 2>/dev/null' \
   wait_rollout "$AI_NS" deploy/ai-gateway 600
 
 # ── 87.6 the controller observes, and the proof is the engines ─────

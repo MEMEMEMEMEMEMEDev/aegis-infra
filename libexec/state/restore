@@ -37,8 +37,17 @@ TUNNEL_ENV="$AEGIS_HOME/platform/tofu/envs/cloudflare-tunnel"
 say()  { printf '[restore] %s\n' "$*"; }
 die()  { printf '[restore] FATAL: %s\n' "$*" >&2; exit 1; }
 
-BUNDLE="${1:-}"; FORCE=0
-[[ "${2:-}" == "--force" ]] && FORCE=1
+# --force is a FLAG, accepted wherever it stands: until 2026-09-20 it
+# was read as the second word only, so `restore --force <bundle>` was
+# silently a restore without it, refused at the first live directory.
+BUNDLE=""; FORCE=0
+for _a in "$@"; do
+    case "$_a" in
+        --force) FORCE=1 ;;
+        -*) die "unknown flag $_a (usage: aegis state restore <bundle.age> [--force])" ;;
+        *) [[ -z "$BUNDLE" ]] || die "one bundle at a time (got $BUNDLE and $_a)"; BUNDLE="$_a" ;;
+    esac
+done
 [[ -n "$BUNDLE" && -f "$BUNDLE" ]] || die "usage: aegis state restore <bundle.age> [--force]"
 
 KEY="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/aegis.key}"
