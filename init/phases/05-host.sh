@@ -320,6 +320,48 @@ gate "userland-completo" check_binaries
 run_cmd sudo ln -sfn "$AEGIS_ROOT/bin/aegis" /usr/local/bin/aegis
 gate "aegis-en-path" bash -c \
     "[[ \"\$(readlink -f \"\$(command -v aegis)\")\" == '$AEGIS_ROOT/bin/aegis' ]]"
+# The units, the README and two protocols name /usr/local/share/aegis
+# as where share/ lives. Nothing created it until 2026-09-20: two
+# documented install recipes copied from a path that did not exist.
+run_cmd sudo ln -sfn "$AEGIS_ROOT/share" /usr/local/share/aegis
+gate "aegis-share-en-su-sitio" test -f /usr/local/share/aegis/systemd/aegis-backup.timer
+
+# ── the user clocks ─────────────────────────────────────────────────
+# THE UNITS THAT KEEP AN INSTANCE ALIVE BETWEEN RUNS: the backup, the
+# host metrics, the update notice. They are USER units because the
+# capture needs the operator's age key and the metrics need nobody's
+# root. No phase installed them until 2026-09-20; measured on the house
+# machine on 2026-09-16, the units had never been installed and the
+# copies were three days old, while every dashboard looked healthy.
+# backup.env is DERIVED from the paths this phase knows, never copied
+# from a README: systemd starts the service with no profile, so the
+# key's path in particular has to be written down here.
+USER_UNITS="$HOME/.config/systemd/user"
+CLOCKS=(aegis-backup aegis-host-metrics aegis-update-notice)
+if systemctl --user show-environment >/dev/null 2>&1; then
+    run_cmd mkdir -p "$USER_UNITS" "$HOME/.config/aegis"
+    run_cmd bash -c "umask 077; printf 'AEGIS_HOME=%s\nAEGIS_ROOT=%s\nPATH=/usr/local/bin:/usr/bin:/bin\nSOPS_AGE_KEY_FILE=%s\n' \
+        '$AEGIS_HOME' '$AEGIS_ROOT' '${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/aegis.key}' > '$HOME/.config/aegis/backup.env'"
+    for _c in "${CLOCKS[@]}"; do
+        run_cmd install -m 644 "$AEGIS_ROOT/share/systemd/$_c.service" "$AEGIS_ROOT/share/systemd/$_c.timer" "$USER_UNITS/"
+    done
+    run_cmd systemctl --user daemon-reload
+    for _c in "${CLOCKS[@]}"; do
+        run_cmd systemctl --user enable --now "$_c.timer"
+    done
+    # linger: or the clocks stop the moment the operator logs out
+    run_cmd sudo loginctl enable-linger "$USER"
+    gate "user-clocks-installed" bash -c \
+        'for c in aegis-backup aegis-host-metrics aegis-update-notice; do systemctl --user is-enabled "$c.timer" >/dev/null 2>&1 || exit 1; done'
+    # ENABLED IS NOT SCHEDULED. A timer can be active and enabled and
+    # have no next run (the OnUnitActiveSec trap above); what proves a
+    # clock is a next appointment, read off systemd.
+    gate "user-clocks-have-a-next-run" bash -c \
+        'for c in aegis-backup aegis-host-metrics aegis-update-notice; do timer_next_elapse --user "$c.timer" >/dev/null || exit 1; done'
+    gate "linger-enabled" bash -c "loginctl show-user '$USER' -p Linger 2>/dev/null | grep -q '=yes'"
+else
+    gate_red "there is no user session bus (systemctl --user cannot be reached: an ssh session without linger, or XDG_RUNTIME_DIR unset). The three clocks were NOT installed. Remedy: loginctl enable-linger $USER, log in again, and run: aegis init --only 05-host"
+fi
 
 # ── defensive direnv hook (A3) ──────────────────────────────────────
 if ! grep -q 'direnv hook bash' ~/.bashrc 2>/dev/null; then

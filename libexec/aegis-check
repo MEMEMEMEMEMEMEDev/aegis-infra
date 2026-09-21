@@ -56,6 +56,7 @@ fi
 export AEGIS_ROOT
 # shellcheck source=../lib/paths.sh
 source "$AEGIS_ROOT/lib/paths.sh"
+source "$AEGIS_ROOT/lib/systemd.sh"     # timer_next_elapse, for the clocks
 
 usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
 JSON_MODE=""
@@ -1145,6 +1146,22 @@ else
     else
         bad "no STATE bundle in $BACKUPS/platform/ — with only the data you have a dump nobody knows where to put"
     fi
+
+    # (b2) THE CLOCKS. A bundle that is fresh today says nothing about
+    #      tomorrow: what keeps the copies coming is a timer with a
+    #      next appointment, and «active» is not that (a restarted
+    #      OnUnitActiveSec timer sits active with no next run for ever;
+    #      measured 2026-09-20). Three user units, each read for its
+    #      next run, none assumed from the other two.
+    for _clock in aegis-backup aegis-host-metrics aegis-update-notice; do
+        if ! systemctl --user is-enabled "$_clock.timer" >/dev/null 2>&1; then
+            bad "$_clock.timer is not installed or not enabled for this user (phase 05 installs it: aegis init --only 05-host)"
+        elif _next="$(timer_next_elapse --user "$_clock.timer")"; then
+            ok "$_clock.timer: next run $_next"
+        else
+            bad "$_clock.timer is enabled and has NO next run: it will not fire again until a reboot (a restarted timer with no OnCalendar; systemctl --user restart $_clock.timer after the unit gains one)"
+        fi
+    done
 
     # (c) and one per organization, ENUMERATED from the contracts.
     mapfile -t ORGS < <(python3 - "$PLATFORM_DIR/orgs" <<'PYEOF'

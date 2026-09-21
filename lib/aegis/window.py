@@ -1085,10 +1085,10 @@ def timer_stop(unit="aegis-backup.timer"):
     instance that is half updated and call it the day's backup — and
     that is the copy somebody would restore from.
     """
-    # BOTH scopes, in this order. On the author's instance the backup
-    # timer is a USER unit (it was installed by hand on 2026-09-16,
-    # because no phase installs the units in share/systemd/); on an
-    # instance where a phase eventually does, it will be a system one.
+    # BOTH scopes, in this order. The backup timer is a USER unit
+    # (phase 05 installs it as one since 2026-09-20; before that it was
+    # installed by hand on 2026-09-16); the system scope is asked too
+    # because a unit can be moved and this must not miss it.
     # Asking the wrong one and reporting «there was nothing to stop»
     # would be the silent half of this whole class of bug.
     for scope in ("--user", "--system"):
@@ -1105,12 +1105,43 @@ def timer_stop(unit="aegis-backup.timer"):
             "por_que": "the timer is not active in either scope: there was nothing to stop"}
 
 
+def timer_next_elapse(unit, scope):
+    """The timer's next appointment, or None when it has none.
+
+    «Active» and «enabled» say nothing about whether a timer will ever
+    fire again: OnUnitActiveSec re-arms only from a service run, so a
+    timer that was stopped and started again can sit active with
+    «NextElapse: n/a» for the rest of its life. Measured 2026-09-20 on
+    the house clock, after the previous night's window put it back.
+    """
+    out = {}
+    for prop in ("NextElapseUSecRealtime", "NextElapseUSecMonotonic"):
+        r = subprocess.run(["systemctl", scope, "show", unit, "-p", prop, "--value"],
+                           capture_output=True, text=True, timeout=30)
+        out[prop] = (r.stdout or "").strip()
+    if out["NextElapseUSecRealtime"]:
+        return out["NextElapseUSecRealtime"]
+    if out["NextElapseUSecMonotonic"] and out["NextElapseUSecMonotonic"] != "infinity":
+        return out["NextElapseUSecMonotonic"]
+    return None
+
+
 def timer_start(unit, scope):
     r = subprocess.run(["systemctl", scope, "start", unit],
                        capture_output=True, text=True, timeout=60)
     if r.returncode != 0:
         raise RuntimeError(f"{unit} ({scope}) did not start again: "
                            f"{(r.stderr or '').strip()[:200]}")
+    # STARTED IS NOT SCHEDULED. Error nº 13 of this protocol: the
+    # window put the backup clock back, systemd said active, and the
+    # clock had no next run until the next reboot. What proves a clock
+    # is an appointment, so the restore reads one or fails out loud.
+    nxt = timer_next_elapse(unit, scope)
+    if nxt is None:
+        raise RuntimeError(f"{unit} ({scope}) is active again and has NO next run: a timer "
+                           f"with only OnUnitActiveSec does not re-arm after a restart. "
+                           f"Give it OnCalendar (share/systemd/) or run its service once")
+    return {"unidad": unit, "ambito": scope, "proxima": nxt}
 
 
 # ══════════════════════════════════════════════════════════════════════

@@ -90,21 +90,35 @@ Read what it publishes without waiting for the timer:
 
 The backup clock, and it is a USER unit: the capture needs the
 operator's age key, their kubeconfig and a `kubectl exec` into every
-tenant, and none of that belongs to root. No phase installs it. An
+tenant, and none of that belongs to root. Phase 05 installs it (since
+2026-09-20; before that no phase did). An
 instance that never ran these lines has no clock, and its copies are
 the ones somebody remembers to make. Measured on the house machine on
 2026-09-16: the units had never been installed, and the copies were
 three days old.
 
+**Since 2026-09-20 phase 05 installs it**, with the other two user
+clocks, a `backup.env` derived from the instance's real paths, and
+linger enabled; and it gates on a NEXT RUN, not on «enabled». To redo it
+by hand, run the phase:
+
+```bash
+aegis init --only 05-host
+systemctl --user list-timers 'aegis-*'         # three timers, each with NEXT
+systemctl --user start aegis-backup.service    # one run now, to see it work
+```
+
+The recipe the phase performs, should you ever need it without the
+product (the paths are the ones phase 05 derives):
+
 ```bash
 mkdir -p ~/.config/aegis ~/.config/systemd/user
 printf 'AEGIS_HOME=%s/aegis\nAEGIS_ROOT=%s/aegis-infra\nPATH=/usr/local/bin:/usr/bin:/bin\nSOPS_AGE_KEY_FILE=%s/.config/sops/age/aegis.key\n' \
     "$HOME" "$HOME" "$HOME" > ~/.config/aegis/backup.env
-cp "$(dirname "$(readlink -f "$(command -v aegis)")")"/../share/systemd/aegis-backup.{service,timer} ~/.config/systemd/user/
+cp /usr/local/share/aegis/systemd/aegis-backup.{service,timer} ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now aegis-backup.timer
 loginctl enable-linger "$USER"                 # or the clock stops when you log out
-systemctl --user start aegis-backup.service    # one run now, to see it work
 ```
 
 `backup.env` is what the unit reads instead of your shell: systemd
@@ -190,16 +204,10 @@ ask for on purpose is `%h`.
 
 ### Installing it
 
-Nothing in the init installs these units — the same gap the backup timer
-had, found on 2026-09-16. Until a phase does:
-
-```bash
-mkdir -p ~/.config/systemd/user
-cp /usr/local/share/aegis/systemd/aegis-update-notice.* ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now aegis-update-notice.timer
-loginctl enable-linger $USER      # or it only runs while you are logged in
-```
+Phase 05 installs these units with the backup clock (since 2026-09-20;
+until then nothing did, the same gap the backup timer had, found on
+2026-09-16). By hand: `aegis init --only 05-host`, or the same recipe as
+the backup clock's with `aegis-update-notice.*`.
 
 The first run measures fifty-odd registries with a cold cache and takes
 about half a minute. After that it is seconds, and the console's Updates

@@ -55,13 +55,17 @@ Healthy edge: `https://aegis.<domain>` → 200, `argocd.<domain>` →
 200, `jenkins.<domain>` → 403 anonymous (that IS success, not a
 failure).
 
-## 2b. The backup clock is yours to install
+## 2b. The clocks
 
-`aegis-backup.timer` ships in `share/systemd/` and no phase installs it:
-it is a user unit, because the capture needs your age key. The recipe
-is in `share/systemd/README.md`; without it there is no clock, and
-`aegis data remote status` (and the console's Storage) will say so with
-copies that only get older.
+Three user timers keep an instance alive between runs: the backup
+(`aegis-backup.timer`), the host metrics and the update notice. Phase 05
+installs and enables them, derives `~/.config/aegis/backup.env` from the
+instance's paths (the capture needs your age key, which is why they are
+user units) and enables linger so they run after you log out. `aegis
+check` reads each one for a **next run**: a timer can be active and
+enabled and never fire again (a restarted `OnUnitActiveSec` timer does
+exactly that), so «active» is not the reading. If a clock has no next
+run: `aegis init --only 05-host`.
 
 ## 3. Diagnosis: where to start (in order)
 
