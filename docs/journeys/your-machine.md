@@ -104,11 +104,11 @@ Two stops this run is expected to meet, and what they mean:
   driver is not installed, or the card fell off the bus (`journalctl -k
   | grep Xid`). Install or reboot; the init waits for nothing.
 - **`ai-gateway-responds` red in phase 87**: the gateway did not roll
-  out. Its log says why. Until 2026-09-20 an instance with no
+  out. Its log says why. Until 2026-09-02 an instance with no
   organizations could not start it at all («registro sin tareas»); the
   gateway image you build carries that fix if the `ai-gateway` you build
-from is at or after the commit that accepted an empty registry
-(2026-09-20).
+  from is at or after the commit that accepted an empty registry
+  (2026-09-02, «un sustrato sin inquilinos no es un archivo roto»).
 
 ## 4. After the install: your first organization, and a base of your own
 

@@ -16,8 +16,9 @@ For a fresh install (`docs/journeys/your-machine.md`):
   `/usr/local/share/aegis`, and gates on a **next run** — not on
   «enabled». `aegis-backup.timer` carries `OnCalendar=daily` beside its
   interval, so a restarted timer never sits without an appointment.
-- **The AI gateway starts with an empty task registry** (`ai-gateway`
-  commit `844c079`): a platform is born before its tenants.
+- **The AI gateway starts with an empty task registry** (in `ai-gateway`
+  since 2026-09-02): a platform is born before its tenants. Not new in
+  this version; named here because a clone that is behind still refuses.
 
 For the bases you own (`base-images/`):
 
