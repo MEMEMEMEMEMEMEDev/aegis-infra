@@ -1,0 +1,15 @@
+# What proves aegis-base-node is alive when it RUNS.
+#
+# This base is a RUNTIME, not a server: its ENTRYPOINT is `node`, which
+# exits at once with no program and no terminal. So the test gives it a
+# program — the smallest server there is — and demands that the port
+# answers. What that proves is what a consumer needs: the binary
+# starts, the http and net modules load, and a socket can be bound as
+# uid 65532 under the tenant's restrictions.
+port: 8080
+command:
+  - node
+  - -e
+  - "require('http').createServer((q, s) => s.end('ok')).listen(8080)"
+writable:
+  - /tmp

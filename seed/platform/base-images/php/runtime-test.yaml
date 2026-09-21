@@ -1,0 +1,12 @@
+# What proves aegis-base-php is alive when it RUNS.
+#
+# The entrypoint starts php-fpm and nginx in front of it; the port is
+# nginx's. Every one of the ten failures of 2026-09-13 would have
+# stopped here, in the job, instead of in the consumer's pod: the pool
+# validated against the wrong uid, the missing libgcc, the nginx user
+# created after the package, the pid file on a read-only /run.
+port: 8080
+writable:
+  - /var/cache/nginx
+  - /run
+  - /tmp

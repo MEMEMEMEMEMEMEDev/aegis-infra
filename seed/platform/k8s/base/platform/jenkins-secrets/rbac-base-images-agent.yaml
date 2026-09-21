@@ -1,0 +1,50 @@
+# The service account the base-images agent pod runs as, and the one
+# thing it may do that a plain agent may not: create a pod in THIS
+# namespace, read whether it became Ready, read its log, delete it.
+#
+# WHY IT EXISTS. A base image used to prove itself inside kaniko (the
+# config says uid 101, the config says 8080/tcp, `nginx -t` passed). None
+# of that runs the image. The first time each base actually started was
+# in a tenant's pod, after it had been signed and propagated to eleven
+# repositories — and on 2026-09-13 that start failed ten times in a row
+# for the php member, each failure a full cascade. So the job now runs
+# the candidate as a pod, here, under a tenant's restrictions, before it
+# signs anything. Running a pod needs a service account that may create
+# one; a plain Jenkins agent has none, on purpose.
+#
+# WHAT IT MAY NOT DO. Nothing outside pods, nothing outside
+# jenkins-system, nothing with exec. The test pod is admitted unsigned
+# because this namespace is not a tenant namespace (the signature
+# policy fences org-*), and that is the point: the image is tested
+# BEFORE its signature exists.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: base-images-agent
+  namespace: jenkins-system
+  labels: {aegis.dev/part-of: aegis-platform}
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: base-images-agent
+  namespace: jenkins-system
+  labels: {aegis.dev/part-of: aegis-platform}
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: base-images-agent
+  namespace: jenkins-system
+  labels: {aegis.dev/part-of: aegis-platform}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: base-images-agent}
+subjects:
+  - {kind: ServiceAccount, name: base-images-agent, namespace: jenkins-system}

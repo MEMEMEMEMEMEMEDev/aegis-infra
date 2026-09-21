@@ -1,4 +1,4 @@
-# title: every base aegis owns keeps its contract: pinned FROM, port 8080, numeric USER, server checked at build
+# title: every base aegis owns keeps its contract: pinned FROM, port 8080, numeric USER, server checked at build, and a runtime test that runs it as a pod
 # origin: new in v3 — 2026-08-27, the day aegis-base-nginx replaced a third-party base nobody could patch
 check() {
 # base-images/<member>/Containerfile is a base image aegis OWNS: alpine
@@ -82,7 +82,28 @@ for cf in "$B"/*/Containerfile; do
         grep -qE "apk[[:space:]]+add[^&|;]*[[:space:]]${pkg}([[:space:]]|$)" <<< "$code" || continue
         grep -qE "^[[:space:]]*RUN[[:space:]].*${pat}" <<< "$code" \
             || D138="$D138 $m: installs $pkg and never runs \`$human\` at build time: $why;"
-    done < <(printf '%s\n' "${SERVERS[@]}")
+    done < <(printf '%s\n' "${SERVERS[@]}")    # THE RUNTIME TEST. Everything above is read off the Containerfile;
+    # none of it runs the image. base-images starts each candidate as
+    # a pod under a tenant's restrictions before signing it, and what
+    # proves it alive is declared by the member itself in
+    # runtime-test.yaml: the port that must answer, the paths it needs
+    # writable (a read-only root filesystem is the tenant's rule), and
+    # for a runtime with no server of its own, the command that stands
+    # one up. A member without it is a base nobody ever ran.
+    rt="$(dirname "$cf")/runtime-test.yaml"
+    if [[ ! -f "$rt" ]]; then
+        D138="$D138 $m: no runtime-test.yaml: the job cannot run it as a pod before signing, so the first place it would ever start is a tenant's pod;"
+    else
+        rtc="$(grep -vE '^[[:space:]]*#' "$rt")"
+        grep -qE '^port:[[:space:]]*[0-9]+[[:space:]]*$' <<< "$rtc" \
+            || D138="$D138 $m: runtime-test.yaml declares no numeric port: — nothing to wait for;"
+        while IFS= read -r w; do
+            [[ -z "$w" || "$w" == /* ]] \
+                || D138="$D138 $m: runtime-test.yaml lists '$w' under writable: — every writable path is absolute;"
+        done < <(awk '/^writable:/{f=1;next} /^[a-z]/{f=0} f && /^[[:space:]]*-[[:space:]]/{sub(/^[[:space:]]*-[[:space:]]*/,""); print}' <<< "$rtc")
+        awk '/^command:/{f=1;next} /^[a-z]/{f=0} f && /^[[:space:]]*-[[:space:]]/{sub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/^"|"$/,""); print}' <<< "$rtc" | grep -q '"' \
+            && D138="$D138 $m: runtime-test.yaml has a command item with a double quote inside: the job builds the pod's JSON from it and does not escape quotes on purpose;"
+    fi
 done
 # ── the platform's OWN consumer: the bucket provisioner ─────────────
 # services.yaml names the Job's image. It must be a member that exists,
@@ -121,5 +142,5 @@ else
     D138="$D138 base-images/consumers.txt does not exist: the rebuilt base is propagated to nobody;"
 fi
 if [[ -n "$D138" ]]; then fail "base-images:$D138"
-else pass "$members owned base(s): pinned FROM, EXPOSE 8080, numeric USER, the server run once at build time where one is installed (nginx -t · node -e); the job and the consumers list with both sentinels are there"; fi
+else pass "$members owned base(s): pinned FROM, EXPOSE 8080, numeric USER, the server run once at build time where one is installed (nginx -t · node -e), and a runtime-test.yaml that says what proves each one alive as a pod; the job and the consumers list with both sentinels are there"; fi
 }

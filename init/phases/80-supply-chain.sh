@@ -234,7 +234,23 @@ gate_diag "mirror-images-build-verde" \
 # the mirror (80.3). A gate for the same reason as the mirror's: a base that
 # fails its scan does not exist, and an init that went on would leave
 # the provisioner on a reference nobody built.
-gate "base-images-build-verde" jenkins_build_retry base-images 2700 2
+#
+# BOTH SAID OUT LOUD. The job refuses an empty MEMBERS and propagates
+# only when told (check 223): «every member» is spelled here as the
+# list the tree carries, and PROPAGATE=true because this is the one run
+# that MUST reach the provisioner's services.yaml line. A phase that
+# relied on «empty = all» and on propagation being implicit was the
+# same default that cost 168 builds in six hours on 2026-09-13.
+BASE_MEMBERS=""
+for _cf in "$PLATFORM_DIR"/base-images/*/Containerfile; do
+    [[ -f "$_cf" ]] || continue
+    BASE_MEMBERS="${BASE_MEMBERS:+$BASE_MEMBERS }$(basename "$(dirname "$_cf")")"
+done
+[[ -n "$BASE_MEMBERS" ]] \
+    || die "base-images/ in the platform repo has no member with a Containerfile — nothing to build, and nothing for the provisioner to stand on"
+log_info "base-images: members $BASE_MEMBERS, PROPAGATE=true (the provisioner's line is written by the propagate stage)"
+gate "base-images-build-verde" jenkins_build_retry base-images 2700 2 \
+    "MEMBERS=$(jq -rn --arg m "$BASE_MEMBERS" '$m|@uri')&PROPAGATE=true"
 
 # ── 80.5 FIRST SIGNED IMAGE (the phase's hinge gate) ───────────────
 REG_HOST="$REGISTRY_HOST_INTERNAL"   # single source (P3 audit)

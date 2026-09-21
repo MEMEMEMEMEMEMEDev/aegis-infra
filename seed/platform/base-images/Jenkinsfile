@@ -36,8 +36,23 @@
 //   report    one summary event.
 //
 // Job defined in JCasC job-dsl (D9), next to mirror-images. It declares
-// the MEMBERS parameter; so does this file, so that a manual "Build
-// with Parameters" shows the same thing the DSL says.
+// the two parameters, MEMBERS and PROPAGATE; so does this file, so that
+// a manual "Build with Parameters" shows the same thing the DSL says,
+// and check 223 keeps the two declarations equal.
+//
+// TWO GUARDS, BOTH LEARNED THE SAME WEEK (2026-09-13, standing up the
+// first PHP base): a pipeline cannot know who fired it, so nothing here
+// is decided by the caller's identity — it is decided by what the
+// caller SAYS.
+//   · MEMBERS is never empty. «empty = all of them» rebuilt nginx and
+//     node ten times while somebody iterated on php.
+//   · PROPAGATE is false unless asked. Each of those ten runs rewrote
+//     the FROM of eleven consumer repositories and queued two builds
+//     per repo: 168 builds and 1 042 agent-minutes in six hours for one
+//     member. A base that is built, scanned, signed and pushed is a
+//     complete result; its consumers learn of it when somebody means
+//     it — image-watch does, `aegis ci build --propagate` does, phase 80
+//     does. A human iterating does not.
 // Script-level state shared between stages. Declared as fields ON
 // PURPOSE: a bare `NAME = value` inside a stage makes Jenkins warn
 // «WorkflowScript seems to be setting a field named NAME … did you
@@ -66,6 +81,10 @@ pipeline {
 apiVersion: v1
 kind: Pod
 spec:
+  # The one agent in this platform that may create a pod: the candidate
+  # base is RUN here, under a tenant's restrictions, before it is
+  # signed (k8s/base/platform/jenkins-secrets/rbac-base-images-agent.yaml).
+  serviceAccountName: base-images-agent
   imagePullSecrets:
   - name: regcred-internal
   containers:
@@ -189,7 +208,9 @@ spec:
   }
   parameters {
     string(name: 'MEMBERS', defaultValue: '',
-      description: 'space-separated member directories under base-images/ (e.g. "nginx node"); empty = all of them. image-watch passes only the members with a fixable CVE.')
+      description: 'space-separated member directories under base-images/ (e.g. "nginx node"). REQUIRED: an empty value is refused; nothing rebuilds every member by default. image-watch passes only the members with a fixable CVE.')
+    booleanParam(name: 'PROPAGATE', defaultValue: false,
+      description: 'rewrite the FROM of every consumer of the members built (one commit per consumer repository, which makes it rebuild). OFF by default: the bases are built, scanned, signed and pushed, and nobody is told until asked. image-watch and phase 80 pass true; so does `aegis ci build --propagate`.')
   }
   stages {
     stage('preflight') {
@@ -240,17 +261,23 @@ spec:
               error "base-images/${m}: a member name is [a-z0-9-] only"
             }
           }
-          def members = all
+          if (all.isEmpty()) { error 'base-images/ has no member with a Containerfile' }
           def asked = (params.MEMBERS ?: '').trim()
-          if (asked) {
-            members = asked.split(/\s+/) as List
-            members.each { m ->
-              if (!all.contains(m)) {
-                error "MEMBERS names '${m}', and base-images/${m}/Containerfile does not exist (known: ${all.join(' ')})"
-              }
+          if (!asked) {
+            // EMPTY IS NOT «ALL OF THEM». It was, until 2026-09-13: a
+            // run that meant one member got three, and every consumer
+            // of the other two was rewritten for nothing, ten times.
+            // A caller that wants every member names every member —
+            // `aegis ci build` derives the list from the tree and says
+            // so; phase 80 does the same. The job itself never guesses.
+            error "MEMBERS is empty: name the member(s) to rebuild (known: ${all.join(' ')}). Nothing here rebuilds every member by default."
+          }
+          def members = asked.split(/\s+/) as List
+          members.each { m ->
+            if (!all.contains(m)) {
+              error "MEMBERS names '${m}', and base-images/${m}/Containerfile does not exist (known: ${all.join(' ')})"
             }
           }
-          if (members.isEmpty()) { error 'base-images/ has no member with a Containerfile' }
           echo "${members.size()} member(s) to build: ${members.join(' ')}"
           MEMBERS_TO_BUILD = members
         }
@@ -403,6 +430,79 @@ spec:
                   echo "built on alpine:${MINOR}@$(cat base-${M}.base-digest)"
                 '''
               }
+              // ── RUN IT, before it is signed ───────────────────────
+              // Everything above proves the image was BUILT right: the
+              // config says the uid, the config says the port, the
+              // server ran once inside kaniko. None of that runs the
+              // image. On 2026-09-13 the first place each php base ever
+              // started was a tenant's pod, after signing and after
+              // propagating to eleven repositories, and it died there
+              // ten times: the pool validated against the wrong uid,
+              // the missing libgcc, the nginx user created after the
+              // package, the pid file on a read-only /run. Each failure
+              // was a full cascade.
+              //
+              // So the candidate is started HERE as a pod, in this
+              // namespace, under exactly what a tenant pod gets —
+              // non-root, seccomp RuntimeDefault, no capabilities, a
+              // read-only root filesystem with only the paths the base
+              // itself declares writable — and it has to answer on its
+              // port before cosign touches it. Unsigned, it is inert
+              // for every tenant (the signature policy fences org-*),
+              // so a candidate that fails leaves nothing anyone can
+              // deploy. The pod is created through the API with the
+              // agent's own service account: no kubectl, three
+              // requests, and a role that allows pods and nothing else.
+              sh '''
+                set -e
+                cd "${WORKSPACE}"
+                RT="base-images/${M}/runtime-test.yaml"
+                test -f "$RT" || { echo "ERROR: $RT is missing — a base declares what proves it alive (port, writable paths, an optional command); see the other members"; exit 1; }
+                PORT="$(sed -n -E 's/^port:[[:space:]]*([0-9]+).*/\\1/p' "$RT" | head -1)"
+                test -n "$PORT" || { echo "ERROR: $RT declares no port:"; exit 1; }
+                # the lists: `- value` lines under their key, until the next key.
+                # A command item carries no double quote (the file says so).
+                WRITABLE="$(awk '/^writable:/{f=1;next} /^[a-z]/{f=0} f && /^[[:space:]]*-[[:space:]]/{sub(/^[[:space:]]*-[[:space:]]*/,""); print}' "$RT")"
+                CMD_JSON="$(awk '/^command:/{f=1;next} /^[a-z]/{f=0} f && /^[[:space:]]*-[[:space:]]/{sub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/^"|"$/,""); printf "%s\\"%s\\"", (n++?",":""), $0}' "$RT")"
+                NAME="base-test-${M}-${BUILD_NUMBER}"
+                API=https://kubernetes.default.svc
+                SA=/var/run/secrets/kubernetes.io/serviceaccount
+                NS="$(cat $SA/namespace)"
+                k() { curl -sS --cacert $SA/ca.crt -H "Authorization: Bearer $(cat $SA/token)" "$@"; }
+                mounts=""; vols=""; i=0
+                for p in $WRITABLE; do
+                  i=$((i+1))
+                  mounts="${mounts}${mounts:+,}{\\"name\\":\\"w$i\\",\\"mountPath\\":\\"$p\\"}"
+                  vols="${vols}${vols:+,}{\\"name\\":\\"w$i\\",\\"emptyDir\\":{}}"
+                done
+                cmd=""; [ -n "$CMD_JSON" ] && cmd=",\\"command\\":[$CMD_JSON]"
+                POD="$(printf '{"apiVersion":"v1","kind":"Pod","metadata":{"name":"%s","labels":{"aegis.dev/base-test":"%s"}},"spec":{"restartPolicy":"Never","automountServiceAccountToken":false,"imagePullSecrets":[{"name":"regcred-internal"}],"securityContext":{"runAsNonRoot":true,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"base","image":"%s/aegis-base-%s:%s"%s,"ports":[{"containerPort":%s}],"readinessProbe":{"tcpSocket":{"port":%s},"periodSeconds":2,"failureThreshold":30},"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true},"resources":{"requests":{"cpu":"50m","memory":"64Mi"},"limits":{"cpu":"250m","memory":"256Mi"}},"volumeMounts":[%s]}],"volumes":[%s]}}' \\
+                        "$NAME" "$M" "$REGISTRY" "$M" "$TAG" "$cmd" "$PORT" "$PORT" "$mounts" "$vols")"
+                echo "run: starting $NAME from ${REGISTRY}/aegis-base-${M}:${TAG} under a tenant's restrictions (port $PORT, writable: ${WRITABLE:-none})"
+                code="$(k -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data-binary "$POD" "$API/api/v1/namespaces/$NS/pods")"
+                case "$code" in 200|201) ;; *)
+                  echo "ERROR: the API refused the test pod (HTTP $code; is rbac-base-images-agent.yaml synced?):"
+                  k -X POST -H 'Content-Type: application/json' --data-binary "$POD" "$API/api/v1/namespaces/$NS/pods" | head -c 600; echo; exit 1 ;;
+                esac
+                ok=0; i=0
+                while [ $i -lt 45 ]; do
+                  st="$(k "$API/api/v1/namespaces/$NS/pods/$NAME")"
+                  if printf '%s' "$st" | grep -q '"type":"Ready","status":"True"'; then ok=1; break; fi
+                  if printf '%s' "$st" | grep -qE '"phase":"(Failed|Succeeded)"|"reason":"(CrashLoopBackOff|Error|ImagePullBackOff|ErrImagePull|CreateContainerConfigError)"'; then break; fi
+                  i=$((i+1)); sleep 2
+                done
+                if [ "$ok" != 1 ]; then
+                  echo "ERROR: aegis-base-${M}:${TAG} did not come up as a pod within 90 s under a tenant's restrictions."
+                  echo "       This is the failure a consumer would have had AFTER the signature and the propagation."
+                  echo "       status: $(printf '%s' "$st" | grep -oE '"containerStatuses":\\[.{0,900}' | head -c 900)"
+                  echo "       log:"; k "$API/api/v1/namespaces/$NS/pods/$NAME/log?tailLines=60" 2>/dev/null | sed 's/^/       | /' || true
+                  k -o /dev/null -X DELETE "$API/api/v1/namespaces/$NS/pods/$NAME?gracePeriodSeconds=0" || true
+                  echo "       Fix base-images/${M} (its runtime-test.yaml names what it needs writable). The image is pushed and NOT signed: no tenant can deploy it."
+                  exit 1
+                fi
+                k -o /dev/null -X DELETE "$API/api/v1/namespaces/$NS/pods/$NAME?gracePeriodSeconds=0" || echo "NOTICE: could not delete $NAME (the build does NOT fail for this)"
+                echo "run: aegis-base-${M}:${TAG} came up and answered on port $PORT under restricted — signing it"
+              '''
               container('cosign') {
                 // Signed BY DIGEST (immutable) against the internal
                 // registry. --tlog-upload=false: nothing from the
@@ -515,6 +615,15 @@ spec:
         script {
           if (!BUILT) {
             echo 'propagate: no member was built — nothing to propagate'
+            return
+          }
+          if (!params.PROPAGATE) {
+            // THE DEFAULT IS TO TELL NOBODY. What was built above is
+            // scanned, signed and pushed: a complete result on its own.
+            // The consumers are told when the caller means it, and the
+            // caller says so with PROPAGATE=true — never implied,
+            // because this pipeline cannot know who fired it.
+            echo "propagate: PROPAGATE is false — ${BUILT.size()} member(s) built, signed and pushed; no consumer was told. image-watch passes PROPAGATE=true; so does `aegis ci build --propagate`."
             return
           }
           def consumers = []
@@ -768,7 +877,8 @@ spec:
           if (FAILED) {
             error "members that failed (${FAILED.size()}): ${FAILED.join(', ')}"
           }
-          echo 'all members built, signed and propagated.'
+          echo params.PROPAGATE ? 'all members built, signed and propagated.'
+                                : 'all members built and signed; nobody was told (PROPAGATE=false).'
         }
       }
     }

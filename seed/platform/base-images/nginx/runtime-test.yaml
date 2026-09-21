@@ -1,0 +1,20 @@
+# What proves aegis-base-nginx is alive when it RUNS — not when it builds.
+#
+# base-images starts the image as a pod, under the same restrictions a
+# tenant pod gets (non-root, seccomp RuntimeDefault, no capabilities, a
+# read-only root filesystem), and demands that the port below accepts a
+# TCP connection before the image is signed. A base that only proved
+# itself inside kaniko (`nginx -t`) can still die at start-up in the
+# consumer's pod: the user that must exist before the package, the cache
+# directory that is not writable, the pid file on a read-only /run —
+# measured ten times on 2026-09-13 with the php member, each time in
+# production, because nothing here ran the image.
+#
+# `writable` names the paths this base needs to write at run time. They
+# are the paths every consumer has to mount as an emptyDir, so this
+# file is also the base's contract with its consumers, written by the
+# base and not rediscovered by each tenant.
+port: 8080
+writable:
+  - /var/cache/nginx
+  - /run

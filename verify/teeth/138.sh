@@ -150,3 +150,20 @@ red_8() {
 control_5() {
     sed -i -E 's/^(\s*tag:\s*)"3\.22-[0-9]{6}"\s*$/\1"3.22-000009"/; s/^(\s*digest:\s*)sha256:[0-9a-f]{64}\s*$/\1sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/' "$AEGIS_ROOT/seed/platform/services.yaml"
 }
+
+# ── the runtime test (2026-09-20): the member says what proves it alive ──
+RT138="$AEGIS_ROOT/seed/platform/base-images/nginx/runtime-test.yaml"
+
+# no runtime-test.yaml: the first place the base ever starts is a tenant's pod
+red_11() { rm -f "$RT138"; }
+# a port nobody can wait for
+red_12() { sed -i 's/^port: 8080$/port: http/' "$RT138"; }
+# a relative writable path: the emptyDir would land nowhere a tenant mounts
+red_13() { sed -i 's|^  - /var/cache/nginx$|  - var/cache/nginx|' "$RT138"; }
+# a command item with a double quote inside: the job builds JSON from it verbatim
+red_14() { printf 'command:\n  - sh\n  - -c\n  - "echo \\"hi\\""\n' >> "$RT138"; }
+# ── controls ──
+# one more writable path is still a contract
+control_6() { printf '  - /tmp\n' >> "$RT138"; }
+# a comment explaining the port is prose
+control_7() { sed -i 's/^port: 8080$/# the port nginx listens on\nport: 8080/' "$RT138"; }

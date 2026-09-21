@@ -700,8 +700,14 @@ spec:
               echo "   ${m}: CRITICAL ${st.crit} · HIGH ${st.high} fixable in what we serve"
             }
             try {
+              // The watch is the caller that MEANS it: a base rebuilt for
+              // a CVE is worth nothing until its consumers stand on it,
+              // so it says so. (`propagate: false` two lines down is the
+              // `build` step's own flag — the downstream result does not
+              // fail the watch — and not the job's parameter.)
               build job: 'base-images',
-                    parameters: [string(name: 'MEMBERS', value: members)],
+                    parameters: [string(name: 'MEMBERS', value: members),
+                                 booleanParam(name: 'PROPAGATE', value: true)],
                     wait: false, propagate: false
               TRIGGERED = members
             } catch (err) {
