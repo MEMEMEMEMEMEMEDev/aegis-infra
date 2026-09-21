@@ -30,6 +30,22 @@ red_4() {
         >> "$AEGIS_ROOT/libexec/aegis-verify"
 }
 
+# the account this repository is published from, quoted in a comment:
+# what the first CI run (2026-09-21) turned out to measure INSTEAD of a
+# login, because on a CI platform the login is the platform's. Read from
+# the origin of the clone, so this bites on every machine that has one.
+# (The CI branch itself, where the login is declared NOT measured, is
+# an environment and not a tree: it is exercised by running the check
+# with GITHUB_ACTIONS=true USER=runner, and by the workflow's own run.)
+red_5() {
+    local owner
+    owner="$(git -C "$AEGIS_ROOT" remote get-url origin 2>/dev/null \
+        | sed -nE 's#^.*github\.com[:/]([^/]+)/.*$#\1#p')"
+    [[ -n "$owner" ]] || return 1
+    printf '\n# the repository lives under github.com/%s while this was written\n' "$owner" \
+        >> "$AEGIS_ROOT/lib/common.sh"
+}
+
 # control: the portable way of saying the same thing is exactly what
 # belongs here, and the tree is full of it
 control_1() {
