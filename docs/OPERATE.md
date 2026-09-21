@@ -13,6 +13,27 @@ record between the operator and the assistant, not the product.
 
 ---
 
+## 0. Install, and start over
+
+**Install** on a machine of your own: `docs/journeys/your-machine.md`
+(the `cloudflare` profile with a GPU, what to prepare, the two human
+moments, what to send when a phase stops). The `local` profile on a
+throwaway host is `docs/journeys/foreign-instance.md`.
+
+**Start over on the same host**, keeping the instance's platform repo,
+its store and its key:
+
+```bash
+aegis destroy                       # dry-run: what it would remove
+aegis destroy --yes --k3s           # the edge, the host bridge and the cluster; NOT the platform repo, the store, the key, the GitHub repos or the R2 bucket
+aegis init --reset-state            # every gate forgotten; the phases converge over what platform/ holds
+aegis org apply orgs/*.yaml && aegis sync garage   # what the init does not repair after a re-init (Disease G)
+```
+
+Rotating the identity as well (a new age key, a purged store, new
+cosign and deploy keys) is a different exercise with its own ordering:
+it is written in the registro's plan 18 and not yet a verb.
+
 ## 1. Where you are standing
 
 - The **product** (`AEGIS_ROOT`) is this repo: `bin/ libexec/ lib/

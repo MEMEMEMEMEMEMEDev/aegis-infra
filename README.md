@@ -605,6 +605,9 @@ Por dónde empezar a leer:
   se publica.
 - `docs/glossary.md` es el vocabulario, y `aegis verify` lo hace
   cumplir.
+- `docs/journeys/your-machine.md` es el viaje de instalarlo en tu máquina con
+  tu dominio en Cloudflare y tu GPU: qué preparar, los dos momentos humanos,
+  qué mandar cuando una fase se frena.
 - `docs/journeys/foreign-instance.md` es el ensayo en máquina ajena,
   escrito para poder repetirlo.
 - `seed/platform/docs/failure-modes.md` cataloga las clases de fallo
