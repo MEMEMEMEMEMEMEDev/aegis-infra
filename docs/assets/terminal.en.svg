@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 466" width="1200" height="466" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">
-  <title>Salidas reales: aegis init --list y aegis verify --profile both</title>
+  <title>Real outputs: aegis init --list and aegis verify --profile both</title>
   <rect x="0" y="0" width="1200" height="466" rx="14" fill="#1e2127"/>
   <g fill="#5b6672" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13">
     <circle cx="26" cy="24" r="6" fill="#e0443e"/><circle cx="46" cy="24" r="6" fill="#dea123"/><circle cx="66" cy="24" r="6" fill="#1aab29"/>
-    <text x="600" y="29" text-anchor="middle" fill="#8b949e">salidas reales del producto · dos comandos</text>
+    <text x="600" y="29" text-anchor="middle" fill="#8b949e">real outputs of the product · two commands</text>
   </g>
   <g fill="#c9d1d9">
     <text x="40" y="76"><tspan fill="#7ee787">$</tspan> aegis init --list</text>
@@ -20,7 +20,7 @@
     <text x="460" y="254" fill="#7ee787">   profile local       235 checks, 0 not evaluated</text>
     <text x="460" y="300"><tspan fill="#7ee787">$</tspan> aegis --help | head -1</text>
     <text x="460" y="328"><tspan font-weight="600">aegis</tspan> — self-hosted GitOps platform · v3.0.0-alpha.1</text>
-    <text x="460" y="380" fill="#8b949e" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13">Sin clúster: el verificador mide el artefacto. Con clúster:</text>
-    <text x="460" y="402" fill="#8b949e" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13">aegis check mide la instancia viva contra lo declarado.</text>
+    <text x="460" y="380" fill="#8b949e" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13">Without a cluster: the verifier measures the artifact. With one:</text>
+    <text x="460" y="402" fill="#8b949e" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13">aegis check measures the live instance against what is declared.</text>
   </g>
 </svg>
