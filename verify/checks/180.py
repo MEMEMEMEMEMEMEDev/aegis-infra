@@ -8,8 +8,13 @@
 #
 # What this does NOT measure, said out loud because the honest shape of
 # this check is a narrow one: a gap claim added tomorrow is not covered
-# until somebody derives its fact. This guards the four that actually
+# until somebody derives its fact. This guards the five that actually
 # decayed, and the class they belong to.
+#
+# BOTH READMEs. Until 2026-09-21 only README.md was read, and the English
+# page decayed in silence: it still said 136 checks, fifteen phases and
+# that restore left the bucket behind, months after each stopped being
+# true. A gap list is a gap list in either language.
 import pathlib
 import re
 import sys
@@ -31,17 +36,32 @@ if not readme.is_file():
     print("__COUNT__ 0", file=sys.stderr)
     sys.exit(2)
 
-texto = readme.read_text(encoding="utf-8", errors="replace")
-m = re.search(r"^## Lo que no está\s*$(.*?)^## ", texto, re.M | re.S)
-if not m:
-    print("README.md no longer has a «Lo que no está» section: the artifact stopped declaring "
-          "its own gaps, and a product that lists no gaps is not a more finished product")
-    print("__COUNT__ 0", file=sys.stderr)
-    sys.exit(0)
-seccion = m.group(1)
+# (file, heading of its gap list); the English page is optional, the
+# Spanish one is the front page and is not
+paginas = [(readme, "## Lo que no está"),
+           (raiz / "README.en.md", "## What is not there yet")]
+secciones = []
+for pagina, titulo in paginas:
+    if not pagina.is_file():
+        continue
+    texto = pagina.read_text(encoding="utf-8", errors="replace")
+    m = re.search(rf"^{titulo}\s*$(.*?)^## ", texto, re.M | re.S)
+    if not m:
+        print(f"{pagina.name} no longer has a «{titulo[3:]}» section: the artifact stopped "
+              "declaring its own gaps, and a product that lists no gaps is not a more finished "
+              "product")
+        print("__COUNT__ 0", file=sys.stderr)
+        sys.exit(0)
+    secciones.append((pagina.name, m.group(1)))
 
 datos = sin_comentarios(raiz / "libexec" / "aegis-data")
 secreto = sin_comentarios(raiz / "libexec" / "aegis-secret")
+# the verb is declared where the menu reads it (`# aegis-subcommands:`), so
+# this fact is the same one check 100 trusts
+try:
+    semilla = (raiz / "libexec" / "aegis-seed").read_text(encoding="utf-8", errors="replace")
+except OSError:
+    semilla = ""
 plantillas = sorted(p.name for p in (raiz / "seed" / "templates").glob("*") if p.is_dir())
 
 # (fact that holds, claim that then becomes false, why it costs)
@@ -67,12 +87,20 @@ casos = [
      "aegis-secret derives the copied registry credential and the README still says it does "
      "not, pointing at a command that needs the private age key for work that no longer "
      "needs it"),
+
+    # `aegis seed apply` (2026-09-20) brings a seed change to a living
+    # instance; the README carried the opposite for a day after it shipped
+    (bool(re.search(r"^#\s*aegis-subcommands:.*\bapply\b", semilla, re.M)),
+     re.compile(r"no llega a una instancia ya sembrada|does not reach an instance", re.I),
+     "aegis seed apply brings a seed change to a living instance and the README still says a "
+     "fix does not reach one, sending the operator to re-seed by hand"),
 ]
 
 malo = []
 for vale, patron, porque in casos:
-    if vale and patron.search(seccion):
-        malo.append(porque)
+    for nombre, seccion in secciones:
+        if vale and patron.search(seccion):
+            malo.append(f"{nombre}: {porque}")
 
 for l in malo:
     print(l)

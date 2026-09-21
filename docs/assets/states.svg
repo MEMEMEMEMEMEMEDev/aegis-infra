@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 260" width="1200" height="260" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <title>Los cuatro estados de la consola</title>
+  <defs>
+    <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="6" stroke="#5b6672" stroke-width="2"/>
+    </pattern>
+  </defs>
+  <rect x="0" y="0" width="1200" height="260" rx="14" fill="#f6f7f9"/>
+  <text x="40" y="44" font-size="15" fill="#5b6672" letter-spacing="1.5">CUATRO ESTADOS, NO DOS</text>
+  <rect x="30" y="70" width="260" height="120" rx="10" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/><circle cx="66" cy="106" r="11" fill="#2f6f5e"/><text x="90" y="112" font-size="17" font-weight="600" fill="#1f2733">bien</text><text x="50" y="156" font-size="13" fill="#5b6672">se miró y no hay fallas</text><rect x="315" y="70" width="260" height="120" rx="10" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/><circle cx="351" cy="106" r="11" fill="#b3432b"/><text x="375" y="112" font-size="17" font-weight="600" fill="#1f2733">pide atención</text><text x="335" y="156" font-size="13" fill="#5b6672">se miró y algo está mal</text><rect x="600" y="70" width="260" height="120" rx="10" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/><circle cx="636" cy="106" r="11" fill="url(#hatch)" stroke="#5b6672" stroke-width="1.5"/><text x="660" y="112" font-size="17" font-weight="600" fill="#1f2733">nadie pudo mirar</text><text x="620" y="156" font-size="13" fill="#5b6672">el instrumento no llegó a su sujeto</text><rect x="885" y="70" width="260" height="120" rx="10" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/><circle cx="921" cy="106" r="11" fill="none" stroke="#9aa4ae" stroke-width="1.5" stroke-dasharray="3 3"/><text x="945" y="112" font-size="17" font-weight="600" fill="#1f2733">no leído</text><text x="905" y="156" font-size="13" fill="#5b6672">todavía no se preguntó</text>
+  <text x="40" y="228" font-size="13" fill="#5b6672">Casi todo tablero pinta de verde «no encontré fallas» y «no pude llegar a mirar». Aquí son estados distintos, y el tercero se dibuja primero.</text>
+</svg>

@@ -1,37 +1,85 @@
-# aegis-infra
+# aegis
 
 **Haces `git push`. Tu servidor construye, escanea, firma y publica.**
 
-Read this in English: [README.en.md](README.en.md)
+[![verify](https://github.com/MEMEMEMEMEMEMEDev/aegis-infra/actions/workflows/verify.yml/badge.svg)](https://github.com/MEMEMEMEMEMEMEDev/aegis-infra/actions/workflows/verify.yml)
+· Read this in English: [README.en.md](README.en.md)
 
 ![Qué le pasa a un git push: construir, escanear, firmar, desplegar, exponer; sin firma, rechazada](docs/assets/pipeline.svg)
 
-aegis-infra convierte una máquina Linux y una cuenta de GitHub en una
-plataforma de despliegue propia. Un solo comando, `aegis init`,
-instala Kubernetes (k3s), ArgoCD, Jenkins, un registro de imágenes, el
-escáner de vulnerabilidades, la firma de imágenes y la observabilidad,
-y los deja conectados entre sí. Desde ese momento, cada push a un repo
-de aplicación se construye en un pod sin privilegios, se escanea, se
-firma por digest, se despliega por GitOps y se expone a internet con
-TLS. Una imagen sin firma no entra al clúster: se rechaza en la
-admisión, no se descubre después.
+aegis convierte una máquina Linux y una cuenta de GitHub en una
+plataforma de despliegue propia. Un comando, `aegis init`, instala
+Kubernetes (k3s), ArgoCD, Jenkins, un registro de imágenes, el escáner
+de vulnerabilidades, la firma de imágenes y la observabilidad, y los
+deja conectados. Desde ahí, cada push a un repositorio de aplicación se
+construye en un pod sin privilegios, se escanea, se firma por digest,
+se despliega por GitOps y sale a internet con TLS. Una imagen sin firma
+no entra al clúster.
 
-Se parece a lo que hace un servicio como Vercel, con una diferencia:
-el servidor, los datos y las llaves son tuyos.
+Hace lo que hace un servicio como Vercel, con una diferencia: el
+servidor, los datos y las llaves son tuyos.
 
-**Estado: avance técnico (`v3.0.0-alpha.1`).** Es la versión para
-desarrolladores y gente de plataforma. La instalación completa ya
-corrió de principio a fin en una máquina que no era la del autor (ver
-[Dónde se probó](#dónde-se-probó)), y cada afirmación de este
-documento sale de una comprobación que se puede volver a ejecutar.
-Falta pulirlo. La capa visual ya empezó —hay una consola sobre el CLI,
-en loopback, que lee y que sabe dar de alta una organización— y lo que
-todavía no existe es la consola del inquilino: alguien que no sea quien
-administra la máquina mirando lo suyo.
+**Estado: avance técnico (`v3.0.0-alpha.1`).** Es una versión para
+desarrolladores y gente de plataforma. La instalación completa ya corrió
+de principio a fin en una máquina ajena (ver [Dónde se
+probó](#dónde-se-probó)) y cada afirmación de esta página sale de una
+comprobación que se puede repetir. Falta pulir. Hay una consola visual
+para el operador; la consola del inquilino todavía no existe.
 
 ---
 
-## Empezar en cinco pasos
+## Qué obtienes
+
+- **Una plataforma desde un comando.** `aegis init` corre dieciséis
+  fases. Volver a correrlo no repite lo que ya pasó.
+- **Una cadena de suministro completa.** Build sin privilegios (kaniko),
+  escaneo (Trivy), firma por digest (cosign) y admisión obligatoria
+  (Kyverno). Las imágenes de la propia plataforma siguen la misma regla.
+- **Aplicaciones desde un contrato.** Un YAML por organización. De ahí
+  se derivan namespace, cuotas, políticas de red, RBAC, jobs, apps de
+  ArgoCD, hostnames, secretos y respaldos.
+- **Observabilidad con alertas al teléfono.** VictoriaMetrics, Grafana,
+  sondas y bitácora, con avisos por ntfy. Hay un latido: si la
+  plataforma deja de avisar, eso también es un aviso.
+- **Recuperación ensayada.** Respaldo y restauración del estado y de los
+  datos, rotación de cada credencial que el init genera, y `aegis
+  destroy` para deshacerlo todo.
+- **Un verificador.** 235 checks estáticos miden este repositorio sin
+  clúster (`aegis verify --list` los cuenta). Cada uno lleva su
+  *diente*: una mutación que demuestra que el check falla cuando debe.
+  `aegis check` hace lo mismo contra el clúster vivo.
+
+## Antes de empezar
+
+| | |
+|---|---|
+| **Host** | Linux con `sudo`. Probado en Ubuntu; el playbook exige Ubuntu 24.04 o superior con systemd. El preflight instala lo que falta con `apt`. |
+| **Recursos** | 4 CPU y 8 GB de RAM alcanzan (avisa por debajo de 7 GB). 25 GB libres en `/`. `aegis host measure` mide tu máquina; `aegis host budget` dice si lo que la plataforma reserva entra en lo que la máquina deja. |
+| **Si compartes la máquina** | Con sesión gráfica, aegis reserva un piso de memoria para el escritorio y no lo toca. `aegis host floor --set` lo cambia. |
+| **GPU (opcional)** | Para el carril de GPU de la AI: una NVIDIA con driver 570 o superior. Se comparte con tu escritorio; `aegis host show` dice cuánta VRAM hay. |
+| **Red** | Salida a internet por IPv4, reloj en hora, IPv6 apagado. El preflight sondea y corrige lo que puede. |
+| **GitHub** | Una cuenta con `gh auth login` hecho e identidad git configurada. El init crea dos repositorios (plataforma y canario) y después uno por aplicación. Una cuenta u organización dedicada es lo más cómodo. |
+| **Cloudflare (opcional)** | Una zona en tu cuenta, para el perfil `cloudflare`: hostnames públicos, túnel y TLS de Let's Encrypt. Sin ella, el perfil `local` levanta la misma plataforma sobre nombres que resuelven al host, con TLS de la CA propia. |
+
+Qué tener a mano:
+
+- **Un lugar seguro para la clave age.** Es la raíz de confianza:
+  descifra todo, y perderla es perder todo lo cifrado, respaldos
+  incluidos. La fase 10 la genera, la muestra una sola vez y exige un
+  respaldo que valida de verdad. Decide antes dónde va (gestor de
+  contraseñas, USB, papel) y que no sea el mismo host. No grabes la
+  sesión durante esa fase.
+- **Con Cloudflare:** el ID de cuenta, el ID de zona y una credencial
+  maestra (la Global API Key, o un token con «Account API Tokens:
+  Edit»). El init crea con ella sus dos tokens acotados y no la guarda.
+- **Sin operador delante** (`--non-interactive`): `AEGIS_AGE_BACKUP_FILE`
+  y, con Cloudflare, `CF_MASTER_FILE`.
+
+No hace falta preparar claves de cosign, certificados, registros DNS,
+el túnel ni las credenciales del registro interno. Todo eso lo genera
+el init.
+
+## Instalar
 
 ```bash
 git clone https://github.com/MEMEMEMEMEMEMEDev/aegis-infra && cd aegis-infra
@@ -41,129 +89,37 @@ tmux new -s aegis          # la corrida es larga; que un ssh caído no la mate
 ./bin/aegis init           # el asistente pregunta lo que no puede inferir, y luego dieciséis fases
 ```
 
-Antes de sentarte, decide dónde vas a guardar la clave age (la fase
-10 la muestra una sola vez) y, si vas a usar Cloudflare, ten a mano
-una zona y una credencial con la que crear tokens. Los detalles están
-en [Qué tener listo](#qué-tener-listo); cada paso, en
-[Empezar](#empezar).
+Tarda horas, no minutos. La fase larga es la 80, que espeja y construye
+las imágenes de la plataforma. En adelante esta página escribe `aegis`
+a secas: es `./bin/aegis` desde el checkout, y `aegis --help` es el
+mapa.
 
-## En dos minutos
-
-| | |
-|---|---|
-| **Qué es** | Un instalador por fases (`aegis init`) que levanta k3s, ArgoCD, Jenkins, un registro de imágenes con su propia PKI, Kyverno, cosign, Trivy, Traefik y observabilidad, y los deja hablándose entre sí. |
-| **Para quién** | Un equipo y sus proyectos, en su propio hardware o en un VPS. No sirve para una flota de clústeres, y todavía pide leer configuración. |
-| **Qué obtienes** | Cadena de suministro completa (build sin privilegios, escaneo, firma, admisión obligatoria), aplicaciones dadas de alta desde un contrato YAML, observabilidad con alertas al teléfono, respaldos y rotación de credenciales ya ensayados, y `aegis destroy` para deshacerlo todo. |
-| **Cómo sabes que funciona** | Cada paso del instalador registra una puerta: una comprobación con resultado guardado. 147 checks estáticos verifican el repositorio sin necesidad de clúster, y cada uno tiene un diente, una mutación que demuestra que el check falla cuando debe. `aegis check` hace lo mismo contra el clúster vivo. Nada que no se haya podido medir cuenta como éxito. |
-
-## Requisitos
-
-| | |
-|---|---|
-| **Host** | Linux con `sudo`. Se ha corrido en Ubuntu; el playbook que prepara el host exige Ubuntu 24.04 o superior con systemd. El preflight configura `sudo` sin contraseña, instala con `apt` tmux, python3-yaml y jq (y `gh` si falta), y exige que curl, git y python3 ya estén. |
-| **Recursos** | 4 CPU y 8 GB de RAM alcanzan (el preflight avisa por debajo de 7 GB). 25 GB libres en `/` y `/dev/shm` escribible. `aegis host measure` mide la máquina y la anota; `aegis host budget` dice si lo que la plataforma reserva entra en lo que esa máquina deja. |
-| **Si compartís la máquina** | Con sesión gráfica, aegis le deja un piso de memoria y no lo toca. Lo deriva solo, y `aegis host floor --set` lo cambia si querés exprimir tu propia máquina. Sin ese piso lo que se cuelga es el escritorio, no el clúster: los pods no mueren, el kernel los deja crecer y desaloja al humano. |
-| **GPU (opcional)** | El carril de GPU de la AI pide una NVIDIA con driver 570 o superior. La tarjeta se comparte con tu escritorio: los motores toman una fracción del TOTAL y no de lo libre, así que el compositor puede quedarse sin VRAM aunque la cuenta cierre. `aegis host show` dice cuánta hay. |
-| **Red** | Salida a internet por IPv4: el preflight sondea github.com, api.github.com, api.cloudflare.com, get.k3s.io, dl.k8s.io y Docker Hub. Reloj en hora (menos de 120 s de diferencia con GitHub) e IPv6 apagado; el preflight se encarga de las dos cosas. |
-| **GitHub** | Una cuenta con `gh auth login` hecho e identidad git configurada (`user.name`, `user.email`). Más abajo, lo que el init hace con ella. |
-| **Cloudflare (opcional)** | Una cuenta con una zona, para el perfil `cloudflare`: hostnames públicos, túnel y TLS de Let's Encrypt. Sin ella, el perfil `local` da la misma plataforma sobre nombres que resuelven al host, con TLS de la CA propia de la instancia. |
-
-Un host con restos de otra instancia también funciona (está medido);
-el init avisa si los encuentra.
-
-## Qué tener listo
-
-Para probarlo completo hacen falta GitHub y Cloudflare. Sin Cloudflare,
-el perfil `local` levanta la plataforma entera (build, escaneo, firma,
-admisión, GitOps, observabilidad) sobre nombres que resuelven al host,
-y las puertas del borde público, unas veinte, quedan registradas como
-no evaluables. Es una buena primera corrida; no es la corrida completa.
-
-- **GitHub.** El preflight dice qué permisos pide la sesión de `gh`
-  (`repo` y `delete_repo`). El init crea y administra dos repos con
-  nombres nuevos, el de plataforma y el canario, y después uno por
-  cada aplicación; las deploy keys y los webhooks también los crea él.
-  Una cuenta u organización dedicada es lo más cómodo.
-- **Cloudflare, solo para el perfil `cloudflare`.** Una zona en tu
-  cuenta (un dominio con sus nameservers en Cloudflare), el ID de
-  cuenta y el ID de zona (el asistente los pide), y una credencial
-  maestra con la que el init crea sus dos tokens acotados: la Global
-  API Key, o un token de cuenta con el permiso «Account API Tokens:
-  Edit». Esa credencial vive solo en memoria durante la fase 15. Si la
-  pasas por archivo (`CF_MASTER_FILE`), destrúyelo al terminar; el
-  init te lo recuerda.
-- **Un lugar seguro para la clave age, decidido antes de empezar.** Es
-  la raíz de confianza: descifra todo, y perderla es perder todo lo
-  cifrado, incluidos los respaldos de estado. La fase 10 la genera, la
-  muestra una sola vez y exige un respaldo que valida cifrando y
-  descifrando de verdad. Ten decidido dónde va (gestor de contraseñas,
-  USB, papel) y que no sea el mismo host. Y no grabes la sesión
-  (`script`, `tmux pipe-pane`, asciinema) durante esa fase.
-- **Sin operador delante** (`--non-interactive`): `AEGIS_AGE_BACKUP_FILE`
-  para el respaldo de la clave y `CF_MASTER_FILE` para la credencial de
-  Cloudflare. Sin ellos el init se niega a correr.
-- **Un correo de contacto** para los certificados; el asistente lo saca
-  de `git config`.
-
-Lo que no hace falta preparar: claves de cosign, certificados, registros
-DNS, el túnel, las credenciales del registro interno. Todo eso lo genera
-el init, y `aegis rotate` lo puede rotar después.
-
-## Empezar
-
-Los cinco comandos de arriba son toda la instalación. Lo que sigue es
-lo que conviene saber mientras corren.
-
-En adelante este documento escribe `aegis` a secas; es `./bin/aegis`
-desde el checkout, y `aegis --help` es el mapa de comandos.
-
-**Cuánto tarda.** Horas, no minutos. Depende de la máquina y de la
-conexión; la fase larga es la 80, que espeja y construye las imágenes
-de la plataforma. Por eso el tmux.
+**Lo que pregunta el asistente.** El perfil de borde (`cloudflare` o
+`local`), los nombres de los dos repositorios, el dominio raíz y, con
+`cloudflare`, los dos ID. El resto lo deduce: el dueño de GitHub de la
+sesión de `gh`, el correo de `git config`. Muestra un resumen, pide
+confirmación y escribe `~/aegis/aegis.conf`.
 
 **Dónde queda cada cosa.** Este checkout es el producto y no se escribe
-durante una corrida. La instancia, lo que pertenece a esta máquina,
-vive en `~/aegis` (o donde apunte `AEGIS_HOME`): la configuración en
-`aegis.conf`, el checkout del repo de plataforma en `platform/`, los
-marcadores de fase y las puertas en `.init-state/`, y el almacén
-cifrado en `.state-secrets/`.
+durante una corrida. La instancia vive en `~/aegis`: la configuración en
+`aegis.conf`, el repositorio de plataforma en `platform/`, los marcadores
+de fase y las puertas en `.init-state/`, el almacén cifrado en
+`.state-secrets/`.
 
-**Lo que pregunta el asistente.** Solo lo que no puede deducir: el
-perfil de borde (`cloudflare` o `local`), los nombres de los dos repos
-que va a crear, el dominio raíz (en `local` propone uno de sslip.io),
-el contexto de kubectl, el ClusterIP del registro interno y el
-directorio de trabajo para direnv. Con `cloudflare` pide además el ID
-de cuenta y el de zona; con `local`, en qué dirección escucha el
-puente. El dueño de GitHub lo toma de la sesión de `gh` y el correo de
-contacto de `git config`. Al final muestra un resumen, pide
-confirmación y escribe `aegis.conf`.
-
-### Cuando termina
-
-La fase `10-age-ceremony` te habrá mostrado un secreto, el único de
-toda la corrida: la clave age, en `~/.config/sops/age/aegis.key`. Es
-la raíz de confianza de la instancia. Guárdala donde el init te indica;
-sin ella no se lee nada de lo que sigue.
-
-Las consolas cuelgan del dominio raíz: `argocd.`, `jenkins.`,
-`grafana.` y `ntfy.<dominio>`. En `aegis.<dominio>` vive el canario,
-la primera aplicación que la propia plataforma construyó, firmó y
-desplegó. Con el perfil `cloudflare` las consolas quedan detrás de
-Cloudflare Access. Con `local`, los nombres resuelven al host vía
-sslip.io y el certificado lo firma la CA de la instancia, así que el
-navegador avisará hasta que la importes.
-
-Las contraseñas de administración no se imprimen. Nacen cifradas en el
-almacén, `~/aegis/.state-secrets/`, en archivos como
-`jenkins_admin_pass.enc`, `grafana_admin_pass.enc` y
-`argocd_admin_pass.enc`. Se leen con la clave age:
+**Cuando termina.** Las consolas cuelgan del dominio raíz: `argocd.`,
+`jenkins.`, `grafana.` y `ntfy.<dominio>`. En `aegis.<dominio>` vive el
+canario, la primera aplicación que la plataforma construyó, firmó y
+desplegó. Con `cloudflare` las consolas quedan detrás de Cloudflare
+Access; con `local`, el navegador avisará hasta que importes la CA. Las
+contraseñas de administración nacen cifradas en `~/aegis/.state-secrets/`
+y se leen con la clave age:
 
 ```bash
 export SOPS_AGE_KEY_FILE=~/.config/sops/age/aegis.key
 sops -d --input-type binary --output-type binary ~/aegis/.state-secrets/jenkins_admin_pass.enc
 ```
 
-Y en adelante, la rutina:
+La rutina, después:
 
 ```bash
 aegis check               # mide el clúster vivo contra lo declarado; no escribe nada
@@ -177,16 +133,16 @@ Cuando una fase falla, el init se detiene en ella y deja su puerta
 registrada. Arregla la causa y reanuda:
 
 ```bash
-aegis init --from 30      # reanuda desde la fase 30 (las anteriores ya pasaron)
+aegis init --from 30      # reanuda desde la fase 30
 aegis init --only 60      # repite una sola fase
 aegis init --check        # mide sin cambiar nada
 aegis init-log            # lo mismo que init, dejando un dosier completo de la corrida
 ```
 
-`aegis init-log` imprime la ruta del dosier antes de empezar, para que
-la conozcas aunque la corrida muera. La caja negra es
-`.init-state/gates.jsonl`; `docs/OPERATE.md` explica por dónde empezar
-a diagnosticar.
+`aegis init-log` imprime la ruta del dosier antes de empezar. La caja
+negra es `.init-state/gates.jsonl`; `docs/OPERATE.md` dice por dónde
+empezar a diagnosticar. Si vas a pedir ayuda, manda la línea `fail` de
+ese fichero y el dosier.
 
 Para empezar de cero sobre el mismo host:
 
@@ -196,20 +152,19 @@ aegis destroy --yes --k3s # quita el borde, el puente y el clúster
 aegis init --reset-state  # olvida todas las puertas y vuelve a empezar
 ```
 
-`aegis destroy` no borra los repos de GitHub: llevan un topic que los
-marca como propios del init, y una nueva corrida los reutiliza.
+`aegis destroy` no borra los repositorios de GitHub: llevan un topic
+que los marca como propios del init, y una nueva corrida los reutiliza.
 
 </details>
 
-## Dar de alta una aplicación
+Con tu propio dominio en Cloudflare y tu GPU, el viaje completo está en
+[docs/journeys/your-machine.md](docs/journeys/your-machine.md): qué
+preparar, qué esperar de cada fase y qué mandar cuando algo se frena.
 
-Hay una plantilla, `base`: un servicio HTTP mínimo en Go con su
-contrato, un `Containerfile` que corre sin root, overlays de kustomize
-y el script que escribe el digest. El `Jenkinsfile` no vive en la
-plantilla; `aegis org` lo genera desde el canónico.
+## Tu primera aplicación
 
-Todo ocurre en el repo de plataforma de la instancia. Ahí viven los
-contratos, en `orgs/`, y ahí se hace el commit.
+Todo ocurre en el repositorio de plataforma de la instancia. Ahí viven
+los contratos, en `orgs/`, y ahí se hace el commit.
 
 ```bash
 cd ~/aegis/platform
@@ -220,12 +175,10 @@ aegis sync root                      # ArgoCD recoge la organización nueva
 aegis app apply shop                 # crea el repo, la deploy key y el webhook en GitHub
 ```
 
-`aegis app apply --check` muestra lo que haría sin tocar nada. Desde el
-primer push al repo de la aplicación, la plataforma la construye,
-escanea, firma, despliega y expone. La plantilla se usa una sola vez:
-desde ahí el contrato y el repo son tuyos y los editas a mano. Para
-cambiar algo de la organización, editas el contrato y vuelves a
-generar:
+Desde el primer push al repositorio de la aplicación, la plataforma la
+construye, escanea, firma, despliega y expone. La plantilla se usa una
+vez: desde ahí el contrato y el repositorio son tuyos. Para cambiar
+algo, editas el contrato y vuelves a derivar:
 
 ```bash
 $EDITOR orgs/shop.yaml               # añadir postgres, un bucket, otro servicio
@@ -238,70 +191,9 @@ aegis secret create orgs/shop.yaml   # si aparecieron secretos nuevos
 equipo que va a hacer push: qué pasa con cada push y qué reglas lo
 rechazan.
 
-## La consola
-
-```bash
-aegis console serve            # http://127.0.0.1:7391
-```
-
-Una capa visual **encima** del CLI, no en su lugar: cada pantalla se
-dibuja con los documentos que los comandos ya emiten. No mide nada por
-su cuenta y no puede correr nada que tú no puedas. **No tiene agente de
-IA**, y eso es una decisión: una plataforma cuyo trabajo es decir qué es
-verdad sobre tu máquina no se pone a adivinar.
-
-Lo que la separa de un tablero cualquiera son **cuatro estados** en vez
-de dos. Casi todos pintan de verde tanto «no encontré fallas» como «no
-pude llegar a mirar», y sólo uno de los dos se investiga. Acá **«nadie
-pudo mirar» es un estado con nombre**, es el único sin color propio (va
-tramado) y es el primero que se dibuja.
-
-Está organizada como las consolas que ya conocés, y no como está escrito
-el CLI: un menú con **Projects, Deployments, Domains, Traffic, Storage,
-Security, Machine y Health**, y al lado de cada entrada un punto con el
-peor estado de lo que la alimenta, así «algo anda mal en Storage» se lee
-antes de abrir Storage. Cada palabra de la plataforma va traducida: el
-contrato dice `http` y la pantalla dice *web service*; dice `cuota` y la
-pantalla dice *plan*. El plan se elige por para qué sirve, y un plan a
-tu medida está a un clic: un escalón con nombre en el mismo catálogo,
-nunca un número en un contrato.
-
-Abre con **tus proyectos**: cada servicio lleva el lenguaje que GitHub
-ya midió para su repositorio, con un punto del color que GitHub mismo le
-pone (un punto y no un logo, porque cada logo es una marca registrada
-con su política de uso), lo que llegó en 24 horas y el último push con
-sus cuatro eslabones. Debajo, los repositorios que **todavía no corre
-nadie**, y cada uno abre el formulario de alta ya lleno. Entrando a un
-proyecto lo ve **como el clúster lo tiene**, contra lo que su contrato
-declara, incluido lo que el contrato **no** declara, que es justo lo
-que ninguna otra herramienta de la casa puede ver, porque todas derivan
-del contrato.
-
-Y **da de alta un proyecto**: partís de uno de tus repositorios (la
-consola ya sabe en qué está escrito), elegís qué es en tres tarjetas,
-marcás qué necesita (una base, una caché, un bucket, salir a internet)
-y el plan por para qué sirve; los servicios que hagan falta se agregan
-de a uno, tantos como quepan en el plan. La previsualización empieza en
-palabras. También cambia uno que ya existe mostrándote el diff del
-contrato antes de pisarlo. Escribe el contrato, deriva los manifiestos y crea los secretos
-que falten, que son las tres cosas que **sólo escriben ficheros en esta
-máquina**. Después te muestra los tres pasos que quedan y por qué queda
-cada uno: **tu commit**, el sync, y `aegis app apply`, que es el que
-sale a GitHub.
-
-No commitea, no empuja, no aplica y no toca el clúster. Eso es lo que
-hace inofensivo el fichero: ArgoCD lee el remoto, así que nada corre
-hasta que tú commitees. Y no quita nada: borrar un servicio es
-`aegis org` a mano.
-
-Trae su propio recorrido guiado, quince pasos pantalla por pantalla, en
-«Take the tour». No se publica por el túnel (se entra con `ssh -L 7391:127.0.0.1:7391`)
-y el porqué, junto con el modelo de seguridad y lo que falta, está en
-[La consola](docs/console.md).
-
 ## Cómo funciona
 
-### Las dieciséis fases, en cuatro etapas
+### Dieciséis fases, cuatro etapas
 
 ```mermaid
 flowchart LR
@@ -317,45 +209,43 @@ flowchart LR
         direction TB
         c0["40 registry-pki"] --> c1["50 jenkins"] --> c2["60 webhook"] --> c3["70 deploy-auto<br/>el canario"]
     end
-    subgraph D["4. cadena y vigilancia"]
+    subgraph D["4. cadena, vigilancia y AI"]
         direction TB
-        d0["80 supply-chain<br/>Kyverno en Enforce"] --> d1["85 observability"]
+        d0["80 supply-chain<br/>Kyverno en Enforce"] --> d1["85 observability"] --> d2["87 ai<br/>si se pidió"]
     end
     A --> B --> C --> D
 ```
 
 Cada fase deja un marcador y registra sus puertas en
-`.init-state/gates.jsonl`. Volver a ejecutar converge: una fase que ya
-pasó no se repite, salvo que `--from` o `--only` lo pidan. El orden
-importa: la política de admisión se activa cuando ya existe una imagen
-firmada que admitir, la observabilidad va al final porque mide lo que
-ya existe, y los secretos entran antes que los charts que los usan.
+`.init-state/gates.jsonl`. El orden importa: la política de admisión se
+activa cuando ya existe una imagen firmada que admitir, y la
+observabilidad va al final porque mide lo que ya existe.
 
 <details>
 <summary><b>Las dieciséis fases, una por una</b></summary>
 
 | fase | qué hace |
 |---|---|
-| `00-preflight` | Comprueba las precondiciones y muestra los límites conocidos. Lanza el asistente de configuración si no hay `aegis.conf`. Si falta algo, aborta aquí y no a mitad del clúster. |
-| `05-host` | Instala en el host las herramientas con versión fijada (tofu, sops, age, kubectl, helm, cosign, direnv, jq, git, openssl, y `gh`, del que solo exige que esté y tenga sesión), leyendo las versiones de `group_vars/all.yml` y esperando el lock de apt si hace falta. |
-| `10-age-ceremony` | Genera la clave age, la valida cifrando y descifrando de verdad, exige respaldo y escribe `.sops.yaml`. Es la única fase que muestra un secreto al operador. |
-| `12-workrepos` | Crea y siembra en GitHub, con `gh`, los dos repos del init (plataforma y canario), marcados con un topic. Si ya existen, los reutiliza; si un repo existe sin la marca, pregunta antes de marcarlo, y sin terminal se niega. |
-| `15-third-parties` | Credenciales de terceros sin pasar por el navegador: deploy keys, HMAC de los webhooks y credencial de CI desde la sesión de `gh`. Con el perfil `cloudflare`, crea además los tokens acotados de Cloudflare. |
-| `20-k3s` | Prepara el kernel del host e instala k3s con versión fijada, con los playbooks de Ansible del repo de plataforma. |
-| `25-edge-tofu` | Levanta el borde. Con `cloudflare`: túnel, DNS y Access con OpenTofu. Con `local`: un puente de systemd en el host que entrega los puertos 80 y 443 a Traefik. |
-| `30-argocd` | Instala ArgoCD con helm (la única instalación imperativa) y crea con kubectl los Secrets de arranque, entre ellos la clave age para KSOPS. |
-| `35-gitops` | Entrega el control a GitOps: AppProjects, App raíz y sincronizaciones en orden (cert-manager, PKI, Traefik, cloudflared). |
-| `40-registry-pki` | Registro interno de imágenes con PKI propia y TLS desde el primer día; credenciales derivadas de un único origen e instalación de la CA en el host. |
-| `50-jenkins` | Jenkins con jobs definidos en código desde el primer arranque y secretos creados antes que el chart. Termina con la imagen de herramientas de CI construida y publicada. |
-| `60-webhook` | Comprueba de extremo a extremo que un push llega a Jenkins, con una puerta por eslabón: borde, hook, entrega, el build existe, el build está verde. Con `local`, hook y entrega quedan como no evaluables y el build se mide por sondeo. |
-| `70-deploy-auto` | Despliegue automático del canario: el pipeline escribe el digest en el overlay y ArgoCD despliega. Antes de escribir nada prueba el anti-bucle: un commit que solo toca k8s no dispara un build. |
-| `80-supply-chain` | Servidor Trivy, clave cosign y política Kyverno en modo Enforce, activada al final, cuando ya existe la primera imagen firmada. |
-| `85-observability` | Sobre todo lo anterior: VictoriaMetrics, vmalert, Grafana, sondas y bitácora de eventos, con un latido que llega al topic de ntfy. |
-| `87-ai` | El subsistema de AI, si se pidió. `AI=no` la salta dejando escrito el motivo y sus puertas sin sujeto; `AI=cpu` levanta pasarela, controlador y el motor pequeño, sin tarjeta; `AI=gpu` mide el driver y el runtime del host antes de tocar nada. Los motores nacen apagados. Un valor que no reconoce no lo trata como «no»: se detiene, porque adivinar cuál quiso decir es como un subsistema queda desplegado a medias. |
+| `00-preflight` | Comprueba las precondiciones. Lanza el asistente si no hay `aegis.conf`. Si falta algo, aborta aquí y no a mitad del clúster. Con `AI=gpu` mide el driver antes de seguir. |
+| `05-host` | Instala en el host las herramientas con versión fijada (tofu, sops, age, kubectl, helm, cosign, direnv, jq, git) verificando el checksum que publica cada autor. Instala los relojes de usuario: respaldo, métricas del host, aviso de actualizaciones. |
+| `10-age-ceremony` | Genera la clave age, la valida cifrando y descifrando de verdad, exige respaldo y escribe `.sops.yaml`. Es la única fase que muestra un secreto. |
+| `12-workrepos` | Crea y siembra en GitHub los dos repositorios del init (plataforma y canario), marcados con un topic. Si ya existen, los reutiliza. |
+| `15-third-parties` | Credenciales de terceros sin pasar por el navegador: deploy keys, HMAC de los webhooks, credencial de CI. Con `cloudflare`, los tokens acotados. |
+| `20-k3s` | Prepara el kernel e instala k3s con versión fijada, con Ansible. |
+| `25-edge-tofu` | Levanta el borde. Con `cloudflare`: túnel, DNS y Access con OpenTofu. Con `local`: un puente de systemd que entrega los puertos 80 y 443 a Traefik. |
+| `30-argocd` | Instala ArgoCD con helm (la única instalación imperativa) y crea los Secrets de arranque, entre ellos la clave age para KSOPS. |
+| `35-gitops` | Entrega el control a GitOps: AppProjects, App raíz y sincronizaciones en orden. |
+| `40-registry-pki` | Registro interno de imágenes con PKI propia y TLS desde el primer día. |
+| `50-jenkins` | Jenkins con jobs definidos en código desde el primer arranque. Termina con la imagen de herramientas de CI construida y publicada. |
+| `60-webhook` | Comprueba de extremo a extremo que un push llega a Jenkins, con una puerta por eslabón. |
+| `70-deploy-auto` | Despliegue automático del canario: el pipeline escribe el digest y ArgoCD despliega. Antes prueba que un commit que solo toca manifiestos no dispara un build. |
+| `80-supply-chain` | Servidor Trivy, clave cosign y política Kyverno en Enforce, activada al final, cuando ya existe la primera imagen firmada. Construye las imágenes base propias. |
+| `85-observability` | VictoriaMetrics, vmalert, Grafana, sondas y bitácora, con un latido que llega a ntfy. |
+| `87-ai` | El subsistema de AI, si se pidió. `AI=no` lo salta y lo deja escrito; `AI=cpu` levanta pasarela, controlador y un motor pequeño; `AI=gpu` mide driver y runtime antes de tocar nada. Los motores nacen apagados. |
 
 </details>
 
-### Producto e instancia son dos cosas
+### Producto e instancia
 
 ```mermaid
 flowchart LR
@@ -363,7 +253,7 @@ flowchart LR
         direction TB
         p1["bin/ libexec/ lib/<br/>los comandos"]
         p2["init/<br/>las dieciséis fases"]
-        p3["verify/<br/>147 checks y sus dientes"]
+        p3["verify/<br/>235 checks y sus dientes"]
         p4["seed/<br/>lo que se distribuye"]
     end
     subgraph I["la instancia: ~/aegis, estado vivo"]
@@ -374,20 +264,21 @@ flowchart LR
         i4[".state-secrets/<br/>el almacén cifrado con age"]
     end
     P -- "aegis init<br/>siembra, instala, mide" --> I
+    P -- "aegis seed apply<br/>trae un arreglo de la semilla" --> I
     I -- "aegis check, aegis state backup<br/>aegis data backup, aegis rotate" --> I
 ```
 
 Un solo archivo decide dónde vive cada cosa, con una copia en bash y
 otra en python, para que dos comandos no puedan discrepar. Lo que no
-está en `seed/` no se distribuye: el repo de plataforma de cada
-instancia nace de esa semilla, con marcadores de posición en lugar de
-valores.
+está en `seed/` no se distribuye. Cuando el producto cambia, `git pull`
+trae el arreglo a la máquina y `aegis seed apply` lo trae a la
+instancia, conservando lo que es suyo.
 
 ### Un contrato, y todo lo demás derivado
 
 ```mermaid
 flowchart LR
-    c["orgs/shop.yaml<br/>el contrato: servicios, rutas públicas,<br/>base de datos, bucket, cuotas"]
+    c["orgs/shop.yaml<br/>el contrato: servicios, rutas públicas,<br/>base de datos, bucket, plan"]
     c --> n["namespace + cuotas<br/>+ PSS restricted"]
     c --> np["NetworkPolicies<br/>default-deny"]
     c --> r["RBAC"]
@@ -399,60 +290,78 @@ flowchart LR
 ```
 
 `aegis org apply` vuelve a generar todo desde el contrato, en bloques
-marcados que se reescriben enteros: nada se escribe dos veces a mano.
-`aegis org plan` muestra qué cambiaría antes de tocar nada.
+marcados que se reescriben enteros. `aegis org plan` muestra qué
+cambiaría antes de tocar nada.
 
-### La cadena de suministro, paso a paso
+### La cadena de suministro, en seis pasos
 
-1. Un push llega a Jenkins por webhook (o por sondeo con el perfil
-   `local`).
-2. kaniko construye la imagen en un pod sin privilegios. El
-   Containerfile de la plantilla corre sin root bajo PSS restricted.
-3. Trivy escanea con `--exit-code 1 --severity CRITICAL,HIGH
-   --ignore-unfixed`: una vulnerabilidad corregible de esa severidad
-   detiene el build.
-4. cosign firma por digest, nunca por tag, con la clave de la
-   instancia.
-5. El pipeline escribe el digest en el overlay de kustomize
-   (`ci/write-digest.mjs`) y hace commit. ArgoCD despliega.
-6. Kyverno (`require-aegis-signature`, en Enforce, con `mutateDigest`)
-   rechaza en la admisión cualquier imagen sin firma válida.
+1. Un push llega a Jenkins por webhook (o por sondeo, con `local`).
+2. kaniko construye la imagen en un pod sin privilegios.
+3. Trivy escanea. Una vulnerabilidad corregible de severidad HIGH o
+   CRITICAL detiene el build.
+4. cosign firma por digest, nunca por tag, con la clave de la instancia.
+5. El pipeline escribe el digest en el overlay de kustomize y hace
+   commit. ArgoCD despliega.
+6. Kyverno, en Enforce, rechaza en la admisión cualquier imagen sin
+   firma válida.
 
-Las imágenes de la propia plataforma siguen la misma disciplina. El job
-`mirror-images` trae de fuera solo versiones fijadas, `ci-images`
-construye la imagen de herramientas de CI, `base-images` fabrica las
-bases propias, e `image-watch` vuelve a escanear todo cada día (cron
-`H 6 * * *`). `aegis ci build` dispara los cuatro en ese orden;
-`aegis ci digests` lista `imagen@digest` para leerlo antes de cambiar
-un `FROM` a mano.
+Las imágenes de la propia plataforma siguen la misma disciplina: un job
+espeja de fuera solo versiones fijadas, otro construye las bases propias
+y las prueba arrancándolas antes de firmarlas, y `image-watch` vuelve a
+escanear todo cada día.
 
-### Las reglas que ordenan todo lo demás
+### Seis reglas
 
-- **El contrato es la única fuente de verdad.** Las plantillas generan
-  contratos; de los contratos se deriva todo lo demás, siempre igual.
-- **Converger, no ejecutar.** Un comando que se vuelve a correr con el
-  trabajo ya hecho termina en «nada que hacer».
-- **Cuatro salidas, siempre.** `0` hecho o ya estaba; `1` mal o falta;
-  `2` no se pudo evaluar; `3` uso inválido. «No se pudo evaluar» es una
-  respuesta con todas las letras: un instrumento que nunca llegó a su
+- El contrato es la única fuente de verdad. Todo lo demás se deriva.
+- Un comando que se vuelve a correr con el trabajo hecho termina en
+  «nada que hacer».
+- Cuatro salidas, siempre: `0` hecho o ya estaba, `1` mal o falta, `2`
+  no se pudo evaluar, `3` uso inválido. Un instrumento que no llegó a su
   sujeto no dice que el sujeto esté bien.
-- **El silencio nunca es éxito.** Una puerta sin sujeto se registra como
-  tal; un build que nunca apareció es un fallo; un asistente que no pudo
-  escribir el archivo se detiene en vez de seguir.
-- **Un check que no muerde no existe.** Cada check viene con la mutación
-  que demuestra que falla cuando debe (`aegis verify --teeth`).
-- **El producto no nombra máquinas ni personas.** Dos checks mantienen
-  fuera direcciones e identidades, para que lo que se instala aquí se
-  instale en cualquier parte.
+- Una puerta sin sujeto se registra como tal. Un build que nunca
+  apareció es un fallo.
+- Cada check viene con la mutación que demuestra que muerde
+  (`aegis verify --teeth`).
+- El producto no nombra máquinas ni personas. Dos checks lo vigilan.
 
-![Salidas reales: aegis init --list con las dieciséis fases pasadas y aegis verify con 147 checks en verde en los dos perfiles](docs/assets/terminal.svg)
+![Salidas reales: aegis init --list con las dieciséis fases pasadas y aegis verify con 235 checks en verde en los dos perfiles](docs/assets/terminal.svg)
+
+## La consola
+
+```bash
+aegis console serve            # http://127.0.0.1:7391
+```
+
+![La consola: Projects, con los cinco proyectos de una instancia y el peor estado de cada sección al lado de su entrada](docs/assets/console-projects.png)
+
+Una capa visual encima del CLI. Cada pantalla se dibuja con los
+documentos que los comandos ya emiten; no mide nada por su cuenta y no
+puede correr nada que tú no puedas. No tiene agente de AI: una
+plataforma cuyo trabajo es decir qué es verdad sobre tu máquina no
+adivina.
+
+![Cuatro estados: bien, pide atención, nadie pudo mirar, no leído](docs/assets/states.svg)
+
+Está organizada como las consolas que ya conoces: Projects,
+Deployments, Domains, Traffic, Storage, Security, Machine y Health, y al
+lado de cada entrada el peor estado de lo que la alimenta. Abre con tus
+proyectos y con los repositorios que todavía no corre nadie. Da de alta
+un proyecto en tres tarjetas y escribe el contrato, los manifiestos y
+los secretos que falten. No commitea, no empuja, no aplica y no toca el
+clúster: ArgoCD lee el remoto, así que nada corre hasta que tú
+commitees.
+
+![Deployments: los últimos sesenta pushes, cada uno con sus cuatro eslabones medidos](docs/assets/console-deployments.png)
+
+Trae un recorrido guiado de quince pasos. No se publica por el túnel:
+se entra con `ssh -L 7391:127.0.0.1:7391`. El porqué, el modelo de
+seguridad y lo que falta están en [docs/console.md](docs/console.md).
 
 ## Los comandos
 
 `aegis --help` imprime el menú y `aegis <cmd> --help` el detalle de cada
 uno. Todos devuelven los mismos cuatro códigos de salida, salvo
-`aegis verify`, que usa 0, 1 y 3 (el 3 señala un defecto del propio
-verificador).
+`aegis verify`, que usa 0, 1 y 3.
 
 | grupo | comandos |
 |---|---|
@@ -469,102 +378,113 @@ verificador).
 
 | comando | qué hace |
 |---|---|
-| `aegis preflight` | Deja la máquina en el estado que el init necesita: sudo sin contraseña, IPv6 apagado, DNS, reloj, paquetes, identidad git. Sin argumentos actúa y repara. |
-| `aegis init` | El orquestador: levanta la plataforma fase por fase y registra una puerta por paso. Volver a correrlo converge. Flags: `--from N`, `--only N`, `--check`, `--configure`, `--list`, `--reset-state`, `--non-interactive`. |
-| `aegis init-log` | Ejecuta `aegis init` bajo `script`, dejando un dosier completo de la corrida. Acepta los mismos flags. |
-| `aegis verify` | Verificación estática del repositorio, sin clúster: los checks de `verify/checks/`. Flags: `--profile cloudflare\|local\|both`, `--only NNN`, `--teeth [NNN]` (prueba que cada check muerde), `--harness` (los arneses funcionales), `--with-charts`, `--list`. |
-| `aegis destroy` | Deshace la huella del init en el borde y en este host; con `--k3s` también el clúster; con `--purge-secrets`, el almacén de la instancia. Sin `--yes` solo dice qué haría. No borra los repos de GitHub. |
+| `aegis preflight` | Deja la máquina en el estado que el init necesita. Sin argumentos actúa y repara. |
+| `aegis init` | Levanta la plataforma fase por fase y registra una puerta por paso. `--from N`, `--only N`, `--check`, `--list`, `--reset-state`, `--non-interactive`. |
+| `aegis init-log` | `aegis init` bajo `script`, dejando un dosier completo de la corrida. |
+| `aegis verify` | Los checks estáticos, sin clúster. `--profile cloudflare\|local\|both`, `--only NNN`, `--teeth [NNN]`, `--with-charts`, `--list`. |
+| `aegis destroy` | Deshace la huella del init; `--k3s` también el clúster; `--purge-secrets`, el almacén. Sin `--yes` solo dice qué haría. |
 
 **apps**
 
 | comando | qué hace |
 |---|---|
-| `aegis app new` / `apply` | `new` escribe el alta entera en archivos (contrato desde una plantilla con `--template`, esqueleto, derivaciones, secretos) sin tocar nada fuera; `apply` ejecuta los pasos de GitHub de cada contrato: repo, esqueleto, deploy key, webhook (`--check` para verlo sin tocar nada). |
-| `aegis org plan` / `apply` / `validate` / `list` / `schema` / `edge` / `routes` / `plan-delete` / `delete` / `migrate` | `plan` muestra qué cambiaría; `apply` escribe los manifiestos; `validate` solo valida el contrato; `edge` deriva los hostnames públicos de todos los contratos; `routes` deriva el ConfigMap de rutas de IA (`ai-ruteo`); `plan-delete` muestra qué borraría; `delete` borra del repo y dice qué retirar del clúster; `migrate` lleva un contrato a una versión nueva; `list` lista las organizaciones que los contratos declaran, incluidas las que no validan; `schema` dice **qué puede contener un contrato**, derivado del propio validador, que es lo que lee el formulario de la consola. |
-| `aegis quota list` / `add` / `set` / `remove` | Los planes que un proyecto puede tomar, tal como los tiene `plans.yaml`: cada uno con su descripción, sus siete números, si viene de serie y qué proyectos lo nombran. `add` escribe un plan nuevo a partir de otro, con la misma validación que los de serie; `set` cambia los números de uno tuyo o la descripción de cualquiera; `remove` quita uno tuyo que ningún contrato nombre. Los de serie conservan sus números. Nunca un número en un contrato. |
-| `aegis repos list` | Los repositorios de la cuenta, con el lenguaje que GitHub ya midió y qué organización y servicio los despliega. Los que ningún contrato nombra son los que se podrían tomar. Si `gh` no contesta dice que no pudo mirar, nunca una lista vacía. |
-| `aegis image request` / `list` / `from` / `check` / `gc` | Las imágenes base que la plataforma fabrica y firma. `request` mide el digest al que apunta un tag hoy y lo declara en `images.txt` (con `--allow CVE --until --reason` para una excepción que firma un humano); `from` imprime la línea `FROM` que se pega en un Dockerfile; `check` mide que lo declarado sea lo que hay; `gc` limpia versiones viejas. |
-| `aegis secret create` / `rotate` / `move` | Crea los secretos cifrados que faltan (nunca regenera los que existen), reemplaza el material, o copia un secreto a otro namespace (`move` necesita la clave age). |
+| `aegis app` | `new` escribe el alta entera en ficheros sin tocar nada fuera; `apply` hace los pasos de GitHub: repo, deploy key, webhook (`--check` para verlo antes). |
+| `aegis org` | `plan` muestra qué cambiaría; `apply` escribe los manifiestos; `validate`, `list`, `schema`, `edge`, `routes`, `delete`, `migrate`. |
+| `aegis quota` | Los planes que un proyecto puede tomar. `list`, `add`, `set`, `remove`. Nunca un número en un contrato. |
+| `aegis repos` | Los repositorios de la cuenta, con su lenguaje y qué organización los despliega. |
+| `aegis image` | Las imágenes base que la plataforma fabrica y firma. `request`, `list`, `from`, `check`, `gc`. |
+| `aegis secret` | `create` los secretos cifrados que faltan; `rotate` el material; `move` a otro namespace. |
 
 **operate**
 
 | comando | qué hace |
 |---|---|
-| `aegis check` | La ronda rutinaria. Sin argumentos y sin escribir nada: mide el clúster vivo contra lo declarado (firma en Enforce, respaldos por organización, desincronías). |
-| `aegis console serve` / `capture` / `list` / `draw` | La consola visual, en loopback y sobre el CLI: dibuja los documentos que los comandos ya emiten, organizados en Projects, Deployments, Domains, Traffic, Storage, Security, Machine y Health. `capture` guarda un estado del mundo como caso; `list` muestra el corpus; `draw` escribe todas las pantallas de un caso como ficheros HTML, sin servidor. Ver [La consola](docs/console.md). |
-| `aegis update inventory` / `plan` / `window` / `rollback` / `status` / `metrics` | Qué versión corre de cada cosa que la plataforma fija, y qué existe hoy río arriba: charts, imágenes de los manifiestos, espejos, bases propias, plantillas del CI, k3s y los binarios del anfitrión. `inventory` mide y no toca nada; `plan` propone qué subiría una ventana, en qué capa y cómo se desharía cada cambio, y rechaza en voz alta un salto mayor o un menor de k3s; `window` es el protocolo entero —rechazos, foto, página de mantenimiento con la medición de que hizo efecto, Jenkins en silencio, las alertas de los sitios silenciadas, el reloj de respaldo parado, las nueve capas en orden con una aceptación después de cada una, la vuelta atrás si alguna falla, y todo lo que tocó de la máquina devuelto al salir— y es SECO mientras no le pases `--yes`; el ensayo elige y presupuesta exactamente lo que haría la corrida real, y `--allow-major <pin>`, `--k3s-minor`, `--kernel` y `--layer N` son las cuatro maneras de levantarle un rechazo; `rollback` deshace los commits de una ventana, del más nuevo al más viejo, y dice si el árbol volvió a lo que la foto vio; `status` cuenta la última ventana; `metrics` imprime lo mismo en formato de exposición para el temporizador diario que lo empuja a vmsingle, y de ahí salen `aegis_update_pins_behind{class}` y las alertas que avisan que toca ventana. Nada de eso actualiza nada: la ventana la abres tú. Lo que no pudo medirse nunca se cuenta como al día. Ver [el protocolo de actualización](seed/platform/docs/protocols/updates.md). |
-| `aegis tenant show` | Una organización **como el clúster la tiene**, contra lo que su contrato declara: sus servicios, el volumen de cada base, si cada camino público tiene a alguien detrás, su cuota, y lo que el contrato no declara. `aegis org` es el lado contrato y no toca el clúster; éste no escribe un fichero. |
-| `aegis traffic show` | Lo que de verdad llegó a cada organización, leído de las métricas de traefik. Atribuye por organización, reporta lo de la plataforma aparte, y **reconcilia contra el total** para que nada desaparezca. `--org` lo acota a una. |
-| `aegis capacity show` | ¿Entra otra organización? El allocatable del nodo contra la suma de los requests vivos, y cuántas de cada plan caben — diciendo **qué se acaba primero**. Si el apiserver no contesta dice que no pudo mirar, nunca cero. |
-| `aegis builds show` | Qué le pasó a cada push, eslabón por eslabón: construir, escanear, firmar, anotar el digest. Los dos que pasan después y en otros componentes (el sync y la admisión) viajan marcados como **no medidos acá**. |
-| `aegis host measure` / `show` / `floor` / `budget` / `metrics` / `reservation` / `requires` | Mide la máquina en la que aegis aterrizó y lo anota. `floor` es el piso de memoria que le deja al escritorio si compartís la máquina (`--set` para elegirlo, `--apply` para ponerlo en manos del kernel); `budget` dice si lo que la plataforma reserva entra en lo que esa máquina deja; `metrics` exporta lo que sólo el anfitrión puede ver. |
-| `aegis sync` | Dispara un sync de ArgoCD de las apps nombradas sin pasar `syncOptions`; `--drifted` sincroniza todo lo que no esté Synced. |
-| `aegis seed diff` / `apply` | Lo que la semilla del producto cambió y esta instancia no tiene todavía: `diff` compara cada fichero de la semilla (renderizado como el init lo haría) con la copia de la instancia y separa lo que es de la instancia (contratos, planes, digests, secretos, lo que `aegis org apply` escribe), lo que sólo difiere en versiones fijadas (la ventana de actualización las mueve) y lo que la semilla cambió de verdad; `apply` lo trae copiando **y** renderizando, conservando los pines y los bloques derivados de la instancia, y lo deja en un commit que tú lees y empujas. Un `git pull` del producto trae el arreglo a la máquina; esto lo trae a la instancia. |
-| `aegis ai` | El control del operador sobre el sustrato de IA; queda fuera de este documento. |
+| `aegis check` | La ronda: mide el clúster vivo contra lo declarado. No escribe nada. |
+| `aegis console` | `serve` la consola en loopback; `capture` guarda un estado del mundo como caso; `draw` dibuja las pantallas de un caso sin servidor. |
+| `aegis update` | `inventory` qué corre y qué existe río arriba; `plan` qué subiría una ventana; `window` el protocolo entero, en seco salvo `--yes`; `rollback`, `status`, `metrics`. Ver [el protocolo](seed/platform/docs/protocols/updates.md). |
+| `aegis tenant` | Una organización como el clúster la tiene, contra lo que su contrato declara. |
+| `aegis traffic` | Lo que llegó a cada organización, leído de las métricas de Traefik, reconciliado contra el total. |
+| `aegis capacity` | ¿Entra otra organización? El nodo contra lo que los planes cuestan. |
+| `aegis builds` | Qué le pasó a cada push: construir, escanear, firmar, anotar el digest. |
+| `aegis host` | `measure` la máquina; `show`; `floor` el piso de memoria del escritorio; `budget` si la plataforma entra; `metrics`. |
+| `aegis sync` | Un sync de ArgoCD de las apps nombradas; `--drifted` todo lo que no esté Synced. |
+| `aegis seed` | `diff` lo que la semilla cambió y esta instancia no tiene; `apply` lo trae conservando pines y bloques derivados, en un commit que tú lees y empujas. |
+| `aegis ai` | El control del operador sobre el subsistema de AI. |
 
 **infra**
 
 | comando | qué hace |
 |---|---|
-| `aegis ci build` / `jobs` / `digests` / `quiet` | `build` dispara los jobs de imágenes de la plataforma en orden (`mirror-images`, `ci-images`, `base-images`, `image-watch`) y espera a cada uno, y también dispara por nombre cualquier otro job que el job-dsl declare; `jobs` lista los jobs derivados de ese job-dsl sin hablar con el clúster; `digests` lista `imagen@digest` de lo que guarda el registro interno; `quiet on|off|status` pone a Jenkins en modo tranquilo —termina lo que corre y no empieza nada— para que un push no dispare una construcción sobre una plataforma a medio cambiar. |
-| `aegis edge check` | Compara los hostnames vivos con los derivados de los contratos. |
-| `aegis registry check` / `rotate` | `check` verifica que la credencial del registro interno esté alineada en sus diez destinos; `rotate` la genera de nuevo y reescribe los diez. |
-| `aegis rotate list` / `check` / `run` / `continue` | El protocolo de rotación hecho comando: inventario, comprobar si una credencial funciona sin rotarla, rotar con el radio de impacto a la vista, y reanudar un lote interrumpido. |
-| `aegis webhook check` / `apply` | Mide que todo repo con job tenga webhook; crea los que faltan resincronizando el HMAC. |
+| `aegis ci` | `build` dispara los jobs de imágenes de la plataforma en orden; `jobs`; `digests`; `quiet on\|off` para que un push no construya sobre una plataforma a medio cambiar. |
+| `aegis edge` | `check` compara los hostnames vivos con los derivados de los contratos. |
+| `aegis registry` | `check` la credencial del registro interno en sus diez destinos; `rotate` la genera de nuevo. |
+| `aegis rotate` | El protocolo de rotación: `list`, `check`, `run`, `continue`. |
+| `aegis webhook` | `check` que todo repositorio con job tenga webhook; `apply` crea los que faltan. |
 
 **backup**
 
 | comando | qué hace |
 |---|---|
-| `aegis data backup` / `list` / `restore` / `size` / `remote` | Los datos de los tenants: un bundle por organización. `list` mira dentro sin restaurar; `restore` exige `--org` y, si la credencial rotó desde la captura, `--force`; `size` mide lo que pesan los datos; `remote` es el destino fuera de sitio (`bucket`, `adopt`, `push`, `list`, `status`, `cadence`), y `remote status --org X --json` contesta por una sola organización con la **cadencia al lado de la edad**. |
-| `aegis state backup` / `restore` | Los tres estados que viven solo en esta máquina y que ningún git guarda: el almacén cifrado, los marcadores de fase y el tfstate del borde. Perder cualquiera obliga a rehacer la instalación a mano. |
+| `aegis data` | Los datos de los inquilinos, un bundle por organización: `backup`, `list`, `restore`, `size`, `remote` (el destino fuera de sitio: `bucket`, `adopt`, `push`, `status`, `cadence`). |
+| `aegis state` | `backup` y `restore` de los tres estados que solo viven en esta máquina: el almacén cifrado, los marcadores de fase y el tfstate del borde. |
 
-`state` es la máquina: lo que hace falta para reconstruir la
-instalación. `data` son los tenants: lo que hace falta para reconstruir
-sus aplicaciones y sus datos. El respaldo de uno no restaura el otro.
+`state` es la máquina; `data` son los inquilinos. El respaldo de uno no
+restaura el otro.
 
 </details>
 
 ## Dónde se probó
 
-El entorno: un VPS alquilado (4 CPU, 16 GB, Ubuntu, nada instalado
-salvo ssh), una cuenta de GitHub nueva y sin dominio (perfil `local`).
-Es decir, sin nada de lo que el autor tiene a mano en su propia
-máquina. Todo lo de abajo ocurrió ahí el 2026-08-27, y la tabla
-completa, puerta por puerta, está en
-`docs/journeys/foreign-instance.md`.
+| dónde | qué | resultado |
+|---|---|---|
+| Un VPS alquilado (4 CPU, 16 GB, Ubuntu, nada instalado salvo ssh), una cuenta de GitHub nueva, sin dominio (perfil `local`) | `aegis init` desde cero, 2026-08-27 | 15 de 15 fases, 174 puertas pasadas, 20 registradas como no evaluables (necesitan un borde público) |
+| el mismo host | dos aplicaciones dadas de alta desde su contrato, con sus datos restaurados desde respaldos | 12 productos y 4 pedidos servidos por HTTPS |
+| el mismo host | cadena de suministro de extremo a extremo | imagen firmada admitida; imagen sin firma rechazada citando la política |
+| el mismo host | `aegis state backup` y `aegis state restore` en un segundo directorio de instancia | ida y vuelta verificada |
+| el mismo host, sucio | `aegis destroy --k3s` y un segundo `aegis init` sobre los restos | 15 de 15 fases; lo que una instancia anterior deja atrás lo detecta y repara el init |
+| la máquina del autor | la instancia de la que sale esta versión, con el perfil `cloudflare` | en uso diario |
 
-Las cifras de abajo son de esa corrida y se dejan como salieron. Dicen
-15 de 15 fases porque entonces eran quince: la fase 87, la del
-subsistema de AI, llegó el 2026-08-29. Corregirlas para que cuadren con
-el producto de hoy sería inventar una medición que nadie tomó.
+Las cifras se dejan como salieron: dicen 15 fases porque entonces eran
+quince; la 87 llegó después. La tabla completa, puerta por puerta, está
+en `docs/journeys/foreign-instance.md`.
 
-- **Instalación desde cero:** 15 de 15 fases, 174 puertas pasadas, 20
-  registradas como no evaluables (necesitan un borde público).
-- **Dos aplicaciones dadas de alta desde su contrato**, con sus datos
-  restaurados desde respaldos (12 productos, 4 pedidos) y su catálogo
-  servido por HTTPS.
-- **Cadena de suministro de extremo a extremo:** imagen firmada
-  admitida; imagen sin firma rechazada citando la política; espejo y
-  vigilancia diaria sin CVEs corregibles.
-- **Respaldo y restauración del estado** en un segundo directorio de
-  instancia: ida y vuelta verificada.
-- **Destruir y reinstalar sobre los restos:** `aegis destroy --k3s` y
-  un segundo `aegis init` sobre el mismo host sucio, 15 de 15 fases.
-  Lo que una instancia anterior deja atrás (una política de admisión
-  heredada, una CA vieja, un registro que ya no existe) ahora lo
-  detecta y lo repara el propio init.
+Esa primera corrida en máquina ajena necesitó catorce reanudaciones y
+sacó a la luz unos treinta defectos que los checks estáticos no podían
+ver. Están todos cerrados, cada uno con su check, y sus clases tienen
+nombre en `seed/platform/docs/failure-modes.md`.
 
-Esa primera corrida en máquina ajena necesitó catorce reanudaciones
-(`aegis init --from`) y sacó a la luz unos treinta defectos que los
-checks estáticos no podían ver: errores de la distancia entre el
-producto y su primera instancia real. Están todos cerrados, cada uno
-con su check, y sus clases tienen nombre en
-`seed/platform/docs/failure-modes.md`.
+## Lo que no está
 
-Lo que todavía no se ha medido: el perfil `cloudflare` en una máquina
-ajena. Con el perfil `local` sus puertas quedan registradas como no
-evaluables.
+Dicho claro, porque los checks lo dirían igual.
+
+- El perfil `cloudflare` no se ha corrido en una máquina ajena.
+- Restaurar entre instancias no es automático: el bundle viene cifrado
+  con la clave age de la instancia que lo hizo, y `restore` exige
+  `--force` cuando detecta que la credencial de la base de datos cambió.
+- Un repositorio por servicio. El monorepo no es de primera clase.
+- Kyverno solo alcanza registros firmados por la CA de la instancia; una
+  imagen pública se rechaza con un error `x509`, no con «sin firma».
+- Un solo nodo. Sin HA ni multiclúster: es una plataforma para un equipo
+  y sus proyectos, no para una flota. Un nodo de 4 CPU admite un build a
+  la vez. En memoria, la plataforma completa reserva del orden de 14 GB
+  y puede pedir el doble en sus techos, medido en una máquina el
+  2026-09-09; `aegis host budget` lo mide en la tuya.
+- Algunos identificadores dentro de la semilla siguen en español a
+  propósito. El glosario lista los pendientes.
+- El vigía de VRAM solo avisa. Cuando el escritorio y los motores se
+  quedan sin tarjeta, aegis lo dice y no baja nada.
+- El presupuesto de memoria es un piso, no un techo: lee los manifiestos
+  de la semilla, no los defaults de cada chart.
+- La consola es la del operador. Corre en loopback y se entra por un
+  túnel SSH. La del inquilino necesita Cloudflare Access con más de un
+  correo, y hoy admite uno.
+- La consola agrega y cambia, y nunca quita. Borrar un servicio es
+  `aegis org` a mano.
+- Fuera de la consola, sigue exigiendo leer.
+
+Lo próximo, en este orden y sin fechas: el perfil `cloudflare` en una
+máquina ajena; la consola del inquilino; el monorepo como caso de
+primera clase.
 
 ## Qué hay dentro
 
@@ -576,124 +496,57 @@ init/         el orquestador y sus dieciséis fases
 verify/       los checks, sus dientes, los arneses
 seed/         lo que se distribuye: el repo de plataforma, el canario, las plantillas
 share/        los códigos de salida y las unidades de systemd
-docs/         AGENTS.md (cómo cambiar esto), OPERATE.md (cómo operarlo),
-              console.md (la capa visual), el glosario, los journeys
+docs/         AGENTS.md, OPERATE.md, console.md, el glosario, los journeys
 ```
 
-Lo que corre en el clúster: k3s v1.35.4+k3s1 (sin el Traefik ni el
-servicelb de fábrica), instalado por Ansible; ArgoCD con KSOPS; Jenkins
-con jobs en código y kaniko; Trivy, cosign y Kyverno; Traefik y
-cert-manager con CA interna; cloudflared solo con el perfil
-`cloudflare`; un registro interno de imágenes con TLS de la PKI propia;
-Garage (S3) y Postgres 17 como tipos de servicio, con un bucket y una
-base de datos por organización; VictoriaMetrics, VictoriaLogs, Grafana,
-Vector, blackbox-exporter, Alertmanager y ntfy; NetworkPolicies por
-tenant (default-deny con salida DNS) y PSS restricted en el canario y en
-cada namespace de tenant. En el host: sops 3.9.4 y age 1.2.1 para el
-almacén cifrado, y OpenTofu 1.12.3 solo para el borde de Cloudflare
-(túnel, DNS y Access).
+En el clúster: k3s sin el Traefik ni el servicelb de fábrica, instalado
+por Ansible; ArgoCD con KSOPS; Jenkins con jobs en código y kaniko;
+Trivy, cosign y Kyverno; Traefik y cert-manager con CA interna;
+cloudflared solo con `cloudflare`; un registro interno de imágenes con
+TLS propio; Garage (S3) y Postgres como tipos de servicio, con un bucket
+y una base de datos por organización; VictoriaMetrics, VictoriaLogs,
+Grafana, Vector, blackbox-exporter, Alertmanager y ntfy; NetworkPolicies
+por inquilino y PSS restricted en cada namespace. Las versiones están
+fijadas en un solo lugar y `aegis update inventory` dice cuáles corren.
 
-Por dónde empezar a leer:
+Por dónde seguir leyendo:
 
-- `docs/AGENTS.md`, si vas a cambiar el producto: el método, las reglas
-  que nacieron de incidentes reales, dónde vive cada cosa.
-- `docs/OPERATE.md`, si vas a operar una instancia: estado esperado,
-  diagnóstico, qué desincronías son inofensivas, herramientas de
-  recuperación.
-- `docs/console.md`, si vas a usar la consola: sus cuatro estados, qué
-  lee, qué escribe y qué nunca hace, cómo se llega a ella y por qué no
-  se publica.
+- [docs/journeys/your-machine.md](docs/journeys/your-machine.md), si vas
+  a instalarlo con tu dominio y tu GPU.
+- [docs/OPERATE.md](docs/OPERATE.md), si vas a operar una instancia:
+  estado esperado, diagnóstico, herramientas de recuperación.
+- [docs/console.md](docs/console.md), si vas a usar la consola.
+- [docs/AGENTS.md](docs/AGENTS.md), si vas a cambiar el producto: el
+  método y las reglas que nacieron de incidentes reales.
 - `docs/glossary.md` es el vocabulario, y `aegis verify` lo hace
   cumplir.
-- `docs/journeys/your-machine.md` es el viaje de instalarlo en tu máquina con
-  tu dominio en Cloudflare y tu GPU: qué preparar, los dos momentos humanos,
-  qué mandar cuando una fase se frena.
-- `docs/journeys/foreign-instance.md` es el ensayo en máquina ajena,
-  escrito para poder repetirlo.
-- `seed/platform/docs/failure-modes.md` cataloga las clases de fallo
-  (de la A a la H) con su firma y su arreglo.
+- `seed/platform/docs/failure-modes.md` cataloga las clases de fallo con
+  su firma y su arreglo.
 - `seed/platform/docs/platform-for-developers.md` es lo que lee el
   equipo que hace push.
-
-## Lo que no está
-
-Dicho claro, porque los checks lo dirían igual.
-
-- El perfil `cloudflare` no se ha corrido en una máquina ajena.
-- Un arreglo en la semilla no llega a una instancia ya sembrada;
-  volver a sembrar una instancia viva es manual.
-- Restaurar entre instancias no es automático: el bundle viene cifrado
-  con la clave age de la instancia que lo hizo, hay que recifrarlo con
-  la clave de la nueva, y `restore` exige `--force` porque detecta que
-  la credencial de la base de datos cambió.
-- Un repositorio por servicio. El monorepo no es de primera clase, y
-  los sitios que hoy comparten repositorio llevan su Jenkinsfile
-  escrito a mano.
-- Kyverno solo alcanza registros firmados por la CA de la instancia;
-  una imagen pública se rechaza con un error `x509`, no con «sin
-  firma».
-- Un solo nodo. Sin HA ni multiclúster: es una plataforma para un
-  equipo y sus proyectos, no para una flota. En reposo reserva unas
-  2,5 CPU; un nodo de 4 CPU admite un build a la vez. En memoria, la
-  plataforma completa reserva del orden de 14 GB y puede pedir el doble
-  en sus techos: medido en UNA máquina el 2026-09-09, y por eso
-  `aegis host budget` lo vuelve a medir en la tuya en vez de que
-  confíes en esta línea.
-- Algunos identificadores dentro de la semilla siguen en español a
-  propósito: cada uno se mueve con la instancia que lo lee, y el
-  glosario lista los pendientes.
-- El vigía de VRAM sólo avisa. Cuando el escritorio y los motores se
-  quedan sin tarjeta, aegis lo dice y no baja nada: terminar la
-  inferencia de alguien para salvarle el compositor es una decisión de
-  quien está en el teclado. Y aegis no le pone freno a la GPU del
-  escritorio, que no es suya.
-- El presupuesto de memoria es un PISO de lo que se va a pedir, no un
-  techo. Lee los manifiestos de la semilla; los defaults propios de un
-  chart, para lo que la semilla no sobreescribe, viven dentro de un
-  tarball que ese recorrido no abre.
-- La consola es la del **operador**, y sólo la de él. Corre en loopback
-  y se entra por un túnel SSH; la del inquilino —una persona no técnica
-  mirando su propia organización— necesita Cloudflare Access y un túnel
-  propio, y hoy Access admite un solo correo.
-- La consola **agrega y cambia**, y nunca **quita**: no borra un
-  servicio ni una organización. Eso es `aegis org` a mano, que dice qué
-  va a hacer antes de hacerlo.
-- Fuera de la consola, sigue exigiendo leer.
-
-Lo próximo, en este orden y sin fechas: la consola del inquilino, con
-Access admitiendo a más de una persona; el perfil `cloudflare` en una
-máquina ajena, con sus puertas pasando de no evaluables a medidas; el
-monorepo como caso de primera clase.
 
 ## Sobre el idioma y el historial
 
 El producto está en inglés: código, identificadores, mensajes, la
-semilla y la documentación interna (`docs/`, `seed/platform/docs/`).
-`docs/glossary.md` decide qué palabra inglesa representa cada idea, y
-un check lo hace cumplir. Este README en español es la página principal
-por ahora; `README.en.md` es la versión en inglés, y la intención es
-que toda la documentación pública termine en inglés. El historial de
-commits está en español a propósito: es registro de trabajo, no
-producto, y se conserva tal cual porque cuenta cómo se encontró cada
-bug.
+semilla y la documentación interna. Este README en español es la página
+principal por ahora; `README.en.md` es la versión en inglés. El
+historial de commits está en español a propósito: es registro de
+trabajo, y cuenta cómo se encontró cada bug.
 
-Este historial empieza con la reconstrucción v3 y cuenta solo esa
-parte. El grueso del trabajo anterior (la versión 2, que sigue
-corriendo la instancia del autor, sus repos de plataforma y las
-sesiones que la precedieron) vive en repositorios privados, porque
-lleva la identidad de una instancia concreta. Quizá algún día se
-libere. Lo que sí conviene saber: este proyecto no salió de una sola
-sesión ni de un prompt; cada pieza de arriba tiene detrás corridas que
-fallaron y checks que nacieron de ellas.
+Este historial empieza con la reconstrucción v3. El trabajo anterior (la
+versión 2, que sigue corriendo la instancia del autor) vive en
+repositorios privados, porque lleva la identidad de una instancia
+concreta. Este proyecto no salió de una sesión ni de un prompt: cada
+pieza de arriba tiene detrás corridas que fallaron y checks que nacieron
+de ellas.
 
 ## Contribuir, seguridad, licencia
 
-- `CONTRIBUTING.md`: el método es corto y no se negocia. Un ítem, un
-  commit; un check por cada arreglo; un diente por cada check;
-  `aegis verify --profile both` en verde antes de hacer commit, y
-  `--teeth NNN` para los checks que tocaste. Nada está hecho hasta que
-  una corrida lo valida en una instancia real.
+- `CONTRIBUTING.md`: un ítem, un commit; un check por cada arreglo; un
+  diente por cada check; `aegis verify --profile both` en verde antes de
+  commitear. Nada está hecho hasta que una corrida lo valida en una
+  instancia real.
 - `SECURITY.md`: cómo reportar una vulnerabilidad en privado, con el
-  reporte privado de GitHub de este repositorio (Security, Report a
-  vulnerability), nunca por un issue público.
+  reporte privado de GitHub de este repositorio, nunca por un issue
+  público.
 - Licencia Apache, versión 2.0; ver `LICENSE`.
