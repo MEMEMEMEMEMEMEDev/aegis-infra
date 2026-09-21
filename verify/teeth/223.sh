@@ -119,6 +119,22 @@ n = s.count("-X DELETE"); assert n == 2, n
 p.write_text(s.replace("-X DELETE", "-X GET"))
 PY
 }
+# the API's pretty JSON is read raw again: Ready never matches (build #13)
+red_17() { _sub "$JF223" "| tr -d '[:space:]')\"" ")\""; }
+# the report's ternary loses its parentheses (build #13)
+red_18() { _sub "$JF223" "          echo(params.PROPAGATE ? 'all members built, signed and propagated.'" "          echo params.PROPAGATE ? 'all members built, signed and propagated.'"; }
+# type and status adjacent again: observedGeneration sits between them (build #14)
+red_19() { _sub "$JF223" "grep -qE '\"type\":\"Ready\"[^}]*\"status\":\"True\"'" "grep -q '\"type\":\"Ready\",\"status\":\"True\"'"; }
+# the token back in argv (build #14 printed it)
+red_20() { _sub "$JF223" 'k() { curl -sS --cacert $SA/ca.crt -H @"$HDR" "$@"; }' 'k() { curl -sS --cacert $SA/ca.crt -H "Authorization: Bearer $(cat $SA/token)" "$@"; }'; }
+# the trace back on
+red_21() { python3 - "$JF223" <<'PYT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+i = s.index("// ── RUN IT, before it is signed"); j = s.index("                set +x\n", i)
+p.write_text(s[:j] + s[j + len("                set +x\n"):])
+PYT
+}
 # ── controls ──
 # waiting longer is still waiting
 control_4() { _sub "$JF223" 'while [ $i -lt 45 ]; do' 'while [ $i -lt 60 ]; do'; }
