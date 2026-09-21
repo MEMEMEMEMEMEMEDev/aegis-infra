@@ -16,8 +16,10 @@ unprivileged pod, scanned, signed by digest, deployed by GitOps and
 exposed to the internet with TLS. An unsigned image does not enter the
 cluster.
 
-It does what a service like Vercel does, with one difference: the
-server, the data and the keys are yours.
+For whoever pushes, the experience resembles Vercel, with one
+difference: the server, the data and the keys are yours. For whoever
+operates it, today it is a platform engineering tool: the console for
+the product team does not exist yet.
 
 **Status: technical preview (`v3.0.0-alpha.1`).** This is a version for
 developers and platform people. The whole install has already run end

@@ -16,8 +16,10 @@ construye en un pod sin privilegios, se escanea, se firma por digest,
 se despliega por GitOps y sale a internet con TLS. Una imagen sin firma
 no entra al clúster.
 
-Hace lo que hace un servicio como Vercel, con una diferencia: el
-servidor, los datos y las llaves son tuyos.
+Para quien hace push, la experiencia se parece a Vercel, con una
+diferencia: el servidor, los datos y las llaves son tuyos. Para quien
+la opera, hoy es una herramienta de platform engineering: la consola
+para el equipo de producto todavía no existe.
 
 **Estado: avance técnico (`v3.0.0-alpha.1`).** Es una versión para
 desarrolladores y gente de plataforma. La instalación completa ya corrió
