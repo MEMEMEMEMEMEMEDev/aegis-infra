@@ -36,6 +36,17 @@ check() {
 #     Where the name cannot be read, the sub-check says so instead of
 #     passing: not being able to look is not the same as being clean.
 #
+#     A CI PLATFORM IS NOT A PERSON. The first run of the GitHub workflow
+#     (2026-09-21, run 35554189668) went red on the login `runner`: an
+#     ordinary word, and the one this tree uses for the thing that runs
+#     the checks. On a CI platform the login is the platform's service
+#     account and says nothing about anybody; the people there are the
+#     account that owns the repository and the one who pushed, and the
+#     platform hands both over by name. The repository's owner is also
+#     readable on every machine, from the origin of the clone, so it is
+#     measured everywhere: a product that quotes the account it is
+#     published from is written for its author, not for anybody.
+#
 # The RECORD (plan/, ENCARGO.md, EJECUTADO.md, Problema-*) is out of
 # scope here, unlike in 116, and the difference is deliberate: an address
 # is an address wherever it is written, but the record's whole job is to
@@ -75,10 +86,10 @@ if [[ -n "$HOMES" ]]; then
 fi
 
 # ── (2) the name of whoever runs it ─────────────────────────────────
-# A login shorter than four characters, or one that is an ordinary
-# English word, would fire on prose and teach the operator to ignore
-# this check. Those cases are declared as NOT MEASURED rather than
-# silently skipped.
+# A login shorter than four characters would fire on prose and teach the
+# operator to ignore this check. That case, the CI platform's service
+# account, and a name that cannot be read are all declared as NOT
+# MEASURED rather than silently skipped.
 _name_absent() {   # <name> <what it is>
     local name="$1" what="$2" hits
     if [[ -z "$name" ]]; then
@@ -96,8 +107,17 @@ _name_absent() {   # <name> <what it is>
     D117="$D117 the product names $what ('$name') in: $(echo "$hits" | head -3 | tr '\n' ' ')— the artifact is for anybody, and it must not carry the identity of whoever happens to be building it;"
 }
 
-_name_absent "${SUDO_USER:-${USER:-$(id -un 2>/dev/null)}}" "the login of whoever is running this"
+if [[ -n "${GITHUB_ACTIONS:-}${CI:-}" ]]; then
+    printf '    the login (%s) is the CI platform'"'"'s service account, not a person: NOT measured\n' \
+        "${USER:-$(id -un 2>/dev/null)}"
+    _name_absent "${GITHUB_ACTOR:-}" "the account that pushed this"
+else
+    _name_absent "${SUDO_USER:-${USER:-$(id -un 2>/dev/null)}}" "the login of whoever is running this"
+fi
 _name_absent "$(gh api user --jq .login 2>/dev/null || true)" "the GitHub account this machine is authenticated as"
+# the owner of the origin: `github.com/OWNER/repo` or `git@github.com:OWNER/repo`
+_name_absent "$(git -C "$AEGIS_ROOT" remote get-url origin 2>/dev/null \
+    | sed -nE 's#^.*github\.com[:/]([^/]+)/.*$#\1#p')" "the account that owns this repository's origin"
 
 printf '    %s dirs of product swept · %s identity(ies) measured\n' "${#PRODUCT_DIRS[@]}" "$N117"
 if [[ -n "$D117" ]]; then fail "the product names a person:$D117"
