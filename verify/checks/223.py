@@ -189,7 +189,11 @@ else:
         if not (i_sign != -1 and i_run < i_sign):
             findings.append("the candidate is signed before it is run: a base that dies at start-up "
                             "would already carry the signature every tenant trusts")
-        run = bbody[i_run:i_sign if i_sign != -1 else None]
+        # the whole sh block that holds the run step: from its opening
+        # quotes (set +x sits there, before the first mention of the
+        # runtime test) to the signature
+        i_run0 = bbody.rfind("sh '''", 0, i_run)
+        run = bbody[(i_run0 if i_run0 != -1 else i_run):i_sign if i_sign != -1 else None]
         for want, why in (('"runAsNonRoot":true', "a tenant pod runs as non-root"),
                           ('"readOnlyRootFilesystem":true', "a tenant's root filesystem is read-only"),
                           ('"seccompProfile":{"type":"RuntimeDefault"}', "a tenant pod carries seccomp RuntimeDefault"),
@@ -199,6 +203,32 @@ else:
                 findings.append(f"the test pod is laxer than a tenant's: {why}, and the pod spec does not say {want}")
         if '"readinessProbe"' not in run or '"tcpSocket"' not in run:
             findings.append("the test pod has no TCP readiness probe: «it started» is not «it answers»")
+        # THE API PRETTY-PRINTS for a client that is not kubectl. A compact
+        # pattern over the raw response never matches: build #13 of the
+        # house instance had its pod Ready for ninety seconds while the
+        # loop saw nothing, and failed a base that was fine (2026-09-20).
+        # A PodCondition carries fields between type and status
+        # (observedGeneration since Kubernetes 1.33): build #14 waited ninety
+        # seconds on a Ready pod because the pattern wanted them adjacent.
+        if '"type":"Ready"[^}]*"status":"True"' not in run:
+            findings.append("the run step wants type and status adjacent in the Ready condition: a "
+                            "PodCondition carries observedGeneration between them (build #14)")
+        # THE TOKEN NEVER IN ARGV. Jenkins runs sh with -x; build #14 printed
+        # the agent's bearer token into the console with every request.
+        if 'Bearer $(cat' in run or '-H "Authorization: Bearer' in run:
+            findings.append("the run step passes the service-account token in curl's argv: /proc and "
+                            "the -x trace both publish it (build #14)")
+        if "-H @" not in run:
+            findings.append("the run step does not read its Authorization header from a file")
+        if not re.search(r"^\s*set \+x\s*$", run, re.M):
+            findings.append("the run step runs under Jenkins' -x: every expansion, the token included, "
+                            "lands in the console")
+        if "tr -d '[:space:]'" not in run:
+            findings.append("the run step reads the API's JSON without compacting it first: the "
+                            "apiserver pretty-prints for curl, and «\"type\":\"Ready\"» never matches")
+        if "echo params.PROPAGATE ?" in jf:
+            findings.append("the report stage hands `params.PROPAGATE ? a : b` to echo without "
+                            "parentheses: Groovy does not read that as a ternary (build #13)")
         if "DELETE" not in run:
             findings.append("the test pod is never deleted: every build leaves one behind")
     if "serviceAccountName: base-images-agent" not in jf:

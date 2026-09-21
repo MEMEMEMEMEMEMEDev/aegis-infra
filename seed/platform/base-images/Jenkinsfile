@@ -455,6 +455,11 @@ spec:
               // requests, and a role that allows pods and nothing else.
               sh '''
                 set -e
+                # +x, on purpose: Jenkins runs every sh step with -x, and
+                # build #14 of the house instance printed the agent's
+                # service-account token into the console with every
+                # request. The lines this step means to say, it echoes.
+                set +x
                 cd "${WORKSPACE}"
                 RT="base-images/${M}/runtime-test.yaml"
                 test -f "$RT" || { echo "ERROR: $RT is missing — a base declares what proves it alive (port, writable paths, an optional command); see the other members"; exit 1; }
@@ -468,7 +473,12 @@ spec:
                 API=https://kubernetes.default.svc
                 SA=/var/run/secrets/kubernetes.io/serviceaccount
                 NS="$(cat $SA/namespace)"
-                k() { curl -sS --cacert $SA/ca.crt -H "Authorization: Bearer $(cat $SA/token)" "$@"; }
+                # the token travels in a header FILE (curl -H @file): never
+                # in argv, which /proc and a -x trace both publish
+                HDR="$(mktemp)"; chmod 600 "$HDR"
+                printf 'Authorization: Bearer %s\\n' "$(cat $SA/token)" > "$HDR"
+                trap 'rm -f "$HDR"' EXIT
+                k() { curl -sS --cacert $SA/ca.crt -H @"$HDR" "$@"; }
                 mounts=""; vols=""; i=0
                 for p in $WRITABLE; do
                   i=$((i+1))
@@ -484,10 +494,19 @@ spec:
                   echo "ERROR: the API refused the test pod (HTTP $code; is rbac-base-images-agent.yaml synced?):"
                   k -X POST -H 'Content-Type: application/json' --data-binary "$POD" "$API/api/v1/namespaces/$NS/pods" | head -c 600; echo; exit 1 ;;
                 esac
+                # THE API PRETTY-PRINTS for a client that is not kubectl:
+                # `"type": "Ready",` with spaces and newlines, which no
+                # compact pattern matches. Build #13 of the house instance
+                # (2026-09-20) had its pod Running and Ready for ninety
+                # seconds while this loop saw nothing, and failed a base
+                # that was fine. Everything is compacted before it is read.
                 ok=0; i=0
                 while [ $i -lt 45 ]; do
-                  st="$(k "$API/api/v1/namespaces/$NS/pods/$NAME")"
-                  if printf '%s' "$st" | grep -q '"type":"Ready","status":"True"'; then ok=1; break; fi
+                  st="$(k "$API/api/v1/namespaces/$NS/pods/$NAME" | tr -d '[:space:]')"
+                  # tolerant of fields between type and status: a PodCondition
+                  # carries "observedGeneration" there since Kubernetes 1.33,
+                  # and build #14 waited ninety seconds on a Ready pod for it
+                  if printf '%s' "$st" | grep -qE '"type":"Ready"[^}]*"status":"True"'; then ok=1; break; fi
                   if printf '%s' "$st" | grep -qE '"phase":"(Failed|Succeeded)"|"reason":"(CrashLoopBackOff|Error|ImagePullBackOff|ErrImagePull|CreateContainerConfigError)"'; then break; fi
                   i=$((i+1)); sleep 2
                 done
@@ -877,8 +896,12 @@ spec:
           if (FAILED) {
             error "members that failed (${FAILED.size()}): ${FAILED.join(', ')}"
           }
-          echo params.PROPAGATE ? 'all members built, signed and propagated.'
-                                : 'all members built and signed; nobody was told (PROPAGATE=false).'
+          // Parenthesised on purpose: `echo a ? b : c` is not a ternary
+          // handed to echo in Groovy's command syntax. Build #13 of the
+          // house instance failed its report stage on exactly that
+          // line, with every stage before it green (2026-09-20).
+          echo(params.PROPAGATE ? 'all members built, signed and propagated.'
+                                : 'all members built and signed; nobody was told (PROPAGATE=false).')
         }
       }
     }
