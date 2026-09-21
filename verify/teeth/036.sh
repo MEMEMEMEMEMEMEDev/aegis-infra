@@ -87,3 +87,40 @@ control_3() {
     printf '\n# note: limits are a ceiling, not a reservation.\n' \
         >> "$AEGIS_ROOT/seed/platform/k8s/base/platform/jenkins-secrets/bundle.yaml"
 }
+
+# ── 2026-09-20: both halves, every sidecar, every spelling ──────────────
+V036="$AEGIS_ROOT/seed/platform/k8s/base/platform/jenkins/values.yaml"
+G036="$AEGIS_ROOT/seed/platform/ai/engine-gpu/Jenkinsfile"
+B036="$AEGIS_ROOT/seed/platform/k8s/base/platform/jenkins-secrets/bundle.yaml"
+
+# requests are the reservation: a pod that asks for more than the quota reserves is pending for ever
+red_7() { sed -i 's/requests.cpu: "8"/requests.cpu: "4"/' "$B036"; }
+# a second sidecar with a real limit eats the 800m margin: unsummed, the check would still say fine
+red_8() { python3 - "$V036" <<'PY'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+old = "  sidecars:\n    configAutoReload:\n"
+assert s.count(old) == 1, "re-aim this tooth"
+p.write_text(s.replace(old, "  sidecars:\n    metricsExporter:\n      resources:\n        requests: {cpu: 100m, memory: 64Mi}\n        limits: {cpu: 1000m, memory: 256Mi}\n    configAutoReload:\n", 1))
+PY
+}
+# the heaviest pod rewritten in block style AND heavier: read, it is short; unread, it weighs zero and the check smiles
+red_9() { python3 - "$G036" <<'PY'
+import sys, pathlib, re
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+m = re.search(r"limits:\s*\{\s*cpu:\s*([^,]+),\s*memory:\s*([^}\s]+)\s*\}", s)
+assert m, "re-aim this tooth"
+block = "limits:\n            cpu: 7000m\n            memory: " + m.group(2)
+p.write_text(s[:m.start()] + block + s[m.end():])
+PY
+}
+# ── controls ──
+# the same numbers in block style weigh the same
+control_4() { python3 - "$G036" <<'PY'
+import sys, pathlib, re
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+m = re.search(r"limits:\s*\{\s*cpu:\s*([^,]+),\s*memory:\s*([^}\s]+)\s*\}", s)
+assert m, "re-aim this tooth"
+p.write_text(s[:m.start()] + "limits:\n            cpu: " + m.group(1).strip() + "\n            memory: " + m.group(2) + s[m.end():])
+PY
+}
