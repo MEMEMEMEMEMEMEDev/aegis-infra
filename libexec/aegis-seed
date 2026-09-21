@@ -115,7 +115,7 @@ do_apply() {
     # AND SO DO ITS DERIVED BLOCKS (the tenant jobs, the tenant probes,
     # the base consumers): the seed's structure, the instance's block.
     local state blocks; state="$(mktemp)"; blocks="$(mktemp)"
-    PYTHONPATH="$AEGIS_ROOT/lib" python3 -m aegis.seed snapshot "$PLATFORM_DIR" "$state"
+    PYTHONPATH="$AEGIS_ROOT/lib" python3 -m aegis.seed snapshot "$PLATFORM_DIR" "$state" "${paths[@]}"
     PYTHONPATH="$AEGIS_ROOT/lib" python3 -m aegis.seed block-snapshot "$PLATFORM_DIR" "$blocks" "${paths[@]}"
     seed_fetch "${paths[@]}"
     PYTHONPATH="$AEGIS_ROOT/lib" python3 -m aegis.seed block-splice "$PLATFORM_DIR" "$blocks"

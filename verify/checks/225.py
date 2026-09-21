@@ -134,6 +134,30 @@ with tempfile.TemporaryDirectory() as td:
         findings.append(f"after a copy the instance's pin (a chart at 1.2.0) is not written back: "
                         f"restored={restored!r} gone={gone!r} — a seed apply would be a downgrade")
 
+# ── 5. a pin shared by several files keeps the instance's value in the copied one ──
+# The kaniko executor tag lives in seventeen Jenkinsfiles. Copy ONE from
+# the seed and the pin-level comparison reads the same value from the
+# other sixteen and says «unchanged», while the copied file carries the
+# seed's older tag. Measured on the first real seed apply, 2026-09-20.
+with tempfile.TemporaryDirectory() as td:
+    I = pathlib.Path(td) / "inst"
+    Q = "\x27" * 3
+    line = "    image: gcr.io/kaniko-project/executor:v1.24.0-debug"
+    for rel in ("base-images/Jenkinsfile", "ci-images/Jenkinsfile"):
+        f = I / rel; f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("pipeline {\n  agent { kubernetes { yaml " + Q + "\ncontainers:\n  - name: kaniko\n"
+                     + line + "\n" + Q + " } }\n}\n")
+    before = pins.read(str(I))
+    snap = seed.pin_lines(I, before, ["base-images/Jenkinsfile"])
+    bi = I / "base-images/Jenkinsfile"
+    bi.write_text(bi.read_text().replace("v1.24.0", "v1.23.2"))
+    restored = seed.repin_lines(I, snap); driven += 1
+    if "v1.24.0-debug" not in bi.read_text():
+        findings.append(f"a pin shared by two files lost the instance's value in the copied one "
+                        f"(restored={restored!r}, snapshot={snap!r}): the seed's older tag stays in that file")
+    if (I / "ci-images/Jenkinsfile").read_text().count("v1.24.0") != 1:
+        findings.append("the per-site re-pin touched a file that was not copied")
+
 for f in findings:
     print(f)
 print(f"SCOPE: the command read for its render, its dry run and its no-push; ownership checked against "
