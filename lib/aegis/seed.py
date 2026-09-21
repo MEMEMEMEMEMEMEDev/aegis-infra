@@ -145,6 +145,61 @@ def splice_block(platform_dir, rel, instance_text_before):
     return True
 
 
+def pin_lines(platform_dir, pins_map, files):
+    """For each file about to be copied, the exact LINES that carry a pin
+    and the value they carry: {rel: [(line_text, value), …]}.
+
+    PER SITE, not per pin. A pin can live in seventeen Jenkinsfiles at
+    once (the kaniko executor tag does); `pins.read` reports one current
+    value for the pin, taken from wherever it reads first. Copy ONE of
+    those files from the seed and the pin-level comparison sees the same
+    current value in the sixteen others and says «unchanged», while the
+    copied file quietly carries the seed's older tag. Measured 2026-09-20
+    on the first real `aegis seed apply`: base-images/Jenkinsfile came
+    back on kaniko v1.23.2 beside sixteen files on v1.24.0.
+    """
+    files = {str(f) for f in files}
+    out = {}
+    for pin in pins_map.values():
+        val = pin.current or pin.digest
+        if not val:
+            continue
+        for rel, lineno in pin.where:
+            if rel not in files:
+                continue
+            f = pathlib.Path(platform_dir) / rel
+            if not f.is_file():
+                continue
+            lines = f.read_text(encoding="utf-8").splitlines()
+            if 1 <= lineno <= len(lines) and val in lines[lineno - 1]:
+                out.setdefault(rel, []).append((lines[lineno - 1], val))
+    return out
+
+
+def repin_lines(platform_dir, snapshot):
+    """After the copy: every line that is the old pin line with only the
+    token changed gets the old line back. Returns what was restored."""
+    restored = []
+    for rel, entries in snapshot.items():
+        f = pathlib.Path(platform_dir) / rel
+        if not f.is_file():
+            continue
+        text = f.read_text(encoding="utf-8")
+        lines = text.splitlines(keepends=True)
+        for old_line, val in entries:
+            if any(ln.rstrip("\n") == old_line for ln in lines):
+                continue                                   # still there
+            pat = re.compile("^" + re.escape(old_line).replace(re.escape(val), r"(\S+)") + "$")
+            for i, ln in enumerate(lines):
+                m = pat.match(ln.rstrip("\n"))
+                if m and m.group(1) != val:
+                    lines[i] = old_line + ("\n" if ln.endswith("\n") else "")
+                    restored.append(f"{rel}: {m.group(1)} → {val}")
+                    break
+        f.write_text("".join(lines), encoding="utf-8")
+    return restored
+
+
 def repin(platform_dir, before, files):
     """Put the instance's pins back into `files` after a seed copy.
 
@@ -261,14 +316,18 @@ if __name__ == "__main__":
                 print(f"derived block kept: {rel}")
     elif verb == "snapshot":
         before = pins.read(str(platform))
-        state.write_text(json.dumps({k[0] + ":" + k[1]: {"cls": p.cls, "name": p.name, "current": p.current,
-                                                          "digest": p.digest, "where": p.where}
-                                     for k, p in before.items()}))
+        state.write_text(json.dumps({"pins": {k[0] + ":" + k[1]: {"cls": p.cls, "name": p.name, "current": p.current,
+                                                                  "digest": p.digest, "where": p.where}
+                                             for k, p in before.items()},
+                                     "lines": pin_lines(platform, before, sys.argv[4:])}))
     elif verb == "repin":
         raw = json.loads(state.read_text())
         before = {(v["cls"], v["name"]): pins.Pin(v["cls"], v["name"], v["current"],
                                                   [tuple(w) for w in v["where"]], v["digest"])
-                  for v in raw.values()}
+                  for v in raw["pins"].values()}
+        # lines first (per site), then the pin model (what the lines missed)
+        for r in repin_lines(platform, raw.get("lines", {})):
+            print(f"repin: {r}")
         restored, gone = repin(platform, before, sys.argv[4:])
         for r in restored:
             print(f"repin: {r}")

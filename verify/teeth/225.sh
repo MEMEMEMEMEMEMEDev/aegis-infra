@@ -26,6 +26,8 @@ red_6() { _s225 "$C225" '    if owned="$(PYTHONPATH="$AEGIS_ROOT/lib" python3 -m
 red_7() { _s225 "$C225" '    printf '"'"'%sread it (git -C %s show), then push it: ArgoCD reads the remote%s\n'"'"' "$gray" "$PLATFORM_DIR" "$reset"' '    git -C "$PLATFORM_DIR" push'; }
 # a PEM the instance carries reads as a seed change
 red_8() { _s225 "$S225" '    text = _PEM.sub(r"\1__PEM__", text)' '    pass'; }
+# the per-site re-pin is gone: a copied file keeps the seed's older tag beside sixteen newer ones
+red_9() { _s225 "$S225" '                    lines[i] = old_line + ("\n" if ln.endswith("\n") else "")' '                    pass'; }
 # ── controls ──
 control_1() { _s225 "$S225" '# GENERATED placeholders: rendered by a phase, not by the config' '# GENERATED placeholders (a phase writes them, not the config render)'; }
 control_2() { _s225 "$S225" '    "k8s/base/ai-system/prompts.yaml", "mirror-images/trivyignore.yaml",' '    "k8s/base/ai-system/prompts.yaml", "mirror-images/trivyignore.yaml", "notes/*",'; }
