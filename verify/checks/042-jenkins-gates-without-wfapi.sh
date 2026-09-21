@@ -5,7 +5,10 @@ check() {
 # stage-STEP and stage-tags-metadata ones are OTHER plugins) → an
 # eternal 404 with the system working fine. The gates go through the
 # core (/api/json) and the build console:
-BAD42="$(grep -rn '/wfapi/' "$PHASES" "$AEGIS_ROOT/init/lib" \
+# `init/lib` is a v2 path: the product keeps its libraries in `lib/`, and a
+# grep over a directory that does not exist wrote «No such file» into
+# every CI log (first run, 2026-09-21) while measuring nothing there.
+BAD42="$(grep -rn '/wfapi/' "$PHASES" "$AEGIS_ROOT/lib" \
     | nc_hits || true)"
 AL_BODY="$(body_of _antiloop_skipped "$PHASES/70-deploy-auto.sh" \
     | nc)"
