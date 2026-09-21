@@ -29,6 +29,23 @@ red_3() { _180_add "- Tras \`--force\`, el rol de la base de datos se realinea a
 # that needs the private age key for work that no longer needs it.
 red_4() { _180_add "- \`aegis secret create\` no deriva la copia por namespace de la credencial del registro."; }
 
+# `seed apply` brings a seed change to a living instance; the README said
+# the opposite for a day after it shipped (2026-09-20).
+red_5() { _180_add "- Un arreglo en la semilla no llega a una instancia ya sembrada; volver a sembrar es manual."; }
+
+# the English page is read too: the same denied claim, in the other
+# language, in the other file
+_180_add_en() { python3 - "$AEGIS_ROOT/README.en.md" "$1" <<'PYEOF'
+import re, sys
+p, linea = sys.argv[1], sys.argv[2]
+s = open(p, encoding="utf-8").read()
+anchor = "- The `cloudflare` profile has not been run on a foreign machine.\n"
+assert s.count(anchor) == 1
+open(p, "w", encoding="utf-8").write(s.replace(anchor, anchor + linea + "\n", 1))
+PYEOF
+}
+red_6() { _180_add_en "- A fix to the seed does not reach an instance that was already seeded."; }
+
 # control: a gap that IS real. A check that turned red on any honest
 # declaration would push the artifact to stop declaring its gaps, which
 # is the opposite of what this section is for.
