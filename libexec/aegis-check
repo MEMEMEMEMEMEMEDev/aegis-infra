@@ -194,6 +194,7 @@ red=$'\033[31m'; green=$'\033[32m'; yellow=$'\033[33m'; gray=$'\033[90m'; reset=
 [[ -t 1 ]] || { red=""; green=""; yellow=""; gray=""; reset=""; }
 
 failures=0; notices=0
+noteval=0    # the fourth outcome, counted apart: it decides the rc
 
 # ── --json: the round, readable by a machine ───────────────────────
 # The narration below is for people and it stays exactly as it is. What
@@ -211,8 +212,12 @@ failures=0; notices=0
 #     from the middle of section 1 when kubectl does not answer, and a
 #     round that says nothing when it could not look is the disease
 #     this whole command exists to treat.
-# THE rc DOES NOT CHANGE. The document carries the process rc — 0 or 1,
-# as always — and the trap reads it, it does not decide it.
+# THE rc IS THE PROCESS rc, and the trap reads it, it does not decide
+# it. Since 2026-09-20 it can be 2: a round with a measure it could not
+# take exits 2, and 2 dominates 1 (lib/aegis/outcomes.py), because a
+# «1» that hides an unmeasured section is the same lie as a «0» that
+# does. Until then this command returned 0 or 1 only, counted the
+# could-not-look notices with the others, and its rc lied every day.
 _rec() { :; }
 if [[ -n "$JSON_MODE" ]]; then
     _REC="$(mktemp -t aegis-check-json.XXXXXX)"
@@ -266,7 +271,7 @@ ok()     { printf '  %s✓%s %s\n' "$green" "$reset" "$*"; _rec good "$*"; }
 bad()    { printf '  %s✗%s %s\n' "$red"   "$reset" "$*"; _rec bad "$*"; failures=$((failures + 1)); }
 # A notice that says it could not look is the fourth outcome, not a
 # warning; the record keeps the two apart even though the prose does not.
-notice() { printf '  %s!%s %s\n' "$yellow" "$reset" "$*"; case "$*" in "COULD NOT EVALUATE"*|"NOT EVALUATED"*|*"NOT EVALUATED"*) _rec not-evaluated "$*" ;; *) _rec notice "$*" ;; esac; notices=$((notices + 1)); }
+notice() { printf '  %s!%s %s\n' "$yellow" "$reset" "$*"; case "$*" in "COULD NOT EVALUATE"*|"NOT EVALUATED"*|*"NOT EVALUATED"*) _rec not-evaluated "$*"; noteval=$((noteval + 1)) ;; *) _rec notice "$*" ;; esac; notices=$((notices + 1)); }
 note()   { printf '    %s%s%s\n' "$gray" "$*" "$reset"; _rec note "$*"; }
 heading(){ printf '\n%s\n' "$*"; _rec section "$*"; }
 
@@ -439,6 +444,22 @@ all_apps=$(kubectl get applications -n argocd --no-headers \
            2>/dev/null)
 n_apps=$(printf '%s' "$all_apps" | grep -c . )
 desync=$(printf '%s\n' "$all_apps" | grep -v 'Synced  *Healthy' | grep -v '^$')
+# EVERY CONTRACT HAS ITS AppProject. `aegis org apply` renders
+# k8s/bootstrap/appprojects-tenants.yaml and touches no cluster; only
+# phase 35 applies that file, and phase 35 runs when there are zero
+# contracts. An organization signed up afterwards has an AppProject in
+# git and none in the cluster until somebody applies the file: its apps
+# are refused with a message about a project that does not exist.
+for _c in "$PLATFORM_DIR"/orgs/*.yaml; do
+    [[ -f "$_c" ]] || continue
+    _o="$(python3 -c 'import sys,yaml; print((yaml.safe_load(open(sys.argv[1])) or {}).get("organizacion",""))' "$_c" 2>/dev/null)"
+    [[ -n "$_o" ]] || continue
+    if kubectl get appproject "aegis-tenant-$_o" -n argocd >/dev/null 2>&1; then
+        ok "AppProject aegis-tenant-$_o exists for orgs/$(basename "$_c")"
+    else
+        bad "orgs/$(basename "$_c") has no AppProject aegis-tenant-$_o in the cluster: its apps cannot sync (kubectl apply -f $PLATFORM_DIR/k8s/bootstrap/appprojects-tenants.yaml)"
+    fi
+done
 if [[ -z "$desync" ]]; then
     ok_if_measured "$n_apps" "the $n_apps apps Synced + Healthy" \
                  "the state of the ArgoCD Applications"
@@ -1577,6 +1598,13 @@ fi
 
 # ── verdict ───────────────────────────────────────────────────────
 printf '\n'
+# 2 DOMINATES 1: a round that could not take a measure has not
+# measured, whatever else it found. The failures are still printed and
+# still recorded; the rc says the strongest thing that is true.
+if [[ ${noteval:-0} -gt 0 ]]; then
+    printf '%s%d measure(s) could not be evaluated%s, %d failure(s), %d notice(s)\n' "$yellow" "$noteval" "$reset" "$failures" "$notices"
+    exit 2
+fi
 if [[ $failures -gt 0 ]]; then
     printf '%s%d failure(s)%s, %d notice(s)\n' "$red" "$failures" "$reset" "$notices"
     exit 1

@@ -376,10 +376,14 @@ def layer_apt(ctx, layer, before_round):
     diagnosable, which is that nothing else had changed.
     """
     doc = before_round.get("doc") or {}
-    if before_round.get("rc") not in (0, None):
-        return {"aplicada": False, "por_que": "the round came in red, and this is the one "
-                                              "layer with no way back: it does not run on "
-                                              "top of an instance that is already wrong"}
+    rc = before_round.get("rc")
+    if rc not in (0, None):
+        return {"aplicada": False,
+                "por_que": ("the round could not evaluate everything (rc 2)" if rc == 2 else
+                            "the round came in red (rc 1)")
+                           + ", and this is the one layer with no way back: it does not run "
+                             "on top of an instance that is wrong, or that nobody could "
+                             "fully look at"}
     data, why = upstream.apt_upgradable()
     if data is None:
         return {"aplicada": False, "por_que": f"apt could not be asked: {why}"}
