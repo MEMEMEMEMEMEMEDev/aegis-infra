@@ -1,0 +1,53 @@
+# The product verifies itself on every push and pull request: the whole
+# static suite in both profiles, and the TEETH of every check the change
+# touches. Until 2026-09-20 nothing ran `aegis verify` on its own between
+# runs — the tree rotted between two human runs, and six broken teeth
+# were found only when somebody ran them all by hand (2026-09-14).
+#
+# What this does NOT do, on purpose: it never talks to a cluster, a
+# registry or a cloud, and it never renders the real charts (`--with-charts`
+# asks the chart repositories; a network flake would read as a red
+# product). Those are the operator's runs, on an instance.
+name: verify
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # the teeth of a PR need the base to know which checks changed
+      - name: the tools the checks drive (python+yaml, jq; no cluster, no cloud)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q python3-yaml jq
+      - name: aegis verify --profile both
+        run: ./bin/aegis verify --profile both
+      - name: the teeth of every check this change touches
+        if: github.event_name == 'pull_request'
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          changed="$(git diff --name-only "$base"...HEAD -- verify/checks verify/teeth | grep -oE '(^|/)[0-9]{3}[^/]*' | grep -oE '^/?[0-9]{3}' | tr -d / | sort -u)"
+          if [[ -z "$changed" ]]; then echo "no check changed: no teeth to run"; exit 0; fi
+          for n in $changed; do
+            echo "══ teeth $n ══"
+            ./bin/aegis verify --teeth "$n"
+          done
+  secrets:
+    # NOTHING THAT LOOKS LIKE A SECRET LEAVES IN A COMMIT. The one
+    # GitGuardian finding this repo has had (2026-08-29) was a false
+    # positive on a fabricated token; the checks now fabricate at run
+    # time. A scanner here is the cheap second opinion, on every push.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
