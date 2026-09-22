@@ -20,7 +20,7 @@ red_2() { _sub224 "$PH224" 'run_cmd install -m 644 "$AEGIS_ROOT/share/systemd/$_
 # no linger: the clocks stop when the operator logs out
 red_3() { _sub224 "$PH224" 'run_cmd sudo loginctl enable-linger "$USER"' ':'; }
 # the phase gates on «enabled» only
-red_4() { _sub224 "$PH224" "timer_next_elapse --user \"\$c.timer\" >/dev/null || exit 1" "systemctl --user is-active \"\$c.timer\" >/dev/null || exit 1"; }
+red_4() { _sub224 "$PH224" "timer_next_elapse --user \"\$c.timer\" >/dev/null || return 1" "systemctl --user is-active \"\$c.timer\" >/dev/null || return 1"; }
 # the window puts the timer back and stops reading a next run (error nº 13)
 red_5() { python3 - "$WN224" <<'PY'
 import sys, pathlib, re
@@ -41,6 +41,9 @@ red_9() { _sub224 "$PH224" 'run_cmd sudo ln -sfn "$AEGIS_ROOT/share" /usr/local/
 
 # ── controls ──
 # a different calendar is still a calendar
+# the gate as it was on 2026-09-22: measured the second after enable --now
+red_10() { _sub224 "$PH224" '        wait_for 120 3 "the three user clocks have a next run" _clocks_scheduled' '        _clocks_scheduled'; }
+
 control_1() { _sub224 "$TM224" "OnCalendar=daily" "OnCalendar=*-*-* 03:00:00"; }
 # the phase's prose is prose
 control_2() { _sub224 "$PH224" "# linger: or the clocks stop the moment the operator logs out" "# linger, so the clocks keep running after logout"; }

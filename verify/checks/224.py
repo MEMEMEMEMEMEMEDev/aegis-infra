@@ -60,6 +60,14 @@ if not re.search(r"^\s*run_cmd\s+sudo\s+ln\s+-sfn\s+\"\$AEGIS_ROOT/share\"\s+/us
                     "(/usr/local/share/aegis)")
 if "timer_next_elapse" not in ph:
     findings.append("phase 05 gates on «enabled» and never on a next run")
+# the gate converges before it measures: `enable --now` on a machine
+# past OnBootSec fires the timers that second, and a running service has
+# no next elapse yet (first Vultr VM of the lab, 2026-09-22)
+_g = re.search(r'gate\s+"user-clocks-have-a-next-run"\s*\\?\s*\n?\s*(.*)', ph)
+if not _g or not _g.group(1).lstrip().startswith("wait_for "):
+    findings.append("phase 05 measures the clocks' next run the second after `enable --now`: a "
+                    "timer that just fired has none yet, and the gate fails a healthy machine "
+                    "(converge with wait_for first)")
 # anchored on code, not on a comment: nc() strips the comments
 tail = ph.split("CLOCKS=(", 1)[1] if "CLOCKS=(" in ph else ""
 if "gate_red" not in tail[:4000]:
