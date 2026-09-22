@@ -46,7 +46,7 @@ para el operador; la consola del inquilino todavía no existe.
 - **Recuperación ensayada.** Respaldo y restauración del estado y de los
   datos, rotación de cada credencial que el init genera, y `aegis
   destroy` para deshacerlo todo.
-- **Un verificador.** 235 checks estáticos miden este repositorio sin
+- **Un verificador.** 236 checks estáticos miden este repositorio sin
   clúster (`aegis verify --list` los cuenta). Cada uno lleva su
   *diente*: una mutación que demuestra que el check falla cuando debe.
   `aegis check` hace lo mismo contra el clúster vivo.
@@ -55,7 +55,7 @@ para el operador; la consola del inquilino todavía no existe.
 
 | | |
 |---|---|
-| **Host** | Linux con `sudo`. Probado en Ubuntu; el playbook exige Ubuntu 24.04 o superior con systemd. El preflight instala lo que falta con `apt`. |
+| **Host** | **Ubuntu 24.04 o superior**, con `sudo`. Otras distribuciones (Arch, CachyOS, Fedora, Debian, Mint, Pop!_OS) se rechazan antes de tocar nada: aegis usa `apt` y los valores por defecto de Ubuntu. |
 | **Recursos** | 4 CPU y 8 GB de RAM alcanzan (avisa por debajo de 7 GB). 25 GB libres en `/`. `aegis host measure` mide tu máquina; `aegis host budget` dice si lo que la plataforma reserva entra en lo que la máquina deja. |
 | **Si compartes la máquina** | Con sesión gráfica, aegis reserva un piso de memoria para el escritorio y no lo toca. `aegis host floor --set` lo cambia. |
 | **GPU (opcional)** | Para el carril de GPU de la AI: una NVIDIA con driver 570 o superior. Se comparte con tu escritorio; `aegis host show` dice cuánta VRAM hay. |
@@ -255,7 +255,7 @@ flowchart LR
         direction TB
         p1["bin/ libexec/ lib/<br/>los comandos"]
         p2["init/<br/>las dieciséis fases"]
-        p3["verify/<br/>235 checks y sus dientes"]
+        p3["verify/<br/>236 checks y sus dientes"]
         p4["seed/<br/>lo que se distribuye"]
     end
     subgraph I["la instancia: ~/aegis, estado vivo"]
@@ -326,7 +326,7 @@ escanear todo cada día.
   (`aegis verify --teeth`).
 - El producto no nombra máquinas ni personas. Dos checks lo vigilan.
 
-![Salidas reales: aegis init --list con las dieciséis fases pasadas y aegis verify con 235 checks en verde en los dos perfiles](docs/assets/terminal.svg)
+![Salidas reales: aegis init --list con las dieciséis fases pasadas y aegis verify con 236 checks en verde en los dos perfiles](docs/assets/terminal.svg)
 
 ## La consola
 

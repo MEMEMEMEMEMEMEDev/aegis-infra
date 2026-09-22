@@ -4,6 +4,25 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-22 — a machine aegis cannot install on is refused first
+
+- **The host is the first question**, in `aegis preflight` (before its
+  first `sudo`), in `aegis init` (before the phase loop, so `--from` and
+  `--only` cannot walk around it) and at the top of phase 00 (before the
+  wizard). The rule is Ubuntu 24.04 or newer, the same one the phase 20
+  playbook asserts, and it lives in `lib/host.sh`. Until today the only
+  refusal was that playbook: on a CachyOS machine the preflight had
+  already written a sudoers drop-in and switched IPv6 off, the wizard had
+  asked every question, and phase 00 had only warned.
+- **If you ran aegis on another distribution before this commit**, what
+  it may have left: `/etc/sudoers.d/010-aegis-init-nopasswd`,
+  `/etc/sysctl.d/99-disable-ipv6.conf` (plus IPv6 off until reboot or
+  `sysctl -w`), `/usr/local/bin/k3s*` (remove with
+  `k3s-uninstall.sh`), `~/aegis/`, the age key in
+  `~/.config/sops/age/aegis.key`; outside the machine, two GitHub
+  repositories with the topic `aegis-v2-disposable` and, with
+  `cloudflare`, API tokens whose names start with `aegis`.
+
 ## 2026-09-21 — the front page, and main under CI
 
 - **Both READMEs rewritten as one document in two languages**, section

@@ -47,7 +47,7 @@ console for the operator; the tenant's console does not exist yet.
 - **Recovery, rehearsed.** Backup and restore of the state and of the
   data, rotation of every credential the init generates, and `aegis
   destroy` to undo it all.
-- **A verifier.** 235 static checks measure this repository without a
+- **A verifier.** 236 static checks measure this repository without a
   cluster (`aegis verify --list` counts them). Each one carries its
   *tooth*: a mutation that proves the check fails when it should.
   `aegis check` does the same against the live cluster.
@@ -56,7 +56,7 @@ console for the operator; the tenant's console does not exist yet.
 
 | | |
 |---|---|
-| **Host** | Linux with `sudo`. Run on Ubuntu; the playbook requires Ubuntu 24.04 or newer with systemd. The preflight installs what is missing with `apt`. |
+| **Host** | **Ubuntu 24.04 or newer**, with `sudo`. Other distributions (Arch, CachyOS, Fedora, Debian, Mint, Pop!_OS) are refused before anything is touched: aegis uses `apt` and Ubuntu's defaults. |
 | **Resources** | 4 CPU and 8 GB of RAM are enough (it warns below 7 GB). 25 GB free on `/`. `aegis host measure` measures your machine; `aegis host budget` says whether what the platform reserves fits in what the machine leaves. |
 | **If you share the machine** | With a graphical session, aegis reserves a floor of memory for the desktop and does not touch it. `aegis host floor --set` changes it. |
 | **GPU (optional)** | For the AI's GPU lane: an NVIDIA card with driver 570 or newer. It is shared with your desktop; `aegis host show` says how much VRAM there is. |
@@ -258,7 +258,7 @@ flowchart LR
         direction TB
         p1["bin/ libexec/ lib/<br/>the commands"]
         p2["init/<br/>the sixteen phases"]
-        p3["verify/<br/>235 checks and their teeth"]
+        p3["verify/<br/>236 checks and their teeth"]
         p4["seed/<br/>what ships"]
     end
     subgraph I["the instance: ~/aegis, living state"]
@@ -329,7 +329,7 @@ re-scans everything daily.
   (`aegis verify --teeth`).
 - The product names no machine and no person. Two checks watch that.
 
-![Real outputs: aegis init --list with all sixteen phases passed, and aegis verify with 235 checks green in both profiles](docs/assets/terminal.en.svg)
+![Real outputs: aegis init --list with all sixteen phases passed, and aegis verify with 236 checks green in both profiles](docs/assets/terminal.en.svg)
 
 ## The console
 
