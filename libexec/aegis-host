@@ -234,8 +234,18 @@ def probe_shared_with_a_human():
     The rule is written down rather than voted on, and it errs on the
     side of "yes":
 
-      · `graphical.target` is active, OR
+      · `graphical.target` is active AND a display manager is installed
+        (`display-manager.service` loads), OR
       · a login session holds a seat and is not remote.
+
+    `graphical.target` alone is NOT a desktop. Cloud images boot into it
+    with nothing graphical installed: the first Vultr VM of the lab
+    (Ubuntu 26.04, 2026-09-22) had it active and no gdm, sddm or lightdm,
+    and this probe called it shared — reserving memory for a desktop that
+    did not exist, on a 15 GB machine. A display manager is what puts a
+    login screen in front of somebody; without one nobody can sit down.
+    When the display manager cannot be asked, the verdict stays the timid
+    one (shared), as before.
 
     A `graphical.target` that is up with nobody logged in STILL counts
     as shared. The freeze this product is trying to prevent happens
@@ -258,6 +268,21 @@ def probe_shared_with_a_human():
             state = out.stdout.strip()
             evidence.append(f"graphical.target is {state or 'unreadable'}")
             verdict = (state == "active")
+            if verdict:
+                dm = subprocess.run(
+                    ["systemctl", "show", "-p", "LoadState", "display-manager.service"],
+                    capture_output=True, text=True, timeout=10).stdout.strip()
+                load = dm.split("=", 1)[1] if dm.startswith("LoadState=") else ""
+                if load == "not-found":
+                    evidence.append("but no display manager is installed "
+                                    "(display-manager.service not found): a server "
+                                    "image's default target, not a desktop")
+                    verdict = False
+                elif load == "loaded":
+                    evidence.append("and a display manager is installed")
+                else:
+                    evidence.append("and whether a display manager is installed "
+                                    "could not be read: counted as shared")
         except (OSError, subprocess.SubprocessError):
             pass
 
