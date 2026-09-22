@@ -4,6 +4,15 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-22 — Zero Trust dormant, found before the edge is built
+
+- **Phase 25 asks whether Cloudflare Access is enabled** before it
+  creates a tunnel, a DNS record or a policy. A brand new Cloudflare
+  account has Zero Trust dormant and answers 403 «not_enabled» to every
+  Access call; the first cloud instance found out in the middle of `tofu
+  apply`. The refusal names the page that switches it on, and both
+  READMEs and the journey now say it belongs in the preparation.
+
 ## 2026-09-22 — the valve's probe can say yes
 
 - **Phase 20 no longer withdraws a reservation that was working.** The

@@ -47,7 +47,7 @@ console for the operator; the tenant's console does not exist yet.
 - **Recovery, rehearsed.** Backup and restore of the state and of the
   data, rotation of every credential the init generates, and `aegis
   destroy` to undo it all.
-- **A verifier.** 239 static checks measure this repository without a
+- **A verifier.** 240 static checks measure this repository without a
   cluster (`aegis verify --list` counts them). Each one carries its
   *tooth*: a mutation that proves the check fails when it should.
   `aegis check` does the same against the live cluster.
@@ -62,7 +62,7 @@ console for the operator; the tenant's console does not exist yet.
 | **GPU (optional)** | For the AI's GPU lane: an NVIDIA card with driver 570 or newer. It is shared with your desktop; `aegis host show` says how much VRAM there is. |
 | **Network** | Outbound internet over IPv4, a clock on time, IPv6 off. The preflight probes and fixes what it can. |
 | **GitHub** | An account with `gh auth login` done and a git identity configured. The init creates two repositories (platform and canary) and later one per application. A dedicated account or organization is the most comfortable. |
-| **Cloudflare (optional)** | A zone in your account, for the `cloudflare` profile: public hostnames, a tunnel and TLS from Let's Encrypt. Without it, the `local` profile brings up the same platform on names that resolve to the host, with TLS from the instance's own CA. |
+| **Cloudflare (optional)** | A zone in your account and **Zero Trust switched on** (free, once, at one.dash.cloudflare.com), for the `cloudflare` profile: public hostnames, a tunnel, TLS from Let's Encrypt and the consoles behind Access. Without it, the `local` profile brings up the same platform on names that resolve to the host, with TLS from the instance's own CA. |
 
 What to have at hand:
 
@@ -258,7 +258,7 @@ flowchart LR
         direction TB
         p1["bin/ libexec/ lib/<br/>the commands"]
         p2["init/<br/>the sixteen phases"]
-        p3["verify/<br/>239 checks and their teeth"]
+        p3["verify/<br/>240 checks and their teeth"]
         p4["seed/<br/>what ships"]
     end
     subgraph I["the instance: ~/aegis, living state"]
@@ -329,7 +329,7 @@ re-scans everything daily.
   (`aegis verify --teeth`).
 - The product names no machine and no person. Two checks watch that.
 
-![Real outputs: aegis init --list with all sixteen phases passed, and aegis verify with 239 checks green in both profiles](docs/assets/terminal.en.svg)
+![Real outputs: aegis init --list with all sixteen phases passed, and aegis verify with 240 checks green in both profiles](docs/assets/terminal.en.svg)
 
 ## The console
 

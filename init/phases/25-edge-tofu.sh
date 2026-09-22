@@ -232,6 +232,30 @@ else
     ( umask 077; printf 'header = "Authorization: Bearer %s"\n' "$(cat "$CF_API")" > "$_cf_cfg" )
     _cf() { curl -sS -K "$_cf_cfg" -H 'Content-Type: application/json' "$@"; }
     CFB="https://api.cloudflare.com/client/v4"
+
+    # ACCESS IS TURNED ON ONCE, BY A HUMAN, IN THE DASHBOARD. A brand new
+    # Cloudflare account has Zero Trust dormant, and every Access call
+    # answers 403 «access.api.error.not_enabled». The first cloud
+    # instance (2026-09-22) found out in the MIDDLE of `tofu apply`,
+    # after the tunnel module had already run: the apply died with the
+    # policies half created. Asked here, before a single resource is
+    # touched, and with the page that fixes it.
+    _access_enabled() {
+        local out
+        out="$(_cf "$CFB/accounts/$CF_ACCOUNT_ID/access/organizations" 2>/dev/null || true)"
+        if [[ -z "$out" ]]; then
+            log_warn "Cloudflare did not answer about Access: NOT measured"
+            return 0
+        fi
+        if grep -q 'not_enabled' <<< "$out"; then
+            log_error "Cloudflare Access (Zero Trust) is NOT enabled in this account, and phases 25, 35 and 60 put the operator consoles behind it."
+            log_error "  Enable it once, it is free: https://one.dash.cloudflare.com/ -> choose a team domain -> Zero Trust Free"
+            log_error "  Then resume: ${AEGIS_CMD:-aegis} init --from 25-edge-tofu"
+            return 1
+        fi
+        grep -q '"success"[[:space:]]*:[[:space:]]*true' <<< "$out"
+    }
+    gate "access-habilitado" _access_enabled
     TID_PREV="$(_cf "$CFB/accounts/$CF_ACCOUNT_ID/cfd_tunnel?name=$TUNNEL_NAME&is_deleted=false" \
                 | jq -r '.result[0].id // empty')"
     CNAMES_PREV=()
