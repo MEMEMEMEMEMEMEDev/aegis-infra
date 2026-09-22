@@ -4,6 +4,17 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-22 — a server image is not a desktop
+
+- **`aegis host` no longer reserves memory for a desktop that does not
+  exist.** It took `graphical.target` alone as proof that a human shares
+  the machine, and cloud images boot into it with nothing graphical
+  installed (the first Vultr VM of the lab: Ubuntu 26.04, no gdm, sddm
+  or lightdm). Now a machine is shared when a display manager is
+  installed or a local session holds a seat; an unreadable display
+  manager still counts as shared. An instance already installed on a
+  VPS keeps the floor it derived: `aegis host floor --set` changes it.
+
 ## 2026-09-22 — a machine aegis cannot install on is refused first
 
 - **The host is the first question**, in `aegis preflight` (before its
