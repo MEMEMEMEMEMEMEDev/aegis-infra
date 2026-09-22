@@ -46,7 +46,7 @@ para el operador; la consola del inquilino todavía no existe.
 - **Recuperación ensayada.** Respaldo y restauración del estado y de los
   datos, rotación de cada credencial que el init genera, y `aegis
   destroy` para deshacerlo todo.
-- **Un verificador.** 239 checks estáticos miden este repositorio sin
+- **Un verificador.** 240 checks estáticos miden este repositorio sin
   clúster (`aegis verify --list` los cuenta). Cada uno lleva su
   *diente*: una mutación que demuestra que el check falla cuando debe.
   `aegis check` hace lo mismo contra el clúster vivo.
@@ -61,7 +61,7 @@ para el operador; la consola del inquilino todavía no existe.
 | **GPU (opcional)** | Para el carril de GPU de la AI: una NVIDIA con driver 570 o superior. Se comparte con tu escritorio; `aegis host show` dice cuánta VRAM hay. |
 | **Red** | Salida a internet por IPv4, reloj en hora, IPv6 apagado. El preflight sondea y corrige lo que puede. |
 | **GitHub** | Una cuenta con `gh auth login` hecho e identidad git configurada. El init crea dos repositorios (plataforma y canario) y después uno por aplicación. Una cuenta u organización dedicada es lo más cómodo. |
-| **Cloudflare (opcional)** | Una zona en tu cuenta, para el perfil `cloudflare`: hostnames públicos, túnel y TLS de Let's Encrypt. Sin ella, el perfil `local` levanta la misma plataforma sobre nombres que resuelven al host, con TLS de la CA propia. |
+| **Cloudflare (opcional)** | Una zona en tu cuenta y **Zero Trust encendido** (gratis, una vez, en one.dash.cloudflare.com), para el perfil `cloudflare`: hostnames públicos, túnel, TLS de Let's Encrypt y las consolas detrás de Access. Sin ella, el perfil `local` levanta la misma plataforma sobre nombres que resuelven al host, con TLS de la CA propia. |
 
 Qué tener a mano:
 
@@ -255,7 +255,7 @@ flowchart LR
         direction TB
         p1["bin/ libexec/ lib/<br/>los comandos"]
         p2["init/<br/>las dieciséis fases"]
-        p3["verify/<br/>239 checks y sus dientes"]
+        p3["verify/<br/>240 checks y sus dientes"]
         p4["seed/<br/>lo que se distribuye"]
     end
     subgraph I["la instancia: ~/aegis, estado vivo"]
@@ -326,7 +326,7 @@ escanear todo cada día.
   (`aegis verify --teeth`).
 - El producto no nombra máquinas ni personas. Dos checks lo vigilan.
 
-![Salidas reales: aegis init --list con las dieciséis fases pasadas y aegis verify con 239 checks en verde en los dos perfiles](docs/assets/terminal.svg)
+![Salidas reales: aegis init --list con las dieciséis fases pasadas y aegis verify con 240 checks en verde en los dos perfiles](docs/assets/terminal.svg)
 
 ## La consola
 

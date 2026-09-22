@@ -19,6 +19,7 @@ the product.
 
 | thing | why |
 |---|---|
+| **Cloudflare Zero Trust switched on** in that account (once, free): https://one.dash.cloudflare.com/ → choose a team domain → Zero Trust Free. aegis puts the operator consoles behind Access, and a brand new account has it dormant | phase 25 refuses before it creates anything if it is off |
 | Ubuntu (24.04 or newer; any other system is refused by `aegis preflight` before it touches anything), a user with sudo, ~30 GB free on `/`, a GPU whose driver answers `nvidia-smi` | phase 00 measures all four and stops before anything runs if one is missing. The driver is the operating system's: `sudo ubuntu-drivers install`, reboot. |
 | a zone in Cloudflare (`example.com` you control), its **Account ID** and **Zone ID** | the edge: a tunnel, DNS records, Access in front of the operator consoles. Both IDs are on the zone's overview page; they are not secrets. |
 | a **Cloudflare master credential**, pasted ONCE in phase 15 and destroyed in tmpfs | the init mints its own scoped tokens from it (DNS, API, Access) so that nothing long-lived carries the master. Global API Key, or an account token with *Account API Tokens: Edit*. |
