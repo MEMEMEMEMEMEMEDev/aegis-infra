@@ -113,6 +113,16 @@ source "$AEGIS_ROOT/lib/config.sh"
 # shellcheck source=lib/access.sh
 source "$AEGIS_ROOT/lib/access.sh"
 
+# ── the host, before anything (2026-09-22) ─────────────────────────
+# Phase 00 cannot be the only door: --from 20 never runs it. A CachyOS
+# machine got a half k3s because the one «is this Ubuntu?» lived in the
+# playbook of phase 20. lib/host.sh holds the rule.
+# shellcheck source=lib/host.sh
+source "$AEGIS_ROOT/lib/host.sh"
+if ! $DO_LIST && ! host_why="$(host_supported 2>&1)"; then
+    die "$host_why — nothing was changed on this machine"
+fi
+
 $DO_RESET && { clear_state; log_ok "state reset"; }
 
 # ── early TTY guard (P0 of the 2026-07-18 audit) ────────────────────

@@ -57,6 +57,20 @@ clock_drift(){
   d=$(( $(date +%s) - remote_ts )); echo "${d#-}"
 }
 
+# THE HOST FIRST, before any sudo. On 2026-09-22 this script wrote a
+# sudoers drop-in and switched IPv6 off on a CachyOS machine, and only
+# then did its apt-get calls fail — in silence. Nothing below is safe
+# to run on a machine aegis cannot install on (lib/host.sh).
+# shellcheck source=../lib/host.sh
+source "$AEGIS_ROOT/lib/host.sh"
+echo "== 0/9 a machine aegis can install on =="
+if ! host_why="$(host_supported 2>&1)"; then
+  echo "  [FAIL] $host_why" >&2
+  echo "  nothing was changed on this machine." >&2
+  exit 1
+fi
+ok "$(sed -nE 's/^PRETTY_NAME="?([^"]*)"?$/\1/p' "$(host_os_release_file)" | head -1)"
+
 echo "== 1/9 sudo NOPASSWD (the init only discovers it at phase 20) =="
 if ! sudo -n true 2>/dev/null; then
   sudo bash -c "printf '%s ALL=(ALL) NOPASSWD:ALL\n' '$USER' > /etc/sudoers.d/010-aegis-init-nopasswd \

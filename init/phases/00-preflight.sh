@@ -19,6 +19,13 @@ KNOWN LIMITS OF THIS INIT (v1):
 EOF
 
 # ── hard preconditions ──────────────────────────────────────────────
+# 0. The host, before the wizard asks a single question: on a machine
+#    aegis cannot install on, every answer is wasted (2026-09-22,
+#    CachyOS). The orchestrator already refused; this is the phase
+#    saying it for itself when it is sourced some other way.
+host_why=""
+host_supported 2>/dev/null || { host_why="$(host_supported 2>&1)"; die "$host_why — nothing was changed on this machine"; }
+
 # 1. Config: GUIDED. No conf → the wizard asks field by field
 #    (explanation + default + validation) and writes it; with a valid
 #    conf → it goes straight through (re-runs). The operator answers
@@ -147,9 +154,11 @@ gate "wsl2-o-linux" check_wsl2
 if [[ -r /etc/os-release ]]; then
     . /etc/os-release
     log_info "OS detected: ${PRETTY_NAME:-unknown}"
+    # supported was decided at the top (lib/host.sh); what is left is
+    # telling a newer Ubuntu that nobody has run it there yet
     case "${VERSION_ID:-}" in
         24.04|26.04) ;;
-        *) log_warn "Ubuntu ${VERSION_ID:-?} is not on the tested list (24.04/26.04)" ;;
+        *) log_warn "Ubuntu ${VERSION_ID:-?} is supported but not on the tested list (24.04/26.04)" ;;
     esac
 fi
 

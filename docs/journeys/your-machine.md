@@ -19,7 +19,7 @@ the product.
 
 | thing | why |
 |---|---|
-| Ubuntu (24.04 or newer), a user with sudo, ~30 GB free on `/`, a GPU whose driver answers `nvidia-smi` | phase 00 measures all four and stops before anything runs if one is missing. The driver is the operating system's: `sudo ubuntu-drivers install`, reboot. |
+| Ubuntu (24.04 or newer; any other system is refused by `aegis preflight` before it touches anything), a user with sudo, ~30 GB free on `/`, a GPU whose driver answers `nvidia-smi` | phase 00 measures all four and stops before anything runs if one is missing. The driver is the operating system's: `sudo ubuntu-drivers install`, reboot. |
 | a zone in Cloudflare (`example.com` you control), its **Account ID** and **Zone ID** | the edge: a tunnel, DNS records, Access in front of the operator consoles. Both IDs are on the zone's overview page; they are not secrets. |
 | a **Cloudflare master credential**, pasted ONCE in phase 15 and destroyed in tmpfs | the init mints its own scoped tokens from it (DNS, API, Access) so that nothing long-lived carries the master. Global API Key, or an account token with *Account API Tokens: Edit*. |
 | `gh auth login` with `repo` and `delete_repo` | the init creates two repositories in your account (the platform repo and a canary app) and registers deploy keys and webhooks. There is no separate token: the init uses your `gh` session. |
