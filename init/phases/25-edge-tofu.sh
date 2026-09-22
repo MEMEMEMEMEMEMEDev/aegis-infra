@@ -70,8 +70,10 @@ if [[ "${EDGE:-cloudflare}" == local ]]; then
     [[ -n "${EDGE_BIND_IP:-}" ]] || \
         die "EDGE=local with no EDGE_BIND_IP in the conf — the host bridge has no address to listen on; reconfigure the instance before resuming"
 
-    # The five gates of the Cloudflare path, named one by one with the
+    # The six gates of the Cloudflare path, named one by one with the
     # reason each one has nobody to measure here:
+    gate_no_subject "access-habilitado" \
+      "EDGE=local: nothing is put behind Cloudflare Access, so whether Zero Trust is switched on in the account is nobody's business here"
     gate_no_subject "parse-main-tf" \
       "EDGE=local: no tofu env is applied, so there is no main.tf to read a tunnel_name or a list of public_hostnames out of"
     gate_no_subject "token-no-vacio" \
