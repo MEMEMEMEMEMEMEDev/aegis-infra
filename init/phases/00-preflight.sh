@@ -169,6 +169,10 @@ fi
 #    apt install gh && gh auth login  (scopes: repo + repo admin)
 gate "github-auth" check_github_reachable
 
+# 3a. The OWNER's policy, asked before anything exists: an organization
+#     that forbids deploy keys kills phase 15 half an hour in.
+gate "github-owner-permite-deploy-keys" check_gh_org_allows_deploy_keys "$GH_OWNER"
+
 # 3b. GitHub's pinned host keys are still current (A32 — detects a
 #     GitHub rotation BEFORE baking the values into the cluster):
 gate "github-hostkeys-vigentes" check_github_hostkeys_pin

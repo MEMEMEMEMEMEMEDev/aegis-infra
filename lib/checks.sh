@@ -71,6 +71,38 @@ check_wsl2() {
 }
 
 # ── account preconditions (known limits H4/H5) ──────────────────────
+# A GitHub ORGANIZATION can forbid deploy keys, and a new one does by
+# default: `deploy_keys_enabled_for_repositories = false`. Phase 15 asks
+# for the first deploy key after the repos exist, the Cloudflare tokens
+# are minted and half an hour is gone — the first cloud instance of the
+# lab died exactly there (aegis-gitops, 2026-09-22) with «Deploy keys are
+# disabled for this repository». ArgoCD and Jenkins read the repos with
+# those keys: without them there is no platform. Asked HERE, before
+# anything is created, and only for an organization: a personal account
+# has no such policy, and the API says which one the owner is.
+check_gh_org_allows_deploy_keys() {
+    local owner="${1:?owner}" kind allowed
+    kind="$(gh api "users/$owner" --jq .type 2>/dev/null || true)"
+    if [[ -z "$kind" ]]; then
+        log_warn "GitHub did not say whether $owner is a user or an organization: NOT measured"
+        return 0
+    fi
+    [[ "$kind" == "Organization" ]] || return 0
+    # || true: under set -e a failing API call would kill the phase, and
+    # «could not be asked» is a THIRD answer, not a refusal
+    allowed="$(gh api "orgs/$owner" --jq .deploy_keys_enabled_for_repositories 2>/dev/null || true)"
+    case "$allowed" in
+        true) return 0 ;;
+        false)
+            log_error "the organization $owner does not allow deploy keys, and phase 15 needs them (ArgoCD and Jenkins read the repos with them)."
+            log_error "  Enable them: https://github.com/organizations/$owner/settings/repository-policies -> Deploy keys"
+            return 1 ;;
+        *)
+            log_warn "whether $owner allows deploy keys could not be read (does the gh session have read:org?): NOT measured"
+            return 0 ;;
+    esac
+}
+
 check_github_reachable() {
     retry_net 3 gh auth status >/dev/null 2>&1
 }

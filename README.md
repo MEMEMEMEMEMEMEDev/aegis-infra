@@ -46,7 +46,7 @@ para el operador; la consola del inquilino todavía no existe.
 - **Recuperación ensayada.** Respaldo y restauración del estado y de los
   datos, rotación de cada credencial que el init genera, y `aegis
   destroy` para deshacerlo todo.
-- **Un verificador.** 237 checks estáticos miden este repositorio sin
+- **Un verificador.** 238 checks estáticos miden este repositorio sin
   clúster (`aegis verify --list` los cuenta). Cada uno lleva su
   *diente*: una mutación que demuestra que el check falla cuando debe.
   `aegis check` hace lo mismo contra el clúster vivo.
@@ -255,7 +255,7 @@ flowchart LR
         direction TB
         p1["bin/ libexec/ lib/<br/>los comandos"]
         p2["init/<br/>las dieciséis fases"]
-        p3["verify/<br/>237 checks y sus dientes"]
+        p3["verify/<br/>238 checks y sus dientes"]
         p4["seed/<br/>lo que se distribuye"]
     end
     subgraph I["la instancia: ~/aegis, estado vivo"]
@@ -326,7 +326,7 @@ escanear todo cada día.
   (`aegis verify --teeth`).
 - El producto no nombra máquinas ni personas. Dos checks lo vigilan.
 
-![Salidas reales: aegis init --list con las dieciséis fases pasadas y aegis verify con 237 checks en verde en los dos perfiles](docs/assets/terminal.svg)
+![Salidas reales: aegis init --list con las dieciséis fases pasadas y aegis verify con 238 checks en verde en los dos perfiles](docs/assets/terminal.svg)
 
 ## La consola
 

@@ -4,6 +4,22 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-22 — the owner's deploy-key policy, asked in time
+
+- **Phase 00 asks whether the GitHub owner allows deploy keys.** An
+  organization forbids them by default, and aegis asked for its first
+  one in phase 15 — with two repositories created, two Cloudflare tokens
+  minted and half an hour gone. The first cloud instance of the lab died
+  exactly there («Deploy keys are disabled for this repository»). Now the
+  run stops before it touches anything, naming the page that changes the
+  policy. A personal account has no such policy and is left alone; an API
+  that cannot answer is NOT measured, not refused.
+- **The clocks' gate converges before it measures.** `enable --now` on a
+  machine past the timers' `OnBootSec` fires them that second, and a
+  timer whose service is still running has no next elapse yet. The gate
+  now waits for one (up to two minutes) instead of failing a healthy
+  machine.
+
 ## 2026-09-22 — a server image is not a desktop
 
 - **`aegis host` no longer reserves memory for a desktop that does not
