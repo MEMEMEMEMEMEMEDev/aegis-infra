@@ -47,7 +47,7 @@ console for the operator; the tenant's console does not exist yet.
 - **Recovery, rehearsed.** Backup and restore of the state and of the
   data, rotation of every credential the init generates, and `aegis
   destroy` to undo it all.
-- **A verifier.** 236 static checks measure this repository without a
+- **A verifier.** 237 static checks measure this repository without a
   cluster (`aegis verify --list` counts them). Each one carries its
   *tooth*: a mutation that proves the check fails when it should.
   `aegis check` does the same against the live cluster.
@@ -258,7 +258,7 @@ flowchart LR
         direction TB
         p1["bin/ libexec/ lib/<br/>the commands"]
         p2["init/<br/>the sixteen phases"]
-        p3["verify/<br/>236 checks and their teeth"]
+        p3["verify/<br/>237 checks and their teeth"]
         p4["seed/<br/>what ships"]
     end
     subgraph I["the instance: ~/aegis, living state"]
@@ -329,7 +329,7 @@ re-scans everything daily.
   (`aegis verify --teeth`).
 - The product names no machine and no person. Two checks watch that.
 
-![Real outputs: aegis init --list with all sixteen phases passed, and aegis verify with 236 checks green in both profiles](docs/assets/terminal.en.svg)
+![Real outputs: aegis init --list with all sixteen phases passed, and aegis verify with 237 checks green in both profiles](docs/assets/terminal.en.svg)
 
 ## The console
 
