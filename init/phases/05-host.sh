@@ -356,8 +356,22 @@ if systemctl --user show-environment >/dev/null 2>&1; then
     # ENABLED IS NOT SCHEDULED. A timer can be active and enabled and
     # have no next run (the OnUnitActiveSec trap above); what proves a
     # clock is a next appointment, read off systemd.
-    gate "user-clocks-have-a-next-run" bash -c \
-        'for c in aegis-backup aegis-host-metrics aegis-update-notice; do timer_next_elapse --user "$c.timer" >/dev/null || exit 1; done'
+    #
+    # CONVERGE BEFORE MEASURING. On a machine that has been up longer
+    # than the timers' OnBootSec, `enable --now` makes them fire THAT
+    # second, and while their service runs systemd has no next elapse
+    # yet. The first Vultr VM of the lab (2026-09-22) failed this gate
+    # in exactly that second; three seconds later all three clocks had
+    # their appointment and all three services had ended in success. A
+    # clock that never gets one in two minutes is the real failure.
+    _clocks_scheduled() {
+        local c
+        for c in "${CLOCKS[@]}"; do
+            timer_next_elapse --user "$c.timer" >/dev/null || return 1
+        done
+    }
+    gate "user-clocks-have-a-next-run" \
+        wait_for 120 3 "the three user clocks have a next run" _clocks_scheduled
     gate "linger-enabled" bash -c "loginctl show-user '$USER' -p Linger 2>/dev/null | grep -q '=yes'"
 else
     gate_red "there is no user session bus (systemctl --user cannot be reached: an ssh session without linger, or XDG_RUNTIME_DIR unset). The three clocks were NOT installed. Remedy: loginctl enable-linger $USER, log in again, and run: aegis init --only 05-host"
