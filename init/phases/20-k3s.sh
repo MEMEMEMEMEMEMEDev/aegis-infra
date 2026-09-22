@@ -93,7 +93,19 @@ run_cmd retry_net 2 ansible/.venv/bin/ansible-playbook \
 # Does the API answer? A function and not an inline command, because
 # `wait_for` takes a LABEL before the command and an inline pipeline
 # there is exactly how the label ate the verb the first time.
-_k3s_api_answers() { kubectl get --raw=/readyz >/dev/null 2>&1; }
+# THE KUBECONFIG THIS FUNCTION NEEDS DOES NOT EXIST YET. ~/.kube/config
+# is written further down in THIS phase; up here `kubectl` alone talks to
+# localhost:8080 and answers «connection refused» however healthy the
+# cluster is. The first cloud instance (2026-09-22) died on exactly that:
+# the API had been up for three minutes while this probe kept saying no,
+# so the valve withdrew a reservation that was never the problem. Same
+# lesson as the label bug below, one layer down — a valve whose probe can
+# only say NO is a switch that turns the feature off on a timer. k3s's own
+# kubeconfig is there from the first start; the user's copy is not.
+_k3s_api_answers() {
+    sudo -n env KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl get --raw=/readyz >/dev/null 2>&1 \
+        || kubectl get --raw=/readyz >/dev/null 2>&1
+}
 
 # ── the reservation, made real, with the way back wired in ─────────
 #

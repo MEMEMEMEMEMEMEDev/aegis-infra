@@ -4,6 +4,18 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-22 — the valve's probe can say yes
+
+- **Phase 20 no longer withdraws a reservation that was working.** The
+  valve that rolls the node's memory reservation back asks the API with
+  `kubectl`, and the user's kubeconfig is written further down in the
+  same phase: up there kubectl talks to localhost:8080 and refuses
+  however healthy the cluster is. On the first cloud instance the API
+  had been serving for three minutes while the probe kept saying no. The
+  probe now uses k3s's own kubeconfig, with the user's as a fallback, and
+  check 230 drives it against a healthy cluster, a dead one, and a
+  machine where `sudo -n` is refused.
+
 ## 2026-09-22 — the owner's deploy-key policy, asked in time
 
 - **Phase 00 asks whether the GitHub owner allows deploy keys.** An
