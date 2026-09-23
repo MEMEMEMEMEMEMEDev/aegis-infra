@@ -344,13 +344,16 @@ if [[ "$AI" == "gpu" ]]; then
     # gate is what turns that written step into a measured one.
     _inotify_ok() {
         local n
-        n="$(sysctl -n fs.inotify.max_user_instances 2>/dev/null || echo 0)"
+        # /proc, not sysctl: sysctl lives in /usr/sbin, which is not on a
+        # user's PATH on Debian, and «command not found» read as 0 here
+        # would send the operator after a ceiling that is fine
+        n="$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo 0)"
         [[ "$n" =~ ^[0-9]+$ ]] || return 1
         log_info "fs.inotify.max_user_instances = $n (1024 is what the host bootstrap persists)"
         (( n >= 1024 ))
     }
     gate_diag "inotify-ceiling-for-the-device-plugin" \
-      'sysctl fs.inotify.max_user_instances 2>&1;
+      'echo "  fs.inotify.max_user_instances = $(cat /proc/sys/fs/inotify/max_user_instances 2>&1)";
        echo "  remedy: re-run ansible/playbooks/bootstrap-host.yml, which persists this to";
        echo "  /etc/sysctl.d/99-aegis-k3s.conf. Without it the plugin restarts in a loop and";
        echo "  the node advertises 0 GPUs while every Application reports Synced."' \
