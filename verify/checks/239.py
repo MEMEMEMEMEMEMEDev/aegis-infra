@@ -26,6 +26,7 @@ TOOL = "|".join(re.escape(t) for t in SBIN_ONLY)
 # an opening quote (gate_diag and wait_for take commands as strings)
 CMD = re.compile(r"(?:^|;|&&|\|\||\||\(|\$\(|`|'|\")\s*(?:[A-Z_]+=\S*\s+)*(" + TOOL + r")(?=\s|$|\)|;|'|\")")
 PYCALL = re.compile(r"""\[\s*["'](""" + TOOL + r""")["']""")
+CASE_ARM = re.compile(r"^\s*[\w.*\-\"'|]+\)")
 SUDO_SHELL = re.compile(r"\bsudo\b[^;|&]*\b(?:bash|sh)\s+-c\b")
 
 findings, scanned = [], 0
@@ -54,6 +55,9 @@ def scan_shell(path):
     with open(path, encoding="utf-8", errors="replace") as f:
         text = f.read()
     for n, line in logical_lines(text):
+        # a case arm's PATTERN (`age|jq|iptables)`) names words, it runs
+        # nothing: drop it and read what the arm does
+        line = CASE_ARM.sub(" ", line)
         for m in CMD.finditer(line):
             before = line[:m.start(1)]
             if SUDO_SHELL.search(before):
