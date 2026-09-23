@@ -129,8 +129,13 @@ else
       || bad "I could not remove the stale aegis-dns-fix.service"
   fi
 fi
-R=0; for i in 1 2 3; do resolvectl query github.com >/dev/null 2>&1 && R=$((R+1)); done
-[ "$R" -eq 3 ] && ok "github.com resolves 3/3" || bad "unstable DNS ($R/3) - check resolvectl status"
+# The probe asks the resolver every program on this host uses
+# (getaddrinfo, through nsswitch), not systemd-resolved's own tool.
+# Debian 13 and Arch do not ship resolved: `resolvectl query` there is
+# «command not found», and it was read as «DNS broken» on a host whose
+# DNS worked (lab-debian13, 2026-09-23).
+R=0; for i in 1 2 3; do getent ahosts github.com >/dev/null 2>&1 && R=$((R+1)); done
+[ "$R" -eq 3 ] && ok "github.com resolves 3/3" || bad "unstable DNS ($R/3) - check /etc/resolv.conf (and resolvectl status, where systemd-resolved runs)"
 
 echo "== 4/9 clock (TLS/ACME/cosign/apt depend on this) — auto-repairs =="
 # Real lessons: NTPSynchronized=yes lied with 7 days of lag; and with chrony
