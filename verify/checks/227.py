@@ -169,8 +169,11 @@ WIDENED = [
     ("debian", "ubuntu,debian", 1),        # Debian 12: under the floor
     ("debiansid", "ubuntu,debian", 1),     # no VERSION_ID: no floor to compare
     ("mint", "ubuntu,debian", 1),          # a derivative is not its parent
-    ("cachyos", "ubuntu,arch", 1),         # arch has no code yet
-    ("fedora42", "ubuntu,debian,rhel", 1),
+    ("cachyos", "ubuntu,arch", 0),         # an Arch derivative IS arch (ID_LIKE=arch)
+    ("arch", "ubuntu,arch", 0),
+    ("arch", "ubuntu,debian", 1),          # arch has code, but was not opened
+    ("mint", "ubuntu,arch", 1),
+    ("fedora42", "ubuntu,debian,rhel", 1), # rhel has no code: nothing is accepted
     ("ubuntu2404", "ubuntu,debain", 1),    # a typo: nothing is accepted
 ]
 with tempfile.TemporaryDirectory() as td:

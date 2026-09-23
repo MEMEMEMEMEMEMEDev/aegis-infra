@@ -21,6 +21,9 @@
             (ansible_facts['distribution'] == 'Debian'
              and ansible_facts['distribution_major_version'] is version('13', '>=')
              and 'debian' in (aegis_host_supported | default('ubuntu')).split(','))
+            or
+            (ansible_facts['os_family'] == 'Archlinux'
+             and 'arch' in (aegis_host_supported | default('ubuntu')).split(','))
         fail_msg: >-
           {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}
           is not in the host families in force ({{ aegis_host_supported | default('ubuntu') }})

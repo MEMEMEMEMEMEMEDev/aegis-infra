@@ -32,7 +32,7 @@
 
 AEGIS_HOST_MIN_UBUNTU="24.04"
 AEGIS_HOST_MIN_DEBIAN="13"     # 12 ships python 3.11; ansible==14 needs 3.12
-AEGIS_HOST_FAMILIES_KNOWN="ubuntu debian"
+AEGIS_HOST_FAMILIES_KNOWN="ubuntu debian arch"
 AEGIS_HOST_SUPPORTED_DEFAULT="ubuntu"
 
 # host_os_release_file — overridable so the check can feed it fixtures
@@ -85,6 +85,7 @@ _host_describe_list() {
         case "$f" in
             ubuntu) out+=("Ubuntu $AEGIS_HOST_MIN_UBUNTU or newer") ;;
             debian) out+=("Debian $AEGIS_HOST_MIN_DEBIAN or newer") ;;
+            arch)   out+=("Arch Linux (rolling) or a derivative that says ID_LIKE=arch") ;;
         esac
     done
     local IFS=','; printf '%s' "${out[*]}" | sed 's/,/, /g'
