@@ -31,6 +31,17 @@ p.write_text(out)
 PYT
 }
 
+# the auth error read as «Access is off»: a run blocked by a token's
+# permissions, not by the account (measured 2026-09-22)
+red_5() { python3 - "$PH231" <<'PYT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+i = s.index("        if grep -qE 'Authentication error")
+j = s.index("        fi\n", i) + len("        fi\n")
+p.write_text(s[:i] + s[j:])
+PYT
+}
+
 # control: the same probe, with the shapes checked in the other order
 control_1() { _sub "$PH231" '        if [[ -z "$out" ]]; then
             log_warn "Cloudflare did not answer about Access: NOT measured"

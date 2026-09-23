@@ -242,11 +242,31 @@ else
     # after the tunnel module had already run: the apply died with the
     # policies half created. Asked here, before a single resource is
     # touched, and with the page that fixes it.
+    # ASKED WITH THE TOKEN THAT CAN ASK. The scoped token this phase uses
+    # for the tunnel and DNS has no Access permission and answers
+    # «Authentication error» — measured on the first cloud instance
+    # (2026-09-22), where this probe would have blocked a run whose
+    # account was perfectly fine. Access has its own token since phase 15.
+    _cf_access() {
+        local tok cfg
+        tok="$(restore_secret cf_access_token 2>/dev/null)" || { _cf "$@"; return; }
+        cfg="$SECRETS_TMP/cf_access.curlcfg"
+        ( umask 077; printf 'header = "Authorization: Bearer %s"\n' "$(cat "$tok")" > "$cfg" )
+        curl -sS -K "$cfg" -H 'Content-Type: application/json' "$@"
+    }
     _access_enabled() {
         local out
-        out="$(_cf "$CFB/accounts/$CF_ACCOUNT_ID/access/organizations" 2>/dev/null || true)"
+        out="$(_cf_access "$CFB/accounts/$CF_ACCOUNT_ID/access/organizations" 2>/dev/null || true)"
         if [[ -z "$out" ]]; then
             log_warn "Cloudflare did not answer about Access: NOT measured"
+            return 0
+        fi
+        # a token that cannot ask is not an account that is off: only
+        # `not_enabled` is evidence, everything else it cannot see is a
+        # notice
+        if grep -qE 'Authentication error|Invalid request headers|code"?:? ?1000[0-9]' <<< "$out" \
+           && ! grep -q 'not_enabled' <<< "$out"; then
+            log_warn "the Access token could not read the account's Zero Trust state: NOT measured"
             return 0
         fi
         if grep -q 'not_enabled' <<< "$out"; then
