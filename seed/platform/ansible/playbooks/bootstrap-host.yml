@@ -32,11 +32,22 @@
       ansible.builtin.assert:
         that: ansible_facts['service_mgr'] == 'systemd'
 
-    - name: Base packages
+    # The names come from lib/pkg.sh through phase 20
+    # (aegis_base_packages); run by hand, the default is debian's.
+    - name: Base packages (debian family)
       ansible.builtin.apt:
-        name: [curl, ca-certificates, iptables, jq, conntrack]
+        name: "{{ aegis_base_packages | default(['curl', 'ca-certificates', 'iptables', 'jq', 'conntrack']) }}"
         state: present
         update_cache: true
+      when: ansible_facts['os_family'] == 'Debian'
+
+    # No update_cache: the preflight already ran pacman -Syu, and -Sy
+    # before -S is the partial upgrade Arch does not support.
+    - name: Base packages (arch family)
+      community.general.pacman:
+        name: "{{ aegis_base_packages }}"
+        state: present
+      when: ansible_facts['os_family'] == 'Archlinux'
 
     - name: Kernel modules (runtime + persisted)
       community.general.modprobe:

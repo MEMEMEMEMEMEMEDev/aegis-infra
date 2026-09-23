@@ -82,10 +82,16 @@ AEGIS_RESERVED_JSON="$(printf '%s' "$AEGIS_NODE_RESERVED" | python3 -c \
 # distribution from Ansible's OWN facts and only takes the LIST from
 # here, so the two readings of the host stay two
 AEGIS_HOST_LIST="$(host_supported_families | paste -sd, -)"
+# the base packages, by canonical name: lib/pkg.sh says what each is
+# called on this family (conntrack is conntrack-tools on arch). As JSON,
+# for the same reason as the reservation below.
+AEGIS_BASE_PKGS_JSON="$(pkg_names curl ca-certificates iptables jq conntrack \
+    | python3 -c 'import json,sys; print(json.dumps({"aegis_base_packages": sys.stdin.read().split()}))')"
 run_cmd retry_net 2 ansible/.venv/bin/ansible-playbook \
     -i ansible/inventory/hosts.ini \
     -e "aegis_ai=$AI" \
     -e "aegis_host_supported=$AEGIS_HOST_LIST" \
+    -e "$AEGIS_BASE_PKGS_JSON" \
     -e "$AEGIS_RESERVED_JSON" \
     ansible/playbooks/bootstrap-host.yml "${ANSIBLE_BECOME_ARGS[@]}"
 

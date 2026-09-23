@@ -38,7 +38,8 @@ pkg_name() {
         python3-yaml)     deb=python3-yaml  arch=python-yaml ;;
         python3-venv)     deb=python3-venv  arch=- ;;
         gh)               deb=gh            arch=github-cli ;;
-        age|jq|git|openssl|direnv|tmux|rsync)
+        conntrack)        deb=conntrack     arch=conntrack-tools ;;
+        age|jq|git|openssl|direnv|tmux|rsync|curl|ca-certificates|iptables)
                           deb="$c"          arch="$c" ;;
         *) echo "pkg_name: «$c» is not in the package table (lib/pkg.sh)" >&2; return 1 ;;
     esac
@@ -47,6 +48,18 @@ pkg_name() {
         arch)   [[ "$arch" == - ]] || printf '%s\n' "$arch" ;;
         *) echo "pkg_name: this host's family has no package manager aegis knows" >&2; return 1 ;;
     esac
+}
+
+# pkg_names <canonical>… — the family's names, one per line (the ones the
+# family needs nothing for are left out); rc 1 on a name outside the table.
+# For callers that hand the list to someone else (phase 20 → Ansible).
+pkg_names() {
+    local c n
+    for c in "$@"; do
+        n="$(pkg_name "$c")" || return 1
+        [[ -n "$n" ]] && printf '%s\n' "$n"
+    done
+    return 0
 }
 
 # pkg_update — refresh the package index (debian) / sync and upgrade (arch:

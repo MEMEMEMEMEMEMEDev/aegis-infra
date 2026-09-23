@@ -32,10 +32,11 @@ red_4() { _sub "$AEGIS_ROOT/lib/pkg.sh" \
     'apt-get -o DPkg::Lock::Timeout=600 install -y -qq "${names[@]}"' \
     'apt-get install -y -qq "${names[@]}"'; }
 
-# a new package installed with no row: nobody measured its name
+# a package asked for by Ubuntu's name instead of the canonical one:
+# no row, and «target not found» on Arch
 red_5() { _sub "$AEGIS_ROOT/init/phases/05-host.sh" \
     'run_cmd retry_net 3 pkg_install htpasswd python3-yaml python3-venv rsync' \
-    'run_cmd retry_net 3 pkg_install htpasswd python3-yaml python3-venv rsync conntrack'; }
+    'run_cmd retry_net 3 pkg_install apache2-utils python3-yaml python3-venv rsync'; }
 
 # control: a comment that names apt-get is prose
 control_1() { _sub "$AEGIS_ROOT/init/phases/05-host.sh" \
@@ -48,3 +49,18 @@ control_2() { _sub "$AEGIS_ROOT/libexec/aegis-preflight" \
     'pkg_install tmux python3-yaml jq >/dev/null 2>&1' \
     'pkg_install tmux python3-yaml jq >/dev/null 2>&1
 info "on debian this is apt-get; on arch, pacman"'; }
+
+# phase 20 forgets to hand the names over: the arch branch has none
+red_6() { _sub "$AEGIS_ROOT/init/phases/20-k3s.sh" \
+    '    -e "$AEGIS_BASE_PKGS_JSON" \
+' ''; }
+
+# Debian's name for conntrack on Arch: «target not found» in phase 20
+red_7() { _sub "$AEGIS_ROOT/lib/pkg.sh" \
+    'conntrack)        deb=conntrack     arch=conntrack-tools ;;' \
+    'conntrack)        deb=conntrack     arch=conntrack ;;'; }
+
+# the playbook going back to its own list, apt-only
+red_8() { _sub "$AEGIS_ROOT/seed/platform/ansible/playbooks/bootstrap-host.yml" \
+    "        name: \"{{ aegis_base_packages | default(['curl', 'ca-certificates', 'iptables', 'jq', 'conntrack']) }}\"" \
+    "        name: [curl, ca-certificates, iptables, jq, conntrack]"; }

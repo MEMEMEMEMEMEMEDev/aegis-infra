@@ -85,11 +85,25 @@ for m in re.finditer(r"^\s+([a-z0-9|.-]+)\)\s*$\n\s+deb=", pkg_src, re.M):
     rows.update(m.group(1).split("|"))
 
 used = {}
-for rel in ("libexec/aegis-preflight", "init/phases/00-preflight.sh", "init/phases/05-host.sh"):
+for rel in ("libexec/aegis-preflight", "init/phases/00-preflight.sh", "init/phases/05-host.sh",
+            "init/phases/20-k3s.sh"):
     for i, l in nc(os.path.join(ROOT, rel)):
-        for m in re.finditer(r"\bpkg_install\s+((?:[a-z0-9.-]+\s*)+)", l):
+        for m in re.finditer(r"\bpkg_(?:install|names)\s+((?:[a-z0-9.-]+[ \t]*)+)", l):
             for w in m.group(1).split():
                 used.setdefault(w, f"{rel}:{i}")
+
+# the playbook's base packages come from the table, for BOTH families
+PLAY = os.path.join(ROOT, "seed", "platform", "ansible", "playbooks", "bootstrap-host.yml")
+play = "\n".join(l for _, l in nc(PLAY))
+k20 = "\n".join(l for _, l in nc(os.path.join(ROOT, "init", "phases", "20-k3s.sh")))
+if '-e "$AEGIS_BASE_PKGS_JSON"' not in k20:
+    findings.append("phase 20 does not hand the table's base packages to bootstrap-host.yml")
+if not re.search(r"community\.general\.pacman:\s*\n\s+name:\s*\"\{\{ aegis_base_packages \}\}\"", play):
+    findings.append("bootstrap-host.yml's arch branch does not install the names the table gave it")
+if not re.search(r"ansible\.builtin\.apt:\s*\n\s+name:\s*\"\{\{ aegis_base_packages \| default", play):
+    findings.append("bootstrap-host.yml's debian branch does not install the names the table gave it")
+if re.search(r"^\s+name:\s*\[curl", play, re.M):
+    findings.append("bootstrap-host.yml still lists its own base package names")
 # the loop's catch-all installs every tool pinned "apt" by its own name
 pins = {}
 for l in open(PINS, encoding="utf-8"):
@@ -142,6 +156,14 @@ with tempfile.TemporaryDirectory() as td:
         if r.returncode != 0 or got != want:
             findings.append(f"pkg_install on {name} issued «{got or 'nothing'}» (rc {r.returncode}); "
                             f"the measured names say «{want}»")
+    # the names phase 20 hands to Ansible, on arch
+    r = subprocess.run(["bash", "-c", f"source '{HOST}'; source '{PKG}'; "
+                        "pkg_names curl ca-certificates iptables jq conntrack | paste -sd' ' -"],
+                       capture_output=True, text=True, timeout=30,
+                       env={**os.environ, "AEGIS_OS_RELEASE": os.path.join(td, "cachyos")})
+    driven += 1
+    if r.stdout.strip() != "curl ca-certificates iptables jq conntrack-tools":
+        findings.append(f"pkg_names on arch gave «{r.stdout.strip()}» for the playbook's base packages")
     # a name outside the table stops the install, it does not skip it
     if os.path.exists(log):
         os.remove(log)
