@@ -59,14 +59,24 @@
       # The extension MUST be .crt: update-ca-certificates ignores
       # anything else in that directory, silently, and the trust simply
       # never appears.
+      #
+      # WHERE depends on the family: debian's update-ca-certificates reads
+      # /usr/local/share/ca-certificates/; arch's p11-kit (update-ca-trust)
+      # reads /etc/ca-certificates/trust-source/anchors/. Both end in the
+      # same bundle, /etc/ssl/certs/ca-certificates.crt, which is what
+      # every consumer reads.
       ansible.builtin.copy:
         content: "{{ ca_pem.stdout }}"
-        dest: /usr/local/share/ca-certificates/aegis-internal-ca.crt
+        dest: "{{ aegis_ca_anchor[ansible_facts['os_family']] }}"
         mode: "0644"
       register: ca_system
+      vars:
+        aegis_ca_anchor:
+          Debian: /usr/local/share/ca-certificates/aegis-internal-ca.crt
+          Archlinux: /etc/ca-certificates/trust-source/anchors/aegis-internal-ca.crt
 
     - name: Refresh the system trust store
-      ansible.builtin.command: update-ca-certificates
+      ansible.builtin.command: "{{ 'update-ca-trust' if ansible_facts['os_family'] == 'Archlinux' else 'update-ca-certificates' }}"
       when: ca_system.changed
       changed_when: ca_system.changed
 

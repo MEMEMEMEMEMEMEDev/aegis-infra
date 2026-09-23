@@ -153,7 +153,9 @@ else
   info "drift ${drift}s: forcing a resync..."
   for attempt in 1 2 3; do
     if command -v chronyc >/dev/null 2>&1; then
-      sudo systemctl restart chrony >/dev/null 2>&1
+      # the unit is chrony.service on debian/ubuntu (chronyd is an alias
+      # there, measured on Debian 13) and chronyd.service on arch
+      { sudo systemctl restart chrony || sudo systemctl restart chronyd; } >/dev/null 2>&1
       sudo chronyc makestep >/dev/null 2>&1     # chrony: immediate step
       sleep 4
     else

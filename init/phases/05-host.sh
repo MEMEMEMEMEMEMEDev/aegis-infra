@@ -148,13 +148,31 @@ install_binary() {
             # .deb since then, and now the .deb is proved too. apt is
             # what installs it (a local path is still a package), so
             # dpkg keeps the record.
-            fetch_verified \
-                "$GH_REL/opentofu/opentofu/releases/download/v${pin}/tofu_${pin}_amd64.deb" \
-                /tmp/tofu.deb \
-                "$GH_REL/opentofu/opentofu/releases/download/v${pin}/tofu_${pin}_SHA256SUMS" \
-                "tofu_${pin}_amd64.deb"
-            run_cmd apt_locked install -y /tmp/tofu.deb
-            rm -f /tmp/tofu.deb ;;
+            #
+            # A .deb is a debian-family thing. Anywhere else the SAME
+            # SHA256SUMS lists the linux tarball, and it is proved the
+            # same way before it is unpacked (measured 2026-09-23 for
+            # 1.12.3: the .deb, the .zip and the .tar.gz are all there).
+            if [[ "$(pkg_family)" == debian ]]; then
+                fetch_verified \
+                    "$GH_REL/opentofu/opentofu/releases/download/v${pin}/tofu_${pin}_amd64.deb" \
+                    /tmp/tofu.deb \
+                    "$GH_REL/opentofu/opentofu/releases/download/v${pin}/tofu_${pin}_SHA256SUMS" \
+                    "tofu_${pin}_amd64.deb"
+                run_cmd apt_locked install -y /tmp/tofu.deb
+                rm -f /tmp/tofu.deb
+            else
+                fetch_verified \
+                    "$GH_REL/opentofu/opentofu/releases/download/v${pin}/tofu_${pin}_linux_amd64.tar.gz" \
+                    /tmp/tofu.tgz \
+                    "$GH_REL/opentofu/opentofu/releases/download/v${pin}/tofu_${pin}_SHA256SUMS" \
+                    "tofu_${pin}_linux_amd64.tar.gz"
+                run_cmd rm -rf /tmp/tofu-x
+                run_cmd mkdir -p /tmp/tofu-x
+                run_cmd tar -xzf /tmp/tofu.tgz -C /tmp/tofu-x
+                run_cmd sudo install -m755 /tmp/tofu-x/tofu /usr/local/bin/tofu
+                rm -rf /tmp/tofu.tgz /tmp/tofu-x
+            fi ;;
         sops)
             # THE .deb IS NOT PUBLISHED WITH A CHECKSUM. sops signs a
             # checksums.txt with cosign keyless, and that file covers
