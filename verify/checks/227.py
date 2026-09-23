@@ -64,6 +64,39 @@ elif m.group(1) != pm.group(1):
 if "distribution'] == 'Ubuntu'" not in play:
     findings.append("bootstrap-host.yml no longer asserts the distribution is Ubuntu")
 
+# every family the product has code for has its branch in the playbook,
+# with the SAME minimum; and the playbook takes only the LIST from the
+# init, never the family (that is read from Ansible's own facts)
+km = re.search(r'^AEGIS_HOST_FAMILIES_KNOWN="([a-z ]+)"', lib, re.M)
+dm = re.search(r'^AEGIS_HOST_MIN_DEBIAN="([0-9.]+)"', lib, re.M)
+known = km.group(1).split() if km else []
+if not km:
+    findings.append("lib/host.sh declares no AEGIS_HOST_FAMILIES_KNOWN: nothing says which families "
+                    "have code behind them")
+if "debian" in known:
+    pd = re.search(r"distribution'\]\s*==\s*'Debian'\s+and\s+ansible_facts\['distribution_major_version'\]"
+                   r"\s+is\s+version\('([0-9.]+)',\s*'>='\)", play)
+    if not dm:
+        findings.append("lib/host.sh knows debian and declares no AEGIS_HOST_MIN_DEBIAN")
+    elif not pd:
+        findings.append("lib/host.sh knows debian and bootstrap-host.yml has no Debian branch with a "
+                        "minimum: the init would let Debian in and the playbook refuse it at phase 20")
+    elif pd.group(1) != dm.group(1):
+        findings.append(f"lib/host.sh asks for Debian {dm.group(1)} and the playbook asserts "
+                        f"{pd.group(1)}: the door and the wall disagree")
+for fam in known:
+    if f"'{fam}' in (aegis_host_supported" not in play:
+        findings.append(f"the playbook's branch for {fam} does not consult the list the init passes: "
+                        f"a lab run would pass the door and a default run the wall, or the reverse")
+k20 = "\n".join(lines_nc(os.path.join(ROOT, "init", "phases", "20-k3s.sh")))
+if not re.search(r'-e\s+"aegis_host_supported=\$AEGIS_HOST_LIST"', k20) or \
+        "host_supported_families" not in k20:
+    findings.append("phase 20 does not pass the host list to bootstrap-host.yml: under a widened "
+                    "lab list the playbook refuses what the door let in")
+dflt = re.search(r'^AEGIS_HOST_SUPPORTED_DEFAULT="([a-z ]+)"', lib, re.M)
+if not dflt:
+    findings.append("lib/host.sh declares no AEGIS_HOST_SUPPORTED_DEFAULT")
+
 # ── the question comes before the first action, in the three places ──
 pre = lines_nc(PRE)
 i_q = first(pre, lambda l: "host_supported" in l)
@@ -121,7 +154,25 @@ CASES = {
     "pop2404": ('PRETTY_NAME="Pop!_OS 24.04 LTS"\nID=pop\nID_LIKE="ubuntu debian"\nVERSION_ID="24.04"\n', 1),
     "ubuntu2404": ('PRETTY_NAME="Ubuntu 24.04.3 LTS"\nID=ubuntu\nID_LIKE=debian\nVERSION_ID="24.04"\n', 0),
     "ubuntu2604": ('PRETTY_NAME="Ubuntu 26.04.1 LTS"\nID=ubuntu\nVERSION_ID="26.04"\n', 0),
+    # Debian 13 as measured on lab-debian13 (2026-09-23): refused by the
+    # default list, which is the supported one, until its run is archived
+    "debian13": ('PRETTY_NAME="Debian GNU/Linux 13 (trixie)"\nNAME="Debian GNU/Linux"\n'
+                 'VERSION_ID="13"\nVERSION="13 (trixie)"\nVERSION_CODENAME=trixie\nID=debian\n', 1),
+    "debiansid": ('PRETTY_NAME="Debian GNU/Linux forky/sid"\nID=debian\n', 1),
 }
+# the lab override: (fixture, AEGIS_HOST_SUPPORTED, expected rc). It opens
+# a family with code and NOTHING else: not the version floor, not a
+# derivative, not a family without code, and a typo accepts nothing.
+WIDENED = [
+    ("debian13", "ubuntu,debian", 0),
+    ("ubuntu2404", "ubuntu,debian", 0),
+    ("debian", "ubuntu,debian", 1),        # Debian 12: under the floor
+    ("debiansid", "ubuntu,debian", 1),     # no VERSION_ID: no floor to compare
+    ("mint", "ubuntu,debian", 1),          # a derivative is not its parent
+    ("cachyos", "ubuntu,arch", 1),         # arch has no code yet
+    ("fedora42", "ubuntu,debian,rhel", 1),
+    ("ubuntu2404", "ubuntu,debain", 1),    # a typo: nothing is accepted
+]
 with tempfile.TemporaryDirectory() as td:
     for name, (body, want) in CASES.items():
         f = os.path.join(td, name)
@@ -137,6 +188,21 @@ with tempfile.TemporaryDirectory() as td:
                                ": a supported Ubuntu would be turned away"))
         elif want and r.stdout.strip():
             findings.append(f"host_supported writes its refusal to stdout on {name}: stdout is sacred")
+    for name, lst, want in WIDENED:
+        f = os.path.join(td, name)
+        r = subprocess.run(["bash", "-c", f"source '{LIB}'; host_supported"],
+                           capture_output=True, text=True,
+                           env={**os.environ, "AEGIS_OS_RELEASE": f, "AEGIS_HOST_SUPPORTED": lst})
+        driven += 1
+        if r.returncode != want:
+            findings.append(f"host_supported on {name} with AEGIS_HOST_SUPPORTED={lst} answered rc "
+                            f"{r.returncode}, expected {want}"
+                            + (": the lab override opens more than a family with code" if want else
+                               ": the lab override does not open the family it names"))
+        elif r.stdout.strip():
+            findings.append(f"host_supported writes to stdout on {name} with a widened list")
+        elif want == 0 and "lab run" not in r.stderr:
+            findings.append(f"host_supported let {name} in under a widened list without saying so")
 
     # ── driven: preflight and init on a fake CachyOS, sudo trapped ────
     bindir = os.path.join(td, "bin")
@@ -166,6 +232,7 @@ with tempfile.TemporaryDirectory() as td:
 
 for f in findings:
     print(f)
-print(f"SCOPE: the rule agrees with the playbook, the question sits before the first action in "
-      f"the preflight, the orchestrator and phase 00; driven {driven} times (nine os-release "
-      f"files, and two commands on a CachyOS with sudo trapped)")
+print(f"SCOPE: the rule agrees with the playbook family by family, the question sits before the "
+      f"first action in the preflight, the orchestrator and phase 00; driven {driven} times "
+      f"({len(CASES)} os-release files, {len(WIDENED)} under a widened lab list, and two commands "
+      f"on a CachyOS with sudo trapped)")

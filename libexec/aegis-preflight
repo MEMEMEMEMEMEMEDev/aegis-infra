@@ -69,6 +69,7 @@ if ! host_why="$(host_supported 2>&1)"; then
   echo "  nothing was changed on this machine." >&2
   exit 1
 fi
+[ -n "$host_why" ] && warn "$host_why"   # a widened lab list says so every time
 ok "$(sed -nE 's/^PRETTY_NAME="?([^"]*)"?$/\1/p' "$(host_os_release_file)" | head -1)"
 
 echo "== 1/9 sudo NOPASSWD (the init only discovers it at phase 20) =="

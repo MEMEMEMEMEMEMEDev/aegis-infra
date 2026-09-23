@@ -7,11 +7,23 @@
   become: true
 
   tasks:
+    # The same rule as lib/host.sh, read from Ansible's own facts. Only
+    # the LIST of families comes from the init (phase 20 passes it);
+    # run by hand, the list is the supported default: Ubuntu.
     - name: Assert supported distro
       ansible.builtin.assert:
         that:
-          - ansible_facts['distribution'] == 'Ubuntu'
-          - ansible_facts['distribution_version'] is version('24.04', '>=')
+          - >-
+            (ansible_facts['distribution'] == 'Ubuntu'
+             and ansible_facts['distribution_version'] is version('24.04', '>=')
+             and 'ubuntu' in (aegis_host_supported | default('ubuntu')).split(','))
+            or
+            (ansible_facts['distribution'] == 'Debian'
+             and ansible_facts['distribution_major_version'] is version('13', '>=')
+             and 'debian' in (aegis_host_supported | default('ubuntu')).split(','))
+        fail_msg: >-
+          {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}
+          is not in the host families in force ({{ aegis_host_supported | default('ubuntu') }})
 
     - name: Assert systemd is PID 1
       ansible.builtin.assert:

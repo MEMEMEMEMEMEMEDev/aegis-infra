@@ -122,6 +122,7 @@ source "$AEGIS_ROOT/lib/host.sh"
 if ! $DO_LIST && ! host_why="$(host_supported 2>&1)"; then
     die "$host_why — nothing was changed on this machine"
 fi
+[[ -n "${host_why:-}" ]] && log_warn "$host_why"   # a widened lab list says so every time
 
 $DO_RESET && { clear_state; log_ok "state reset"; }
 

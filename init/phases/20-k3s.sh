@@ -78,9 +78,14 @@ fi
 # escaped.
 AEGIS_RESERVED_JSON="$(printf '%s' "$AEGIS_NODE_RESERVED" | python3 -c \
     'import json,sys; print(json.dumps({"aegis_node_reserved": sys.stdin.read()}))')"
+# the host families in force (lib/host.sh): the playbook asserts the
+# distribution from Ansible's OWN facts and only takes the LIST from
+# here, so the two readings of the host stay two
+AEGIS_HOST_LIST="$(host_supported_families | paste -sd, -)"
 run_cmd retry_net 2 ansible/.venv/bin/ansible-playbook \
     -i ansible/inventory/hosts.ini \
     -e "aegis_ai=$AI" \
+    -e "aegis_host_supported=$AEGIS_HOST_LIST" \
     -e "$AEGIS_RESERVED_JSON" \
     ansible/playbooks/bootstrap-host.yml "${ANSIBLE_BECOME_ARGS[@]}"
 
