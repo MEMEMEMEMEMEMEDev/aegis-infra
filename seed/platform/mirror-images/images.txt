@@ -120,7 +120,7 @@ public.ecr.aws/docker/library/golang:1.26.6-alpine@sha256:3889b425f035be855a72fb
 # The source digest is the SAME on public.ecr.aws as on Docker Hub;
 # measured with both APIs on 2026-08-17 before choosing, as was done
 # with nginx-unprivileged.
-public.ecr.aws/docker/library/python:3.12-slim@sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17	python:3.12-slim
+public.ecr.aws/docker/library/python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9	python:3.12-slim
 # nodejs22 distroless — runtime of the portfolio BFF.
 #
 # WHY DISTROLESS AND NOT node:22-alpine. The official one was tried on
@@ -184,4 +184,4 @@ gcr.io/distroless/nodejs22-debian13:nonroot@sha256:22d2f0480e59548ad14cf10d8921b
 # That the canary was the LAST thing to stop reaching the internet has
 # its irony: it exists to exercise the path everything else walks, so it
 # was also the last place where the hole could hide.
-public.ecr.aws/docker/library/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d	alpine:3.21
+public.ecr.aws/docker/library/alpine:3.21@sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f6e5d3507	alpine:3.21
