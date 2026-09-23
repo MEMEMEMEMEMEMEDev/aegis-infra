@@ -227,6 +227,22 @@ run_cmd sudo install -m 600 -o "$(id -u)" -g "$(id -g)" \
     /etc/rancher/k3s/k3s.yaml "$HOME/.kube/config"
 gate "kube-context" check_kube_context "$KUBE_CONTEXT_EXPECTED"
 
+# ── the GPU label, the switch the device plugin obeys ──────────────
+# k8s/base/gpu ships with every instance (core.yaml) and its DaemonSet
+# carries `nodeSelector: aegis.dev/gpu=true`: the node says whether it
+# has a card, and the plugin only lands where it does. Converges in
+# both directions, so an instance that turns AI off later stops running
+# a plugin that can never start.
+if [[ "$AI" == "gpu" ]]; then
+    run_cmd kubectl label node --all --overwrite aegis.dev/gpu=true
+    gate "gpu-node-labelled" bash -c \
+        '[[ -n "$(kubectl get nodes -l aegis.dev/gpu=true -o name 2>/dev/null)" ]]'
+else
+    run_cmd kubectl label node --all aegis.dev/gpu- 2>/dev/null
+    gate_no_subject "gpu-node-labelled" \
+        "AI=$AI: no node is labelled for the GPU on purpose, so the device plugin wants zero pods here and there is nothing to measure"
+fi
+
 # ── hetzner profile: Cilium BEFORE any NetworkPolicy (1.2b,
 #    ADR-0014: k3s' default netpol controller does not enforce) ─────
 if [[ "$PROFILE" == "hetzner" ]]; then
