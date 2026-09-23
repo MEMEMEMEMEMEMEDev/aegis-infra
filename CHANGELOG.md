@@ -4,6 +4,22 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-23 — the GPU device plugin lands only where the node says there is a card
+
+- **The NVIDIA device plugin no longer tries to start on a node without a
+  GPU.** Its DaemonSet is part of the core and is synced on every
+  instance, but its pods need the `nvidia` runtime class: on an `AI=no`
+  install the pod sat in `ContainerCreating` for hours and the ArgoCD app
+  `gpu` never left `Progressing`. The DaemonSet now selects nodes
+  labelled `aegis.dev/gpu=true`; phase 20 puts that label on the node
+  under `AI=gpu` and measures it (`gpu-node-labelled`), and removes it
+  otherwise. Check 233.
+- **If your instance runs `AI=gpu` today**: label the node BEFORE this
+  change reaches it through `aegis seed apply`, or the plugin is left
+  with no node to land on:
+  `kubectl label node --all --overwrite aegis.dev/gpu=true`. An `AI=no`
+  instance needs nothing: the stuck pod disappears on the next sync.
+
 ## 2026-09-23 — cleaning the cloud cleans the encrypted state too
 
 - **Phase 25 no longer resurrects a tunnel it just deleted.** When it

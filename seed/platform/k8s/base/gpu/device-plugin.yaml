@@ -72,6 +72,15 @@ spec:
       # same priority as the rest of the node addons so that it is not
       # the first thing evicted under resource pressure.
       priorityClassName: system-node-critical
+      # ONLY WHERE THERE IS A CARD. This Application is part of the core
+      # and lands on every instance, AI or not; with AI=no the first cloud
+      # instance (2026-09-23) had this pod ContainerCreating for hours
+      # («unable to get OCI runtime for sandbox»: no nvidia runtime) and
+      # the kubelet retrying every two seconds. Phase 20 puts the label
+      # on the node under AI=gpu and takes it off otherwise; with no
+      # labelled node the DaemonSet wants zero pods and stays healthy.
+      nodeSelector:
+        aegis.dev/gpu: "true"
       # The plugin itself needs NVIDIA's runtime to see the devices:
       # without this it starts and finds no GPU at all.
       runtimeClassName: nvidia
