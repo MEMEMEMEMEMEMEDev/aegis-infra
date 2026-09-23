@@ -256,7 +256,13 @@ else
     }
     _access_enabled() {
         local out
-        out="$(_cf_access "$CFB/accounts/$CF_ACCOUNT_ID/access/organizations" 2>/dev/null || true)"
+        # `access/apps` and not `access/organizations`: the scoped token of
+        # phase 15 administers apps and policies, and answers
+        # «Authentication error» to the organizations endpoint — which
+        # would have made this gate blind on the very instance it was
+        # written for (2026-09-23). A dormant account answers
+        # `not_enabled` here too.
+        out="$(_cf_access "$CFB/accounts/$CF_ACCOUNT_ID/access/apps" 2>/dev/null || true)"
         if [[ -z "$out" ]]; then
             log_warn "Cloudflare did not answer about Access: NOT measured"
             return 0
