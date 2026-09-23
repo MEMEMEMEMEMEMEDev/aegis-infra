@@ -4,6 +4,23 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-23 — the dirty-cloud pre-check sweeps Access too
+
+- **Reinstalling against the same zone no longer dies on 409
+  `application_already_exists`.** Phase 25 already swept a previous
+  instance's tunnel and CNAMEs by name; the second cloud VM (the first
+  one's host froze) then hit five 409s in the apply, because the dead
+  instance's Access applications carry the same domains, and its
+  reusable policies and service token sat next to them under the same
+  names. The pre-check now lists the account's Access applications
+  (domains under `ROOT_DOMAIN`), policies and service token (the module's
+  names), keeps whatever THIS instance's encrypted state owns, and
+  deletes the rest under the same RED confirmation — apps first, since
+  a policy in use refuses to die. Gate `access-sin-restos`, declared
+  subjectless on `EDGE=local` and when the token cannot list. Check 234.
+- **A live instance needs nothing.** Its own resources are in its state
+  and are never touched; a re-run of phase 25 lists nothing to sweep.
+
 ## 2026-09-23 — the GPU device plugin lands only where the node says there is a card
 
 - **The NVIDIA device plugin no longer tries to start on a node without a

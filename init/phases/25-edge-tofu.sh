@@ -84,6 +84,8 @@ if [[ "${EDGE:-cloudflare}" == local ]]; then
       "EDGE=local: there is no Cloudflare Access in front of the consoles, so no service token is issued — under this edge phases 35 and 60 reach the routes with nothing to traverse"
     gate_no_subject "access-st-secret-no-vacio" \
       "EDGE=local: the other half of the same service token that is never issued"
+    gate_no_subject "access-sin-restos" \
+      "EDGE=local: no Access application, policy or service token is created here, so there is nothing of a previous instance to sweep"
 
     # ── the host bridge (share/systemd/README.md) ──────────────────
     # Why a bridge and not hostPort: measured against traefik's chart
@@ -340,6 +342,65 @@ else
             find "$TUNNEL_ENV" -maxdepth 1 -name 'terraform.tfstate.*.backup' -exec shred -u {} +
         fi
         log_ok "the env's tfstate purged of the tunnel, encrypted copy included — cloud and state in sync"
+    fi
+
+    # ── Access leftovers: the OTHER half of a dirty cloud ────────
+    # 2026-09-23, second cloud VM (the first one's host froze): the
+    # pre-check above swept the previous instance's tunnel and CNAMEs,
+    # and the apply then died on five 409 «application_already_exists»
+    # — the Access applications of the dead instance carry the same
+    # domains, and its reusable policies and service token were sitting
+    # next to them under the same names. Access resources are matched
+    # by what the seed fixes (the domains under ROOT_DOMAIN, the policy
+    # and token names of the module) and kept when THIS instance's
+    # state owns them: a re-run of the same instance must not eat its
+    # own policies. Apps go first — a policy in use refuses to die.
+    ACCESS_POLICY_NAMES="aegis-operador aegis-automatizacion aegis-webhook-publico"
+    ACCESS_ST_NAME="aegis-automatizacion"
+    _access_state_ids() {
+        [[ -f "$TUNNEL_ENV/terraform.tfstate.enc.json" ]] || return 0
+        "$TOFU" -chdir="$TUNNEL_ENV" state pull 2>/dev/null \
+            | jq -r '.resources[]? | select(.module == "module.access") | .instances[]?.attributes.id // empty'
+    }
+    _access_list() {   # <kind> <jq filter over one .result[] item> → "<kind> <id> <label>" lines
+        local kind="$1" filter="$2" out
+        out="$(_cf_access "$CFB/accounts/$CF_ACCOUNT_ID/access/$kind?per_page=100")"
+        jq -e '.success == true' <<< "$out" >/dev/null 2>&1 || return 2
+        jq -r --arg kind "$kind" --arg d "$ROOT_DOMAIN" --arg names "$ACCESS_POLICY_NAMES" --arg st "$ACCESS_ST_NAME" \
+            ".result[]? | select($filter) | \"\(\$kind) \(.id) \(.domain // .name)\"" <<< "$out"
+    }
+    _access_leftovers() {   # rc 0: printed what is not ours (maybe nothing); rc 2: could not list
+        local known kind id label listed
+        known="$(_access_state_ids)"
+        listed="$(
+            _access_list apps '(.domain // "") | test("^[a-z0-9.-]+\\." + ($d | gsub("\\."; "\\.")) + "(/|$)")' || exit 2
+            _access_list policies '.name as $n | ($names | split(" ")) | index($n)' || exit 2
+            _access_list service_tokens '.name == $st' || exit 2
+        )" || return 2
+        while IFS=' ' read -r kind id label; do
+            [[ -n "$id" ]] || continue
+            grep -qxF "$id" <<< "$known" && continue
+            printf '%s %s %s\n' "$kind" "$id" "$label"
+        done <<< "$listed"
+    }
+    if ACCESS_PREV="$(_access_leftovers)"; then
+        if [[ -n "$ACCESS_PREV" ]]; then
+            log_warn "Access leftovers of a previous instance in Cloudflare (dirty cloud, the other half):"
+            while read -r kind id label; do [[ -n "$id" ]] && log_warn "  $kind $label ($id)"; done <<< "$ACCESS_PREV"
+            gate_red "DELETE them from Cloudflare — apps, then policies, then the service token (the apply answers 409 application_already_exists otherwise; if they belong to ANOTHER instance that is alive, ABORT)"
+            while read -r kind id label; do
+                [[ -n "$id" ]] || continue
+                _cf_access -X DELETE "$CFB/accounts/$CF_ACCOUNT_ID/access/$kind/$id" \
+                    | jq -e '.success == true' >/dev/null || die "could not delete the Access $kind $label ($id)"
+                log_ok "Access $kind $label deleted"
+            done <<< "$ACCESS_PREV"
+        fi
+        _access_swept() { [[ -z "$(_access_leftovers)" ]]; }
+        gate "access-sin-restos" _access_swept
+    else
+        log_warn "the Access token could not list the account's applications, policies or service tokens: leftovers NOT measured"
+        gate_no_subject "access-sin-restos" \
+          "the token of phase 15 could not list Access: nothing was swept and nothing is claimed; a 409 in the apply below is what a leftover looks like"
     fi
 
     # ── cloudflare-tunnel: tunnel + config + CNAMEs ────────────────
