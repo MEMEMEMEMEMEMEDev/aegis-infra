@@ -61,6 +61,8 @@ if "zero trust" not in j:
                     "prepares a Cloudflare account has no way to know it must be switched on")
 
 SHAPES = [
+    ("a token that cannot read Zero Trust (auth error)",
+     '{"success":false,"errors":[{"code":10000,"message":"Authentication error"}]}', 0),
     ("Access dormant (403 not_enabled)",
      '{"success":false,"errors":[{"code":9999,"message":"access.api.error.not_enabled: Access is not enabled."}]}', 1),
     ("Access enabled", '{"success":true,"result":[{"id":"x","name":"team"}]}', 0),
@@ -72,6 +74,7 @@ for name, payload, want in SHAPES:
         'log_warn() { echo "$*" >&2; }\n'
         f'CF_ACCOUNT_ID=acc; CFB=https://api.cloudflare.com/client/v4\n'
         f'_cf() {{ printf %s {payload!r}; }}\n'
+        f'_cf_access() {{ printf %s {payload!r}; }}\n'
         f"{probe}\n_access_enabled\n")
     r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
     driven += 1
@@ -79,6 +82,9 @@ for name, payload, want in SHAPES:
         findings.append(f"with {name} the probe answered rc {r.returncode}, expected {want}"
                         + (": the phase walks into the apply" if want == 1 else
                            ": a run that could go ahead is stopped"))
+    if name.startswith("a token that cannot") and "NOT measured" not in r.stderr:
+        findings.append("a token that cannot read Zero Trust is not an account with it off: the "
+                        "probe must say NOT measured, not refuse")
     if want == 1 and "one.dash" not in r.stderr:
         findings.append("the refusal does not tell the operator where to enable Access")
 
