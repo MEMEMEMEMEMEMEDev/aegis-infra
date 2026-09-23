@@ -4,6 +4,21 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-23 — cleaning the cloud cleans the encrypted state too
+
+- **Phase 25 no longer resurrects a tunnel it just deleted.** When it
+  finds the leftovers of a failed apply in Cloudflare, it deletes them and
+  purged the local tfstate; since the state lives encrypted, the wrapper
+  decrypted the deleted tunnel right back and the apply died on a 404
+  three runs in a row. The tunnel module is now dropped from the state
+  through the wrapper (the Access resources, still in the cloud, stay),
+  the plaintext copies `tofu state rm` writes are shredded, and the
+  seed's `.gitignore` covers them (`*.tfstate.*.backup`). Check 232.
+- **If your instance is stuck on that 404**: `tofu-apply.sh
+  -chdir=envs/cloudflare-tunnel state rm <each module.tunnel.* resource>`
+  with `SOPS_AGE_KEY_FILE` exported, shred the `terraform.tfstate.*.backup`
+  copies, then `aegis init --from 25`.
+
 ## 2026-09-22 — Zero Trust dormant, found before the edge is built
 
 - **Phase 25 asks whether Cloudflare Access is enabled** before it

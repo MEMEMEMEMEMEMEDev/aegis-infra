@@ -319,8 +319,27 @@ else
         # clean-cloud/dirty-state case caused by a manual deletion in the
         # dashboard is covered by tofu's refresh: remote 404 → drop the
         # resource → recreate.)
+        # BUG 2b (first cloud instance, 2026-09-23): since the state lives
+        # ENCRYPTED (#46), the wrapper decrypts terraform.tfstate.enc.json
+        # before every apply, so purging the plaintext was blind — the
+        # deleted tunnel came back from the encrypted copy and the apply
+        # died on PUT .../cfd_tunnel/<id>/configurations → 404, three runs
+        # in a row. The state is edited THROUGH the wrapper (`state rm`,
+        # which re-encrypts), and only the tunnel module is dropped: the
+        # Access resources are still in the cloud and stay in the state.
         rm -f "$TUNNEL_ENV/terraform.tfstate" "$TUNNEL_ENV/terraform.tfstate.backup"
-        log_ok "the env's local tfstate purged — cloud and local state in sync"
+        if [[ -f "$TUNNEL_ENV/terraform.tfstate.enc.json" ]]; then
+            _r=""
+            for _r in $("$TOFU" -chdir="$TUNNEL_ENV" state list 2>/dev/null | awk '/^module\.tunnel\./'); do
+                run_cmd "$TOFU" -chdir="$TUNNEL_ENV" state rm "$_r" \
+                    || die "could not drop $_r from the encrypted state — the apply would hit the deleted tunnel again"
+            done
+            # `tofu state rm` leaves plaintext copies (terraform.tfstate.<n>.backup)
+            # next to the state; they carry the tunnel secret and git does
+            # not ignore them by name
+            find "$TUNNEL_ENV" -maxdepth 1 -name 'terraform.tfstate.*.backup' -exec shred -u {} +
+        fi
+        log_ok "the env's tfstate purged of the tunnel, encrypted copy included — cloud and state in sync"
     fi
 
     # ── cloudflare-tunnel: tunnel + config + CNAMEs ────────────────
