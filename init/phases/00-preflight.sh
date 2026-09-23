@@ -50,7 +50,7 @@ seed_platform_dir
 # (as in #15):
 if ! command -v jq >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
     log_warn "jq missing — installing it (sudo NOPASSWD available; H3 #15)"
-    retry_net 3 sudo apt-get -o DPkg::Lock::Timeout=600 install -y jq || \
+    retry_net 3 pkg_install jq || \
         log_warn "could not install jq on my own — the gate below carries the manual command"
 fi
 gate "bootstrap-bins" check_bootstrap_bins

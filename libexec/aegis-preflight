@@ -63,6 +63,8 @@ clock_drift(){
 # to run on a machine aegis cannot install on (lib/host.sh).
 # shellcheck source=../lib/host.sh
 source "$AEGIS_ROOT/lib/host.sh"
+# shellcheck source=../lib/pkg.sh
+source "$AEGIS_ROOT/lib/pkg.sh"   # the family's package manager, canonical names
 echo "== 0/9 a machine aegis can install on =="
 if ! host_why="$(host_supported 2>&1)"; then
   echo "  [FAIL] $host_why" >&2
@@ -174,8 +176,8 @@ else
 fi
 
 echo "== 5/9 packages the init does NOT install but does use =="
-sudo apt-get update -qq 2>/dev/null || sudo apt-get update -qq || warn "apt update failed (look at the clock in 4/9)"
-sudo apt-get install -y -qq tmux python3-yaml jq >/dev/null 2>&1
+pkg_update >/dev/null 2>&1 || pkg_update >/dev/null || warn "the package index could not be updated (look at the clock in 4/9)"
+pkg_install tmux python3-yaml jq >/dev/null 2>&1
 command -v tmux >/dev/null && ok "tmux installed (run the init inside it)" || bad "tmux not installed"
 command -v jq   >/dev/null && ok "jq present (phase 00's bootstrap-bins gate)" || bad "jq missing"
 python3 -c 'import yaml' 2>/dev/null && ok "PyYAML present (placeholder injection, phase 80)" || bad "PyYAML missing"
@@ -208,7 +210,7 @@ g_mail="$(git config --global user.email 2>/dev/null || true)"
 # gh is THE GitHub credential of the whole init (phase 00, D10): the
 # install is ours to do, the login is the operator's — it is the one
 # step of this command that needs a human and a browser.
-command -v gh >/dev/null || sudo apt-get install -y -qq gh >/dev/null 2>&1
+command -v gh >/dev/null || pkg_install gh >/dev/null 2>&1
 if command -v gh >/dev/null; then
   # THE SCOPE IS MEASURED, not advised. Until 2026-08-31 this only
   # asked whether `gh auth status` succeeded, and named `repo,
@@ -232,7 +234,7 @@ if command -v gh >/dev/null; then
     bad "gh WITHOUT auth -> run 'gh auth login' (scope: repo) and re-run this command"
   fi
 else
-  bad "gh not installed and apt could not install it (the init assumes it at phase 00)"
+  bad "gh not installed and the package manager could not install it (the init assumes it at phase 00)"
 fi
 
 echo "== 7/9 real connectivity to the endpoints the phases use =="

@@ -231,7 +231,7 @@ which installs whatever the distribution's line carries. The number is not deliv
 anything and an update window would propose a bump nobody can install. Write \
 $tool: \"apt\" in $PINS_FILE, or give it a download branch with a published checksum."
             fi
-            run_cmd retry_net 3 apt_locked install -y "$tool" ;;
+            run_cmd retry_net 3 pkg_install "$tool" ;;
     esac
 }
 
@@ -294,15 +294,16 @@ $(command -v "$tool")). A package-managed copy earlier on PATH is the usual caus
 }
 
 log_info "Installing the pinned userland…"
-run_cmd retry_net 3 apt_locked update -qq
+run_cmd retry_net 3 pkg_update
 # apt deps BEFORE the loop (P0.5 audit): read_pin uses pyyaml —
 # installing it AFTER the loop was a race against Ubuntu minimal
 # (without python3-yaml preinstalled, the first read_pin died with a
 # misleading "missing pin" die). htpasswd is in apache2-utils;
 # python3-venv for phase 20's ansible venv (bug 3 validation #3:
-# Ubuntu minimal does not ship ensurepip):
-run_cmd retry_net 3 apt_locked install -y \
-    apache2-utils python3-yaml python3-venv rsync
+# Ubuntu minimal does not ship ensurepip). Canonical names: lib/pkg.sh
+# says what each is called on this family (htpasswd is apache2-utils on
+# debian, apache on arch; python's venv needs nothing on arch):
+run_cmd retry_net 3 pkg_install htpasswd python3-yaml python3-venv rsync
 for t in jq git openssl direnv gh age sops tofu kubectl helm cosign; do
     install_tool "$t"
 done

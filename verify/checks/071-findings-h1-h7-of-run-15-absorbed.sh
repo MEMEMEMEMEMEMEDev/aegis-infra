@@ -84,7 +84,9 @@ nc "$PHASES/00-preflight.sh" | grep -q 'gate .*check_clock_ntp' \
     && D71="$D71 H1: timedatectl is still a GATE (an unreliable signal with chrony);"
 # H3: jq auto-installed with NOPASSWD before the gate:
 NC00="$(nc "$PHASES/00-preflight.sh")"
-echo "$NC00" | grep -q 'install -y jq' \
+# the install goes through the family's manager (lib/pkg.sh) since
+# 2026-09-23; the property is the same: phase 00 installs jq itself
+echo "$NC00" | grep -qE '(^|[[:space:]])pkg_install jq([[:space:]]|$)' \
     || D71="$D71 H3: phase 00 does not install jq by itself (a deterministic stop on every clean VM);"
 # H2: runner with a 2nd pass + purge of the generated state:
 nc "$LIBEXEC/aegis-verify" | grep -q 'AEGIS_VERIFY_RETRY=1' \

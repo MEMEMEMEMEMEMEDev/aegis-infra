@@ -119,6 +119,8 @@ source "$AEGIS_ROOT/lib/access.sh"
 # playbook of phase 20. lib/host.sh holds the rule.
 # shellcheck source=lib/host.sh
 source "$AEGIS_ROOT/lib/host.sh"
+# shellcheck source=lib/pkg.sh
+source "$AEGIS_ROOT/lib/pkg.sh"   # every phase installs through it, by canonical name
 if ! $DO_LIST && ! host_why="$(host_supported 2>&1)"; then
     die "$host_why — nothing was changed on this machine"
 fi
