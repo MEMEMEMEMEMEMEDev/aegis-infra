@@ -457,6 +457,27 @@ gate "webhooks-scopeados" poll 180 5 bash -c \
 # (A44: the webhook's namespaceSelector IS the blast radius of the
 #  failurePolicy Fail — verify the generated object, not the policy)
 
+# A SYNC THAT DIED ON THE SIGNED DIGEST IS NOT RETRIED BY ARGOCD.
+# 2026-09-24, second cloud VM: the canary's auto-sync of the revision
+# carrying THIS digest ran at 04:24 against a Kyverno that could not
+# read signatures yet (its CA restart was owed, check 236) and failed;
+# Kyverno was fixed at 04:57 and the gate below then waited fifteen
+# minutes for an IU→ArgoCD cycle that never came — ArgoCD does not
+# re-attempt an automated sync of the same revision after a failure.
+# Narrow on purpose: only a failed operation that was refusing THIS
+# digest is re-fired; any other failure is left to the wait and its
+# diagnostic, as before.
+_canary_sync_stuck_on_digest() {
+    kubectl -n argocd get application hello-aegis -o json 2>/dev/null \
+        | jq -e --arg d "$DIGEST" \
+            '.status.operationState.phase == "Failed"
+             and ((.status.operationState.message // "") | contains($d))' >/dev/null
+}
+if _canary_sync_stuck_on_digest; then
+    log_info "the canary's last sync failed admitting ${DIGEST:0:19}… (before Kyverno could verify it) — syncing it again"
+    argo_sync hello-aegis 300
+fi
+
 # ── 80.7 the supply-chain's final gate (3.E.3's, codified) ─────────
 # CR-2-poll run #14: after policy-ready the Deployment still
 # references the LAST PRE-signature tag (the IU has not yet bumped to

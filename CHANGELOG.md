@@ -4,6 +4,18 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-24 — the canary sync ArgoCD does not retry
+
+- **Phase 80 re-fires the canary sync that died on the signed digest.**
+  ArgoCD re-attempts an automated sync only for a new revision. On the
+  second cloud VM the canary revision carrying the signed digest was
+  synced while Kyverno could not verify signatures, and was denied; once
+  Kyverno was repaired the canary gate waited fifteen minutes for a sync
+  that never came. After the policy is live and before that gate, the
+  phase now syncs the canary again when its last operation Failed
+  refusing that exact digest; any other failure is left to the wait and
+  its diagnostic. Check 237.
+
 ## 2026-09-24 — a Kyverno restart owed for the CA is measured
 
 - **Phase 80 restarts Kyverno whenever a controller is older than its
