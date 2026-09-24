@@ -383,14 +383,47 @@ argo_sync kyverno 600
 # injection: a rollout restart of ALL kyverno deploys + a real wait
 # (the golden anti-class-D rule: config of a live pod ⇒ restart or
 # checksum):
-if [[ "$CA_INJECTED_THIS_RUN" == "true" ]]; then
-    log_info "CA injected on THIS run — rollout restart of Kyverno's controllers (subPath does not refresh on its own)"
+# OWED, not «injected on this run». 2026-09-24, second cloud VM: the
+# first phase-80 run injected the CA (23:51) and died in mirror-images
+# BEFORE this block; every later run found the CA already in git, so
+# CA_INJECTED_THIS_RUN stayed false and nobody restarted anything. The
+# admission controller (started 23:40) kept a CA file with no aegis CA
+# in it, fell back to plain HTTP against the registry, and denied the
+# signed canary for fifteen minutes. A restart one run owes and dies
+# before paying is owed to the next run too — so it is MEASURED: a
+# controller whose oldest running pod started before the last write of
+# the CA ConfigMap it mounts is holding a CA it never loaded.
+_kyverno_ca_restart_owed() {   # prints deploy/<name> for each controller holding a stale CA
+    local d cm written started
+    while IFS= read -r d; do
+        cm="$(kubectl -n kyverno get "$d" -o json \
+            | jq -r '[.spec.template.spec.volumes[]? | .configMap.name // empty | select(test("ca-certificates$"))][0] // empty')"
+        [[ -n "$cm" ]] || continue
+        written="$(kubectl -n kyverno get cm "$cm" --show-managed-fields -o json \
+            | jq -r '[.metadata.managedFields[]? | select(.fieldsV1["f:data"] != null) | .time] | max // empty')"
+        started="$(kubectl -n kyverno get pods -l "$(kubectl -n kyverno get "$d" -o json \
+                | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")')" \
+                --field-selector=status.phase=Running -o json \
+            | jq -r '[.items[].status.startTime] | min // empty')"
+        [[ -n "$written" && -n "$started" && "$started" < "$written" ]] && printf '%s\n' "$d"
+    done < <(kubectl -n kyverno get deploy -o name)
+    return 0
+}
+KYV_OWED="$(_kyverno_ca_restart_owed)"
+if [[ "$CA_INJECTED_THIS_RUN" == "true" || -n "$KYV_OWED" ]]; then
+    if [[ -n "$KYV_OWED" ]]; then
+        log_info "Kyverno controllers started before their CA was written: $(tr '\n' ' ' <<< "$KYV_OWED")— rollout restart (subPath does not refresh on its own)"
+    else
+        log_info "CA injected on THIS run — rollout restart of Kyverno's controllers (subPath does not refresh on its own)"
+    fi
     run_cmd bash -c "kubectl -n kyverno get deploy -o name \
         | xargs -r -n1 kubectl -n kyverno rollout restart"
     while IFS= read -r d; do
         gate "kyverno-restart-${d##*/}" wait_rollout kyverno "$d" 600
     done < <(kubectl -n kyverno get deploy -o name)
 fi
+_kyverno_ca_loaded() { [[ -z "$(_kyverno_ca_restart_owed)" ]]; }
+gate "kyverno-ca-cargada" _kyverno_ca_loaded
 
 # A v1.1 applied to Kyverno (same pattern, another provider): the
 # ClusterPolicy is governed by Kyverno's admission webhook — which has
