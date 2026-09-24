@@ -1363,7 +1363,14 @@ seed_fetch() {   # <path relative to platform/>...
 # reason this list exists is that a transient network fault must not
 # read as a defect, so it has to speak every language the artifact
 # downloads in: Go, git, AND python.
-AEGIS_NET_SIGS='dial tcp|i/o timeout|TLS handshake timeout|server misbehaving|connection reset|connection refused|temporary failure|could not resolve|unexpected EOF|lookup .* on|failed to get git|ReadTimeoutError|ConnectionError|IncompleteRead|Read timed out|Connection broken|Temporary failure in name resolution|Failed to establish a new connection|Remote end closed connection|ETIMEDOUT|ECONNRESET|ENOTFOUND|network timeout|temporary error|Could not resolve host'
+AEGIS_NET_SIGS='dial tcp|i/o timeout|TLS handshake timeout|server misbehaving|connection reset|connection refused|temporary failure|could not resolve|unexpected EOF|lookup .* on|failed to get git|ReadTimeoutError|ConnectionError|IncompleteRead|Read timed out|Connection broken|Temporary failure in name resolution|Failed to establish a new connection|Remote end closed connection|ETIMEDOUT|ECONNRESET|ENOTFOUND|network timeout|temporary error|Could not resolve host|TOOMANYREQUESTS|Too Many Requests|Rate exceeded'
+# 2026-09-24, lab-arch, SEEN live: kaniko pulling alpine for the ci-images
+# build got «TOOMANYREQUESTS: Rate exceeded» from public.ecr.aws and the
+# retry declared it a real failure. A registry's pull rate limit is the
+# network having a bad moment, not the artifact being wrong: every
+# Containerfile starts with a FROM, so the registry is a downloader the
+# seed always uses. Docker Hub spells it «toomanyrequests», ECR «Rate
+# exceeded», HTTP «429 Too Many Requests»; the grep is case-insensitive.
 # Provenance, because it matters which of these were SEEN and which
 # were read: `ReadTimeoutError` and `Read timed out` were measured on
 # 2026-09-01, live, in the GPU engine's build. The go/git ones come
