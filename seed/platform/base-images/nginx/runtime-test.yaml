@@ -18,3 +18,4 @@ port: 8080
 writable:
   - /var/cache/nginx
   - /run
+  - /tmp
