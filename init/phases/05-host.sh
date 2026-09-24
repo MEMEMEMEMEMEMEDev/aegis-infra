@@ -313,6 +313,11 @@ $(command -v "$tool")). A package-managed copy earlier on PATH is the usual caus
 
 log_info "Installing the pinned userland…"
 run_cmd retry_net 3 pkg_update
+# the upgrade can replace the kernel, and on Arch the running one is
+# then left without its module tree (lib/host.sh); phase 20's k3s would
+# find no vxlan. Asked here, right after the action, so the init stops
+# with the remedy (reboot, then --from 05-host) instead of at coredns:
+gate "modulos-del-kernel-en-marcha" host_running_kernel_has_modules
 # apt deps BEFORE the loop (P0.5 audit): read_pin uses pyyaml —
 # installing it AFTER the loop was a race against Ubuntu minimal
 # (without python3-yaml preinstalled, the first read_pin died with a

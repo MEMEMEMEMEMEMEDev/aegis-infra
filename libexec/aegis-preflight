@@ -179,6 +179,10 @@ fi
 
 echo "== 5/9 packages the init does NOT install but does use =="
 pkg_update >/dev/null 2>&1 || pkg_update >/dev/null || warn "the package index could not be updated (look at the clock in 4/9)"
+# the upgrade above can replace the kernel; on Arch the running one is
+# then left without its module tree (lib/host.sh) and k3s cannot load
+# vxlan until a reboot. A FAIL, not a warning: «Machine ready» would lie
+host_running_kernel_has_modules 2>/dev/null && ok "the running kernel $(host_kernel_release) has its modules on disk" || bad "the running kernel $(host_kernel_release) has no modules on disk: the upgrade replaced the kernel - reboot, then run the preflight again"
 pkg_install tmux python3-yaml jq >/dev/null 2>&1
 command -v tmux >/dev/null && ok "tmux installed (run the init inside it)" || bad "tmux not installed"
 command -v jq   >/dev/null && ok "jq present (phase 00's bootstrap-bins gate)" || bad "jq missing"

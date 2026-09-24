@@ -129,3 +129,30 @@ host_supported() {
     fi
     return 0
 }
+
+# ── the kernel that is running still has its modules (2026-09-24) ───
+# On Arch a kernel upgrade REPLACES the module tree: /lib/modules keeps
+# one directory per installed kernel, and the old one leaves with the
+# old package. The kernel keeps running, and every module it has not
+# loaded yet is gone: on lab-arch, after the preflight's own
+# `pacman -Syu` had moved linux-lts from 6.18.52 to 6.18.53, flannel
+# could not create its vxlan device and kube-proxy could not load
+# xt_comment; k3s restarted 19 times and phase 20 died at coredns.
+# Debian and Ubuntu keep the old tree, so it never bit there. Measured
+# right after pkg_update, where it can happen, and by the TREE and not
+# by a version string: a tree that is there is what modprobe needs.
+
+# host_kernel_release / host_modules_dir — overridable so the check can
+# drive the measure with a fixture instead of this machine's kernel
+host_kernel_release() { printf '%s\n' "${AEGIS_KERNEL_RELEASE:-$(uname -r)}"; }
+host_modules_dir()    { printf '%s\n' "${AEGIS_MODULES_DIR:-/lib/modules}"; }
+
+# host_running_kernel_has_modules — rc 0 when the running kernel's
+# module tree is on disk; rc 1 with the reason and the remedy on stderr
+host_running_kernel_has_modules() {
+    local rel dir
+    rel="$(host_kernel_release)"; dir="$(host_modules_dir)/$rel"
+    [[ -d "$dir" ]] && return 0
+    echo "the running kernel $rel has no modules on disk ($dir is gone): a package upgrade replaced the kernel under this session, and every module it has not loaded yet (vxlan for flannel, xt_comment for kube-proxy) cannot load until the machine boots the new one. Reboot, then run again." >&2
+    return 1
+}
