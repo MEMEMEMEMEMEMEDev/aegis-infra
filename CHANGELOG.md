@@ -4,6 +4,23 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-24 — a Kyverno restart owed for the CA is measured
+
+- **Phase 80 restarts Kyverno whenever a controller is older than its
+  CA, not only on the run that injected it.** The registry CA reaches
+  Kyverno by subPath, which never refreshes; the restart used to hang on
+  a flag of the injecting run. On the second cloud VM that run died in
+  mirror-images before the restart, every later run found the CA already
+  in git, and the admission controller kept a CA file without the aegis
+  CA: it fell back to plain HTTP against the registry and denied the
+  signed canary (`GET http://…:5000/v2/: 400`). The phase now compares
+  each controller's oldest running pod with the last write of the CA
+  ConfigMap it mounts, restarts on any debt, and gates
+  `kyverno-ca-cargada` afterwards. Check 236.
+- **If your Kyverno denies signed images with that 400**: resume phase
+  80, or restart its controllers by hand
+  (`kubectl -n kyverno rollout restart deploy`).
+
 ## 2026-09-24 — aegis-base-nginx declares /tmp writable
 
 - **The nginx base starts under its own smoke test.** Its `nginx.conf`
