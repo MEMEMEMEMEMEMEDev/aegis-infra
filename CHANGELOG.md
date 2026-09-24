@@ -4,6 +4,20 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-24 — redis 8.6.7 and postgres 17.11: the next patch, not a wait
+
+- **The seed pins the patch that followed.** `redis:8.6.4-alpine` and
+  `postgres:17.10-alpine` carry util-linux with CVE-2026-53612 (HIGH,
+  fixed) and upstream never rebuilds an old patch tag: it publishes the
+  next one. `redis:8.6.7-alpine` and `postgres:17.11-alpine` (both built
+  2026-09-21, same major) carry the fixed util-linux and OpenSSL 3.5.8.
+  No exception was written: the packages ARE in those images (`setpriv`,
+  `libuuid`), and the clean patch exists.
+- **If your instance runs these images**: `aegis seed apply
+  mirror-images/images.txt --yes`, push the commit, and run the
+  `mirror-images` job. The service catalogue's digests follow in a
+  separate commit, read off the live registry once the mirror publishes.
+
 ## 2026-09-23 — the dirty-cloud pre-check sweeps Access too
 
 - **Reinstalling against the same zone no longer dies on 409

@@ -91,6 +91,6 @@ red_8() {
 # it red. The table is allowed to be ahead of the catalogue; what is
 # forbidden is a template ahead of the table.
 control_3() {
-    sed -i 's|^    "__FROM_PYTHON__": "python:3.12-slim",$|    "__FROM_PYTHON__": "python:3.12-slim",\n    "__FROM_REDIS__": "redis:8.6.4-alpine",|' \
+    sed -i 's|^    "__FROM_PYTHON__": "python:3.12-slim",$|    "__FROM_PYTHON__": "python:3.12-slim",\n    "__FROM_REDIS__": "redis:8.6.7-alpine",|' \
         "$AEGIS_ROOT/libexec/aegis-app"
 }
