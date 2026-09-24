@@ -4,6 +4,23 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-24 — aegis-base-nginx declares /tmp writable
+
+- **The nginx base starts under its own smoke test.** Its `nginx.conf`
+  puts the pid and every temp path under `/tmp` (tenant pods run with a
+  read-only root), and its `runtime-test.yaml` declared only
+  `/var/cache/nginx` and `/run`. Since the smoke test arrived
+  (2026-09-20) every clean install died in phase 80 on
+  `open() "/tmp/nginx.pid" failed (30: Read-only file system)`, and `php`,
+  built on top of it, fell with it. The runtime test now names `/tmp`,
+  as php's already did. Check 235 reads every `pid` and `*_temp_path`
+  of each base's nginx.conf against what its runtime test mounts.
+- **If your instance's consumers of aegis-base-nginx do not mount /tmp
+  as an emptyDir**, they die the same way on the next base rebuild:
+  the runtime test is the base's contract with them.
+- **If your instance was installed before 2026-09-20**, bring the file
+  over: `aegis seed apply base-images/nginx/runtime-test.yaml --yes`.
+
 ## 2026-09-24 — redis 8.6.7 and postgres 17.11: the next patch, not a wait
 
 - **The seed pins the patch that followed.** `redis:8.6.4-alpine` and
