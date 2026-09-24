@@ -63,12 +63,14 @@
 docker.io/dxflrs/garage:v2.3.0@sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690	garage:v2.3.0
 
 # --- data -----------------------------------------------------------
-# redis:8.6.4-alpine
-public.ecr.aws/docker/library/redis:8.6.4-alpine@sha256:2cc044fc5a07c9b701f8f1255a309ae9ad7856e694ac03513bf3648c01e40763	redis:8.6.4-alpine
+# redis:8.6.7-alpine — the patch that followed 8.6.4 (built 2026-09-21,
+# util-linux 2.41.6-r1: 8.6.4 carried CVE-2026-53612 and was never rebuilt)
+public.ecr.aws/docker/library/redis:8.6.7-alpine@sha256:79aff60c78f59416f3f639f810a11938d3e854d31c83675e3d8c52e8cc5b5208	redis:8.6.7-alpine
 
-# postgres:17.10-alpine — major 17 on purpose (more field time than 18;
-# upstream support until November 2029).
-public.ecr.aws/docker/library/postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193	postgres:17.10-alpine
+# postgres:17.11-alpine — major 17 on purpose (more field time than 18;
+# upstream support until November 2029). 17.11 is the patch that followed
+# 17.10 (built 2026-09-21, util-linux 2.42.3-r1).
+public.ecr.aws/docker/library/postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24	postgres:17.11-alpine
 
 # --- CI toolchains --------------------------------------------------
 # golang:1.26.6-alpine — compiles the ai-gateway in the pipeline.
