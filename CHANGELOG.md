@@ -4,6 +4,22 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-25 — a release does not drop the people on the site
+
+- **The canary and every app template that serves a port wait 5 s in
+  `preStop` before stopping** (native `sleep` action: the runtime images
+  carry no shell), with `terminationGracePeriodSeconds: 30`. On SIGTERM a
+  pod leaves the endpoints and stops at the same instant, and traefik
+  keeps routing to it until the change reaches it: measured 2026-09-24,
+  every rollout under 300 req/s dropped ~296 requests in 3 s (cloud
+  instance) and 295 (Debian). The worker template has no port and is
+  unchanged. Check 245.
+- **Apps created before this** keep their own `k8s/` (the template is
+  copied once): add the same `lifecycle.preStop.sleep` to their
+  Deployment; `aegis seed apply k8s/…` does not reach a tenant's repo.
+  The canary: its Deployment lives in the canary's app repo, not in the
+  platform repo — copy the block there.
+
 ## 2026-09-25 — the rate limit counts per visitor, and traefik has room
 
 - **Every rate limiter now counts per VISITOR behind the tunnel.** A

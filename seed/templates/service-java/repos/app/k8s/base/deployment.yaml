@@ -29,6 +29,8 @@ spec:
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
+      # longer than the preStop sleep above plus the app's own shutdown
+      terminationGracePeriodSeconds: 30
       containers:
         - name: app
           # The IMAGE is governed by the overlay (kustomize images) and
@@ -62,6 +64,17 @@ spec:
           # own. 256Mi is the floor a stdlib-only JVM starts on; the
           # heap follows the limit through -XX:MaxRAMPercentage=70, so
           # raising the limit is the only number to touch.
+          # A RELEASE MUST NOT DROP THE PEOPLE ON THE SITE (plan/19 B-8).
+          # On SIGTERM the pod leaves the Service's endpoints and stops at
+          # the same instant, but traefik keeps routing to it until the
+          # endpoints change reaches it: measured 2026-09-24, every rollout
+          # under 300 req/s dropped ~296 requests in 3 s (502s and 10 s
+          # hangs), on the cloud instance and on Debian alike. Five seconds
+          # of sleep before the signal covers that propagation. The native
+          # `sleep` action needs no shell (the runtime images carry none).
+          lifecycle:
+            preStop:
+              sleep: {seconds: 5}
           resources:
             requests: {cpu: 100m, memory: 256Mi}
             limits: {cpu: 1000m, memory: 512Mi}
