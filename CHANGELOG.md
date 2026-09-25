@@ -4,6 +4,25 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-25 — an organization does not reach the GPU unless the platform hands it one
+
+- **Security.** Measured on a live instance: in any organization's
+  namespace, a pod could ask for `nvidia.com/gpu` (no quota named it), or
+  ask for nothing and set `runtimeClassName: nvidia` plus
+  `NVIDIA_VISIBLE_DEVICES=all`, and see the whole card (`/dev/nvidia0`).
+  The new ClusterPolicy `tenants-without-gpu` refuses the three in every
+  `org-*` namespace (Enforce, fails closed). `ai-system`, the platform's
+  own GPU lane, is not affected.
+- **Instances already running** get it by listing the policy in their
+  `kyverno-policies` kustomization:
+  `aegis seed apply k8s/base/kyverno-policies/clusterpolicy-tenants-without-gpu.yaml k8s/base/kyverno-policies/kustomization.yaml`
+  (the kustomization of an instance past phase 80 also lists the
+  signature policy: keep that entry). It can be applied at once with
+  `kubectl apply -f` on that file; ArgoCD adopts it when the kustomization
+  lists it.
+- Phases 35 and 80 add and remove only the signature policy's entry
+  (`signature_policy_entry`), and keep any other policy in the list.
+
 ## 2026-09-25 — a release does not drop the people on the site
 
 - **The canary and every app template that serves a port wait 5 s in

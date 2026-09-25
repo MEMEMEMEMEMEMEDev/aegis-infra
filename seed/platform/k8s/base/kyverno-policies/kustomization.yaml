@@ -10,5 +10,12 @@ kind: Kustomization
 # ("missing digest") — an EVALUATION failure blocks even when the
 # action is Audit. Phase 80 adds the entry IN THE SAME COMMIT that
 # injects the real pub (runtime-entry pattern — checks 18/18b/39). Do
-# NOT list policies here by hand.
-resources: []
+# NOT list the SIGNATURE policy here by hand.
+#
+# tenants-without-gpu IS listed from the seed (2026-09-25, check 247): it
+# evaluates no image and no key, so it has no order to wait for, and an
+# organization must not reach the GPU during the minutes before phase 80
+# either. Phases 35 and 80 touch only the signature entry
+# (signature_policy_entry), never this one.
+resources:
+  - clusterpolicy-tenants-without-gpu.yaml

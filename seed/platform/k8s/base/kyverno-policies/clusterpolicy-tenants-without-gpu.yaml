@@ -1,0 +1,104 @@
+# tenants-without-gpu — an organization does not reach the GPU unless the
+# platform hands it one.
+#
+# MEASURED 2026-09-25 on the home instance (org-canary, enforce=restricted,
+# signed image), two ways in and both open:
+#
+#   1. `nvidia.com/gpu: 1` in a container's limits. No quota named the
+#      resource, so the apiserver admitted it and the device plugin (time
+#      slicing, 2 replicas) would have handed over a slice of the card.
+#   2. WITHOUT asking for anything: `runtimeClassName: nvidia` plus
+#      `NVIDIA_VISIBLE_DEVICES=all` in the pod's env. The NVIDIA runtime
+#      honours that variable for unprivileged containers by default
+#      (`accept-nvidia-visible-devices-envvar-when-unprivileged = true`),
+#      and the pod listed /dev/nvidia0, /dev/nvidiactl and /dev/nvidia-uvm:
+#      the whole card, invisible to the scheduler and to every quota.
+#
+# Restricted PSS does not look at runtimeClassName, and the signature
+# policy only looks at the image. Hence one rule per way in, each with a
+# message that names what was refused.
+#
+# WHY `runtimeClassName` ALONE CLOSES WAY 2. The node's default runtime is
+# runc: without the nvidia runtime class the NVIDIA hook never runs, and the
+# variable is just a string. The env rule is still here because the variable
+# is the half a reviewer recognises, and a refusal that names it teaches.
+#
+# SCOPE: `org-*`, the namespaces of organizations. NOT the `aegis-tenants`
+# label: ai-system carries it too, and ai-system is the platform's own GPU
+# lane. A future contract word (`gpu:` on a service) makes the exception for
+# ONE service of ONE organization; until then no organization has the card.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: tenants-without-gpu
+  labels:
+    aegis.dev/part-of: aegis-platform
+    aegis.dev/component: policy-enforcement
+  annotations:
+    pod-policies.kyverno.io/autogen-controllers: DaemonSet,Deployment,Job,StatefulSet,CronJob
+spec:
+  webhookConfiguration:
+    failurePolicy: Fail
+  background: true
+  rules:
+    - name: no-runtime-class
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["org-*"]
+      validate:
+        failureAction: Enforce
+        message: >-
+          an organization's pod does not choose its runtime: runtimeClassName
+          is refused (the nvidia class hands over the whole GPU)
+        pattern:
+          spec:
+            X(runtimeClassName): "null"
+    - name: no-gpu-resource
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["org-*"]
+      validate:
+        failureAction: Enforce
+        message: >-
+          an organization's pod does not ask for nvidia.com/gpu: the GPU is
+          handed over by the platform, not requested from a repo
+        pattern:
+          spec:
+            containers:
+              - =(resources):
+                  =(limits):
+                    X(nvidia.com/gpu): "null"
+                  =(requests):
+                    X(nvidia.com/gpu): "null"
+            =(initContainers):
+              - =(resources):
+                  =(limits):
+                    X(nvidia.com/gpu): "null"
+                  =(requests):
+                    X(nvidia.com/gpu): "null"
+    - name: no-nvidia-env
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["org-*"]
+      validate:
+        failureAction: Enforce
+        message: >-
+          an organization's pod does not set NVIDIA_* variables: with the
+          nvidia runtime they expose the GPU without asking the scheduler
+        pattern:
+          spec:
+            containers:
+              - =(env):
+                  - name: "!NVIDIA_*"
+            =(initContainers):
+              - =(env):
+                  - name: "!NVIDIA_*"
+            =(ephemeralContainers):
+              - =(env):
+                  - name: "!NVIDIA_*"
