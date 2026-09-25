@@ -43,6 +43,11 @@ metadata:
   labels: {aegis.dev/part-of: aegis-platform}
 spec:
   rateLimit:
+    # per VISITOR behind the tunnel, not per connection (cloudflared's):
+    # see the {org}-ritmo middleware in lib/aegis/org.py and check 244
+    sourceCriterion:
+      ipStrategy:
+        excludedIPs: ["10.42.0.0/16"]
     average: 50
     burst: 100
     period: 1s

@@ -4,6 +4,25 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-25 — the rate limit counts per visitor, and traefik has room
+
+- **Every rate limiter now counts per VISITOR behind the tunnel.** A
+  traefik rateLimit with no `sourceCriterion` counts by the connection, and
+  behind Cloudflare every connection is cloudflared's: «50 req/s per
+  visitor» was 50 for the whole internet. Measured with a control on
+  2026-09-24: a quiet visitor at ~5 req/s got 197 × 429 of 300 while another
+  IP pushed 80 req/s, and none alone. The generator's `<org>-ritmo` and the
+  seed's `canary-ritmo` and `ntfy-ritmo` now scan X-Forwarded-For from the
+  right, skipping the pod range the entrypoints trust (`10.42.0.0/16`).
+- **traefik runs two replicas with 512Mi** (it was one with 256Mi, and was
+  OOMKilled at ~1600 req/s towards a CPU-throttled backend). Check 244.
+- **If your instance is live**: `aegis seed apply
+  k8s/base/ingress/traefik/values.yaml
+  k8s/organizations/org-canary/routes.yaml
+  k8s/base/observability/routes.yaml --yes`, push, and re-render every
+  organization's routes with `aegis org apply orgs/<org>.yaml` (the
+  generator writes the new criterion into each `<org>-ritmo`).
+
 ## 2026-09-24 — the canary sync ArgoCD does not retry
 
 - **Phase 80 re-fires the canary sync that died on the signed digest.**

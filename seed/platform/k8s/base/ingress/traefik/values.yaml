@@ -37,8 +37,15 @@ ports:
         enabled: true
     forwardedHeaders:
       trustedIPs: ["10.42.0.0/16"]
+# traefik is the ONE door every tenant, console and demo shares. With one
+# replica and 256Mi it was OOMKilled at ~1600 req/s towards a canary
+# throttled on its CPU (plan/19 B-3, 2026-09-24: exit 137 after its
+# probes failed): the requests queue in traefik's memory while the
+# backend chokes. Two replicas keep the door open while one restarts,
+# and 512Mi gives the queue room. On a single node both land on the
+# same host: this buys a restart, not a failure domain.
 deployment:
-  replicas: 1
+  replicas: 2
 resources:
-  requests: {cpu: 100m, memory: 128Mi}
-  limits: {cpu: 500m, memory: 256Mi}
+  requests: {cpu: 200m, memory: 256Mi}
+  limits: {cpu: "1", memory: 512Mi}
