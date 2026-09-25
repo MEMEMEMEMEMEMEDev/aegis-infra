@@ -421,6 +421,32 @@ services of one organization, and on an instance whose AI lane
 (`AI` in `aegis.conf`) is not `gpu`: there, no device plugin announces a
 card and the pod would wait forever.
 
+### A service's own secrets: `secretos`
+
+Some credentials cannot be invented: a cloud provider's key, a password
+somebody chose. `secretos: [vertex, panel]` on an `http` or `worker`
+service declares them by name; each one becomes the Secret
+`<service>-<name>` in the organization's namespace, listed in the
+generator like the databases' credentials — so a declared secret nobody
+has provided shows up as MISSING in `aegis org apply`, instead of
+breaking the build.
+
+The material goes in through one door:
+
+```
+aegis secret put k8s/organizations/org-<org>/secret-<service>-<name>.enc.yaml \
+    --from-file <KEY>=<path> [--from-file ...]
+```
+
+Each `--from-file` becomes one key of the Secret, as `data:` of the
+file's **exact bytes** (a JSON key's trailing newline included — never
+`stringData`). The value is read from the path: it is never in argv,
+never printed (only key names and byte lengths are), and it reaches sops
+through stdin. Only a file a contract declares is accepted. Running it
+again leaves the existing file alone; `--replace` changes its material.
+The tenant's repo mounts the Secret by its name, `<service>-<name>`.
+`credenciales` is not a valid name: it is the databases' suffix.
+
 ### The schema's rules
 
 1. **Unknown fields = error.** They are not ignored in silence. A typo

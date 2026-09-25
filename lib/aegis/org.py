@@ -141,7 +141,7 @@ TYPES_WITH_IMAGE = {"estatico", "http", "worker"}
 # down is the one that stops working.
 USES = {"ai", "bucket", "internet"}
 
-# ── the GPU (2026-09-25) ────────────────────────────────────────────
+# ── the GPU and a service's own secrets (2026-09-25) ──────────────────
 # `gpu: true` hands the instance's card to ONE service of the
 # organization. Since the same day no organization reaches the GPU on its
 # own (ClusterPolicy tenants-without-gpu, check 247): this is the only
@@ -152,6 +152,14 @@ USES = {"ai", "bucket", "internet"}
 GPU_GRANT = "aegis.dev/gpu-otorgada"
 GPU_RUNTIME_CLASS = "nvidia"
 GPU_TYPES = {"http", "worker"}
+# `secretos: [name, ...]` are credentials that come from OUTSIDE (a cloud
+# key, a password somebody chose): the platform cannot invent them, it
+# encrypts what it is given (`aegis secret put`). Each becomes the Secret
+# `<service>-<name>` in the organization's namespace, listed in the
+# generator like every other secret. `credenciales` is taken: it is the
+# suffix of the databases' own.
+SECRET_NAME = re.compile(r"^[a-z][a-z0-9-]{1,29}$")
+SECRET_TYPES = {"http", "worker"}
 
 # The port on which the platform EXPECTS each type that does not declare
 # one. It is not a convenient default: it is part of the contract. A
@@ -864,7 +872,7 @@ def validate(c, plans):
         # platform is decided by services.yaml, and that is what it is
         # for.
         _only(s, {"nombre", "tipo", "repo", "puerto", "publico", "usa", "tamano",
-                  "gpu"},
+                  "gpu", "secretos"},
               "servicios[]")
         n = _require(s, "nombre", "servicios[]")
         if n in seen:
@@ -927,6 +935,28 @@ def validate(c, plans):
                 f"{lane!r}, not 'gpu'.\n"
                 f"  Without the lane there is no device plugin and no runtime class:\n"
                 f"  the pod would wait forever for a card nobody announces.")
+
+    # ── secretos: names, on a service that runs code ─────────────────
+    for s in services:
+        if "secretos" not in s:
+            continue
+        names = s["secretos"]
+        if s["tipo"] not in SECRET_TYPES:
+            raise Invalid(
+                f"service {s['nombre']!r} is {s['tipo']} and declares secretos.\n"
+                f"  A secret is read by code the tenant writes: "
+                f"{' or '.join(sorted(SECRET_TYPES))}.")
+        if not isinstance(names, list) or not names:
+            raise Invalid(f"service {s['nombre']!r}: secretos is a non-empty list of names")
+        for nm in names:
+            if not isinstance(nm, str) or not SECRET_NAME.match(nm):
+                raise Invalid(f"service {s['nombre']!r}: secreto {nm!r} is not a name "
+                              f"(lowercase, digits and dashes, 2-30)")
+            if nm == "credenciales":
+                raise Invalid(f"service {s['nombre']!r}: `credenciales` is the databases' "
+                              f"suffix; call the secret by what it holds")
+        if len(set(names)) != len(names):
+            raise Invalid(f"service {s['nombre']!r}: a secreto is declared twice")
 
     # ── repo: only if some service IS BUILT ───────────────────────
     #
@@ -2272,6 +2302,12 @@ def secrets_of(c):
     # a migration instead of a line.
     for b in sorted(x["nombre"] for x in c["servicios"] if x["tipo"] in PROVIDED):
         s.append(f"secret-{b}-credenciales.enc.yaml")
+    # A service's own secrets (`secretos:`): material from outside, which
+    # `aegis secret put` encrypts. Listed like the rest, so a declared one
+    # nobody has put is reported missing instead of breaking the build.
+    for x in sorted(c["servicios"], key=lambda x: x["nombre"]):
+        for nm in sorted(x.get("secretos") or []):
+            s.append(f"secret-{x['nombre']}-{nm}.enc.yaml")
     return s
 
 
