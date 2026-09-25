@@ -4,6 +4,14 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-25 — a tenant build does not hold its layers compressed in memory
+
+- The app Jenkinsfile template runs kaniko with `--compressed-caching=false`.
+  A layer of CUDA wheels is several GB; with compression caching kaniko
+  held it in memory and was OOMKilled at its 2Gi limit (the build read
+  ABORTED). Existing apps get it by re-deriving (`aegis org apply`) and
+  pushing the new Jenkinsfile to their repo.
+
 ## 2026-09-25 — a service's own secrets: `secretos:` and `aegis secret put`
 
 - **New contract field.** `secretos: [name, ...]` on an `http` or

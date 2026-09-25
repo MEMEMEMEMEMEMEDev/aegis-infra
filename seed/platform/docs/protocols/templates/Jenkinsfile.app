@@ -498,12 +498,21 @@ spec:
           // W-05: kaniko builds into a TAR (--no-push) so the scan runs
           // BEFORE the push. --destination gives the tar its ref; our own
           // CA via --registry-certificate.
+          //
+          // --compressed-caching=false (2026-09-25, conf-motor build #3):
+          // kaniko keeps a compressed copy of every layer IN MEMORY while it
+          // snapshots, and a `pip install` of CUDA wheels is a layer of
+          // several GB. The container hit its 2Gi limit and was OOMKilled —
+          // the build ended ABORTED with no message of its own. Turning the
+          // compression cache off keeps the layer on disk; the ceiling stays
+          // where the CI quota's arithmetic put it.
           sh '''
             /kaniko/executor \
               --context=dir://${WORKSPACE} \
               --dockerfile=${CONTAINERFILE} \
               --destination=${REGISTRY}/${IMAGE}:${TAG} \
               --no-push \
+              --compressed-caching=false \
               --tarPath=${WORKSPACE}/image.tar \
               --registry-certificate ${REGISTRY}=/kaniko/ca.crt
           '''
