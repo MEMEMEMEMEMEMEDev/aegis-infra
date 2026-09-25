@@ -4,6 +4,34 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-25 — a service's own secrets: `secretos:` and `aegis secret put`
+
+- **New contract field.** `secretos: [name, ...]` on an `http` or
+  `worker` service declares credentials the platform cannot invent (a
+  cloud key, a chosen password). Each becomes the Secret
+  `<service>-<name>`, listed by the generator; one nobody has provided
+  shows as missing in `aegis org apply`.
+- **New verb.** `aegis secret put <file> --from-file KEY=PATH [...]`
+  encrypts the file's exact bytes into `data:`, through sops's stdin:
+  never in argv, never printed (key names and byte lengths only), and
+  only for a file a contract declares. It leaves an existing file alone;
+  `--replace` changes the material.
+
+## 2026-09-25 — `gpu: true` hands the instance's card to one service
+
+- **New contract field.** `gpu: true` on ONE `http` or `worker` service
+  of an organization, on an instance whose AI lane is `gpu`. The
+  platform labels the organization's Namespace `aegis.dev/gpu-otorgada`,
+  sets its quota to one `nvidia.com/gpu`, and its sizes Policy writes
+  `runtimeClassName: nvidia` and the card request into that service's
+  pods. The tenant's repo writes none of it. Deploy the service with
+  `strategy: Recreate`: the quota refuses a second copy.
+- `tenants-without-gpu` steps aside for that label only; in a granted
+  namespace the nvidia runtime must ask for the card in every container.
+  `NVIDIA_*` variables stay refused everywhere.
+- Instances: bring `clusterpolicy-tenants-without-gpu.yaml` over again
+  (`aegis seed apply k8s/base/kyverno-policies/clusterpolicy-tenants-without-gpu.yaml`).
+
 ## 2026-09-25 — an organization does not reach the GPU unless the platform hands it one
 
 - **Security.** Measured on a live instance: in any organization's

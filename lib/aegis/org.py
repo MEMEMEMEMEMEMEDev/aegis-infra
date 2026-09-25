@@ -141,6 +141,26 @@ TYPES_WITH_IMAGE = {"estatico", "http", "worker"}
 # down is the one that stops working.
 USES = {"ai", "bucket", "internet"}
 
+# ── the GPU and a service's own secrets (2026-09-25) ──────────────────
+# `gpu: true` hands the instance's card to ONE service of the
+# organization. Since the same day no organization reaches the GPU on its
+# own (ClusterPolicy tenants-without-gpu, check 247): this is the only
+# door, and the platform opens it — the Namespace carries GPU_GRANT, the
+# quota allows ONE `nvidia.com/gpu`, and the organization's own sizes
+# Policy writes runtimeClassName and the request into that service's pods.
+# The tenant's repo writes none of it (and would be refused if it did).
+GPU_GRANT = "aegis.dev/gpu-otorgada"
+GPU_RUNTIME_CLASS = "nvidia"
+GPU_TYPES = {"http", "worker"}
+# `secretos: [name, ...]` are credentials that come from OUTSIDE (a cloud
+# key, a password somebody chose): the platform cannot invent them, it
+# encrypts what it is given (`aegis secret put`). Each becomes the Secret
+# `<service>-<name>` in the organization's namespace, listed in the
+# generator like every other secret. `credenciales` is taken: it is the
+# suffix of the databases' own.
+SECRET_NAME = re.compile(r"^[a-z][a-z0-9-]{1,29}$")
+SECRET_TYPES = {"http", "worker"}
+
 # The port on which the platform EXPECTS each type that does not declare
 # one. It is not a convenient default: it is part of the contract. A
 # front listening somewhere else starts up fine and never receives
@@ -851,7 +871,8 @@ def validate(c, plans):
         # had pinned something. The version of a service provided by the
         # platform is decided by services.yaml, and that is what it is
         # for.
-        _only(s, {"nombre", "tipo", "repo", "puerto", "publico", "usa", "tamano"},
+        _only(s, {"nombre", "tipo", "repo", "puerto", "publico", "usa", "tamano",
+                  "gpu", "secretos"},
               "servicios[]")
         n = _require(s, "nombre", "servicios[]")
         if n in seen:
@@ -885,6 +906,57 @@ def validate(c, plans):
             if u in PROVIDED and u not in declared_types:
                 raise Invalid(f"service {n!r} declares usa:[{u}] but the organization "
                               f"did not declare any service of type {u}")
+
+    # ── gpu: one service, on an instance that has one ──────────────
+    gpu = [s for s in services if "gpu" in s]
+    for s in gpu:
+        if s["gpu"] is not True:
+            raise Invalid(
+                f"service {s['nombre']!r}: gpu: {s['gpu']!r}. The only value is `true`;\n"
+                f"  a service without the card simply does not write the field.")
+        if s["tipo"] not in GPU_TYPES:
+            raise Invalid(
+                f"service {s['nombre']!r} is {s['tipo']} and declares gpu.\n"
+                f"  The card goes to a process the tenant builds: "
+                f"{' or '.join(sorted(GPU_TYPES))}.")
+    if len(gpu) > 1:
+        raise Invalid(
+            f"{len(gpu)} services declare gpu ({', '.join(s['nombre'] for s in gpu)}).\n"
+            f"  The quota hands the organization ONE card: two services would\n"
+            f"  take turns being refused. Serve both from one process.")
+    if gpu:
+        try:
+            lane = paths.read_conf().get("AI")
+        except OSError:
+            lane = None
+        if lane != "gpu":
+            raise Invalid(
+                f"service {gpu[0]['nombre']!r} declares gpu and this instance's AI lane is "
+                f"{lane!r}, not 'gpu'.\n"
+                f"  Without the lane there is no device plugin and no runtime class:\n"
+                f"  the pod would wait forever for a card nobody announces.")
+
+    # ── secretos: names, on a service that runs code ─────────────────
+    for s in services:
+        if "secretos" not in s:
+            continue
+        names = s["secretos"]
+        if s["tipo"] not in SECRET_TYPES:
+            raise Invalid(
+                f"service {s['nombre']!r} is {s['tipo']} and declares secretos.\n"
+                f"  A secret is read by code the tenant writes: "
+                f"{' or '.join(sorted(SECRET_TYPES))}.")
+        if not isinstance(names, list) or not names:
+            raise Invalid(f"service {s['nombre']!r}: secretos is a non-empty list of names")
+        for nm in names:
+            if not isinstance(nm, str) or not SECRET_NAME.match(nm):
+                raise Invalid(f"service {s['nombre']!r}: secreto {nm!r} is not a name "
+                              f"(lowercase, digits and dashes, 2-30)")
+            if nm == "credenciales":
+                raise Invalid(f"service {s['nombre']!r}: `credenciales` is the databases' "
+                              f"suffix; call the secret by what it holds")
+        if len(set(names)) != len(names):
+            raise Invalid(f"service {s['nombre']!r}: a secreto is declared twice")
 
     # ── repo: only if some service IS BUILT ───────────────────────
     #
@@ -1019,7 +1091,14 @@ metadata:
     # org-ecommerce, which were born outside the scope and admitted a
     # public busybox.
     aegis.dev/part-of: aegis-tenants
-    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce: restricted""")
+    gpu_svc = next((s for s in c["servicios"] if s.get("gpu") is True), None)
+    if gpu_svc:
+        # The grant is a label ON THE NAMESPACE, which the platform owns
+        # and a tenant's repo cannot touch (cluster-scoped): the
+        # ClusterPolicy lets runtimeClassName in only where it is.
+        lines.append(f'    {GPU_GRANT}: "true"')
+    lines.append(f"""\
 ---
 apiVersion: v1
 kind: ResourceQuota
@@ -1037,6 +1116,11 @@ spec:
         # ALWAYS goes in quotes — `2` unquoted is an integer and the
         # apiserver rejects the object.
         lines.append(f'    {k}: "{quota[k]}"')
+    if gpu_svc:
+        # ONE card, whatever the plan: a second pod asking for it (a
+        # rolling update, a copy) is refused by the apiserver with a
+        # message that names the quota.
+        lines.append('    requests.nvidia.com/gpu: "1"')
     lines.append(f"""\
 ---
 apiVersion: v1
@@ -1173,6 +1257,39 @@ spec:
                     resources:
                       requests: {{cpu: {_q(size["requests.cpu"])}, memory: {_q(size["requests.memory"])}}}
                       limits: {{cpu: {_q(size["limits.cpu"])}, memory: {_q(size["limits.memory"])}}}""")
+            if s.get("gpu") is True:
+                lines.append(f"""\
+    # `gpu: true` in the contract: the runtime class and ONE card, written
+    # by the platform into every container of this service's pods. The
+    # tenant's repo declares neither (tenants-without-gpu refuses them).
+    - name: gpu-runtime-{s['nombre']}
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              selector:
+                matchLabels: {{app: {org}-{s['nombre']}}}
+      mutate:
+        patchStrategicMerge:
+          spec:
+            runtimeClassName: {GPU_RUNTIME_CLASS}
+    - name: gpu-{s['nombre']}
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              selector:
+                matchLabels: {{app: {org}-{s['nombre']}}}
+      mutate:
+        foreach:
+          - list: "request.object.spec.containers"
+            patchStrategicMerge:
+              spec:
+                containers:
+                  - name: "{{{{ element.name }}}}"
+                    resources:
+                      requests: {{nvidia.com/gpu: "1"}}
+                      limits: {{nvidia.com/gpu: "1"}}""")
         lines.append("")
     return "\n".join(lines)
 
@@ -2185,6 +2302,12 @@ def secrets_of(c):
     # a migration instead of a line.
     for b in sorted(x["nombre"] for x in c["servicios"] if x["tipo"] in PROVIDED):
         s.append(f"secret-{b}-credenciales.enc.yaml")
+    # A service's own secrets (`secretos:`): material from outside, which
+    # `aegis secret put` encrypts. Listed like the rest, so a declared one
+    # nobody has put is reported missing instead of breaking the build.
+    for x in sorted(c["servicios"], key=lambda x: x["nombre"]):
+        for nm in sorted(x.get("secretos") or []):
+            s.append(f"secret-{x['nombre']}-{nm}.enc.yaml")
     return s
 
 

@@ -25,8 +25,18 @@
 #
 # SCOPE: `org-*`, the namespaces of organizations. NOT the `aegis-tenants`
 # label: ai-system carries it too, and ai-system is the platform's own GPU
-# lane. A future contract word (`gpu:` on a service) makes the exception for
-# ONE service of ONE organization; until then no organization has the card.
+# lane.
+#
+# THE ONE DOOR (2026-09-25, check 248): a contract's `gpu: true` labels
+# the organization's Namespace `aegis.dev/gpu-otorgada: "true"`. The
+# Namespace is the platform's (cluster-scoped: a tenant's repo cannot
+# write it), so that label is the grant. In a granted namespace the first
+# two rules step aside and `granted-runtime-asks-for-the-card` takes over:
+# the nvidia runtime is allowed only on a pod whose every container asks
+# the device plugin for `nvidia.com/gpu`. That keeps the quota (ONE card)
+# counting it, and the device plugin's own NVIDIA_VISIBLE_DEVICES
+# overrides whatever an image's ENV carries. The env rule has no
+# exception anywhere.
 #
 # allowExistingViolations: false, DECLARED. Kyverno defaults it to true,
 # which lets a pod that already holds the card be updated in place; and a
@@ -53,6 +63,12 @@ spec:
           - resources:
               kinds: [Pod]
               namespaces: ["org-*"]
+      exclude:
+        any:
+          - resources:
+              namespaceSelector:
+                matchLabels:
+                  aegis.dev/gpu-otorgada: "true"
       validate:
         allowExistingViolations: false
         failureAction: Enforce
@@ -68,6 +84,12 @@ spec:
           - resources:
               kinds: [Pod]
               namespaces: ["org-*"]
+      exclude:
+        any:
+          - resources:
+              namespaceSelector:
+                matchLabels:
+                  aegis.dev/gpu-otorgada: "true"
       validate:
         allowExistingViolations: false
         failureAction: Enforce
@@ -88,6 +110,46 @@ spec:
                     X(nvidia.com/gpu): "null"
                   =(requests):
                     X(nvidia.com/gpu): "null"
+    - name: granted-runtime-is-nvidia
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["org-*"]
+              namespaceSelector:
+                matchLabels:
+                  aegis.dev/gpu-otorgada: "true"
+      validate:
+        allowExistingViolations: false
+        failureAction: Enforce
+        message: >-
+          the only runtime an organization with the GPU granted may use is
+          nvidia, and the platform writes it
+        pattern:
+          spec:
+            =(runtimeClassName): "nvidia"
+    - name: granted-runtime-asks-for-the-card
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["org-*"]
+              namespaceSelector:
+                matchLabels:
+                  aegis.dev/gpu-otorgada: "true"
+      validate:
+        allowExistingViolations: false
+        failureAction: Enforce
+        message: >-
+          a pod on the nvidia runtime asks for nvidia.com/gpu in every
+          container: otherwise it sees the card without the quota counting it
+        pattern:
+          spec:
+            (runtimeClassName): "nvidia"
+            containers:
+              - resources:
+                  limits:
+                    nvidia.com/gpu: "?*"
     - name: no-nvidia-env
       match:
         any:

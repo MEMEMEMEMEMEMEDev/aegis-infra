@@ -74,10 +74,18 @@ for r in rules:
     sel = [s.get("namespaceSelector") for s in scopes if s.get("namespaceSelector")]
     if not any("Pod" in (s.get("kinds") or []) for s in scopes):
         findings.append(f"rule {name} does not match Pods")
-    if not any(fnmatch.fnmatch("org-conf", g) for g in ns) or sel:
+    # The refusing rules (no-*) cover EVERY organization; the rules for a
+    # granted namespace (check 248) narrow to the grant label on purpose.
+    granted = [x for x in sel if (x.get("matchLabels") or {}).get("aegis.dev/gpu-otorgada") == "true"]
+    if not any(fnmatch.fnmatch("org-conf", g) for g in ns) or (sel and not name.startswith("granted-")):
         findings.append(f"rule {name} does not cover every organization's namespace (org-*)")
+    if name.startswith("granted-") and not granted:
+        findings.append(f"rule {name} is for granted namespaces and does not select the grant label")
     if any(fnmatch.fnmatch("ai-system", g) for g in ns) or any("aegis-tenants" in str(x) for x in sel):
         findings.append(f"rule {name} also covers ai-system: the platform's own GPU lane would be refused")
+    if name == "no-nvidia-env" and r.get("exclude"):
+        findings.append("the NVIDIA_* env rule has an exception: with the nvidia runtime granted, "
+                        "the variable would hand over the card outside the quota")
     pspec = ((v.get("pattern") or {}).get("spec")) or {}
     k, _ = child(pspec, "runtimeClassName")
     if k and k.startswith("X("):
