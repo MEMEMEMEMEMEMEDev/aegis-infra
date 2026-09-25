@@ -4,6 +4,21 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-25 — `gpu: true` hands the instance's card to one service
+
+- **New contract field.** `gpu: true` on ONE `http` or `worker` service
+  of an organization, on an instance whose AI lane is `gpu`. The
+  platform labels the organization's Namespace `aegis.dev/gpu-otorgada`,
+  sets its quota to one `nvidia.com/gpu`, and its sizes Policy writes
+  `runtimeClassName: nvidia` and the card request into that service's
+  pods. The tenant's repo writes none of it. Deploy the service with
+  `strategy: Recreate`: the quota refuses a second copy.
+- `tenants-without-gpu` steps aside for that label only; in a granted
+  namespace the nvidia runtime must ask for the card in every container.
+  `NVIDIA_*` variables stay refused everywhere.
+- Instances: bring `clusterpolicy-tenants-without-gpu.yaml` over again
+  (`aegis seed apply k8s/base/kyverno-policies/clusterpolicy-tenants-without-gpu.yaml`).
+
 ## 2026-09-25 — an organization does not reach the GPU unless the platform hands it one
 
 - **Security.** Measured on a live instance: in any organization's

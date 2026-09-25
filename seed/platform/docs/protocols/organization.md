@@ -389,6 +389,38 @@ key nobody reads: `request.memory` — one missing `s` — used to be
 dropped in silence, leaving whoever wrote it believing they had resized
 the database while the manifest carried the old figure.
 
+### The instance's GPU: `gpu: true`
+
+No organization reaches the card on its own. The ClusterPolicy
+`tenants-without-gpu` refuses, in every `org-*` namespace, a pod that
+names a `runtimeClassName`, asks for `nvidia.com/gpu`, or sets an
+`NVIDIA_*` variable (measured 2026-09-25: any of those used to hand a
+tenant the whole card, invisible to every quota).
+
+`gpu: true` on ONE `http` or `worker` service is the door, and the
+platform opens it three ways at once:
+
+- the organization's **Namespace** carries `aegis.dev/gpu-otorgada:
+  "true"`. The Namespace is the platform's (a tenant's repo cannot write
+  a cluster-scoped object), so the label is the grant, and the policy
+  steps aside only where it is;
+- the **quota** allows `requests.nvidia.com/gpu: "1"`: one card, so a
+  second copy of the pod (a rolling update) is refused by the apiserver.
+  A GPU service deploys with `strategy: Recreate`;
+- the organization's **sizes Policy** writes `runtimeClassName: nvidia`
+  and `nvidia.com/gpu: 1` into that service's pods. **The tenant's repo
+  writes neither**; if it did, the policy would refuse it.
+
+In a granted namespace the nvidia runtime is still tied to the request:
+a pod on it must ask for the card in every container, so the quota counts
+it and the device plugin's own `NVIDIA_VISIBLE_DEVICES` overrides whatever
+an image carries. `NVIDIA_*` variables stay refused everywhere.
+
+The generator refuses `gpu` on a type the platform provides, on two
+services of one organization, and on an instance whose AI lane
+(`AI` in `aegis.conf`) is not `gpu`: there, no device plugin announces a
+card and the pod would wait forever.
+
 ### The schema's rules
 
 1. **Unknown fields = error.** They are not ignored in silence. A typo
