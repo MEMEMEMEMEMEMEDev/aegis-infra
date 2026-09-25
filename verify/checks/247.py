@@ -66,6 +66,9 @@ for r in rules:
     v = r.get("validate") or {}
     if v.get("failureAction") != "Enforce":
         findings.append(f"rule {name} does not Enforce: it reports the GPU taken and lets it be taken")
+    if v.get("allowExistingViolations") is not False:
+        findings.append(f"rule {name} does not declare allowExistingViolations: false: a pod already holding "
+                        "the card is updated in place, and Kyverno's default reads as drift in ArgoCD")
     scopes = [x.get("resources") or {} for x in ((r.get("match") or {}).get("any") or [])]
     ns = [g for s in scopes for g in (s.get("namespaces") or [])]
     sel = [s.get("namespaceSelector") for s in scopes if s.get("namespaceSelector")]
