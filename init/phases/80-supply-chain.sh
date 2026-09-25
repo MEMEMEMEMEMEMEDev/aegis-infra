@@ -121,15 +121,10 @@ KPK="$PLATFORM_DIR/k8s/base/kyverno-policies/kustomization.yaml"
 # kustomization's COMMENT contains that name → it would have matched
 # the comment and the entry would never have been added (the SAME
 # class that broke the IU's regcred). A structural guard:
+# The list is not born empty any more: tenants-without-gpu is in it from
+# the seed. signature_policy_entry adds THIS entry and keeps the others.
 if ! yaml_lists_file "$KPK" clusterpolicy-require-aegis-signature.yaml; then
-    run_cmd python3 - "$KPK" <<'EOF'
-import sys
-p = sys.argv[1]
-t = open(p).read().replace(
-    "resources: []",
-    "resources:\n  - clusterpolicy-require-aegis-signature.yaml")
-open(p, "w").write(t)
-EOF
+    run_cmd signature_policy_entry on "$KPK"
 fi
 gate "policy-en-kustomization" \
     yaml_lists_file "$KPK" clusterpolicy-require-aegis-signature.yaml

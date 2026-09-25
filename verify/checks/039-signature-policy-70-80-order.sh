@@ -5,9 +5,9 @@ check() {
 # goes live from phase 35 on — with __COSIGN_PUB__ as a placeholder
 # the evaluation crashes and failurePolicy=Fail rejects the canary of
 # phase 70 even though the action is Audit. Invariant: the
-# kustomization does NOT list the ClusterPolicy (it is born with
-# resources: []) and phase 80 adds it in the same commit that injects
-# the pub:
+# kustomization does NOT list the SIGNATURE policy (since 2026-09-25 it
+# is born listing only tenants-without-gpu, which has no order — check
+# 247) and phase 80 adds it in the same commit that injects the pub:
 D39=""
 KPK="$P/k8s/base/kyverno-policies/kustomization.yaml"
 if [[ ! -f "$KPK" ]]; then
@@ -23,7 +23,7 @@ else
 import yaml,sys
 print(' '.join((yaml.safe_load(open('$KPK')) or {}).get('resources') or []))" 2>/dev/null)"; then
         D39="$D39 could not READ $KPK (malformed kustomization, or no pyyaml) — this sub-check did not run;"
-    elif grep -q 'clusterpolicy' <<< "$KPK_RES"; then
+    elif grep -q 'clusterpolicy-require-aegis-signature' <<< "$KPK_RES"; then
         D39="$D39 the ClusterPolicy is listed STATICALLY (it goes live pre-80);"
     fi
 fi
@@ -40,7 +40,7 @@ echo "$F80_NC" | grep -q 'kyverno-policies/kustomization.yaml' \
 # on again:
 F35_NC="$(nc "$PHASES/35-gitops.sh")"
 echo "$F35_NC" | grep -q 'kyverno-policies/kustomization.yaml' \
-    && echo "$F35_NC" | grep -q '"resources: \[\]"' \
+    && echo "$F35_NC" | grep -q 'signature_policy_entry off' \
     && echo "$F35_NC" | grep -q 'politica-apagada-hasta-80' \
     || D39="$D39 phase 35 does not turn the policy OFF on a re-init (a platform/ from a previous cluster would enforce before Kyverno can verify);"
 if [[ -n "$D39" ]]; then fail "70/80 order broken:$D39"

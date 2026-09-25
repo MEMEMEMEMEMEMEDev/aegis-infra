@@ -215,6 +215,45 @@ yaml_lists_file() {   # <yaml> <basename>
     grep -qE "^\s*-\s*${2//./\\.}\s*(#.*)?$" "$1"
 }
 
+# ── the signature policy's entry, and ONLY that entry ───────────────
+# signature_policy_entry on|off <kyverno-policies/kustomization.yaml>
+#
+# Phase 80 turns the signature policy on and phase 35 turns it off on a
+# re-init (D5: its order is a mechanism). Until 2026-09-25 both did it by
+# swapping the literal `resources: []` for a one-entry list and back,
+# which was only right while that policy was the directory's ONLY one.
+# It stopped being so with `tenants-without-gpu` (measured the same day:
+# an organization's repo could take the GPU), which has no order at all
+# and is listed from the seed. With two entries, 80's swap found no
+# `resources: []` and added nothing, and 35's left
+# `resources: []` followed by a stray `- …` line: kustomize dies.
+#
+# So the list is READ as YAML, the signature entry alone is added (first)
+# or removed, every other entry is kept in its order, and the result is
+# parsed back before it is written. The block is replaced up to the next
+# top-level key or the end: the comments above `resources:` are kept.
+signature_policy_entry() {   # on|off <kustomization.yaml>
+    python3 - "$1" "$2" <<'PY'
+import re, sys, yaml
+op, p = sys.argv[1], sys.argv[2]
+if op not in ("on", "off"):
+    sys.exit(f"signature_policy_entry: {op!r} is neither on nor off")
+SIG = "clusterpolicy-require-aegis-signature.yaml"
+t = open(p).read()
+res = [r for r in ((yaml.safe_load(t) or {}).get("resources") or []) if r != SIG]
+if op == "on":
+    res = [SIG] + res
+block = ("resources:\n" + "".join(f"  - {r}\n" for r in res)) if res else "resources: []\n"
+new, n = re.subn(r"^resources:.*?(?=^\S|\Z)", lambda _m: block, t, count=1, flags=re.M | re.S)
+if n != 1:
+    sys.exit(f"{p}: no top-level `resources:` to rewrite")
+got = (yaml.safe_load(new) or {}).get("resources") or []
+if got != res:
+    sys.exit(f"{p}: the rewrite reads back as {got}, not {res}")
+open(p, "w").write(new)
+PY
+}
+
 # ── does this manifest hold any object? (A/B of the H4) ─────────────
 # A DERIVED manifest can legitimately be empty: its documents come out
 # of something else, and that something else may not exist yet. The
