@@ -66,6 +66,14 @@ red_9() { _sub "$POL247" 'spec:
   webhookConfiguration:
     failurePolicy: Ignore'; }
 
+# Kyverno's default left to Kyverno: existing violations updated, ArgoCD drift forever
+red_10() { _sub "$POL247" '        allowExistingViolations: false
+        failureAction: Enforce
+        message: >-
+          an organization'"'"'s pod does not ask for nvidia.com/gpu' '        failureAction: Enforce
+        message: >-
+          an organization'"'"'s pod does not ask for nvidia.com/gpu'; }
+
 # control: a rule's message reworded
 control_1() { _sub "$POL247" 'handed over by the platform, not requested from a repo' 'given by the platform, never requested from a repo'; }
 

@@ -27,6 +27,12 @@
 # label: ai-system carries it too, and ai-system is the platform's own GPU
 # lane. A future contract word (`gpu:` on a service) makes the exception for
 # ONE service of ONE organization; until then no organization has the card.
+#
+# allowExistingViolations: false, DECLARED. Kyverno defaults it to true,
+# which lets a pod that already holds the card be updated in place; and a
+# field Kyverno fills that the manifest does not name is a field ArgoCD
+# reports as drift forever (measured at home the day this landed; the
+# App's ignore list only knew the verifyImages defaults).
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -48,6 +54,7 @@ spec:
               kinds: [Pod]
               namespaces: ["org-*"]
       validate:
+        allowExistingViolations: false
         failureAction: Enforce
         message: >-
           an organization's pod does not choose its runtime: runtimeClassName
@@ -62,6 +69,7 @@ spec:
               kinds: [Pod]
               namespaces: ["org-*"]
       validate:
+        allowExistingViolations: false
         failureAction: Enforce
         message: >-
           an organization's pod does not ask for nvidia.com/gpu: the GPU is
@@ -87,6 +95,7 @@ spec:
               kinds: [Pod]
               namespaces: ["org-*"]
       validate:
+        allowExistingViolations: false
         failureAction: Enforce
         message: >-
           an organization's pod does not set NVIDIA_* variables: with the
