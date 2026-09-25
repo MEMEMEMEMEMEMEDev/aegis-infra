@@ -4,6 +4,19 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-25 — traefik gives up on a dead backend
+
+- **traefik bounds its wait for a backend**: `dialTimeout=5s` and
+  `responseHeaderTimeout=60s` (static arguments in
+  `k8s/base/ingress/traefik/values.yaml`). The running binary (v3.7.4) dialed
+  for 30 s and waited for headers with no limit: during a 90 s network cut
+  towards the canary (2026-09-24) every visitor hung. The header timeout is
+  the wait for the FIRST header byte: SSE and WebSockets send headers at once
+  and are unaffected; 60 s also stays under Cloudflare's own 100 s cut. Check 246.
+- **If your instance is live**: `aegis seed apply
+  k8s/base/ingress/traefik/values.yaml --yes` and push (traefik restarts with
+  the new arguments).
+
 ## 2026-09-25 — a release does not drop the people on the site
 
 - **The canary and every app template that serves a port wait 5 s in

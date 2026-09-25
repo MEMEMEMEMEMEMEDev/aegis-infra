@@ -44,6 +44,22 @@ ports:
 # backend chokes. Two replicas keep the door open while one restarts,
 # and 512Mi gives the queue room. On a single node both land on the
 # same host: this buys a restart, not a failure domain.
+# HOW LONG traefik waits for a backend (plan/19 B-9). With nothing set,
+# the running binary (traefik v3.7.4, its own --help) dials for 30 s and
+# waits for response headers FOREVER: during a 90 s network cut between
+# traefik and the canary (2026-09-24, Chaos Mesh partition) every visitor
+# hung until their client gave up, instead of getting a fast answer.
+#   dialTimeout 5s: a pod on the same node answers a connect in
+#     milliseconds; five seconds without a TCP handshake is a dead backend.
+#   responseHeaderTimeout 60s: the wait for the FIRST byte of headers, not
+#     for the whole response. Streaming (the AI chat's SSE, WebSockets)
+#     sends its headers at once and is unaffected; a request that has not
+#     produced a single header in a minute is hung. It also stays under
+#     Cloudflare's own 100 s cut (524), so the visitor gets traefik's 504
+#     with a cause instead.
+additionalArguments:
+  - "--serversTransport.forwardingTimeouts.dialTimeout=5s"
+  - "--serversTransport.forwardingTimeouts.responseHeaderTimeout=60s"
 deployment:
   replicas: 2
 resources:
