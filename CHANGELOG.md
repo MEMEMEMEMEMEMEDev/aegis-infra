@@ -4,6 +4,15 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-25 — SSE and WebSockets reach the visitor
+
+- traefik's `buffering` (each organization's `-cuerpo`, the 10 MiB cap on
+  request bodies) also holds the RESPONSE until it ends, so an SSE stream
+  never arrived. Every public route now has a sibling for `GET` requests
+  with `Accept: text/event-stream` or `Upgrade: websocket`, without that
+  middleware (headers and per-visitor rate limit kept). Organizations get
+  it on their next `aegis org apply`.
+
 ## 2026-09-25 — a tenant build does not hold its layers compressed in memory
 
 - The app Jenkinsfile template runs kaniko with `--compressed-caching=false`.

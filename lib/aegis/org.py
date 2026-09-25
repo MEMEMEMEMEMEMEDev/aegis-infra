@@ -2192,10 +2192,13 @@ metadata:
   labels: {{aegis.dev/part-of: aegis-organizaciones}}
 spec:
   buffering:
-    # ONLY the request. `maxResponseBodyBytes` is absent on purpose:
-    # buffering the RESPONSE would break the streaming of the AI chat
-    # (SSE), and the symptom —«the chat is stuck thinking»— looks
-    # nothing at all like the cause.
+    # It caps the REQUEST body, and it holds the RESPONSE too: leaving
+    # `maxResponseBodyBytes` out does NOT stop traefik's buffering from
+    # reading the whole response before sending it. MEASURED 2026-09-25
+    # (conf, the Vibeathon): the hub's SSE answered at once straight to
+    # the pod and sent nothing in 4 s through this middleware — a stream
+    # never ends, so it never arrives. Streams and WebSockets therefore go
+    # through the `-continuo` route below, which does not carry it.
     maxRequestBodyBytes: 10485760   # 10 MiB
     memRequestBodyBytes: 1048576    # 1 MiB in RAM, the rest to disk
 ---
@@ -2238,6 +2241,26 @@ spec:
         - {{name: {org}-cabeceras}}
         - {{name: {org}-ritmo}}
         - {{name: {org}-cuerpo}}
+      services:
+        - {{name: {org}-{s['nombre']}, port: 8080}}""")
+        # THE STREAMING SIBLING (check 251). The same host and path, only
+        # for a GET that opens an SSE stream or upgrades to a WebSocket,
+        # WITHOUT `-cuerpo`: its buffering holds the response and a stream
+        # never reaches the visitor. Neither carries a body, so the 10 MiB
+        # cap has nothing to cap — and the GET is part of the rule so a
+        # POST cannot borrow the header to skip the cap. Headers and the
+        # per-visitor rate limit stay: an open stream is one request.
+        # The longer rule wins in traefik, so no explicit priority.
+        stream = (f"({match}) && Method(`GET`) && "
+                  f"(HeaderRegexp(`Accept`, `text/event-stream`) || "
+                  f"HeaderRegexp(`Upgrade`, `(?i)^websocket$`))")
+        parts.append(f"""\
+    # {s['nombre']} — its streams (SSE, WebSocket): no body buffering
+    - kind: Rule
+      match: {stream}
+      middlewares:
+        - {{name: {org}-cabeceras}}
+        - {{name: {org}-ritmo}}
       services:
         - {{name: {org}-{s['nombre']}, port: 8080}}""")
     return "\n".join(parts) + "\n"
