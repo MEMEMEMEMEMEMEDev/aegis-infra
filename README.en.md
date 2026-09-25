@@ -258,7 +258,7 @@ flowchart LR
         direction TB
         p1["bin/ libexec/ lib/<br/>the commands"]
         p2["init/<br/>the sixteen phases"]
-        p3["verify/<br/>253 checks and their teeth"]
+        p3["verify/<br/>254 checks and their teeth"]
         p4["seed/<br/>what ships"]
     end
     subgraph I["the instance: ~/aegis, living state"]
@@ -329,7 +329,7 @@ re-scans everything daily.
   (`aegis verify --teeth`).
 - The product names no machine and no person. Two checks watch that.
 
-![Real outputs: aegis init --list with all sixteen phases passed, and aegis verify with 253 checks green in both profiles](docs/assets/terminal.en.svg)
+![Real outputs: aegis init --list with all sixteen phases passed, and aegis verify with 254 checks green in both profiles](docs/assets/terminal.en.svg)
 
 ## The console
 
