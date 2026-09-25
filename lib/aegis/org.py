@@ -2044,16 +2044,25 @@ spec:
     # single pod IP— so a naive criterion would tip the whole internet
     # into one bucket and a busy visitor would starve everybody else.
     #
-    # Here it works because the `web` entrypoint carries
-    # forwardedHeaders.trustedIPs=10.42.0.0/16, and with that the
-    # default strategy resolves the real visitor's IP. MEASURED on
-    # 2026-08-13: the origin receives `XFF: 186.9.x.x, 10.42.0.206` —
-    # the public IP first, cloudflared's pod IP after it.
+    # And it WAS got wrong, for six weeks. This comment used to say the
+    # default strategy resolved the visitor through the entrypoint's
+    # forwardedHeaders.trustedIPs, citing a measurement of 2026-08-13 —
+    # but what was measured then was the XFF the BACKEND receives, not
+    # the key the limiter counts by. Without a sourceCriterion the
+    # limiter counts by the CONNECTION's address, and behind the tunnel
+    # every connection is cloudflared's. MEASURED on 2026-09-24 (plan/19
+    # L3, with a control): a quiet visitor at ~5 req/s got 197 × 429 of
+    # 300 while another IP pushed 80 req/s, and 0 × 429 alone.
     #
-    # And it resists forgery by construction: Cloudflare APPENDS the
-    # real IP at the end of whatever XFF the client sends, and traefik
-    # takes the last UNTRUSTED one. Inventing entries on the left does
-    # not move the result.
+    # The criterion below scans X-Forwarded-For from the RIGHT and takes
+    # the first address that is not a pod: behind Cloudflare that is the
+    # visitor's own IP, which Cloudflare APPENDS at the end of whatever
+    # XFF the client sends — inventing entries on the left does not move
+    # it. The excluded range is the one traefik's entrypoints already
+    # trust (k8s/base/ingress/traefik/values.yaml); check 244 ties them.
+    sourceCriterion:
+      ipStrategy:
+        excludedIPs: ["10.42.0.0/16"]
     average: 50                     # sustained req/s per visitor
     burst: 100                      # a page load is ~20-50
     period: 1s
