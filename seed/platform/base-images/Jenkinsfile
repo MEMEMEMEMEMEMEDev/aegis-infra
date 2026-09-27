@@ -278,8 +278,17 @@ spec:
               error "MEMBERS names '${m}', and base-images/${m}/Containerfile does not exist (known: ${all.join(' ')})"
             }
           }
-          echo "${members.size()} member(s) to build: ${members.join(' ')}"
-          MEMBERS_TO_BUILD = members
+          // THE BUILD ORDER IS NOT THE ORDER ASKED. A member that stands
+          // on another member of the same run (php on nginx) is built
+          // after it, and siblings.sh pins its FROM to what this run
+          // built (see there: in a clean instance the shipped pin does
+          // not exist, and a run in the asked order built php on it).
+          env.RUN_MEMBERS = members.join(' ')
+          def ordered = sh(returnStdout: true,
+            script: 'sh base-images/siblings.sh order $RUN_MEMBERS'
+          ).trim().split('\n') as List
+          echo "${ordered.size()} member(s) to build, each after the ones it stands on: ${ordered.join(' ')}"
+          MEMBERS_TO_BUILD = ordered
         }
       }
     }
@@ -295,6 +304,12 @@ spec:
             env.M = m
             echo "================ aegis-base-${m} ================"
             try {
+              // A sibling built in THIS run is what this member stands
+              // on, not the pin its Containerfile was shipped with; a
+              // sibling that failed stops it here, by name.
+              env.BUILT_REFS = built.collect { "${it.name}=${it.tag}@${it.digest}" }.join(' ')
+              env.FAILED_NOW = failed.join(' ')
+              sh 'sh base-images/siblings.sh pin "$M"'
               // TAG = <alpine minor>-<build number, zero-padded to 6>
               // (lexicographic order == numeric order). The minor is
               // DERIVED from the member's FROM: one place to edit the
