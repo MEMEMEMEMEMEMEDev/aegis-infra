@@ -48,8 +48,8 @@ ensure_repo() {
     if gh repo view "$GH_OWNER/$repo" >/dev/null 2>&1; then
         # it exists: is it OURS (marked) or a real repo? That
         # distinction is the heart of the isolation:
-        if gh api "repos/$GH_OWNER/$repo/topics" --jq '.names[]' \
-             2>/dev/null | grep -qx "$MARK_TOPIC"; then
+        if grep -qx "$MARK_TOPIC" < <(gh api "repos/$GH_OWNER/$repo/topics" --jq '.names[]' \
+             2>/dev/null); then
             log_info "repo $repo already exists with marker $MARK_TOPIC — reusing it"
         else
             log_warn "repo $GH_OWNER/$repo EXISTS and does NOT have the marker"

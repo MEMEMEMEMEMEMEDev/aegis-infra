@@ -443,7 +443,7 @@ do_build() {
 
     local i name item q missing=()
     for i in "${!ITEMS[@]}"; do
-        jenkins_get_code "/job/$(_jenkins_job "${ITEMS[$i]}")/api/json" 2>/dev/null | grep -q '^200$' \
+        grep -q '^200$' < <(jenkins_get_code "/job/$(_jenkins_job "${ITEMS[$i]}")/api/json" 2>/dev/null) \
             || missing+=("${ITEMS[$i]}")
     done
     (( ${#missing[@]} == 0 )) \

@@ -329,7 +329,7 @@ EOF
 # and the injection is skipped (inject_placeholder with 0 occurrences
 # DIES on purpose — better explicit than silent):
 placeholder_pending() {   # <yaml> <placeholder>
-    grep -vE '^\s*#' "$1" | grep -qF "$2"
+    grep -qF "$2" < <(grep -vE '^\s*#' "$1")
 }
 # ── a PEM that is already injected may be the WRONG one ─────────────
 # On a host that carried a previous instance (destroy + init), the
@@ -857,17 +857,17 @@ _argo_only_waiting_pvcs() {   # <app>
                 2>/dev/null | sed 's/  */ /g; s/ $/ 0/')
 
     # no pod is in trouble
-    kubectl -n "$ns" get pods --no-headers 2>/dev/null \
-      | grep -qE 'CrashLoopBackOff|Error|ImagePull|CreateContainer' && return 1
+    grep -qE 'CrashLoopBackOff|Error|ImagePull|CreateContainer' \
+      < <(kubectl -n "$ns" get pods --no-headers 2>/dev/null) && return 1
 
     # and every volume is bound, or waiting for a consumer that is off
     while read -r name phase; do
         [[ -n "$name" ]] || continue
         [[ "$phase" == "Bound" ]] && continue
         [[ "$phase" == "Pending" ]] || return 1
-        kubectl -n "$ns" get events --field-selector "involvedObject.name=$name" \
-            -o jsonpath='{range .items[*]}{.reason}{"\n"}{end}' 2>/dev/null \
-          | grep -q '^WaitForFirstConsumer$' || return 1
+        grep -q '^WaitForFirstConsumer$' \
+          < <(kubectl -n "$ns" get events --field-selector "involvedObject.name=$name" \
+                -o jsonpath='{range .items[*]}{.reason}{"\n"}{end}' 2>/dev/null) || return 1
         any=1
     done < <(kubectl -n "$ns" get pvc \
                 -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase}{"\n"}{end}' 2>/dev/null)
@@ -955,8 +955,8 @@ argo_secrets_gate() {   # <app> [timeout_s] [expected_sha] [repo_dir]
                 _gate_record "$app-synced" fail $(( SECONDS - t0 ))
                 die "$app: kustomize build BROKEN (an entry/resource with no file? — the generator's temporal rule)"
             fi
-        elif kubectl -n argocd get application "$app" \
-               -o jsonpath='{.status.sync.status}' 2>/dev/null | grep -qx Synced; then
+        elif grep -qx Synced < <(kubectl -n argocd get application "$app" \
+               -o jsonpath='{.status.sync.status}' 2>/dev/null); then
             if [[ -n "$expected" ]]; then
                 local revs
                 revs="$(kubectl -n argocd get application "$app" \

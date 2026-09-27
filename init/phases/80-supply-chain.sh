@@ -663,15 +663,15 @@ _failclosed_gates() {
         --grace-period=0 --force >&2 || true
     local i
     for i in $(seq 1 30); do   # wait for the endpoint to DISAPPEAR
-        kubectl -n kyverno get endpoints kyverno-svc \
-            -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -q . || break
+        grep -q . < <(kubectl -n kyverno get endpoints kyverno-svc \
+            -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null) || break
         sleep 2
     done
     # guard: if the webhook is still alive, the kill did not take — it
     # is NOT a fail-closed verdict (it would be a false fail-open from
     # a bad delete selector):
-    if kubectl -n kyverno get endpoints kyverno-svc \
-         -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -q .; then
+    if grep -q . < <(kubectl -n kyverno get endpoints kyverno-svc \
+         -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null); then
         _gate_record "failclosed-org-canary-rechaza" fail 0
         die "GATE fail-closed: could NOT bring down Kyverno's webhook (the endpoint is alive after the kill) — check the delete's selector, this is not a verdict"
     fi

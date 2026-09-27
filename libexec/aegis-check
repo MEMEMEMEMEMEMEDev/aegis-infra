@@ -891,9 +891,9 @@ else bad "unissued certificates:"; printf '%s\n' "$bad_certs"; fi
 heading "whose the routing is"
 uncontrolled=""
 for p in $(kubectl get appproject -n argocd -o name 2>/dev/null | sed 's|.*/||' | grep '^aegis-tenant-'); do
-    kubectl get appproject "$p" -n argocd \
-        -o jsonpath='{.spec.namespaceResourceBlacklist[*].kind}' 2>/dev/null \
-        | grep -qw IngressRoute || uncontrolled="$uncontrolled $p"
+    grep -qw IngressRoute < <(kubectl get appproject "$p" -n argocd \
+        -o jsonpath='{.spec.namespaceResourceBlacklist[*].kind}' 2>/dev/null) \
+        || uncontrolled="$uncontrolled $p"
 done
 n_projects=$(kubectl get appproject -n argocd -o name 2>/dev/null | sed 's|.*/||' | grep -c '^aegis-tenant-')
 if [[ -n "$uncontrolled" ]]; then
@@ -1251,7 +1251,7 @@ PYEOF
     for d in "$BACKUPS"/org-*/; do
         [[ -d "$d" ]] || continue
         n=$(basename "$d"); n=${n#org-}
-        printf '%s\n' "${ORGS[@]}" | grep -qxF "$n" \
+        grep -qxF "$n" < <(printf '%s\n' "${ORGS[@]}") \
             || notice "$(basename "$d")/ has backups and no contract declares it — a decommissioned organization?"
     done
 

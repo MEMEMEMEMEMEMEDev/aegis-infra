@@ -499,9 +499,9 @@ _pvcs_bound() {
                 -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase}{"\n"}{end}' 2>/dev/null)
     [[ "$total" == "$want" ]] || return 1
     for name in $pending; do
-        kubectl -n "$AI_NS" get events --field-selector "involvedObject.name=$name" \
-            -o jsonpath='{range .items[*]}{.reason}{"\n"}{end}' 2>/dev/null \
-          | grep -q '^WaitForFirstConsumer$' || return 1
+        grep -q '^WaitForFirstConsumer$' \
+          < <(kubectl -n "$AI_NS" get events --field-selector "involvedObject.name=$name" \
+                -o jsonpath='{range .items[*]}{.reason}{"\n"}{end}' 2>/dev/null) || return 1
         log_info "  PVC $name: waiting for its first consumer, and its engine is off by design — it binds when that engine first runs"
     done
     return 0

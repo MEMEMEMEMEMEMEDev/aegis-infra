@@ -711,8 +711,8 @@ _registry_serves_metrics() {
     [[ -n "$ip" && "$ip" != "None" ]] || return 1
     curl -fsS --max-time 5 "http://$ip:5001/metrics" >/dev/null 2>&1
 }
-if kubectl -n registry-system get cm registry-config -o jsonpath='{.data.config\.yml}' 2>/dev/null \
-        | grep -q 'debug:' && ! _registry_serves_metrics; then
+if grep -q 'debug:' < <(kubectl -n registry-system get cm registry-config \
+        -o jsonpath='{.data.config\.yml}' 2>/dev/null) && ! _registry_serves_metrics; then
     log_info "the ConfigMap declares metrics and the pod does not serve them — rollout restart (B11)"
     run_cmd kubectl -n registry-system rollout restart deploy/registry
 fi
@@ -977,9 +977,9 @@ fi
 ( umask 077; printf 'machine ntfy.%s login operador password %s\n' \
     "$ROOT_DOMAIN" "$(cat "$OPF")" > "$SECRETS_TMP/ntfy-operador.netrc" )
 _alert_reached_ntfy() {
-    curl -fsS --max-time 30 --netrc-file "$SECRETS_TMP/ntfy-operador.netrc" \
-        "https://ntfy.$ROOT_DOMAIN/aegis-alertas/json?poll=1" 2>/dev/null \
-      | grep -qiE 'DeadmanAegis|latido'
+    grep -qiE 'DeadmanAegis|latido' \
+      < <(curl -fsS --max-time 30 --netrc-file "$SECRETS_TMP/ntfy-operador.netrc" \
+            "https://ntfy.$ROOT_DOMAIN/aegis-alertas/json?poll=1" 2>/dev/null)
 }
 gate_diag "obs-cadena-alerta-canal" \
     'kubectl -n observability logs deploy/ntfy-bridge --tail=15 2>/dev/null; kubectl -n observability logs deploy/alertmanager --tail=15 2>/dev/null; kubectl -n observability logs deploy/ntfy --tail=10 2>/dev/null' \

@@ -366,7 +366,7 @@ make_enc_secret() {
     mv "$tmp_yaml" "$dest"
     sops_encrypt_repo "$dest"
     # roundtrip ALWAYS — validates rule and recipient without showing values:
-    sops -d "$dest" | grep -q '^kind: Secret' \
+    grep -q '^kind: Secret' < <(sops -d "$dest") \
         || die "SOPS roundtrip failed for $dest"
     log_ok "Secret $ns/$name encrypted into $dest (roundtrip OK)"
 }
@@ -496,8 +496,8 @@ validate_age_backup() {
     if ni_mode; then
         ( cd "$SECRETS_TMP" && \
           sops --encrypt --age "$AGE_PUBLIC" "$canary" > "$canary.enc" )
-        SOPS_AGE_KEY_FILE="$AEGIS_AGE_BACKUP_FILE" \
-            sops -d "$canary.enc" | grep -q "aegis-init-canary-$$"
+        grep -q "aegis-init-canary-$$" \
+            < <(SOPS_AGE_KEY_FILE="$AEGIS_AGE_BACKUP_FILE" sops -d "$canary.enc")
         return $?
     fi
     # cd to tmpfs for the encrypt: even with an explicit --age, sops
@@ -526,8 +526,8 @@ validate_age_backup() {
     chmod 600 "$SECRETS_TMP/age.restored" 2>/dev/null
     [[ -s "$SECRETS_TMP/age.restored" ]] || {
         log_warn "no key pasted and no file either (plan B)"; return 1; }
-    SOPS_AGE_KEY_FILE="$SECRETS_TMP/age.restored" \
-        sops -d "$canary.enc" | grep -q "aegis-init-canary-$$"
+    grep -q "aegis-init-canary-$$" \
+        < <(SOPS_AGE_KEY_FILE="$SECRETS_TMP/age.restored" sops -d "$canary.enc")
 }
 # (validate_cosign_backup REMOVED in D11: the cosign ceremony no
 # longer exists — the keypair and the password live in the encrypted
