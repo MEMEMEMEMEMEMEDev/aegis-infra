@@ -4,6 +4,22 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-09-27 — downloads reach the visitor without a copy on the system disk
+
+- The `-cuerpo` sibling of 2026-09-25 only caught `GET`s that announced a
+  stream; a plain download of a large file was still buffered — copied in
+  full to a `temp-multibuf-*` file in traefik's emptyDir on the system
+  disk before its first byte went out. On the home instance that pinned a
+  QLC SSD at 90 % busy, slowed the k3s API server to seconds, got traefik
+  and kyverno killed by their liveness probes, and cut every download of
+  a 3 GB file mid-way. The sibling now covers every `GET` and `HEAD` —
+  the methods with no body for the cap to cap — with no header
+  condition; `POST`/`PUT`/`PATCH`/`DELETE` keep the 10 MiB cap. Check 251
+  requires both methods and refuses a body-carrying one in the sibling.
+  Organizations get it on their next `aegis org apply`. An instance that
+  already ran into this can purge the leftovers with a rollout restart of
+  traefik (the emptyDir goes with the pod).
+
 ## 2026-09-25 — SSE and WebSockets reach the visitor
 
 - traefik's `buffering` (each organization's `-cuerpo`, the 10 MiB cap on
