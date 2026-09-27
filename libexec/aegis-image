@@ -480,7 +480,7 @@ from_line() { printf 'FROM %s/%s@%s\n' "$REGISTRY_HOST_INTERNAL" "$1" "$2"; }
 jenkins_ready() {
     kubectl -n jenkins-system get sts jenkins -o name >/dev/null 2>&1 \
         || could_not "jenkins-system/sts/jenkins is not reachable (kubeconfig? is the cluster up?)"
-    jenkins_get_code "/job/$MIRROR_JOB/api/json" 2>/dev/null | grep -q '^200$' \
+    grep -q '^200$' < <(jenkins_get_code "/job/$MIRROR_JOB/api/json" 2>/dev/null) \
         || could_not "Jenkins has no job «$MIRROR_JOB» — did the jenkins App sync the Job DSL?"
 }
 

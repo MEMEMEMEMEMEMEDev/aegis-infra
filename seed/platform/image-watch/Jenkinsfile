@@ -82,8 +82,8 @@ def postEvents(List events) {
     while IFS= read -r line; do printf 'AEGIS_EVENT %s\\n' "$line"; done < watch-events.jsonl
     curl -fsS --max-time 15 \
       -H 'Content-Type: application/stream+json' --data-binary @watch-events.jsonl \
-      'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \
-      || echo 'NOTICE: the events could not be recorded in vlogs-events (the watch does NOT fail over this)'
+      'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' 2>/dev/null \
+      || echo "NOTICE: the events could not be recorded in vlogs-events (curl exit $?; the watch does NOT fail over this)"
     rm -f watch-events.jsonl
   '''
 }
@@ -778,8 +778,8 @@ spec:
             echo "-- metrics of the run:"
             sed 's/^/   /' watch-metrics.prom
             curl -fsS --max-time 15 --data-binary @watch-metrics.prom \
-              'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' \
-              || echo 'NOTICE: the watch metrics did not reach vmsingle — no heartbeat this morning; ImageWatchSilent is the correct alarm (the watch does NOT fail over this)'
+              'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' 2>/dev/null \
+              || echo "NOTICE: the watch metrics did not reach vmsingle — no heartbeat this morning; ImageWatchSilent is the correct alarm (curl exit $?; the watch does NOT fail over this)"
             rm -f watch-metrics.prom
           '''
           // `image` here is the watch itself: the row needs a _msg (the

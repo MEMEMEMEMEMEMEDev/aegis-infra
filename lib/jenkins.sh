@@ -322,8 +322,12 @@ jenkins_build_retry() {
             JENKINS_LAST_BUILD="$next"
             return 0
         fi
-        if jenkins_get "/job/$(_jenkins_job "$job")/$next/consoleText" 2>/dev/null \
-             | grep -qiE "$AEGIS_NET_SIGS"; then
+        # The console is read WHOLE before the match (H-05, 2026-09-24):
+        # piped, `grep -q` quit at the first signature, jenkins_get died
+        # of SIGPIPE while still writing, and pipefail turned the match
+        # into «no network signature» — half of the time (check 253).
+        if grep -qiE "$AEGIS_NET_SIGS" \
+             < <(jenkins_get "/job/$(_jenkins_job "$job")/$next/consoleText" 2>/dev/null); then
             log_warn "build $job#$next: FAILURE with a transient NETWORK signature (attempt $i/$tries) — re-firing"
             continue
         fi

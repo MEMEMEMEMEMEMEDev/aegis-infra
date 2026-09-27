@@ -436,8 +436,8 @@ spec:
           printf '%s\n' "$EVENTO" \
             | curl -fsS --max-time 15 \
                 -H 'Content-Type: application/stream+json' --data-binary @- \
-                'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \
-            || echo 'NOTICE: the from-guard event could not be recorded in vlogs-events (the guard does NOT change its verdict over this)'
+                'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' 2>/dev/null \
+            || echo "NOTICE: the from-guard event could not be recorded in vlogs-events (curl exit $?; the guard does NOT change its verdict over this)"
 
           # BOOTSTRAP: the same marker the signature half already uses.
           # Measured on 2026-08-31, on the first run that reached this
@@ -801,8 +801,8 @@ spec:
           printf '%s\n' "$EVENTO" \
             | curl -fsS --max-time 15 \
                 -H 'Content-Type: application/stream+json' --data-binary @- \
-                'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \
-            || echo 'NOTICE: the event could not be recorded in vlogs-events (the build does NOT fail for this)'
+                'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' 2>/dev/null \
+            || echo "NOTICE: the event could not be recorded in vlogs-events (curl exit $?; the build does NOT fail for this)"
 
           # ── and the SAME three things as a metric ───────────────
           #
@@ -842,8 +842,8 @@ spec:
               printf 'aegis_build_timestamp_seconds{image="%s"} %s\n' "${IMAGE}" \
                 "$(date -u +%s)"
             } | curl -fsS --max-time 15 --data-binary @- \
-                  'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' \
-              || echo 'NOTICE: the build metrics did not reach vmsingle (the build does NOT fail for this)'
+                  'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' 2>/dev/null \
+              || echo "NOTICE: the build metrics did not reach vmsingle (curl exit $?; the build does NOT fail for this)"
           fi
         '''
       }

@@ -111,8 +111,8 @@ _disconnect_tunnel() {
 
   local i
   for i in $(seq 1 60); do
-    kubectl -n infra-edge get pods --no-headers 2>/dev/null \
-      | grep -q '^cloudflared-' || { say "edge: cloudflared is down"; return 0; }
+    grep -q '^cloudflared-' < <(kubectl -n infra-edge get pods --no-headers 2>/dev/null) \
+      || { say "edge: cloudflared is down"; return 0; }
     sleep 2
   done
   say "WARNING: cloudflared did not stop in 120s — Cloudflare may still refuse to delete the tunnel"
@@ -224,7 +224,7 @@ if [[ $BRIDGE_FOUND -eq 1 ]]; then
     sudo rmdir /etc/aegis 2>/dev/null || true
     sudo systemctl daemon-reload
     sudo systemctl reset-failed 2>/dev/null || true
-    if ss -ltn 2>/dev/null | grep -qE ':(80|443) '; then
+    if grep -qE ':(80|443) ' < <(ss -ltn 2>/dev/null); then
       say "WARNING: something is STILL listening on 80/443 — it is not aegis' bridge any more, but check what it is before re-installing"
     else
       say "host bridge removed: 80 and 443 are free"

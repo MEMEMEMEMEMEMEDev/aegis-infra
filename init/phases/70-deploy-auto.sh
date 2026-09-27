@@ -149,8 +149,8 @@ run_cmd retry_net 3 bash -c "cd \$(mktemp -d) && \
 _antiloop_skipped() {
     jenkins_get "/job/hello-aegis-mb/job/main/$NEXT_PROBE/api/json" \
         2>/dev/null | jq -e '.result == "SUCCESS"' >/dev/null || return 1
-    jenkins_get "/job/hello-aegis-mb/job/main/$NEXT_PROBE/consoleText" \
-        2>/dev/null | grep -q 'skipped due to when conditional'
+    grep -q 'skipped due to when conditional' \
+        < <(jenkins_get "/job/hello-aegis-mb/job/main/$NEXT_PROBE/consoleText" 2>/dev/null)
 }
 gate_diag "anti-loop-build-salteado" \
   'jenkins_get "/job/hello-aegis-mb/job/main/$NEXT_PROBE/api/json" 2>/dev/null | jq "{result, building}";

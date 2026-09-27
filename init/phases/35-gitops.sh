@@ -146,8 +146,8 @@ if ! argo_sync argocd 600; then
     argo_sync argocd 600 || \
         die "the self App's sync failed twice — check the repo-server/network and --from 35"
 fi
-if ! kubectl -n argocd get application argocd \
-       -o jsonpath='{.status.sync.status}' | grep -qx Synced; then
+if ! grep -qx Synced < <(kubectl -n argocd get application argocd \
+       -o jsonpath='{.status.sync.status}'); then
     log_warn "App argocd OutOfSync after a successful sync — an adoption leftover (benign: Healthy + no automated); resources:"
     kubectl -n argocd get application argocd -o jsonpath=\
 '{range .status.resources[?(@.status=="OutOfSync")]}{.kind}/{.name}{"\n"}{end}' >&2 || true

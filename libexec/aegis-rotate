@@ -393,7 +393,7 @@ _ssh_from_secret() {
     # Permission denied = verdict (the key does not work). Anything else
     # = probably transport. The distinction is what keeps the retry from
     # repeating a real failure.
-    if printf '%s' "$output" | grep -qiE 'permission denied|publickey'; then
+    if grep -qiE 'permission denied|publickey' <<< "$output"; then
         log_error "GitHub rejected the key of $ns/$secret (Permission denied)"
         return 1
     fi
@@ -661,7 +661,7 @@ check_cf_access() {
     output="$( cd "$PLATFORM_DIR/tofu" && ./tofu-apply.sh \
         -chdir=envs/cloudflare-tunnel plan -no-color 2>&1 )" || rc=$?
     (( rc == 0 )) || { log_error "tofu plan failed with the Access token (exit $rc)"; return 1; }
-    if printf '%s' "$output" | grep -qE 'module\.access\..* will be created'; then
+    if grep -qE 'module\.access\..* will be created' <<< "$output"; then
         log_error "tofu wants to RE-CREATE Access resources: either they were deleted from the panel, or the token stopped seeing them, or the STATE went stale (an apply whose re-encrypted enc.json nobody committed? — seen 2026-08-21)"
         return 1
     fi

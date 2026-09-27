@@ -89,8 +89,8 @@ collect init-state    "$INIT_STATE"
 collect tfstate       "$TUNNEL_ENV/terraform.tfstate" "$TUNNEL_ENV/terraform.tfstate.backup"
 
 # HARD GUARD: the age key NEVER enters the bundle (the irreducible goes apart).
-if find "$PAY" -type f \( -name 'aegis.key' -o -name '*.agekey' \) \
-      -o -path '*/sops/age/*' 2>/dev/null | grep -q .; then
+if grep -q . < <(find "$PAY" -type f \( -name 'aegis.key' -o -name '*.agekey' \) \
+      -o -path '*/sops/age/*' 2>/dev/null); then
   die "the payload contains age key material — aborted (the key is never backed up)"
 fi
 
