@@ -534,7 +534,7 @@ spec:
                   echo "       Fix base-images/${M} (its runtime-test.yaml names what it needs writable). The image is pushed and NOT signed: no tenant can deploy it."
                   exit 1
                 fi
-                k -o /dev/null -X DELETE "$API/api/v1/namespaces/$NS/pods/$NAME?gracePeriodSeconds=0" || echo "NOTICE: could not delete $NAME (the build does NOT fail for this)"
+                k -o /dev/null -X DELETE "$API/api/v1/namespaces/$NS/pods/$NAME?gracePeriodSeconds=0" 2>/dev/null || echo "NOTICE: could not delete $NAME (curl exit $?; the build does NOT fail for this)"
                 echo "run: aegis-base-${M}:${TAG} came up and answered on port $PORT under restricted — signing it"
               '''
               container('cosign') {
@@ -572,15 +572,15 @@ spec:
                 printf '%s\\n' "$EVENTO" \
                   | curl -fsS --max-time 15 \
                       -H 'Content-Type: application/stream+json' --data-binary @- \
-                      'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \
-                  || echo 'NOTICE: the event could not be recorded in vlogs-events (the build does NOT fail for this)'
+                      'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' 2>/dev/null \
+                  || echo "NOTICE: the event could not be recorded in vlogs-events (curl exit $?; the build does NOT fail for this)"
                 {
                   printf 'aegis_build_scan_skipped{image="aegis-base-%s"} 0\\n' "$M"
                   printf 'aegis_build_sign_skipped{image="aegis-base-%s"} 0\\n' "$M"
                   printf 'aegis_build_timestamp_seconds{image="aegis-base-%s"} %s\\n' "$M" "$(date -u +%s)"
                 } | curl -fsS --max-time 15 --data-binary @- \
-                      'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' \
-                  || echo 'NOTICE: the build metrics did not reach vmsingle (the build does NOT fail for this)'
+                      'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' 2>/dev/null \
+                  || echo "NOTICE: the build metrics did not reach vmsingle (curl exit $?; the build does NOT fail for this)"
               '''
               def digest = readFile("base-${m}.digest").trim()
               built << [name: m, tag: env.TAG, digest: digest]
@@ -865,8 +865,8 @@ spec:
                 printf '%s\\n' "$EVENTO" \
                   | curl -fsS --max-time 15 \
                       -H 'Content-Type: application/stream+json' --data-binary @- \
-                      'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \
-                  || echo 'NOTICE: the event could not be recorded in vlogs-events (the build does NOT fail for this)'
+                      'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' 2>/dev/null \
+                  || echo "NOTICE: the event could not be recorded in vlogs-events (curl exit $?; the build does NOT fail for this)"
                 if [ "${PROP_CONSUMER}" = true ]; then
                   {
                     printf 'aegis_base_propagation_failed{image="aegis-base-%s",repo="%s"} %s\\n' "$M" "$REPO_SLUG" "$PROP_FAILED"
@@ -874,8 +874,8 @@ spec:
                       printf 'aegis_base_propagated_timestamp_seconds{image="aegis-base-%s",repo="%s"} %s\\n' "$M" "$REPO_SLUG" "$(date -u +%s)"
                     fi
                   } | curl -fsS --max-time 15 --data-binary @- \
-                        'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' \
-                    || echo 'NOTICE: the propagation metrics did not reach vmsingle (the build does NOT fail for this)'
+                        'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' 2>/dev/null \
+                    || echo "NOTICE: the propagation metrics did not reach vmsingle (curl exit $?; the build does NOT fail for this)"
                 else
                   echo "no propagation metric for aegis-base-${M} x ${REPO_SLUG}: not a consumer of this base (no series = not a consumer)"
                 fi
@@ -905,8 +905,8 @@ spec:
             printf '%s\\n' "$EVENTO" \
               | curl -fsS --max-time 15 \
                   -H 'Content-Type: application/stream+json' --data-binary @- \
-                  'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=event&_stream_fields=source' \
-              || echo 'NOTICE: the event could not be recorded in vlogs-events (the build does NOT fail for this)'
+                  'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=event&_stream_fields=source' 2>/dev/null \
+              || echo "NOTICE: the event could not be recorded in vlogs-events (curl exit $?; the build does NOT fail for this)"
           '''
           if (FAILED) {
             error "members that failed (${FAILED.size()}): ${FAILED.join(', ')}"
