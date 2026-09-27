@@ -2197,8 +2197,12 @@ spec:
     # reading the whole response before sending it. MEASURED 2026-09-25
     # (conf, the Vibeathon): the hub's SSE answered at once straight to
     # the pod and sent nothing in 4 s through this middleware — a stream
-    # never ends, so it never arrives. Streams and WebSockets therefore go
-    # through the `-continuo` route below, which does not carry it.
+    # never ends, so it never arrives. And 2026-09-27 (drop, the same
+    # instance): a 3 GB download was copied in full to a temp file on the
+    # system SSD before its first byte went out, and took the edge down
+    # with it. Every GET and HEAD therefore takes the read-only sibling
+    # rule below, which does not carry this middleware — those methods
+    # have no body for the cap to cap. It stays on POST/PUT/PATCH/DELETE.
     maxRequestBodyBytes: 10485760   # 10 MiB
     memRequestBodyBytes: 1048576    # 1 MiB in RAM, the rest to disk
 ---
@@ -2243,19 +2247,31 @@ spec:
         - {{name: {org}-cuerpo}}
       services:
         - {{name: {org}-{s['nombre']}, port: 8080}}""")
-        # THE STREAMING SIBLING (check 251). The same host and path, only
-        # for a GET that opens an SSE stream or upgrades to a WebSocket,
-        # WITHOUT `-cuerpo`: its buffering holds the response and a stream
-        # never reaches the visitor. Neither carries a body, so the 10 MiB
-        # cap has nothing to cap — and the GET is part of the rule so a
-        # POST cannot borrow the header to skip the cap. Headers and the
+        # THE READ-ONLY SIBLING (check 251). The same host and path for
+        # every GET and HEAD, WITHOUT `-cuerpo`. A GET carries no body,
+        # so the 10 MiB cap has nothing to cap there — while the
+        # buffering's other half, holding the whole RESPONSE until it
+        # ends, costs on every read: a stream never ends (conf's SSE,
+        # 2026-09-25), and a large file is copied to disk in full before
+        # the first byte goes out. MEASURED 2026-09-27 on the home
+        # instance: each attempt to download a 3 GB file from drop left a
+        # 1.4 GB `temp-multibuf-*` in traefik's emptyDir on the system SSD,
+        # which sat at 90 % busy over 6 MB/s of writes; the k3s datastore
+        # shares that disk, the API server slowed to seconds, traefik and
+        # kyverno failed their 2 s liveness and were killed, the tunnel
+        # dropped, and the download died with it — while drop's own HDD
+        # idled at 0.4 %. Until 2026-09-27 the sibling only caught GETs
+        # with `Accept: text/event-stream` or a WebSocket upgrade, which
+        # is why the download was still buffered.
+        # The method is part of the rule so a POST cannot borrow it to
+        # skip the cap: PUT/POST/PATCH/DELETE keep going through
+        # `-cuerpo` on the route above. Headers and the
         # per-visitor rate limit stay: an open stream is one request.
         # The longer rule wins in traefik, so no explicit priority.
-        stream = (f"({match}) && Method(`GET`) && "
-                  f"(HeaderRegexp(`Accept`, `text/event-stream`) || "
-                  f"HeaderRegexp(`Upgrade`, `(?i)^websocket$`))")
+        stream = (f"({match}) && "
+                  f"(Method(`GET`) || Method(`HEAD`))")
         parts.append(f"""\
-    # {s['nombre']} — its streams (SSE, WebSocket): no body buffering
+    # {s['nombre']} — its reads (downloads, previews, SSE, WebSocket): no body buffering
     - kind: Rule
       match: {stream}
       middlewares:

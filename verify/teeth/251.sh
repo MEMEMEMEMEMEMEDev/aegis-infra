@@ -1,4 +1,4 @@
-# teeth of check 251 — streams without the response-holding buffering.
+# teeth of check 251 — reads (GET, HEAD) without the response-holding buffering.
 _sub() {
     python3 - "$1" "$2" "$3" <<'PYT'
 import sys, pathlib
@@ -14,7 +14,7 @@ O251="$AEGIS_ROOT/lib/aegis/org.py"
 red_1() {
     python3 -c '
 import sys; p = sys.argv[1]; s = open(p).read()
-i = s.index("        stream = (f\"({match}) && Method")
+i = s.index("        stream = (f\"({match}) && \"")
 j = s.index("port: 8080}}\"\"\")", i) + len("port: 8080}}\"\"\")")
 open(p, "w").write(s[:i] + "        pass" + s[j:])
 ' "$O251"
@@ -30,12 +30,13 @@ red_2() { _sub "$O251" '        - {{name: {org}-ritmo}}
         - {{name: {org}-{s['"'"'nombre'"'"']}, port: 8080}}""")
     return'; }
 
-# any method: a POST sets the header and skips the 10 MiB cap
-red_3() { _sub "$O251" ' && Method(`GET`) && "' ' && "'; }
+# any method: a POST takes the sibling and skips the 10 MiB cap
+red_3() { _sub "$O251" '        stream = (f"({match}) && "
+                  f"(Method(`GET`) || Method(`HEAD`))")' '        stream = (f"({match}) && "
+                  f"(Method(`GET`) || Method(`HEAD`) || Method(`POST`))")'; }
 
-# only SSE, the WebSocket upgrade still buffered
-red_4() { _sub "$O251" ' || "
-                  f"HeaderRegexp(`Upgrade`, `(?i)^websocket$`))")' ')")'; }
+# only GET: a HEAD (a download manager, a Range probe) is still buffered
+red_4() { _sub "$O251" ' || Method(`HEAD`))")' ')")'; }
 
 # control: the comment reworded
 control_1() { _sub "$O251" 'Headers and the
