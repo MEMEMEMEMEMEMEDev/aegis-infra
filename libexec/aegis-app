@@ -849,11 +849,18 @@ def new(org, template, tot):
               f"({n} file(s), gitignored — its destination is ANOTHER repo)")
     print(f"  {gray}derived:{reset}   k8s/organizations/org-{org}/ + jobs, edge, "
           f"projects, credentials (above)")
+    # IN THE ORDER THAT WORKS (measured 2026-09-30 on alpha-arch). It used
+    # to say `app apply --check` BEFORE the push: the deploy key lives in a
+    # Secret that only exists once platform/ is pushed and synced, and the
+    # check could only answer «COULD NOT EVALUATE». The Jenkins job, the
+    # webhook's target, comes from the same push.
     print(f"\nnext steps, IN ORDER (the pause in the middle is the design):")
     print(f"  1. review the diff: git status && git diff")
-    print(f"  2. {cli.cmd('app apply')} {org} --check   {gray}(and without --check when you like it){reset}")
-    print(f"  3. commit+push of platform/  {gray}(an act of government — human on purpose){reset}")
-    print(f"  4. tofu apply of the edge (#46)  {gray}(tofu/envs/cloudflare-tunnel){reset}")
+    print(f"  2. commit+push of platform/, then {cli.cmd('sync root')}  "
+          f"{gray}(an act of government — human on purpose; the AppProject line above goes first when it is new){reset}")
+    print(f"  3. tofu apply of the edge  {gray}(tofu/tofu-apply.sh -chdir=envs/cloudflare-tunnel plan, then apply){reset}")
+    print(f"  4. {cli.cmd('app apply')} {org} --check, then without --check  "
+          f"{gray}(repo, deploy key, webhook — and the skeleton LAST: its push is the first build){reset}")
     return 0
 
 
@@ -1262,6 +1269,9 @@ def mark(tot, state, step, detail=""):
 
 
 def apply_repo(c, url, name, write, tot):
+    """The repo and its deploy key. The skeleton is NOT planted here: see
+    plant_skeleton, which runs after the webhooks. Returns what the
+    planting needs, or None when this repo cannot be looked at."""
     org = c["organizacion"]
     print(f"\n{url}  {gray}(Application: {name}){reset}")
     try:
@@ -1269,7 +1279,7 @@ def apply_repo(c, url, name, write, tot):
     except Error as e:
         # Without owner/repo NO step of this repo can be evaluated.
         mark(tot, "not_evaluable", "GitHub repo", str(e))
-        return
+        return None
 
     # ── step 1: the repo ──────────────────────────────────────────
     try:
@@ -1280,7 +1290,7 @@ def apply_repo(c, url, name, write, tot):
         # better three honest warnings than two silences.
         mark(tot, "not_evaluable", "skeleton", "I could not look at the repo")
         mark(tot, "not_evaluable", "deploy key", "I could not look at the repo")
-        return
+        return None
     if exists:
         mark(tot, "already", "GitHub repo")
     elif not write:
@@ -1294,9 +1304,51 @@ def apply_repo(c, url, name, write, tot):
             mark(tot, "not_evaluable", "GitHub repo", str(e))
             mark(tot, "not_evaluable", "skeleton", "the repo never came to exist")
             mark(tot, "not_evaluable", "deploy key", "the repo never came to exist")
-            return
+            return None
 
-    # ── step 2: the skeleton (ONLY over an empty repo) ────────────
+    # ── step 3: the deploy key ────────────────────────────────────
+    try:
+        public = _public_of(name)
+        registered = _keys_of(owner, repo) if exists else []
+    except Error as e:
+        mark(tot, "not_evaluable", "deploy key", str(e))
+        return {"owner": owner, "repo": repo, "exists": exists, "c": c, "url": url, "name": name}
+    mine = next((k for k in registered
+                 if " ".join((k.get("key") or "").split()[:2]) == public), None)
+    if mine and not mine.get("read_only", False):
+        # It exists but WITH write access: it converged in presence and
+        # violated the doctrine. It is not «fixed» on its own —deleting
+        # and recreating a key is an act that cuts ArgoCD's sync for an
+        # instant and deserves a human— but neither is it blessed.
+        mark(tot, "not_evaluable", "deploy key",
+             f"registered WITH write access ({mine.get('title')!r}) — it should be "
+             f"read only: review it by hand in GitHub")
+    elif mine:
+        mark(tot, "already", "deploy key", f"{mine.get('title')!r}, read only")
+    elif not exists:
+        mark(tot, "would", "deploy key", f"register {KEY_TITLE} (read only)")
+    elif not write:
+        mark(tot, "would", "deploy key", f"register {KEY_TITLE} (read only)")
+    else:
+        try:
+            _register_key(owner, repo, public)
+            mark(tot, "done", "deploy key", f"{KEY_TITLE}, read only")
+        except Error as e:
+            mark(tot, "not_evaluable", "deploy key", str(e))
+    return {"owner": owner, "repo": repo, "exists": exists, "c": c, "url": url, "name": name}
+
+
+def plant_skeleton(r, write, tot):
+    """Step 4, LAST: the skeleton, only over an empty repo.
+
+    Its push is the app's first build — and until 2026-09-30 it was
+    planted before the webhook existed. On alpha-arch the portfolio's
+    skeleton reached GitHub, nobody told Jenkins, the multibranch never
+    scanned, and the first build never started; only the NEXT push, once
+    the hook was there, built anything. Planted after the webhooks, the
+    push is the event the webhook carries."""
+    owner, repo, exists, c, url = r["owner"], r["repo"], r["exists"], r["c"], r["url"]
+    print(f"\n{url}  {gray}(skeleton — its push is the first build){reset}")
     try:
         # A repo just created is empty by construction; only then is it
         # worth asking about the history of one that was already there.
@@ -1325,36 +1377,6 @@ def apply_repo(c, url, name, write, tot):
                      f"planted from {os.path.relpath(staging, PLATFORM_DIR)}")
             except Error as e:
                 mark(tot, "not_evaluable", "skeleton", str(e))
-
-    # ── step 3: the deploy key ────────────────────────────────────
-    try:
-        public = _public_of(name)
-        registered = _keys_of(owner, repo) if exists else []
-    except Error as e:
-        mark(tot, "not_evaluable", "deploy key", str(e))
-        return
-    mine = next((k for k in registered
-                 if " ".join((k.get("key") or "").split()[:2]) == public), None)
-    if mine and not mine.get("read_only", False):
-        # It exists but WITH write access: it converged in presence and
-        # violated the doctrine. It is not «fixed» on its own —deleting
-        # and recreating a key is an act that cuts ArgoCD's sync for an
-        # instant and deserves a human— but neither is it blessed.
-        mark(tot, "not_evaluable", "deploy key",
-             f"registered WITH write access ({mine.get('title')!r}) — it should be "
-             f"read only: review it by hand in GitHub")
-    elif mine:
-        mark(tot, "already", "deploy key", f"{mine.get('title')!r}, read only")
-    elif not exists:
-        mark(tot, "would", "deploy key", f"register {KEY_TITLE} (read only)")
-    elif not write:
-        mark(tot, "would", "deploy key", f"register {KEY_TITLE} (read only)")
-    else:
-        try:
-            _register_key(owner, repo, public)
-            mark(tot, "done", "deploy key", f"{KEY_TITLE}, read only")
-        except Error as e:
-            mark(tot, "not_evaluable", "deploy key", str(e))
 
 
 def apply_webhooks(write, tot):
@@ -1492,6 +1514,7 @@ def main():
         return 2
 
     tot = {"already": 0, "done": 0, "would": 0, "not_evaluable": 0}
+    to_plant = []
     for arg in a.contracts:
         try:
             path, c = _contract(arg)
@@ -1505,9 +1528,15 @@ def main():
                   f"{gray}(pure-infrastructure organization){reset}")
             continue
         for url, name in sorted(repos.items()):
-            apply_repo(c, url, name, write, tot)
+            r = apply_repo(c, url, name, write, tot)
+            if r:
+                to_plant.append(r)
 
     apply_webhooks(write, tot)
+    # LAST: every hook exists by now, so each skeleton's push reaches
+    # Jenkins and is the app's first build.
+    for r in to_plant:
+        plant_skeleton(r, write, tot)
 
     print(f"\nsummary: {tot['already']} already · {tot['done']} done · "
           f"{tot['would']} to do · {tot['not_evaluable']} warning(s)")
