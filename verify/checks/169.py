@@ -20,6 +20,10 @@ TOOLS = {
     "apk":     (r'apk\s+add',                ["temporary error", "Permission denied", "network error"]),
     "curl":    (r'\bcurl\s',                 ["Could not resolve", "could not resolve", "connection reset"]),
     "go/git":  (r'\bgo\s+(mod|install)\b|\bgit\s+clone\b', ["dial tcp", "failed to get git"]),
+    # every Containerfile pulls its base from a registry, and a registry's
+    # pull rate limit is a hiccup (2026-09-24: kaniko, public.ecr.aws,
+    # «TOOMANYREQUESTS: Rate exceeded», declared a real failure)
+    "registry": (r'^\s*FROM\s',                ["TOOMANYREQUESTS", "Too Many Requests", "Rate exceeded"]),
 }
 
 HASH = re.compile(r'(^|\s)#.*$')
@@ -32,7 +36,7 @@ for cf in sorted(seed.rglob("Containerfile*")):
         continue
     body = code_of(cf.read_text(encoding="utf-8", errors="replace"))
     for tool, (pattern, _) in TOOLS.items():
-        if re.search(pattern, body):
+        if re.search(pattern, body, re.MULTILINE):
             used.add(tool)
 
 for tool in sorted(used):

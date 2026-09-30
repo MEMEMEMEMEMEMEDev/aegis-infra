@@ -1,5 +1,5 @@
 # title: the transient-network list speaks every language the seed downloads in
-# origin: new in v3 — 2026-09-01, after a four-hour build was not retried
+# origin: new in v3 — 2026-09-01, after a four-hour build was not retried; 2026-09-24, lab-arch: a registry's pull rate limit (kaniko, public.ecr.aws) read as a real failure
 check() {
 # `AEGIS_NET_SIGS` is the one place that decides whether a failure is
 # the network having a bad moment or the artifact being wrong. Three

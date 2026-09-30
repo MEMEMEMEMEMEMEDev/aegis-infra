@@ -31,3 +31,15 @@ assert t.count(old) == 1, t.count(old)
 open(p, "w").write(t.replace(old, "   | grep -q '@sha256:'\"\n", 1))
 PY
 }
+
+# 2026-09-23 (H3 of run #15, re-anchored to lib/pkg.sh): phase 00 stops
+# installing jq by itself — a deterministic stop on every clean VM
+red_4() {
+    python3 - "$AEGIS_ROOT/init/phases/00-preflight.sh" <<'PY'
+import sys
+p = sys.argv[1]; t = open(p).read()
+old = "    retry_net 3 pkg_install jq || \\\n"
+assert t.count(old) == 1, t.count(old)
+open(p, "w").write(t.replace(old, "    false || \\\n", 1))
+PY
+}

@@ -49,16 +49,54 @@ p.write_text(s.replace(anchor, anchor + gate[0], 1))
 PYT
 }
 
-# any Linux accepted: the CachyOS case itself
-red_5() { _sub "$AEGIS_ROOT/lib/host.sh" '[[ "$id" != "ubuntu" ]]' '[[ -z "$id" ]]'; }
+# any Linux accepted: the CachyOS case itself (the family is never
+# compared with the list)
+red_5() { _sub "$AEGIS_ROOT/lib/host.sh" \
+    'if [[ " ${list[*]} " != *" $fam "* ]]; then' 'if false; then'; }
 
 # the door lower than the wall: 22.04 let in, the playbook refuses it at phase 20
 red_6() { _sub "$AEGIS_ROOT/lib/host.sh" 'AEGIS_HOST_MIN_UBUNTU="24.04"' 'AEGIS_HOST_MIN_UBUNTU="22.04"'; }
 
 # the refusal leaking to stdout, where a $() caller would swallow it
 red_7() { _sub "$AEGIS_ROOT/lib/host.sh" \
-    "(it uses apt and Ubuntu's kernel and AppArmor defaults)\" >&2" \
-    "(it uses apt and Ubuntu's kernel and AppArmor defaults)\""; }
+    "(it installs with that family's package manager, kernel and security defaults)\" >&2" \
+    "(it installs with that family's package manager, kernel and security defaults)\""; }
+
+# ── 2026-09-23: families, and the lab override ─────────────────────
+# the override names a family nobody wrote code for, and it is let in
+red_8() { _sub "$AEGIS_ROOT/lib/host.sh" \
+    'if [[ " $AEGIS_HOST_FAMILIES_KNOWN " != *" $f "* ]]; then' 'if false; then'; }
+
+# Debian 12 let in: python 3.11, and ansible==14 dies in phase 20
+red_9() { _sub "$AEGIS_ROOT/lib/host.sh" 'AEGIS_HOST_MIN_DEBIAN="13"' 'AEGIS_HOST_MIN_DEBIAN="12"'; }
+
+# the door opened with no archived run behind it
+red_10() { _sub "$AEGIS_ROOT/lib/host.sh" \
+    'AEGIS_HOST_SUPPORTED_DEFAULT="ubuntu"' 'AEGIS_HOST_SUPPORTED_DEFAULT="ubuntu debian"'; }
+
+# the playbook lets Debian through whatever the list says
+red_11() { _sub "$AEGIS_ROOT/seed/platform/ansible/playbooks/bootstrap-host.yml" \
+    "and 'debian' in (aegis_host_supported | default('ubuntu')).split(','))" "and true)"; }
+
+# phase 20 forgets to pass the list: a lab run stops at the wall
+red_12() { _sub "$AEGIS_ROOT/init/phases/20-k3s.sh" \
+    '    -e "aegis_host_supported=$AEGIS_HOST_LIST" \
+' ''; }
+
+# the widened list goes in silence: a lab run reads like a supported one
+red_13() { _sub "$AEGIS_ROOT/lib/host.sh" \
+    'echo "note: AEGIS_HOST_SUPPORTED widens the host list' ': "note: AEGIS_HOST_SUPPORTED widens the host list'; }
+
+# a typo in the override keeps the families read before it: half a list
+red_14() { _sub "$AEGIS_ROOT/lib/host.sh" \
+    'if ! raw="$(host_supported_families)" || [[ -z "$raw" ]]; then' \
+    'raw="$(host_supported_families)" || true; if [[ -z "$raw" ]]; then'; }
+
+# a derivative read as its parent: Pop!_OS 24.04 walks in as Ubuntu
+red_15() { _sub "$AEGIS_ROOT/lib/host.sh" \
+    "        *\" arch \"*) printf 'arch\\n' ;;" \
+    "        *\" arch \"*) printf 'arch\\n' ;;
+        *\" ubuntu \"*) printf 'ubuntu\\n' ;;"; }
 
 # control: a COMMENT that mentions sudo above the question is prose, not
 # an action; a check that read it would forbid explaining the order
@@ -68,4 +106,12 @@ control_1() { _sub "$AEGIS_ROOT/libexec/aegis-preflight" \
 # THE HOST FIRST, before any sudo.'; }
 
 # control: a newer Ubuntu joins the tested list; nothing about the order changes
-control_2() { _sub "$AEGIS_ROOT/init/phases/00-preflight.sh" '        24.04|26.04) ;;' '        24.04|26.04|26.10) ;;'; }
+control_2() { _sub "$AEGIS_ROOT/init/phases/00-preflight.sh" \
+    '        ubuntu:24.04|ubuntu:26.04|debian:13) ;;' '        ubuntu:24.04|ubuntu:26.04|ubuntu:26.10|debian:13) ;;'; }
+
+# control: a COMMENT in the playbook with a lower Debian floor is prose;
+# the check reads the assert, not what somebody wrote above it
+control_3() { _sub "$AEGIS_ROOT/seed/platform/ansible/playbooks/bootstrap-host.yml" \
+    "    - name: Assert supported distro" \
+    "    # (Debian 12 was: distribution'] == 'Debian' and ansible_facts['distribution_major_version'] is version('12', '>='))
+    - name: Assert supported distro"; }

@@ -50,7 +50,7 @@ seed_platform_dir
 # (as in #15):
 if ! command -v jq >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
     log_warn "jq missing — installing it (sudo NOPASSWD available; H3 #15)"
-    retry_net 3 sudo apt-get -o DPkg::Lock::Timeout=600 install -y jq || \
+    retry_net 3 pkg_install jq || \
         log_warn "could not install jq on my own — the gate below carries the manual command"
 fi
 gate "bootstrap-bins" check_bootstrap_bins
@@ -155,10 +155,10 @@ if [[ -r /etc/os-release ]]; then
     . /etc/os-release
     log_info "OS detected: ${PRETTY_NAME:-unknown}"
     # supported was decided at the top (lib/host.sh); what is left is
-    # telling a newer Ubuntu that nobody has run it there yet
-    case "${VERSION_ID:-}" in
-        24.04|26.04) ;;
-        *) log_warn "Ubuntu ${VERSION_ID:-?} is supported but not on the tested list (24.04/26.04)" ;;
+    # telling a newer release that nobody has run it there yet
+    case "$(host_family):${VERSION_ID:-}" in
+        ubuntu:24.04|ubuntu:26.04|debian:13) ;;
+        *) log_warn "${PRETTY_NAME:-this system} is accepted but not on the tested list (Ubuntu 24.04/26.04, Debian 13)" ;;
     esac
 fi
 

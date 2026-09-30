@@ -21,6 +21,13 @@ red_3() {
     sed -i "s/|temporary error//" "$AEGIS_ROOT/lib/common.sh"
 }
 
+# the registry's rate limit (2026-09-24, lab-arch): kaniko got
+# «TOOMANYREQUESTS: Rate exceeded» from public.ecr.aws and the build was
+# not retried. Every Containerfile pulls a base image.
+red_6() {
+    sed -i "s/|TOOMANYREQUESTS//; s/|Too Many Requests//; s/|Rate exceeded//" "$AEGIS_ROOT/lib/common.sh"
+}
+
 # the list gone altogether: nothing can tell a hiccup from a defect,
 # and this check has to say so rather than skip.
 red_4() {

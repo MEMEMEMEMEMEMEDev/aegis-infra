@@ -148,13 +148,31 @@ install_binary() {
             # .deb since then, and now the .deb is proved too. apt is
             # what installs it (a local path is still a package), so
             # dpkg keeps the record.
-            fetch_verified \
-                "$GH_REL/opentofu/opentofu/releases/download/v${pin}/tofu_${pin}_amd64.deb" \
-                /tmp/tofu.deb \
-                "$GH_REL/opentofu/opentofu/releases/download/v${pin}/tofu_${pin}_SHA256SUMS" \
-                "tofu_${pin}_amd64.deb"
-            run_cmd apt_locked install -y /tmp/tofu.deb
-            rm -f /tmp/tofu.deb ;;
+            #
+            # A .deb is a debian-family thing. Anywhere else the SAME
+            # SHA256SUMS lists the linux tarball, and it is proved the
+            # same way before it is unpacked (measured 2026-09-23 for
+            # 1.12.3: the .deb, the .zip and the .tar.gz are all there).
+            if [[ "$(pkg_family)" == debian ]]; then
+                fetch_verified \
+                    "$GH_REL/opentofu/opentofu/releases/download/v${pin}/tofu_${pin}_amd64.deb" \
+                    /tmp/tofu.deb \
+                    "$GH_REL/opentofu/opentofu/releases/download/v${pin}/tofu_${pin}_SHA256SUMS" \
+                    "tofu_${pin}_amd64.deb"
+                run_cmd apt_locked install -y /tmp/tofu.deb
+                rm -f /tmp/tofu.deb
+            else
+                fetch_verified \
+                    "$GH_REL/opentofu/opentofu/releases/download/v${pin}/tofu_${pin}_linux_amd64.tar.gz" \
+                    /tmp/tofu.tgz \
+                    "$GH_REL/opentofu/opentofu/releases/download/v${pin}/tofu_${pin}_SHA256SUMS" \
+                    "tofu_${pin}_linux_amd64.tar.gz"
+                run_cmd rm -rf /tmp/tofu-x
+                run_cmd mkdir -p /tmp/tofu-x
+                run_cmd tar -xzf /tmp/tofu.tgz -C /tmp/tofu-x
+                run_cmd sudo install -m755 /tmp/tofu-x/tofu /usr/local/bin/tofu
+                rm -rf /tmp/tofu.tgz /tmp/tofu-x
+            fi ;;
         sops)
             # THE .deb IS NOT PUBLISHED WITH A CHECKSUM. sops signs a
             # checksums.txt with cosign keyless, and that file covers
@@ -231,7 +249,7 @@ which installs whatever the distribution's line carries. The number is not deliv
 anything and an update window would propose a bump nobody can install. Write \
 $tool: \"apt\" in $PINS_FILE, or give it a download branch with a published checksum."
             fi
-            run_cmd retry_net 3 apt_locked install -y "$tool" ;;
+            run_cmd retry_net 3 pkg_install "$tool" ;;
     esac
 }
 
@@ -294,15 +312,21 @@ $(command -v "$tool")). A package-managed copy earlier on PATH is the usual caus
 }
 
 log_info "Installing the pinned userland…"
-run_cmd retry_net 3 apt_locked update -qq
+run_cmd retry_net 3 pkg_update
+# the upgrade can replace the kernel, and on Arch the running one is
+# then left without its module tree (lib/host.sh); phase 20's k3s would
+# find no vxlan. Asked here, right after the action, so the init stops
+# with the remedy (reboot, then --from 05-host) instead of at coredns:
+gate "modulos-del-kernel-en-marcha" host_running_kernel_has_modules
 # apt deps BEFORE the loop (P0.5 audit): read_pin uses pyyaml —
 # installing it AFTER the loop was a race against Ubuntu minimal
 # (without python3-yaml preinstalled, the first read_pin died with a
 # misleading "missing pin" die). htpasswd is in apache2-utils;
 # python3-venv for phase 20's ansible venv (bug 3 validation #3:
-# Ubuntu minimal does not ship ensurepip):
-run_cmd retry_net 3 apt_locked install -y \
-    apache2-utils python3-yaml python3-venv rsync
+# Ubuntu minimal does not ship ensurepip). Canonical names: lib/pkg.sh
+# says what each is called on this family (htpasswd is apache2-utils on
+# debian, apache on arch; python's venv needs nothing on arch):
+run_cmd retry_net 3 pkg_install htpasswd python3-yaml python3-venv rsync
 for t in jq git openssl direnv gh age sops tofu kubectl helm cosign; do
     install_tool "$t"
 done

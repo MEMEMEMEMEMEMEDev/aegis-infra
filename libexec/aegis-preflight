@@ -63,12 +63,15 @@ clock_drift(){
 # to run on a machine aegis cannot install on (lib/host.sh).
 # shellcheck source=../lib/host.sh
 source "$AEGIS_ROOT/lib/host.sh"
+# shellcheck source=../lib/pkg.sh
+source "$AEGIS_ROOT/lib/pkg.sh"   # the family's package manager, canonical names
 echo "== 0/9 a machine aegis can install on =="
 if ! host_why="$(host_supported 2>&1)"; then
   echo "  [FAIL] $host_why" >&2
   echo "  nothing was changed on this machine." >&2
   exit 1
 fi
+[ -n "$host_why" ] && warn "$host_why"   # a widened lab list says so every time
 ok "$(sed -nE 's/^PRETTY_NAME="?([^"]*)"?$/\1/p' "$(host_os_release_file)" | head -1)"
 
 echo "== 1/9 sudo NOPASSWD (the init only discovers it at phase 20) =="
@@ -128,8 +131,13 @@ else
       || bad "I could not remove the stale aegis-dns-fix.service"
   fi
 fi
-R=0; for i in 1 2 3; do resolvectl query github.com >/dev/null 2>&1 && R=$((R+1)); done
-[ "$R" -eq 3 ] && ok "github.com resolves 3/3" || bad "unstable DNS ($R/3) - check resolvectl status"
+# The probe asks the resolver every program on this host uses
+# (getaddrinfo, through nsswitch), not systemd-resolved's own tool.
+# Debian 13 and Arch do not ship resolved: `resolvectl query` there is
+# «command not found», and it was read as «DNS broken» on a host whose
+# DNS worked (lab-debian13, 2026-09-23).
+R=0; for i in 1 2 3; do getent ahosts github.com >/dev/null 2>&1 && R=$((R+1)); done
+[ "$R" -eq 3 ] && ok "github.com resolves 3/3" || bad "unstable DNS ($R/3) - check /etc/resolv.conf (and resolvectl status, where systemd-resolved runs)"
 
 echo "== 4/9 clock (TLS/ACME/cosign/apt depend on this) — auto-repairs =="
 # Real lessons: NTPSynchronized=yes lied with 7 days of lag; and with chrony
@@ -145,7 +153,9 @@ else
   info "drift ${drift}s: forcing a resync..."
   for attempt in 1 2 3; do
     if command -v chronyc >/dev/null 2>&1; then
-      sudo systemctl restart chrony >/dev/null 2>&1
+      # the unit is chrony.service on debian/ubuntu (chronyd is an alias
+      # there, measured on Debian 13) and chronyd.service on arch
+      { sudo systemctl restart chrony || sudo systemctl restart chronyd; } >/dev/null 2>&1
       sudo chronyc makestep >/dev/null 2>&1     # chrony: immediate step
       sleep 4
     else
@@ -168,8 +178,12 @@ else
 fi
 
 echo "== 5/9 packages the init does NOT install but does use =="
-sudo apt-get update -qq 2>/dev/null || sudo apt-get update -qq || warn "apt update failed (look at the clock in 4/9)"
-sudo apt-get install -y -qq tmux python3-yaml jq >/dev/null 2>&1
+pkg_update >/dev/null 2>&1 || pkg_update >/dev/null || warn "the package index could not be updated (look at the clock in 4/9)"
+# the upgrade above can replace the kernel; on Arch the running one is
+# then left without its module tree (lib/host.sh) and k3s cannot load
+# vxlan until a reboot. A FAIL, not a warning: «Machine ready» would lie
+host_running_kernel_has_modules 2>/dev/null && ok "the running kernel $(host_kernel_release) has its modules on disk" || bad "the running kernel $(host_kernel_release) has no modules on disk: the upgrade replaced the kernel - reboot, then run the preflight again"
+pkg_install tmux python3-yaml jq >/dev/null 2>&1
 command -v tmux >/dev/null && ok "tmux installed (run the init inside it)" || bad "tmux not installed"
 command -v jq   >/dev/null && ok "jq present (phase 00's bootstrap-bins gate)" || bad "jq missing"
 python3 -c 'import yaml' 2>/dev/null && ok "PyYAML present (placeholder injection, phase 80)" || bad "PyYAML missing"
@@ -202,7 +216,7 @@ g_mail="$(git config --global user.email 2>/dev/null || true)"
 # gh is THE GitHub credential of the whole init (phase 00, D10): the
 # install is ours to do, the login is the operator's — it is the one
 # step of this command that needs a human and a browser.
-command -v gh >/dev/null || sudo apt-get install -y -qq gh >/dev/null 2>&1
+command -v gh >/dev/null || pkg_install gh >/dev/null 2>&1
 if command -v gh >/dev/null; then
   # THE SCOPE IS MEASURED, not advised. Until 2026-08-31 this only
   # asked whether `gh auth status` succeeded, and named `repo,
@@ -226,7 +240,7 @@ if command -v gh >/dev/null; then
     bad "gh WITHOUT auth -> run 'gh auth login' (scope: repo) and re-run this command"
   fi
 else
-  bad "gh not installed and apt could not install it (the init assumes it at phase 00)"
+  bad "gh not installed and the package manager could not install it (the init assumes it at phase 00)"
 fi
 
 echo "== 7/9 real connectivity to the endpoints the phases use =="
