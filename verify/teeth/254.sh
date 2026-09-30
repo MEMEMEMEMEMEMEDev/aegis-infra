@@ -1,6 +1,7 @@
 # teeth of check 254 — a harmless call that speaks like the network.
 B254="$AEGIS_ROOT/seed/platform/base-images/Jenkinsfile"
 A254="$AEGIS_ROOT/seed/platform/docs/protocols/templates/Jenkinsfile.app"
+M254="$AEGIS_ROOT/seed/platform/mirror-images/Jenkinsfile"
 
 _sub() {   # <file> <old> <new> — exactly one occurrence, or the tooth is mis-aimed
     python3 - "$1" "$2" "$3" <<'PY'
@@ -27,6 +28,11 @@ red_3() { _sub "$B254" "NOTICE: the build metrics did not reach vmsingle (curl e
 # the pod delete of the run step speaks again
 red_4() { _sub "$B254" 'gracePeriodSeconds=0" 2>/dev/null || echo "NOTICE' 'gracePeriodSeconds=0" || echo "NOTICE'; }
 
+# mirror-images as it was on 2026-09-30: the same harmless call, announced with WARNING instead of NOTICE
+red_5() { _sub "$M254" "'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' 2>/dev/null \\
+                  || echo \"NOTICE: the event could not be recorded in vlogs-events (curl exit \$?; the mirror does NOT fail over this)\"" "'http://vlogs-events.observability.svc.cluster.local:9428/insert/jsonline?_time_field=ts&_msg_field=image&_stream_fields=source' \\
+                  || echo 'WARNING: the event could not be recorded in vlogs-events (the mirror does NOT fail over this)'"; }
+
 # ── controls ──
 # stderr discarded on the curl's first line instead of its last
 control_1() { _sub "$A254" "            } | curl -fsS --max-time 15 --data-binary @- \\
@@ -34,3 +40,5 @@ control_1() { _sub "$A254" "            } | curl -fsS --max-time 15 --data-binar
                   'http://vmsingle.observability.svc.cluster.local:8428/api/v1/import/prometheus' \\"; }
 # a NOTICE that is not a harmless call's (plain echo) is not in scope
 control_2() { _sub "$B254" 'echo "NOTICE: nothing in ${REPO_SLUG} names' 'echo "NOTICE: could not resolve: nothing in ${REPO_SLUG} names'; }
+# a value default is not a declaration of harmlessness: `|| echo 0` stays out of scope
+control_3() { _sub "$A254" 'N=$(cat from-count 2>/dev/null || echo 0)' 'N=$(cat from-count || echo 0)'; }

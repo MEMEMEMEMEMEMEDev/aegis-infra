@@ -15,6 +15,15 @@ Its stderr stays out of the console (the notice carries curl's exit code,
 which is the diagnosis without the words), and the notice's own text
 does not match AEGIS_NET_SIGS. Read from every Jenkinsfile the seed
 ships, code only.
+
+WHAT DECLARES A CALL HARMLESS IS THE ACTION, NOT THE WORD. Until
+2026-09-30 this check looked for `|| echo 'NOTICE: …'`. mirror-images
+said the same thing with `WARNING:` and the check never saw it; that day,
+on alpha-arch, its two curls printed «Could not resolve host» and a scan
+that had found CVEs was re-fired twice as a network failure. A fallback
+that echoes a SENTENCE (three words or more, whatever the first one is)
+is the pipeline swallowing a failure; one that echoes a value
+(`|| echo 0`, `|| echo ""`) is a default, and stays out of scope.
 """
 import os
 import re
@@ -31,7 +40,7 @@ if not m:
     sys.exit(0)
 SIGS = re.compile(m.group(1), re.I)
 
-NOTICE = re.compile(r"""\|\|\s*echo\s+(['"])(NOTICE:.*?)\1\s*$""")
+NOTICE = re.compile(r"""\|\|\s*echo\s+(['"])(\S+(?:\s+\S+){2,}.*?)\1\s*$""")
 pipelines = []
 for dp, dn, fn in os.walk(SEED):
     for f in fn:
@@ -57,9 +66,9 @@ for p in sorted(pipelines):
         cmd = "\n".join(lines[j:i + 1])
         cmd = cmd[:cmd.rindex("||")]
         if "2>/dev/null" not in cmd:
-            print(f"{rel}:{i + 1}: the call before this NOTICE writes its stderr to the console "
+            print(f"{rel}:{i + 1}: the call before this notice writes its stderr to the console "
                   f"— a curl error there is read as a network failure and a real failure is retried")
         if SIGS.search(n.group(2)):
-            print(f"{rel}:{i + 1}: the NOTICE itself matches AEGIS_NET_SIGS («{SIGS.search(n.group(2)).group(0)}»)")
+            print(f"{rel}:{i + 1}: the notice itself matches AEGIS_NET_SIGS («{SIGS.search(n.group(2)).group(0)}»)")
 
 print(f"SCOPE: {calls} call(s) declared harmless in {len(pipelines)} pipeline(s) the seed ships")
