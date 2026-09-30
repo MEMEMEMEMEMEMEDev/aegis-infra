@@ -395,32 +395,30 @@ def _register_key(owner, repo, public):
 def _templates_dir():
     """Where the templates live: the PRODUCT's `seed/templates/`.
 
-    The resolution assumes the layout of aegis dev seed: platform/ (the
-    instance, this script's PLATFORM_DIR) lives NESTED inside the root of
-    the product repo (aegis-v2), with the seed beside it. That is:
-
-        <product>/            ← os.path.dirname(PLATFORM_DIR)
-        ├── seed/templates/   the templates (the catalogue of §4)
-        └── platform/         this instance (PLATFORM_DIR)
-
-    On an instance WITHOUT the product repo around it —a loose clone of
-    ops-stack— that directory does not exist, and the honest answer is an
-    error that names what is missing and the path that remains (the
-    artisan does not need templates), not a traceback from os.listdir. The
-    return of the templates to the packaged instance belongs to A7
-    (RUTA.md), not to this command.
+    The product is `paths.aegis_root()` — the same answer every command
+    gives, from AEGIS_ROOT or from where this file sits. Until 2026-09-30
+    this function derived it as `dirname(PLATFORM_DIR)`, which is only
+    true in the development layout, with the instance nested INSIDE the
+    product checkout. Every installation the product documents has them
+    side by side (`~/aegis-infra` and `~/aegis`), and there the templates
+    were never found: Rob's instance (his H-07, 2026-09-28) and alpha-arch
+    (2026-09-30) both got «this clone looks loose», on a textbook install.
+    The nested layout still resolves: it is the second place looked at.
     """
-    d = os.path.join(os.path.dirname(PLATFORM_DIR), "seed", "templates")
-    if not os.path.isdir(d):
-        raise Error(
-            f"I cannot find the templates: {d} does not exist\n"
-            f"  The templates live in the PRODUCT repo (aegis-v2), with this\n"
-            f"  instance nested inside it. This clone looks loose, without the\n"
-            f"  product around it. Ways out: run from a checkout of the product,\n"
-            f"  or the artisan path — write orgs/<org>.yaml by hand and run\n"
-            f"  `aegis app new <org>` WITHOUT --template, which only derives.")
-    return d
-
+    tried = []
+    for d in (os.path.join(str(paths.aegis_root()), "seed", "templates"),
+              os.path.join(os.path.dirname(PLATFORM_DIR), "seed", "templates")):
+        if os.path.isdir(d):
+            return d
+        if d not in tried:
+            tried.append(d)
+    raise Error(
+        f"I cannot find the templates: none of {', '.join(tried)} exists\n"
+        f"  They ship with the PRODUCT (its seed/templates/), and this command\n"
+        f"  resolves the product from AEGIS_ROOT or from where it is installed.\n"
+        f"  If the product checkout is incomplete, `git -C {paths.aegis_root()} status`\n"
+        f"  says why. The artisan path needs no template: write orgs/<org>.yaml\n"
+        f"  by hand and run `aegis app new <org>` WITHOUT --template.")
 
 def _template(name):
     """The directory of ONE template, or the real catalogue in the error."""
