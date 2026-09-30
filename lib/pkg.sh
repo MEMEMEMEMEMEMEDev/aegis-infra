@@ -96,7 +96,7 @@ pkg_is_installed() {
     n="$(pkg_name "$1")" || return 1
     [[ -n "$n" ]] || return 0
     case "$(pkg_family)" in
-        debian) dpkg-query -W -f='${Status}' "$n" 2>/dev/null | grep -q 'install ok installed' ;;
+        debian) grep -q 'install ok installed' < <(dpkg-query -W -f='${Status}' "$n" 2>/dev/null) ;;
         arch)   pacman -Q "$n" >/dev/null 2>&1 ;;
         *) return 1 ;;
     esac
