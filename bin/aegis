@@ -38,6 +38,22 @@ export AEGIS_ROOT
 LIBEXEC="$AEGIS_ROOT/libexec"
 export AEGIS_HOME="${AEGIS_HOME:-$( . "$AEGIS_ROOT/lib/paths.sh" >/dev/null 2>&1; printf '%s' "$AEGIS_HOME" )}"
 
+# ── the instance's age key, from ANY directory ───────────────────────
+# Phase 10 installs it at ~/.config/sops/age/aegis.key (ADR-0003: never
+# keys.txt) and announces it with a direnv .envrc in the instance
+# directory — which only acts in an interactive shell standing THERE.
+# On alpha-arch (2026-09-30) `aegis app new portafolio` run from the
+# product checkout died at its secrets step: sops looked for the default
+# keys.txt. lib/secrets.sh re-derived it for the bash commands that
+# source it; the python ones never did. Same rule as sops_env(), once,
+# here, where every command passes: a variable pointing at nothing is
+# as good as none, and an explicit one pointing at a file is respected.
+_aegis_age_key="$HOME/.config/sops/age/aegis.key"
+if [[ ! -f "${SOPS_AGE_KEY_FILE:-/nonexistent}" && -f "$_aegis_age_key" ]]; then
+    export SOPS_AGE_KEY_FILE="$_aegis_age_key"
+fi
+unset _aegis_age_key
+
 # ── a command's metadata ─────────────────────────────────────────────
 # In the first 20 lines, so reading it is cheap and so it sits at the top
 # where it can be seen.
