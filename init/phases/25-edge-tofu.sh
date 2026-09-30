@@ -224,9 +224,9 @@ else
     # create.
     # Single source for the name/hostnames: the env's main.tf (they are
     # parsed, not duplicated):
-    TUNNEL_NAME="$(grep -oP 'tunnel_name\s*=\s*"\K[^"]+' "$TUNNEL_ENV/main.tf")"
+    TUNNEL_NAME="$(grep -oP 'tunnel_name\s*=\s*"\K[^"]+' "$TUNNEL_ENV/main.tf" || true)"
     HOSTS="$(grep -oP 'public_hostnames\s*=\s*\[\K[^]]*' "$TUNNEL_ENV/main.tf" \
-             | tr -d '" ' | tr ',' ' ')"
+             | tr -d '" ' | tr ',' ' ' || true)"
     gate "parse-main-tf" bash -c "[[ -n '$TUNNEL_NAME' && -n '$HOSTS' ]]"
     CF_API="$(restore_secret cf_api_token)" || \
         die "cf_api_token is not in the store — resume with --from 15"

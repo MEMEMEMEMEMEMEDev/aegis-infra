@@ -853,7 +853,7 @@ do_request() {
         slice="$SECRETS_TMP/mirror-console-entry.txt"
         console_slice "$console" "$dst" > "$slice"
         log_error "$MIRROR_JOB #$MIRROR_BUILD went red — $dst was NOT mirrored (the scan runs BEFORE the push: nothing entered the registry)"
-        others="$(grep -vxF "$dst" <<< "$culprits" | tr '\n' ' ')"
+        others="$(grep -vxF "$dst" <<< "$culprits" | tr '\n' ' ' || true)"
         [[ -z "${others// /}" ]] \
             || log_warn "that build also failed on: ${others}— each one is its own request, with its own measurement; nothing below is about them"
         report_scan "$slice" "$dst"
@@ -1128,7 +1128,7 @@ gc_kb_gb() { awk -v k="${1:-0}" 'BEGIN{printf "%.2f GB", k*1024/1000000000}'; }
 gc_registry_target() {
     GC_CFG="$(kubectl -n registry-system get deploy registry -o json 2>/dev/null \
         | jq -r '.spec.template.spec.containers[]? | select(.name=="registry") | .args[]?' \
-        | grep -E '\.ya?ml$' | head -1)"
+        | grep -E '\.ya?ml$' | head -1 || true)"
     [[ -n "$GC_CFG" ]] \
         || could_not "registry-system/deploy/registry names no config file in its args: the collector sweeps the storage its config declares, and guessing that path would sweep something else"
     GC_ROOT="$(kubectl -n registry-system exec deploy/registry -- cat "$GC_CFG" 2>/dev/null \

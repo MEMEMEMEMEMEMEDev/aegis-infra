@@ -277,7 +277,7 @@ _ntfy_hash_up_to_date() {   # <user> <passfile>
     # `user:topic:permission` entry of auth-access matches too (the
     # fixtures harness caught it before any instance was touched):
     local h
-    h="$(grep -oP -- "-\s*\"$1:\K[^:\"]+(?=:user\")" "$NTFY_YAML" | head -1)"
+    h="$(grep -oP -- "-\s*\"$1:\K[^:\"]+(?=:user\")" "$NTFY_YAML" | head -1 || true)"
     [[ -n "$h" && "$h" != __OBS_* ]] || return 1
     printf '%s:%s\n' "$1" "$h" > "$SECRETS_TMP/htcheck-$1"
     htpasswd -vi "$SECRETS_TMP/htcheck-$1" "$1" < "$2" >/dev/null 2>&1

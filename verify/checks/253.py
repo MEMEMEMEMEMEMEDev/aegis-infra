@@ -32,9 +32,6 @@ import os
 import re
 import sys
 
-ROOT = sys.argv[1]
-
-
 def code_only(src):
     """The file with everything that is not code at THIS shell's level
     blanked: comments, quoted strings (except $(…) inside double
@@ -141,28 +138,33 @@ def is_shell(path):
         return False
 
 
-files = []
-for top in ("lib", "init", "libexec", "bin"):
-    for dp, dn, fn in os.walk(os.path.join(ROOT, top)):
-        for f in fn:
-            p = os.path.join(dp, f)
-            if os.path.isfile(p) and is_shell(p):
-                files.append(p)
+def main(ROOT):
+    files = []
+    for top in ("lib", "init", "libexec", "bin"):
+        for dp, dn, fn in os.walk(os.path.join(ROOT, top)):
+            for f in fn:
+                p = os.path.join(dp, f)
+                if os.path.isfile(p) and is_shell(p):
+                    files.append(p)
 
-scanned = hits = 0
-for p in sorted(files):
-    with open(p, encoding="utf-8") as f:
-        src = f.read()
-    rel = os.path.relpath(p, ROOT)
-    code = code_only(src)
-    if not (rel.startswith("lib/") or PIPEFAIL.search(code)):
-        continue
-    scanned += 1
-    for m in PIPE_Q.finditer(code):
-        line = code.count("\n", 0, m.start()) + 1
-        text = src.splitlines()[line - 1].strip()
-        print(f"{rel}:{line}: {text[:110]}")
-        hits += 1
+    scanned = hits = 0
+    for p in sorted(files):
+        with open(p, encoding="utf-8") as f:
+            src = f.read()
+        rel = os.path.relpath(p, ROOT)
+        code = code_only(src)
+        if not (rel.startswith("lib/") or PIPEFAIL.search(code)):
+            continue
+        scanned += 1
+        for m in PIPE_Q.finditer(code):
+            line = code.count("\n", 0, m.start()) + 1
+            text = src.splitlines()[line - 1].strip()
+            print(f"{rel}:{line}: {text[:110]}")
+            hits += 1
 
-print(f"SCOPE: {scanned} shell file(s) under pipefail (lib/ and every file that sets it), "
-      f"code only — comments, quoted `bash -c` strings and heredocs are not this shell's pipes")
+    print(f"SCOPE: {scanned} shell file(s) under pipefail (lib/ and every file that sets it), "
+          f"code only — comments, quoted `bash -c` strings and heredocs are not this shell's pipes")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1])
