@@ -184,10 +184,23 @@ for need in ("policy.yaml", "verdict.sh", "kev.txt"):
         findings.append(f"the aegis-vuln-policy ConfigMap does not carry {need}: a tenant's build could not read it")
 if "name: aegis-vuln-policy" not in kz or "disableNameSuffixHash: true" not in kz:
     findings.append("the ConfigMap is not `aegis-vuln-policy` without a name suffix: pod templates mount it by name")
-with open(os.path.join(VP, "..", "jenkins-secrets", "kustomization.yaml"), encoding="utf-8") as f:
-    js = f.read()
-if not re.search(r"^\s*-\s*\.\./vuln-policy\b", js, re.M):
-    findings.append("jenkins-secrets does not include ../vuln-policy: the ConfigMap never reaches jenkins-system")
+# its own Application, in a file the SEED owns: jenkins-secrets' kustomization
+# is the instance's, and `aegis seed apply` never brings a change to it
+# (measured on alpha-arch, 2026-09-30) — an installed instance would never
+# get the policy.
+apps = os.path.join(ROOT, "seed", "platform", "k8s", "argocd-apps", "ci-supply-tenants.yaml")
+with open(apps, encoding="utf-8") as f:
+    docs = [d for d in __import__("yaml").safe_load_all(f) if d]
+app = next((d for d in docs if (d.get("metadata") or {}).get("name") == "vuln-policy"), None)
+if not app:
+    findings.append("no Application vuln-policy in k8s/argocd-apps/ci-supply-tenants.yaml: the ConfigMap never reaches jenkins-system")
+else:
+    sp = app.get("spec") or {}
+    if (sp.get("source") or {}).get("path") != "k8s/base/platform/vuln-policy" \
+            or (sp.get("destination") or {}).get("namespace") != "jenkins-system":
+        findings.append("the vuln-policy Application does not carry k8s/base/platform/vuln-policy into jenkins-system")
+    if not (sp.get("syncPolicy") or {}).get("automated"):
+        findings.append("the vuln-policy Application does not sync by itself: this morning's KEV list would wait for a person")
 
 print(f"SCOPE: 16 cases through verdict.sh ({engines}) against the seed's policy "
       f"(critical {CRIT}d, high {HIGH}d, KEV trusted {KEVAGE}d); its template; the ConfigMap")

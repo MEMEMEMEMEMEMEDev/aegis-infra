@@ -1,7 +1,7 @@
 # teeth of check 255 — one verdict decides what a known vulnerability costs.
 V255="$AEGIS_ROOT/seed/platform/k8s/base/platform/vuln-policy/verdict.sh"
 K255="$AEGIS_ROOT/seed/platform/k8s/base/platform/vuln-policy/kustomization.yaml"
-J255="$AEGIS_ROOT/seed/platform/k8s/base/platform/jenkins-secrets/kustomization.yaml"
+A255="$AEGIS_ROOT/seed/platform/k8s/argocd-apps/ci-supply-tenants.yaml"
 
 _sub() {   # <file> <old> <new> — exactly one occurrence, or the tooth is mis-aimed
     python3 - "$1" "$2" "$3" <<'PY'
@@ -39,7 +39,7 @@ red_8() { _sub "$K255" '      - verdict.sh
 ' ''; }
 
 # the ConfigMap is generated and never lands in jenkins-system
-red_9() { _sub "$J255" '  - ../vuln-policy ' '  # - ../vuln-policy '; }
+red_9() { _sub "$A255" '    path: k8s/base/platform/vuln-policy' '    path: k8s/base/platform/vuln-policy-nowhere'; }
 
 # ── controls ──
 # the reasons are words: rewording one changes no verdict

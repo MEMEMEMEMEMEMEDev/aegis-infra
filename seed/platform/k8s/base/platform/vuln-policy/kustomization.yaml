@@ -1,9 +1,9 @@
 # The vulnerability policy, the one verdict and the exploited-in-the-wild
 # list, published as the ConfigMap `aegis-vuln-policy` in jenkins-system so
 # a tenant's pipeline, which runs on ITS repo and not on this one, reads the
-# same three files the platform's own jobs read from their checkout. It is a
-# resource of jenkins-secrets (that Application already lands in
-# jenkins-system); image-watch commits kev.txt every morning and ArgoCD
+# same three files the platform's own jobs read from their checkout. Its own
+# Application, `vuln-policy` (k8s/argocd-apps/ci-supply-tenants.yaml), lands
+# it in jenkins-system; image-watch commits kev.txt every morning and ArgoCD
 # carries it here. No name suffix: pod templates mount it by name.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

@@ -103,10 +103,17 @@ spec:
     resources:
       requests: { cpu: 100m, memory: 256Mi }
       limits:   { cpu: 1000m, memory: 512Mi }
-  # trivy: THIN client — the server (trivy-system) holds the DB.
+  # trivy: THIN client — the server (trivy-system) holds the DB. It
+  # mounts the platform's vulnerability policy (ConfigMap aegis-vuln-policy,
+  # plan/21): the verdict every scan in aegis gives, read here from the
+  # same three files the platform's jobs read.
   - name: trivy
     image: ghcr.io/aquasecurity/trivy:0.72.0
     command: ['sleep', 'infinity']
+    volumeMounts:
+    - name: vuln-policy
+      mountPath: /vuln-policy
+      readOnly: true
     resources:
       requests: { cpu: 100m, memory: 256Mi }
       limits:   { cpu: 1000m, memory: 512Mi }
@@ -165,6 +172,13 @@ spec:
       secretName: cosign-signing-key
       optional: true
       items: [{ key: cosign.key, path: cosign.key }]
+  # optional:true so the pod STARTS without it (a missing ConfigMap would
+  # leave it in ContainerCreating until the build's timeout, saying
+  # nothing): the scan stage refuses to judge without the policy, aloud.
+  - name: vuln-policy
+    configMap:
+      name: aegis-vuln-policy
+      optional: true
 '''
       defaultContainer 'jnlp'
     }
@@ -552,53 +566,134 @@ spec:
       }
     }
     stage('scan') {
-      // Trivy server-mode: export to DOCKER-ARCHIVE (an oci-archive
-      // tar does NOT work with --input — verified against the binary).
-      // It blocks the build on actionable CRITICAL/HIGH (the toolchain
-      // pin ages; the scan is the lookout).
+      // WHAT THE SCAN JUDGES, since 2026-09-30 (plan/21, stage 5).
+      //
+      // Until then a fixable CRITICAL/HIGH anywhere in the image stopped
+      // the build — including the layers of the BASE. On alpha-arch the
+      // first build of an Astro portfolio died on three OpenSSL CVEs of
+      // nodejs-distroless:22 that the platform had already judged at the
+      // mirror (one excused with its measurement, two admitted as dated
+      // debt); on Rob's instance the same class cost half an hour of
+      // trivyignore path forms in the app's repo (his H-09). The base is
+      // the platform's: judged at its door, re-scanned every morning by
+      // image-watch. So the findings are split BY LAYER — trivy says
+      // which layer each one lives in, and the FROM is pinned by digest:
+      //
+      //   - in the base's layers  → INHERITED: printed, never this
+      //     build's verdict (the platform's debt, with its own clock);
+      //   - in this image's own layers → judged by vuln-policy/verdict.sh
+      //     against what RUNS today (the digest in k8s/overlays/dev):
+      //     what the change brings stops; what was already running is
+      //     debt with a date. The first build has nothing running, so it
+      //     is judged as a new admission (inside its window → debt).
       //
       // BOOTSTRAP TOLERANCE: if trivy-server does not answer (init
       // phases 50-70, before phase 80), the scan is SKIPPED with a
       // WARN instead of breaking the build. The distinction matters:
-      // infra-absent ≠ vulnerability-found (the second one ALWAYS
-      // breaks). Phase 80 closes the gap (live server + Enforce).
+      // infra-absent ≠ vulnerability-found. Phase 80 closes the gap.
       when { expression { env.SKIP_BUILD != 'true' } }
       environment {
         TRIVY_SERVER = 'http://trivy.trivy-system.svc.cluster.local:4954'
       }
       steps {
-        container('trivy') {
-          script {
-            def up = sh(returnStatus: true, script:
+        script {
+          def up = false
+          container('trivy') {
+            up = sh(returnStatus: true, script:
               'wget -q -T 5 -O /dev/null ${TRIVY_SERVER}/healthz') == 0
-            if (!up) {
-              echo 'WARN: trivy-server unavailable (bootstrap pre-phase-80) — scan SKIPPED'
-              env.SCAN_SKIPPED = 'true'
-            } else {
-              // A repo-local trivyignore.yaml, IF the app ships one, is
-              // honored — and ONLY for what it names, dated. It is NOT
-              // "our own code may carry exceptions": it is for a CVE in a
-              // BASE LAYER the platform already vetted at mirror time
-              // (the same openssl the mirror-images trivyignore accepts),
-              // which reappears here because the app image contains that
-              // layer. Every entry carries expired_at, like the mirror's,
-              // and check 189 requires it — an undated ignore is refused.
+          }
+          if (!up) {
+            echo 'WARN: trivy-server unavailable (bootstrap pre-phase-80) — scan SKIPPED'
+            env.SCAN_SKIPPED = 'true'
+          } else {
+            container('crane') {
+              // The base's layers: every FROM the from-guard read, pinned
+              // by digest, asked for its config. And what runs today: the
+              // digest this repo's overlay deploys, pulled to be scanned
+              // with TODAY's DB (a CVE published this morning is in both,
+              // and so it is not this change's).
               sh '''
+                set -e
+                rm -f running.tar base-config-*.json
+                n=0
+                if [ -f from-refs ]; then
+                  while read -r ref; do
+                    [ -n "$ref" ] || continue
+                    case "$ref" in __*__) continue ;; esac
+                    n=$((n+1))
+                    crane config "$ref" > "base-config-$n.json"
+                  done < from-refs
+                fi
+                echo "scan: $n base config(s) read (their layers are the platform's)"
+                RUNNING="$(sed -n 's/^[[:space:]]*digest:[[:space:]]*\\(sha256:[0-9a-f]\\{64\\}\\).*/\\1/p' k8s/overlays/dev/kustomization.yaml 2>/dev/null | head -1)"
+                case "$RUNNING" in
+                  ""|sha256:0000000000000000000000000000000000000000000000000000000000000000)
+                    echo "scan: nothing of this image runs yet — its own layers are judged as a new admission" ;;
+                  *)
+                    if crane pull "${REGISTRY}/${IMAGE}@${RUNNING}" running.tar 2>/dev/null; then
+                      echo "scan: what runs today (${RUNNING}) is the reference"
+                    else
+                      rm -f running.tar
+                      echo "NOTICE: what runs today (${RUNNING}) could not be pulled (crane exit $?); its own layers are judged as a new admission"
+                    fi ;;
+                esac
+              '''
+            }
+            container('trivy') {
+              // A repo-local trivyignore.yaml, IF the app ships one, is
+              // honored — and ONLY for what it names, dated (check 189).
+              def judged = sh(returnStatus: true, script: '''
+                set -e
+                VP=/vuln-policy
+                if [ ! -f "$VP/verdict.sh" ] || [ ! -f "$VP/policy.yaml" ]; then
+                  echo "ERROR: the platform's vulnerability policy is not mounted (ConfigMap aegis-vuln-policy in jenkins-system, Application vuln-policy): a scan nobody can judge is not a clean one"
+                  exit 3
+                fi
+                : > base-diffids
+                for c in base-config-*.json; do
+                  [ -f "$c" ] || continue
+                  sh "$VP/verdict.sh" --diff-ids < "$c" >> base-diffids
+                done
+                echo "scan: $(grep -c '^sha256:' base-diffids || true) layer(s) belong to the base(s) this image stands on"
                 IGN=""
                 if [ -f trivyignore.yaml ]; then
                   IGN="--ignorefile trivyignore.yaml"
-                  echo "scan: honoring repo-local trivyignore.yaml (base-layer exceptions the platform already accepts)"
+                  echo "scan: honoring repo-local trivyignore.yaml"
                 fi
-                trivy image \
-                  --server ${TRIVY_SERVER} \
-                  --input ${WORKSPACE}/image.tar \
-                  --exit-code 1 \
-                  --severity CRITICAL,HIGH \
-                  --ignore-unfixed \
-                  --scanners vuln \
-                  --no-progress \
-                  $IGN
-              '''
+                trivy image --server "${TRIVY_SERVER}" --input "${WORKSPACE}/image.tar" \
+                  --exit-code 0 --severity CRITICAL,HIGH --ignore-unfixed \
+                  --scanners vuln --no-progress $IGN --format json --output scan.json
+                trivy convert --format table scan.json
+                trivy convert --format template --template "$(sh "$VP/verdict.sh" --template)" --output all.txt scan.json
+                awk -F'|' 'BEGIN { while ((getline l < "base-diffids") > 0) if (l != "") B[l] = 1 }
+                           ($8 in B) { print > "inherited.txt"; next } { print > "own.txt" }' all.txt
+                touch inherited.txt own.txt
+                sed 's/^/AEGIS_INHERITED /' inherited.txt
+                echo "scan: $(grep -c . inherited.txt || true) finding(s) in the base's layers (the platform's: judged at its door, watched every morning), $(grep -c . own.txt || true) in this image's own layers (judged below)"
+                rc=0
+                if [ -f running.tar ]; then
+                  trivy image --server "${TRIVY_SERVER}" --input running.tar \
+                    --exit-code 0 --severity CRITICAL,HIGH --ignore-unfixed \
+                    --scanners vuln --no-progress $IGN --format json --output running.json
+                  trivy convert --format template --template "$(sh "$VP/verdict.sh" --template)" --output running.txt running.json
+                  KEV="$VP/kev.txt" sh "$VP/verdict.sh" own.txt running.txt > verdict.txt || rc=$?
+                else
+                  KEV="$VP/kev.txt" sh "$VP/verdict.sh" own.txt > verdict.txt || rc=$?
+                fi
+                sed 's/^/AEGIS_VERDICT /' verdict.txt
+                case "$rc" in
+                  0) exit 0 ;;
+                  1) echo "scan: the lines marked «block» above stop this build (in this image's OWN layers)"; exit 10 ;;
+                  *) echo "scan: the verdict could not be given (rc $rc): an unjudged scan is not a clean one"; exit 3 ;;
+                esac
+              ''')
+              sh 'rm -f running.tar running.json scan.json base-config-*.json || true'
+              if (judged == 10) {
+                error "the scan stopped this build: a finding in this image's own layers (AEGIS_VERDICT … block above)"
+              }
+              if (judged != 0) {
+                error "the scan could not be judged (exit ${judged})"
+              }
             }
           }
         }

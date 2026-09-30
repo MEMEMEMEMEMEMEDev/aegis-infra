@@ -4,6 +4,5 @@ resources:
   - bundle.yaml
   - netpol.yaml          # W-07 iter2: aislamiento de ingress de jenkins-system
   - rbac-base-images-agent.yaml   # the base-images agent may run ONE test pod here, before it signs
-  - ../vuln-policy               # the CVE policy, the verdict and the KEV list, as a ConfigMap for tenant builds
 generators:
   - secret-generator.yaml

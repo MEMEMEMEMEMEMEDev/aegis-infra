@@ -10,6 +10,8 @@
 #   sh verdict.sh <findings>               a NEW admission: nothing runs yet
 #   sh verdict.sh <findings> <reference>   a CHANGE: <reference> is the scan of
 #                                          what runs today (empty file = clean)
+#   sh verdict.sh --template                the trivy template the callers use
+#   sh verdict.sh --diff-ids < config.json  an image config's layers, one per line
 #
 # <findings> and <reference> hold one finding per line, as trivy's template
 # prints them (the template is TEMPLATE below, so callers do not retype it):
@@ -51,6 +53,15 @@ TODAY="${TODAY:-$(date -u +%Y-%m-%d)}"
 TEMPLATE='{{range .}}{{$t := .Target}}{{range .Vulnerabilities}}{{.VulnerabilityID}}|{{.Severity}}|{{.PkgName}}|{{.InstalledVersion}}|{{.FixedVersion}}|{{if .PublishedDate}}{{.PublishedDate.Format "2006-01-02"}}{{end}}|{{.PkgPath}}|{{.Layer.DiffID}}|{{$t}}{{"\n"}}{{end}}{{end}}'
 
 [ "${1:-}" = "--template" ] && { printf '%s\n' "$TEMPLATE"; exit 0; }
+# --diff-ids: an image CONFIG on stdin (what `crane config` prints) → its
+# layers' diff_ids, one per line. The config may come compact or pretty:
+# distroless ships it indented over many lines, and a one-line reading
+# found no layer at all on alpha-arch (2026-09-30), so every base finding
+# was judged as the app's. Whitespace goes first; then the one array.
+if [ "${1:-}" = "--diff-ids" ]; then
+    tr -d ' \t\r\n' | sed -n 's/.*"diff_ids":\[\([^]]*\)\].*/\1/p' | tr ',' '\n' | tr -d '"' | grep '^sha256:' || true
+    exit 0
+fi
 FINDINGS="${1:?usage: sh verdict.sh <findings> [<reference>] | --template}"
 REFERENCE="${2:-}"
 MODE=admit

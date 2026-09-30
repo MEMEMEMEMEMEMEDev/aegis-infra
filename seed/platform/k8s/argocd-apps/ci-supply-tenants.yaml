@@ -19,6 +19,31 @@ spec:
     automated: {selfHeal: true}
     syncOptions: [ServerSideApply=true, CreateNamespace=true]
 ---
+# The vulnerability policy every tenant build reads (plan/21): policy.yaml,
+# verdict.sh and the exploited-in-the-wild list, as the ConfigMap
+# aegis-vuln-policy in jenkins-system. Its OWN Application and not a line
+# in jenkins-secrets' kustomization: that file is the instance's (it lists
+# the instance's sealed secrets), so `aegis seed apply` never brings a
+# change to it — measured 2026-09-30 on alpha-arch — and an instance
+# already installed would never get the policy. This file is the seed's.
+# image-watch commits kev.txt every morning; ArgoCD carries it here.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vuln-policy
+  namespace: argocd
+  labels: {aegis.dev/part-of: aegis-platform}
+spec:
+  project: aegis-platform
+  source:
+    repoURL: git@github.com:__GH_OWNER__/__PLATFORM_REPO__.git
+    targetRevision: main
+    path: k8s/base/platform/vuln-policy
+  destination: {server: https://kubernetes.default.svc, namespace: jenkins-system}
+  syncPolicy:
+    automated: {selfHeal: true}
+    syncOptions: [ServerSideApply=true]
+---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

@@ -145,6 +145,29 @@ as if it were a change (plan/21 of the registro):
 Check 255 runs the verdict; check 257 holds the door and runs phase 80's
 reading of it.
 
+### 1.2 What a tenant's scan decides (since 2026-09-30)
+
+A tenant's image is its base plus its own layers, and until 2026-09-30
+the scan judged both the same way. On alpha-arch the first build of an
+Astro portfolio died on three OpenSSL CVEs of `nodejs-distroless:22`,
+which the platform had already judged at the mirror (one excused with
+its measurement, two admitted as dated debt); on Rob's instance the same
+class cost half an hour of `trivyignore` path forms in the app's repo.
+
+Now `Jenkinsfile.app` splits the findings BY LAYER. The layers of every
+`FROM` the from-guard read come from `crane config`, read by
+`verdict.sh --diff-ids`: a finding there is **AEGIS_INHERITED**, printed
+and never the build's verdict, because the base is the platform's,
+judged at its door and re-scanned every morning. The image's own layers
+go to `verdict.sh`, against what RUNS today (the digest the repo's
+overlay deploys, scanned with today's DB): what the change brings stops
+the build; what was already running is debt with a date. The first
+build has nothing running and is judged as a new admission. The policy
+reaches the pod as the ConfigMap `aegis-vuln-policy` (Application
+`vuln-policy`); without it the scan refuses to judge, aloud. A repo-local
+`trivyignore.yaml` is still honoured for the app's own findings. Check
+262 holds it.
+
 Phase 80 fires `mirror-images` once and phase 85 fires `image-watch`
 once. That is why alert `ImageWatchSilent` means **stopped**, never
 "not yet": the first heartbeat exists from birth.
