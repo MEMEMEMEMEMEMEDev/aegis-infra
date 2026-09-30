@@ -1,0 +1,35 @@
+# What a known vulnerability costs, in days. Read by verdict.sh (next to
+# this file) in every job that scans: mirror-images, image-watch and each
+# tenant's pipeline, which mounts this directory as the ConfigMap
+# `aegis-vuln-policy` (kustomization.yaml).
+#
+# WHY A CLOCK AND NOT A RED BUILD. Until 2026-09-30 every scan in aegis
+# had one answer: a fixable CRITICAL/HIGH stops the build. That day a
+# clean install on Arch died in phase 80 because Debian had fixed two
+# OpenSSL CVEs the day before and the upstream python and node images
+# had not been rebuilt yet. Nothing the operator could do made them
+# clean; the only exit was an exception written by hand. The platform
+# now separates what a CHANGE brings from what TIME brought: a finding
+# the change introduces still stops it, and a finding that was already
+# there, or that entered inside its window, becomes debt with a date.
+#
+# THE DATE IS THE CVE's, NOT THE INSTANCE's. The clock starts at the
+# advisory's publication (trivy's PublishedDate), so an install made
+# today and one made a year ago read the same due date for the same CVE.
+#
+# The numbers are the remediation windows CISA sets for US federal
+# agencies (BOD 19-02): 15 days for a critical, 30 for a high. A finding
+# on CISA's list of vulnerabilities exploited in the wild (KEV) gets no
+# window at all.
+#
+# Flat `key: value` lines on purpose: verdict.sh reads them with awk in
+# the trivy container, which has no YAML parser and no jq.
+critical_days: 15
+high_days: 30
+# The longest an operator may accept a risk he did not measure
+# (`aegis image request --accept`): a date further out is refused.
+acceptance_max_days: 90
+# How old the exploited-in-the-wild list may be before a verdict stops
+# trusting it. image-watch refreshes kev.txt every morning; past this
+# age a NEW admission gets no debt credit, and says why.
+kev_max_age_days: 3
