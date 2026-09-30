@@ -66,9 +66,9 @@ taken out.
         │                              │                            │
    crane pull                     kaniko build                  kaniko build
         │                              │                            │
-   trivy (BLOCKING,               contract assertion            push
-   trivyignore.yaml               UID of its USER · 8080        (no scan, no sign:
-   scoped exceptions)             nginx -t · node -e             nothing runs in
+   trivy → verdict.sh             contract assertion            push
+   (debt | RETAINED;              UID of its USER · 8080        (no scan, no sign:
+   trivyignore.yaml exceptions)   nginx -t · node -e             nothing runs in
         │                              │                            a tenant)
    crane push                     trivy (BLOCKING,
         │                         NO exceptions)
@@ -98,7 +98,7 @@ Three jobs, three kinds of image, three levels of trust:
 
 | job | what | scan | sign | who fires it |
 |---|---|---|---|---|
-| `mirror-images` | third parties the tenants run (postgres, redis, garage, runtimes) | blocking, with the scoped exceptions of `trivyignore.yaml` | yes, by digest | phase 80 once; `aegis image request` whenever somebody asks for an image |
+| `mirror-images` | third parties the tenants run (postgres, redis, garage, runtimes) | judged by `vuln-policy/verdict.sh` (§1.1), after the scoped exceptions of `trivyignore.yaml` | yes, by digest, with the source as an annotation | phase 80 once; `aegis image request` whenever somebody asks for an image |
 | `base-images` | bases aegis owns (`aegis-base-<member>`) | blocking, **no exceptions** | yes | phase 80 once; image-watch on a fixable CVE; a human |
 | `ci-images` | tooling the pipelines run in (`aegis-ci-*`) | none | no | phase 50 (bootstrap); a human |
 
@@ -109,6 +109,41 @@ zone, so both scan, both sign, and the difference between them is
 where an exception may live: on a third party's binary we cannot
 rebuild, with a measurement and an expiry (`trivyignore.yaml`); on a
 base we own, nowhere — we rebuild instead.
+
+### 1.1 What the door decides (since 2026-09-30)
+
+On 2026-09-30 a clean install on Arch died in phase 80: Debian had fixed
+two OpenSSL CVEs the day before (CVE-2026-75804, CVE-2026-84782) and the
+upstream `python:3.12-slim` and `nodejs-distroless:22` had not been
+rebuilt. The platform runs neither, nobody could make them clean, and
+the job re-judged every entry on every run, so an image that entered
+clean a month ago could turn an install red today. The door keeps its
+rule — nothing enters unscanned or unsigned — and stops treating TIME
+as if it were a change (plan/21 of the registro):
+
+- **What already came in, from this same source, is not judged again at
+  the door.** `cosign sign` leaves `aegis.dev/source=<src@digest>` on the
+  signature, and the next run checks it with `cosign verify -a` against
+  our key before pulling anything. What is inside it is image-watch's to
+  re-scan every morning (§4).
+- **A new entry is judged by `k8s/base/platform/vuln-policy/verdict.sh`**,
+  the one verdict every scan in the platform uses: a finding inside its
+  window (15 days for a critical, 30 for a high, counted from the CVE's
+  publication — `policy.yaml`) enters as **debt** with its due date; one
+  past its window, undated, or on CISA's exploited-in-the-wild list (the
+  job fetches it fresh; `kev.txt` is the fallback) leaves the entry
+  **RETAINED**: not pushed, not signed, and named in the console as
+  `FAILED <image>: retained at the door` with one `AEGIS_VERDICT` line per
+  finding.
+- **The job ends red only when an entry BROKE** (pull, scan, verdict,
+  push, sign); with entries only retained it ends **UNSTABLE**, and
+  `lib/jenkins.sh` reads that as rc 4 and does not re-fire it.
+- **Phase 80 stops only if the platform runs a retained image** — derived
+  from the tree: the platform repo's `k8s/` names it by its internal
+  reference. Otherwise it says which images wait, and why, and goes on.
+
+Check 255 runs the verdict; check 257 holds the door and runs phase 80's
+reading of it.
 
 Phase 80 fires `mirror-images` once and phase 85 fires `image-watch`
 once. That is why alert `ImageWatchSilent` means **stopped**, never

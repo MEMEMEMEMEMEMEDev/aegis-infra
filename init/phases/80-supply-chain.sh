@@ -212,11 +212,44 @@ gate "cosign-secret-vivo" poll 180 5 bash -c \
 # (2026-08-27) five of seven failed on ONE CVE upstream had not fixed,
 # and the protocol already had the two answers; the gate did not point
 # at them.
+#
+# RETAINED IS NOT BROKEN (2026-09-30, alpha-arch; plan/21). That day two
+# OpenSSL CVEs published the day before, in python:3.12-slim and
+# nodejs-distroless:22 — neither of which the platform runs — killed a
+# clean install here. The door now judges each new image with
+# vuln-policy/verdict.sh: inside its window a finding enters as dated
+# debt; past it, exploited, or undated, the image is RETAINED and the job
+# ends UNSTABLE (lib/jenkins.sh: rc 4). This phase stops only if the
+# PLATFORM needs a retained image — derived from the tree: the platform
+# repo's k8s/ names it by its internal reference — and otherwise says
+# which images wait, and why, and goes on. A tenant that later asks for
+# one gets the same verdict from `aegis image request`.
+_mirror_door() {
+    local rc=0 retained needed="" img
+    jenkins_build_retry mirror-images 2700 2 || rc=$?
+    (( rc == 0 )) && return 0
+    (( rc == 4 )) || return "$rc"
+    retained="$(jenkins_get "/job/mirror-images/$JENKINS_LAST_BUILD/consoleText" 2>/dev/null \
+        | sed -n 's/^RETAINED \([^ ]*\)$/\1/p' || true)"
+    [[ -n "$retained" ]] || { log_error "mirror-images #$JENKINS_LAST_BUILD ended UNSTABLE and names no retained image: nothing to attribute it to"; return 1; }
+    for img in $retained; do
+        if grep -rqsE ":5000/${img%%:*}[:@]" "$PLATFORM_DIR/k8s"; then
+            needed+="$img "
+        fi
+    done
+    if [[ -n "$needed" ]]; then
+        log_error "retained at the door and NEEDED by the platform (its k8s/ runs them): ${needed}— read the AEGIS_VERDICT lines marked «block» in mirror-images #$JENKINS_LAST_BUILD"
+        return 1
+    fi
+    log_warn "retained at the door, not needed by the platform to run: $(tr '\n' ' ' <<< "$retained")"
+    log_warn "  each one waits for upstream (aegis image request <ref> --bump once it moves) or an accepted risk (--accept); image-watch and aegis check keep naming them"
+    return 0
+}
 gate_diag "mirror-images-build-verde" \
-  'log_warn "a third-party image that fails the scan of TODAY does not get in — and the seed pins age between release and install.";
-   log_warn "For each image the job lists: (a) upstream rebuilt it → measure the new digest and bump mirror-images/images.txt (docs/protocols/images.md §2);";
-   log_warn "(b) upstream did not → a DATED exception with explicit paths in mirror-images/trivyignore.yaml, or wait (§6). Then: aegis init --from 80-supply-chain"' \
-  jenkins_build_retry mirror-images 2700 2
+  'log_warn "an image the PLATFORM needs was retained, or the job broke (pull, scan, push, sign) — read the console: «FAILED <image>» names each one.";
+   log_warn "Retained: (a) upstream rebuilt it → aegis image request <ref> --bump (docs/protocols/images.md §2); (b) it did not → a dated exception: --allow (measured) or --accept (risk accepted).";
+   log_warn "Then: aegis init --from 80-supply-chain"' \
+  _mirror_door
 
 # ── 80.4 the bases aegis owns, built here so nothing stands on a sample ──
 # base-images builds every member (nginx for the static fronts, node for

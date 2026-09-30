@@ -22,6 +22,24 @@
 // it, crane pushes it, cosign signs it. The order matters: the scan runs
 // BEFORE the push, just like in Jenkinsfile.app — an image that did not
 // pass the scan never comes to exist in the registry.
+//
+// WHAT THE SCAN DECIDES, since 2026-09-30 (plan/21). Until that day a
+// fixable CRITICAL/HIGH stopped the entry and the job went red, and it
+// did so for EVERY entry on EVERY run: two OpenSSL CVEs published the
+// day before, in python:3.12-slim and nodejs-distroless:22, killed a
+// clean install on alpha-arch although the platform needs neither of
+// them to run and nobody could make them clean. Now:
+//   - an entry already in the registry, signed by aegis FROM THIS SAME
+//     SOURCE (the signature carries it as an annotation, verified with
+//     our key), is not judged again here: what is inside it is
+//     image-watch's to re-scan every morning, against today's DB;
+//   - a new entry is judged by vuln-policy/verdict.sh, the one verdict
+//     every scan uses: inside its window a finding enters as DEBT with a
+//     due date; past it, exploited in the wild, or undated, the entry is
+//     RETAINED — not pushed, not signed, named in the console;
+//   - the job ends red when an entry is BROKEN (pull, scan, verdict,
+//     push, sign), UNSTABLE when entries were only retained, and green
+//     otherwise, debts and all.
 // Script-level state shared between stages. Declared as fields ON
 // PURPOSE: a bare `NAME = value` inside a stage makes Jenkins warn
 // «WorkflowScript seems to be setting a field named NAME … did you
@@ -30,6 +48,7 @@
 // with it. @Field is the declared shape of a script global.
 import groovy.transform.Field
 @Field def MIRROR_ENTRIES = []
+@Field def RETAINED = []
 
 pipeline {
   agent {
@@ -202,6 +221,35 @@ spec:
       }
     }
 
+    stage('exploited list') {
+      steps {
+        container('trivy') {
+          // CISA's list of vulnerabilities exploited in the wild, fresh:
+          // a finding on it gets no window at the door. The fetch is the
+          // job's, not the verdict's (the verdict never talks to the
+          // network). When it fails the platform repo's copy is used —
+          // image-watch refreshes it every morning — and verdict.sh
+          // decides whether that copy is young enough to give debt credit.
+          // Busybox has no jq: the two fields read are flat strings.
+          sh '''
+            VP="${WORKSPACE}/k8s/base/platform/vuln-policy"
+            if wget -q -T 20 -O kev.json https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json 2>/dev/null; then
+              REL="$(grep -o '"dateReleased": *"[0-9-]*' kev.json | head -1 | sed 's/.*"//')"
+              {
+                printf '# CISA KEV dateReleased=%s (fetched by mirror-images #%s)\\n' "$REL" "$BUILD_NUMBER"
+                grep -o '"cveID": *"CVE-[0-9]*-[0-9]*"' kev.json | sed 's/.*"\\(CVE-[^"]*\\)"/\\1/'
+              } > kev.txt
+              echo "exploited-in-the-wild list: $(grep -c '^CVE-' kev.txt) CVE(s), released $REL"
+            else
+              cp "$VP/kev.txt" kev.txt
+              echo "NOTICE: the exploited-in-the-wild list could not be fetched; the platform repo's copy is used ($(head -1 kev.txt | sed 's/.*dateReleased=\\([0-9-]*\\).*/released \\1/')) and the verdict decides whether it is fresh enough"
+            fi
+            rm -f kev.json
+          '''
+        }
+      }
+    }
+
     stage('mirror') {
       steps {
         script {
@@ -212,6 +260,26 @@ spec:
             env.SRC = e.src
             env.DST = e.dst
             echo "================ ${e.dst} ================"
+            // ALREADY IN, FROM THIS SOURCE: not judged again at the door.
+            // The signature this job left carries the source it mirrored
+            // (`aegis.dev/source`), and cosign checks it with our key: a
+            // tag somebody pushed by hand, or one mirrored from another
+            // digest, does not verify and is mirrored anew.
+            def provenance = 1
+            container('cosign') {
+              provenance = sh(returnStatus: true, script: '''
+                cosign public-key --key /cosign/keys/cosign.key > mirror-cosign.pub 2>/dev/null || exit 2
+                cosign verify --key mirror-cosign.pub \
+                    --registry-cacert /cosign/ca/ca.crt \
+                    --insecure-ignore-tlog=true \
+                    -a "aegis.dev/source=${SRC}" "${REGISTRY}/${DST}" > /dev/null 2>&1
+              ''')
+              sh 'rm -f mirror-cosign.pub'
+            }
+            if (provenance == 0) {
+              echo "-- already mirrored from ${e.src} and signed by aegis: not judged again here (image-watch re-scans it every morning)"
+              return
+            }
             try {
               container('crane') {
                 // RETRY on the pull, and ONLY on the pull. It is the
@@ -238,26 +306,52 @@ spec:
                   done
                 '''
               }
+              def judged = -1
               container('trivy') {
-                // Blocking, exactly as for our own code. A third-party
-                // image that does not pass the scan is NOT mirrored: the
-                // right answer is to pick a newer tag, not to lower the
-                // bar.
+                // ONE scan, as JSON; the table a person reads and the
+                // lines the verdict reads are both converted from it, so
+                // they cannot disagree.
                 //
                 // --ignorefile: exceptions SCOPED BY PATH and with an
-                // expiry date, each one with its measurement written
-                // beside it (see trivyignore.yaml). It lowers no
-                // severity and uses no wildcards: verified that with
-                // the file in place, an image with CVEs on another path
-                // still breaks the build. Jenkinsfile.app does NOT use
-                // this file — our own code has no exceptions.
-                sh '''
+                // expiry date, each one with its measurement (or its
+                // accepted risk) written beside it (see trivyignore.yaml).
+                // What it excuses never reaches the verdict.
+                //
+                // exit 10 = RETAINED (the verdict stopped it; nothing is
+                // pushed); any other non-zero = BROKEN (the scan or the
+                // verdict could not be given — never read as clean).
+                judged = sh(returnStatus: true, script: '''
+                  set -e
+                  VP="${WORKSPACE}/k8s/base/platform/vuln-policy"
+                  rm -f scan.json findings.txt verdict.txt mirror-debts
                   echo "-- scan $DST"
                   trivy image --server "$TRIVY_SERVER" --input mirror.tar \
-                    --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed \
+                    --exit-code 0 --severity CRITICAL,HIGH --ignore-unfixed \
                     --scanners vuln --no-progress \
-                    --ignorefile "${WORKSPACE}/mirror-images/trivyignore.yaml"
-                '''
+                    --ignorefile "${WORKSPACE}/mirror-images/trivyignore.yaml" \
+                    --format json --output scan.json
+                  trivy convert --format table scan.json
+                  trivy convert --format template --template "$(sh "$VP/verdict.sh" --template)" \
+                    --output findings.txt scan.json
+                  sed "s|^|AEGIS_SCAN $DST |" findings.txt
+                  rc=0
+                  KEV="${WORKSPACE}/kev.txt" sh "$VP/verdict.sh" findings.txt > verdict.txt || rc=$?
+                  sed "s|^|AEGIS_VERDICT $DST |" verdict.txt
+                  grep -c '^debt|' verdict.txt > mirror-debts || true
+                  case "$rc" in
+                    0) exit 0 ;;
+                    1) exit 10 ;;
+                    *) echo "the verdict could not be given (rc $rc): an unjudged scan is not a clean one"; exit 1 ;;
+                  esac
+                ''')
+              }
+              if (judged == 10) {
+                echo "FAILED ${e.dst}: retained at the door — the findings marked «block» above stop it (not pushed, not signed; nothing entered the registry)"
+                RETAINED << e.dst
+                return
+              }
+              if (judged != 0) {
+                error "the scan of ${e.dst} could not be judged (exit ${judged})"
               }
               container('crane') {
                 sh '''
@@ -271,12 +365,15 @@ spec:
                 // Signs BY DIGEST (immutable) against the internal
                 // registry. --tlog-upload=false: nothing from the
                 // private registry leaves for the public Rekor.
+                // `aegis.dev/source` is the provenance the next run
+                // verifies before judging this entry again (above).
                 sh '''
                   echo "-- sign ${DST}"
                   DIGEST="$(cat mirror-digest)"
                   cosign sign --yes \
                     --key /cosign/keys/cosign.key \
                     --tlog-upload=false \
+                    -a "aegis.dev/source=${SRC}" \
                     --registry-cacert /cosign/ca/ca.crt \
                     "${REGISTRY}/${DST%%:*}@${DIGEST}"
                 '''
@@ -305,8 +402,8 @@ spec:
               // stayed "unmeasured" forever in the round.
               sh '''
                 EVENTO=$(printf \
-                  '{"source":"jenkins-mirror","event":"mirror","origen":"%s","image":"%s","digest":"%s","scan_skipped":false,"sign_skipped":false,"build":"%s","ts":"%s"}' \
-                  "${SRC}" "${DST}" "$(cat mirror-digest)" "${BUILD_NUMBER}" \
+                  '{"source":"jenkins-mirror","event":"mirror","origen":"%s","image":"%s","digest":"%s","scan_skipped":false,"sign_skipped":false,"debts":%s,"build":"%s","ts":"%s"}' \
+                  "${SRC}" "${DST}" "$(cat mirror-digest)" "$(cat mirror-debts 2>/dev/null || echo 0)" "${BUILD_NUMBER}" \
                   "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
                 printf 'AEGIS_EVENT %s\\n' "$EVENTO"
                 printf '%s\\n' "$EVENTO" \
@@ -331,13 +428,23 @@ spec:
               echo "FAILED ${e.dst}: ${err.getMessage()}"
               failed << e.dst
             } finally {
-              sh 'rm -f mirror.tar mirror-digest || true'
+              sh 'rm -f mirror.tar mirror-digest mirror-debts scan.json findings.txt verdict.txt || true'
             }
           }
           if (failed) {
-            error "images that failed (${failed.size()}): ${failed.join(', ')}"
+            error "images that failed (${failed.size() + RETAINED.size()}): ${(failed + RETAINED).join(', ')}"
           }
-          echo "all images mirrored and signed."
+          if (RETAINED) {
+            // Retained is not broken: the job did its work, and what it
+            // held back is named, entry by entry, with the findings that
+            // stopped it (AEGIS_VERDICT … block). UNSTABLE says exactly
+            // that; lib/jenkins.sh reads it as rc 4, and phase 80 stops
+            // only if the platform itself needs a retained image.
+            RETAINED.each { echo "RETAINED ${it}" }
+            unstable "images that failed (${RETAINED.size()}): ${RETAINED.join(', ')} — retained at the door, nothing else broke"
+          } else {
+            echo "all images mirrored and signed (or already in, from the same source)."
+          }
         }
       }
     }

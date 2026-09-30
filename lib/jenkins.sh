@@ -168,7 +168,8 @@ _jenkins_quota_stall() {
     return 0
 }
 
-# jenkins_wait_build <job> <timeout_s> <build_n> — waits for SUCCESS
+# jenkins_wait_build <job> <timeout_s> <build_n> — waits for SUCCESS (rc 0;
+# UNSTABLE is rc 4, anything else that ends it is rc 1)
 # of the SPECIFIC build build_n (mandatory: captured with
 # jenkins_next_build BEFORE the trigger). A GET 404 = the build has not
 # started yet (asynchronous webhook/quiet period) = RUNNING, not an
@@ -207,7 +208,18 @@ jenkins_wait_build() {
         fi
         case "$result" in
             SUCCESS) log_ok "build $job#$build: SUCCESS"; return 0 ;;
-            FAILURE|ABORTED|UNSTABLE)
+            UNSTABLE)
+                # 2026-09-30 (plan/21): UNSTABLE is a job that FINISHED its
+                # work and held something back on purpose — mirror-images
+                # retaining an image at the vulnerability door. It is not
+                # a failure and not the network: rc 4, so a caller that
+                # knows what the job holds back can read it, and every
+                # other caller, which tests for zero, still stops.
+                log_warn "build $job#$build ended UNSTABLE — it finished and held something back; tail of the console:"
+                jenkins_get "/job/$(_jenkins_job "$job")/$build/consoleText" 2>/dev/null \
+                    | tail -n 30 >&2 || true
+                return 4 ;;
+            FAILURE|ABORTED)
                 # F-C run #15 (H7 applied to builds): two FAILUREs in a
                 # row without ONE line of the console — the cause lives
                 # there and the operator dug it out by hand:
@@ -318,9 +330,17 @@ jenkins_build_retry() {
         next="$(jenkins_next_build "$job")"
         jenkins_fire "$job" "$query" || return 1
         _jenkins_build_appears "$job" "$next" 120 || return 1
-        if jenkins_wait_build "$job" "$timeout" "$next"; then
+        local wrc=0
+        jenkins_wait_build "$job" "$timeout" "$next" || wrc=$?
+        if (( wrc == 0 )); then
             JENKINS_LAST_BUILD="$next"
             return 0
+        fi
+        # UNSTABLE is the job's own decision, not a transient: re-firing
+        # it would hold the same things back again.
+        if (( wrc == 4 )); then
+            JENKINS_LAST_BUILD="$next"
+            return 4
         fi
         # The console is read WHOLE before the match (H-05, 2026-09-24):
         # piped, `grep -q` quit at the first signature, jenkins_get died
