@@ -240,8 +240,15 @@ There are exactly two honest ways out.
 1. A newer tag. The command lists the ones upstream publishes above
    this one with the same shape, when it can read them; whether one of
    them is the right one is not something a sort can know.
-2. A dated exception, and only for a CVE you have MEASURED is not
-   reachable in this binary:
+2. A dated exception. `--allow` for a CVE you have MEASURED is not
+   reachable in this binary, or `--accept` for a risk you accept without
+   a measurement while upstream rebuilds: it says «Risk accepted, not
+   measured» in its statement, lasts at most `acceptance_max_days` of
+   `vuln-policy/policy.yaml`, and is refused for a CVE on the
+   exploited-in-the-wild list. Either one is scoped to the paths the
+   scan's own `AEGIS_SCAN` lines named — each `package.json` for an npm
+   finding (the table's «Node.js» header matches nothing: Rob's H-06),
+   `*.tar (<distro>)` for an OS one:
 
 ```
 aegis image request postgres:17.10-alpine \

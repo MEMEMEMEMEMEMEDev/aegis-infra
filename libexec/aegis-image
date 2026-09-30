@@ -4,7 +4,7 @@
 # aegis-subcommands: request list from check gc
 # aegis-help:
 # Usage: aegis image request <repo>:<tag> [--bump]
-#                           [--allow <CVE> --until <YYYY-MM-DD> --reason "<text>"]
+#                           [--allow|--accept <CVE> --until <YYYY-MM-DD> --reason "<text>"]
 #        aegis image list
 #        aegis image from <name>:<tag>
 #        aegis image check
@@ -26,6 +26,12 @@
 #                  dated, path-scoped exception into
 #                  mirror-images/trivyignore.yaml and retries ONCE.
 #                  All three are required together. There is no --force.
+#          --accept/--until/--reason  the same exception for a risk you
+#                  ACCEPT without having measured it (upstream has not
+#                  rebuilt; you decide to run it meanwhile). It says so in
+#                  its statement, it may last at most the policy's
+#                  acceptance_max_days, and it is refused for a CVE on
+#                  the exploited-in-the-wild list.
 # list     what is declared, crossed against the internal registry:
 #          name, tag, short digest, mirrored, signed, live exception.
 # from     prints ONLY the FROM line for an image already mirrored, so a
@@ -114,7 +120,7 @@ case "$VERB" in
     *) bad_usage "«$VERB» is not a subcommand (request | list | from | check | gc)" ;;
 esac
 
-REF="" ; BUMP=0 ; ALLOW="" ; UNTIL="" ; REASON=""
+REF="" ; BUMP=0 ; ALLOW="" ; UNTIL="" ; REASON="" ; EXC_KIND=measured
 
 # ── gc: the retention policy, and the two states of this command ────
 # GC_KEEP_DEFAULT is the number of images each repository keeps ON AGE
@@ -144,6 +150,11 @@ case "$VERB" in
             --bump)    BUMP=1; shift ;;
             --allow)   [[ $# -ge 2 ]] || bad_usage "--allow needs a CVE identifier"; ALLOW="$2"; shift 2 ;;
             --allow=*) ALLOW="${1#--allow=}"; shift ;;
+            --accept)  [[ $# -ge 2 ]] || bad_usage "--accept needs a CVE identifier"
+                       [[ -z "$ALLOW" ]] || bad_usage "--allow and --accept are two kinds of exception: one CVE is either measured or accepted"
+                       ALLOW="$2"; EXC_KIND=accepted; shift 2 ;;
+            --accept=*) [[ -z "$ALLOW" ]] || bad_usage "--allow and --accept are two kinds of exception: one CVE is either measured or accepted"
+                       ALLOW="${1#--accept=}"; EXC_KIND=accepted; shift ;;
             --until)   [[ $# -ge 2 ]] || bad_usage "--until needs a date (YYYY-MM-DD)"; UNTIL="$2"; shift 2 ;;
             --until=*) UNTIL="${1#--until=}"; shift ;;
             --reason)  [[ $# -ge 2 ]] || bad_usage "--reason needs the text of the measurement"; REASON="$2"; shift 2 ;;
@@ -159,7 +170,7 @@ case "$VERB" in
     # measurement is a CVE nobody looks at; one with no end date is
     # invisible debt (images.md §6, and check 136 refuses both shapes).
     if [[ -n "$ALLOW$UNTIL$REASON" && ( -z "$ALLOW" || -z "$UNTIL" || -z "$REASON" ) ]]; then
-        bad_usage "--allow, --until and --reason go together: a scan exception is a MEASUREMENT (what was checked), a DATE it stops holding, and the CVE it covers"
+        bad_usage "--allow (or --accept), --until and --reason go together: a scan exception is a MEASUREMENT (what was checked), a DATE it stops holding, and the CVE it covers"
     fi
     [[ -z "$ALLOW" || "$ALLOW" =~ ^CVE-[0-9]{4}-[0-9]{4,}$ ]] \
         || bad_usage "«$ALLOW» is not a CVE identifier (CVE-YYYY-NNNN...)"
@@ -653,11 +664,11 @@ PY
 # the day it was made, and the day it stops holding. The file is
 # appended as TEXT and never round-tripped through a YAML dumper: its
 # comments are the measurements, and a dumper would throw them away.
-write_exception() {   # <cve> <until> <reason> <paths...>
-    python3 - "$IGNORE" "$@" <<'PY'
-import datetime, sys, yaml
-path, cve, until, reason = sys.argv[1:5]
-paths = sys.argv[5:]
+write_exception() {   # <cve> <until> <reason> <measured|accepted> <paths...>
+    python3 - "$IGNORE" "$LIST_ROOT/k8s/base/platform/vuln-policy" "$@" <<'PY'
+import datetime, re, sys, yaml
+path, vp, cve, until, reason, kind = sys.argv[1:7]
+paths = sys.argv[7:]
 if not paths:
     sys.exit("no scan target to scope the exception to: a path-less entry silences the CVE wherever it appears, which is the wildcard this file forbids")
 today = datetime.date.today()
@@ -667,17 +678,39 @@ if end <= today:
 limit = today.replace(year=today.year + 1)
 if end > limit:
     sys.exit(f"--until {until} is more than 12 months after the measurement ({today}): the measurement holds for THIS binary, not for one two rebuilds away")
+if kind == "accepted":
+    # An accepted risk is bounded by the policy, and never covers what is
+    # exploited in the wild: that one has no window anywhere (plan/21).
+    try:
+        pol = dict(re.findall(r"^([a-z_]+):[ \t]*([0-9]+)", open(f"{vp}/policy.yaml").read(), re.M))
+        most = int(pol["acceptance_max_days"])
+    except (OSError, KeyError, ValueError):
+        sys.exit(f"{vp}/policy.yaml does not say acceptance_max_days: an accepted risk with no ceiling is not written")
+    if (end - today).days > most:
+        sys.exit(f"--until {until} is {(end - today).days} days away; an accepted (unmeasured) risk may last at most {most} (policy.yaml). Measure it (--allow) to hold it longer")
+    try:
+        kev = {l.strip() for l in open(f"{vp}/kev.txt") if l.startswith("CVE-")}
+    except OSError:
+        sys.exit(f"{vp}/kev.txt is not there: whether {cve} is exploited in the wild cannot be said, so it cannot be accepted")
+    if cve in kev:
+        sys.exit(f"{cve} is on CISA's list of vulnerabilities exploited in the wild: it cannot be accepted, only fixed (a newer tag) or measured (--allow)")
 txt = open(path).read()
 if f"id: {cve}" in txt:
     sys.exit(f"{cve} already has an entry in {path}: re-measure the one that is there instead of adding a second")
-body = [
-    "",
-    f"  # {cve} — exception written by the operator on {today} while asking",
-    "  # for this image. The statement is the measurement; when it expires,",
-    "  # trivy reports again and the measurement has to be redone.",
+if kind == "accepted":
+    head = [f"  # {cve} — RISK ACCEPTED by the operator on {today} while asking for",
+            "  # this image: NOT a measurement. When it expires trivy reports again,",
+            "  # and the decision has to be taken again."]
+    statement = f"Risk accepted, not measured: {reason.rstrip(chr(46))}. Accepted {today}."
+else:
+    head = [f"  # {cve} — exception written by the operator on {today} while asking",
+            "  # for this image. The statement is the measurement; when it expires,",
+            "  # trivy reports again and the measurement has to be redone."]
+    statement = f"{reason.rstrip(chr(46))}. Measured {today}."
+body = [""] + head + [
     f"  - id: {cve}",
     "    paths: [" + ", ".join(f'"{p}"' for p in paths) + "]",
-    f'    statement: "{reason.rstrip(chr(46))}. Measured {today}."',
+    f'    statement: "{statement}"',
     f"    expired_at: {end.isoformat()}",
 ]
 new = txt.rstrip("\n") + "\n" + "\n".join(body) + "\n"
@@ -869,7 +902,9 @@ do_request() {
             fi
             log_error "  2. a dated exception, only for a CVE you have MEASURED is not reachable in this binary:"
             log_error "     ${AEGIS_CMD:-aegis} image request $REF --allow <CVE> --until <YYYY-MM-DD> --reason \"what you measured\""
-            log_error "     It is scoped to the scan targets listed above and expires; there is no --force."
+            log_error "     or, for a risk you accept without measuring it (upstream has not rebuilt), for at most the policy's acceptance_max_days:"
+            log_error "     ${AEGIS_CMD:-aegis} image request $REF --accept <CVE> --until <YYYY-MM-DD> --reason \"why it may run meanwhile\""
+            log_error "     Either one is scoped to the paths the scan reported and expires; there is no --force."
             return 1
         fi
 
@@ -877,25 +912,42 @@ do_request() {
         # the exception did not cover what was blocking, and retrying
         # again would only be a loop with a file growing inside it.
         local targets
+        # WHAT AN EXCEPTION IS SCOPED TO (Rob's H-06, 2026-09-28): the
+        # scan's own finding lines (`AEGIS_SCAN <image> …`, printed since
+        # the door judges with vuln-policy/verdict.sh) carry, per finding,
+        # the package's PATH for language packages and the target for OS
+        # ones. The table's header says only «Node.js» for every npm
+        # package, and an exception scoped to that matched nothing: ten
+        # --allow in a row and the same ten CVEs. The tar name becomes a
+        # glob: mirror-images scans mirror.tar and image-watch watch.tar.
+        # An older console, with no such lines, falls back to the table.
         targets="$(python3 - "$slice" "$ALLOW" <<'PY'
-import sys
+import re, sys
 console = open(sys.argv[1], errors="replace").read().split("\n")
 cve, target, hits = sys.argv[2], None, []
-for i, ln in enumerate(console):
-    s = ln.strip()
-    if i + 1 < len(console) and set(console[i + 1].strip()) == {"="} and s:
-        target = s
+for ln in console:
+    m = re.search(r"AEGIS_SCAN \S+ (.*)$", ln)
+    if not m:
         continue
-    if cve in s and target:
-        hits.append(target)
+    f = m.group(1).strip().split("|")
+    if len(f) == 9 and f[0] == cve:
+        hits.append(f[6] if f[6] else re.sub(r"^\S+\.tar ", "*.tar ", f[8]))
+if not hits:
+    for i, ln in enumerate(console):
+        s = ln.strip()
+        if i + 1 < len(console) and set(console[i + 1].strip()) == {"="} and s:
+            target = s
+            continue
+        if cve in s and target:
+            hits.append(target)
 print("\n".join(dict.fromkeys(hits)))
 PY
 )"
         [[ -n "$targets" ]] || die "$ALLOW does not appear in the part of $MIRROR_JOB #$MIRROR_BUILD's console that belongs to $dst: an exception for a CVE this image's scan did not report would silence something nobody measured on it. If it is another entry's finding, that entry is its own request"
         # shellcheck disable=SC2086
-        write_exception "$ALLOW" "$UNTIL" "$REASON" $targets \
+        write_exception "$ALLOW" "$UNTIL" "$REASON" "$EXC_KIND" $targets \
             || die "the exception could not be written (nothing was changed)"
-        commit_list "fix(mirror): dated exception for $ALLOW on $dst" "$IGNORE_REL"
+        commit_list "fix(mirror): dated exception ($EXC_KIND) for $ALLOW on $dst" "$IGNORE_REL"
         log_warn "exception written and committed — retrying $MIRROR_JOB ONCE"
         attempt=2
     done
