@@ -32,13 +32,13 @@ findings = []
 with open(IMG, encoding="utf-8") as f:
     src = f.read()
 
-scope = re.search(r'targets="\$\(python3 - "\$slice" "\$ALLOW" <<\'PY\'\n(.*?)\nPY\n', src, re.S)
+scope = re.search(r'targets="\$\(python3 - "\$slice" "\$cve" <<\'PY\'\n(.*?)\nPY\n', src, re.S)
 writer = re.search(r"write_exception\(\) \{[^\n]*\n\s*python3 - \"\$IGNORE\" \"\$LIST_ROOT/k8s/base/platform/vuln-policy\" \"\$@\" <<'PY'\n(.*?)\nPY\n", src, re.S)
 if not scope:
     findings.append("aegis-image has no scope reader for --allow (targets=…) in the shape this check runs")
 if not writer:
     findings.append("write_exception does not read the vuln-policy directory beside the list: an accepted risk has no ceiling and no KEV list")
-if not re.search(r'write_exception "\$ALLOW" "\$UNTIL" "\$REASON" "\$EXC_KIND" \$targets', src):
+if not re.search(r'write_exception "\$cve" "\$UNTIL" "\$REASON" "\$EXC_KIND" "\$\{targets\[@\]\}"', src):
     findings.append("the exception is written without its kind: an accepted risk would read as a measurement")
 
 T = datetime.date.today()
@@ -116,6 +116,41 @@ with tempfile.TemporaryDirectory() as tmp:
         if rc != 0:
             findings.append(f"a measured exception beyond the acceptance ceiling (but within 12 months) is refused: {err.strip()[:140]}")
 
+# the report reads the door's verdict, not the table (alpha-arch, 2026-09-30:
+# «3 blocking findings» for 11, and the exception pointed at «Node.js (node-pkg)»)
+rep = re.search(r"report_scan\(\) \{[^\n]*\n\s*python3 - \"\$1\" \"\$2\" \"\$\{3:-\$2\}\" <<'PY'\n(.*?)\nPY\n", src, re.S)
+if not rep:
+    findings.append("report_scan does not take the image as asked: it cannot print the one-call command")
+else:
+    with tempfile.TemporaryDirectory() as tmp:
+        rp = os.path.join(tmp, "rep.py")
+        with open(rp, "w") as f:
+            f.write(rep.group(1))
+        cp = os.path.join(tmp, "slice.txt")
+        with open(cp, "w") as f:
+            f.write("Node.js (node-pkg)\n==================\n│ tar │ CVE-2026-59873 │ CRITICAL │\n"
+                    "AEGIS_VERDICT n:1 block|CVE-2026-59873|CRITICAL|tar|usr/lib/npm/tar/package.json|2026-07-08|2026-07-23|published 2026-07-08, its window closed on 2026-07-23\n"
+                    "AEGIS_VERDICT n:1 block|CVE-2026-9496|HIGH|pacote|usr/lib/npm/pacote/package.json|2026-05-26|2026-06-25|published 2026-05-26, its window closed on 2026-06-25\n"
+                    "AEGIS_VERDICT n:1 block|CVE-2026-9496|HIGH|pacote|usr/lib/npm/x/node_modules/pacote/package.json|2026-05-26|2026-06-25|published 2026-05-26, its window closed on 2026-06-25\n"
+                    "AEGIS_VERDICT n:1 debt|CVE-2026-102276|HIGH|brace-expansion|usr/lib/npm/b/package.json|2026-09-28|2026-10-28|inside its window\n")
+        r = subprocess.run([sys.executable, rp, cp, "n:1", "node:22"], capture_output=True, text=True, timeout=30)
+        out = r.stderr
+        if "3 finding(s) stopped n:1; 1 would have entered" not in out:
+            findings.append(f"the report does not count what the verdict stopped and what it would have let in: {out.strip()[:160]}")
+        if "Node.js (node-pkg)" in out:
+            findings.append("the report still names «Node.js (node-pkg)» — the scope that matched nothing on Rob's instance")
+        if "usr/lib/npm/x/node_modules/pacote/package.json" not in out:
+            findings.append("the report does not name each path a stopped finding lives at")
+        if not re.search(r"aegis image request node:22 --accept CVE-2026-59873,CVE-2026-9496 --until \d{4}-\d{2}-\d{2}", out):
+            findings.append("the report does not hand over ONE call accepting every stopped CVE (13 calls and 13 mirror runs is the explosion plan/21 exists to end)")
+
+# a list of CVEs is validated as a list
+p2 = subprocess.run(["bash", IMG, "request", "python:3.12-slim", "--accept", "CVE-2026-1111,oops",
+                     "--until", "2026-10-10", "--reason", "r"], capture_output=True, text=True, timeout=30,
+                    env={"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/tmp")})
+if p2.returncode == 0 or "not a CVE identifier" not in (p2.stderr + p2.stdout):
+    findings.append(f"a CVE list with something that is not a CVE in it is not refused (rc {p2.returncode})")
+
 # the two kinds are one choice
 p = subprocess.run(["bash", IMG, "request", "python:3.12-slim", "--allow", "CVE-2026-1111", "--accept", "CVE-2026-2222",
                     "--until", "2026-10-10", "--reason", "r"], capture_output=True, text=True, timeout=30,
@@ -124,6 +159,7 @@ if p.returncode == 0 or "either measured or accepted" not in (p.stderr + p.stdou
     findings.append(f"--allow and --accept together are not refused (rc {p.returncode})")
 
 print("SCOPE: the scope reader on 4 consoles (npm at two paths, OS, an old table, a CVE not reported), "
-      "the writer on 4 exceptions (accepted in and past the ceiling, accepted KEV, measured), the flag parser")
+      "the writer on 4 exceptions (accepted in and past the ceiling, accepted KEV, measured), the report on "
+      "the door's verdict, the flag parser")
 for x in findings:
     print(x)

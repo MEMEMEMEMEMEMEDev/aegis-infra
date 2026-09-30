@@ -125,7 +125,7 @@ grep -q 'report_scan "$slice"' <<< "$DR" \
     || D150="$D150 do_request does not scope the scan report to this entry's block of the console: the findings of every other broken image get printed under this request, and an exception's paths would be scoped to them;"
 grep -q 'report_scan "$console"' <<< "$DR" \
     && D150="$D150 do_request reports the scan over the WHOLE console: that is the defect itself — the rows belong to whatever entry produced them, not to the one that was asked for;"
-grep -q 'python3 - "$slice" "$ALLOW"' <<< "$DR" \
+grep -qE 'python3 - "\$slice" "\$(ALLOW|cve)"' <<< "$DR" \
     || D150="$D150 the scan targets an exception is scoped to are read from the whole console instead of this entry's block: the paths written into trivyignore.yaml would name another image's scan;"
 # The exception cannot be written under a request that did not fail.
 awk '

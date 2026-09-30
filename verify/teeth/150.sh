@@ -56,7 +56,7 @@ red_4() {
     python3 - "$AEGIS_ROOT/$IMG" <<'PY'
 import sys
 p = sys.argv[1]; t = open(p).read()
-old = '        commit_list "fix(mirror): dated exception for $ALLOW on $dst" "$IGNORE_REL"\n'
+old = '        commit_list "fix(mirror): dated exception ($EXC_KIND) for $ALLOW on $dst" "$IGNORE_REL"\n'
 assert t.count(old) == 1
 open(p, "w").write(t.replace(old, "", 1))
 PY
@@ -196,9 +196,9 @@ red_9() {
     python3 - "$AEGIS_ROOT/$IMG" <<'PY'
 import sys
 p = sys.argv[1]; t = open(p).read()
-old = '        report_scan "$slice" "$dst"\n'
+old = '        report_scan "$slice" "$dst" "$REF"\n'
 assert t.count(old) == 1
-open(p, "w").write(t.replace(old, '        report_scan "$console" "$dst"\n', 1))
+open(p, "w").write(t.replace(old, '        report_scan "$console" "$dst" "$REF"\n', 1))
 PY
 }
 
@@ -248,7 +248,7 @@ control_6() {
     python3 - "$AEGIS_ROOT/$IMG" <<'PY'
 import sys
 p = sys.argv[1]; t = open(p).read()
-old = '        report_scan "$slice" "$dst"\n'
+old = '        report_scan "$slice" "$dst" "$REF"\n'
 assert t.count(old) == 1
 new = old + '        log_error "  the entry\'s block of the console is $(wc -l < "$slice") lines long"\n'
 open(p, "w").write(t.replace(old, new, 1))

@@ -27,5 +27,13 @@ red_4() { _sub "$I258" '    if cve in kev:' '    if False:'; }
 red_5() { _sub "$I258" '            --accept)  [[ $# -ge 2 ]] || bad_usage "--accept needs a CVE identifier"
                        [[ -z "$ALLOW" ]] || bad_usage "--allow and --accept are two kinds of exception: one CVE is either measured or accepted"' '            --accept)  [[ $# -ge 2 ]] || bad_usage "--accept needs a CVE identifier"'; }
 
+# the report as it was on 2026-09-30: the table, «3 blocking findings» and «Node.js (node-pkg)»
+red_6() { _sub "$I258" 'if verdicts:
+    block = [f for f in verdicts if f[0] == "block"]' 'if False:
+    block = [f for f in verdicts if f[0] == "block"]'; }
+
+# a list is let through without checking each member
+red_7() { _sub "$I258" '^CVE-[0-9]{4}-[0-9]{4,}(,CVE-[0-9]{4}-[0-9]{4,})*$' '^CVE-[0-9]{4}-[0-9]{4,}(,.*)*$'; }
+
 # ── controls ──
 control_1() { _sub "$I258" '    head = [f"  # {cve} — RISK ACCEPTED by the operator on {today} while asking for",' '    head = [f"  # {cve} — risk ACCEPTED by the operator on {today} while asking for",'; }

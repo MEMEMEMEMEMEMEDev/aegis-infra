@@ -26,6 +26,8 @@
 #                  dated, path-scoped exception into
 #                  mirror-images/trivyignore.yaml and retries ONCE.
 #                  All three are required together. There is no --force.
+#                  Several CVEs of the SAME image go in one call, comma-
+#                  separated (--allow CVE-A,CVE-B): one commit, one retry.
 #          --accept/--until/--reason  the same exception for a risk you
 #                  ACCEPT without having measured it (upstream has not
 #                  rebuilt; you decide to run it meanwhile). It says so in
@@ -172,7 +174,7 @@ case "$VERB" in
     if [[ -n "$ALLOW$UNTIL$REASON" && ( -z "$ALLOW" || -z "$UNTIL" || -z "$REASON" ) ]]; then
         bad_usage "--allow (or --accept), --until and --reason go together: a scan exception is a MEASUREMENT (what was checked), a DATE it stops holding, and the CVE it covers"
     fi
-    [[ -z "$ALLOW" || "$ALLOW" =~ ^CVE-[0-9]{4}-[0-9]{4,}$ ]] \
+    [[ -z "$ALLOW" || "$ALLOW" =~ ^CVE-[0-9]{4}-[0-9]{4,}(,CVE-[0-9]{4}-[0-9]{4,})*$ ]] \
         || bad_usage "«$ALLOW» is not a CVE identifier (CVE-YYYY-NNNN...)"
     [[ -z "$UNTIL" || "$UNTIL" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
         || bad_usage "«$UNTIL» is not an ISO date (YYYY-MM-DD): trivy silences forever what it cannot parse"
@@ -584,10 +586,44 @@ PY
 # target it was found on (which is what an exception has to be scoped
 # to). The verdict itself came from Jenkins' API, not from this text:
 # prose is what a person reads, never what a program decides on.
-report_scan() {
-    python3 - "$1" "$2" <<'PY'
-import re, sys
-console, dst = open(sys.argv[1], errors="replace").read().split("\n"), sys.argv[2]
+report_scan() {   # <console slice> <dst> [<ref as asked>]
+    python3 - "$1" "$2" "${3:-$2}" <<'PY'
+import datetime, re, sys
+console, dst, ref = open(sys.argv[1], errors="replace").read().split("\n"), sys.argv[2], sys.argv[3]
+# The door's own verdict first (one `AEGIS_VERDICT <image> <line>` per
+# finding, since the mirror judges with vuln-policy/verdict.sh). It is
+# what decided, so it is what is reported: which findings stopped the
+# image and why, which ones would have entered as debt, and the path
+# each exception has to name. Measured 2026-09-30 on alpha-arch: the
+# table-reading below said «3 blocking findings» for 13, glued titles
+# into the fixed-in column, and pointed the exception at «Node.js
+# (node-pkg)» — the scope that matched nothing on Rob's instance.
+verdicts = []
+for ln in console:
+    m = re.search(r"AEGIS_VERDICT \S+ (.*)$", ln)
+    if m:
+        f = m.group(1).strip().split("|")
+        if len(f) == 8:
+            verdicts.append(f)
+if verdicts:
+    block = [f for f in verdicts if f[0] == "block"]
+    debt = [f for f in verdicts if f[0] != "block"]
+    print(f"    {len(block)} finding(s) stopped {dst}; {len(debt)} would have entered as dated debt:", file=sys.stderr)
+    for v, cve, sev, pkg, path, pub, due, why in block[:30]:
+        where = path or "the OS package"
+        print(f"    {sev:<8} {cve:<18} {pkg:<22} {why}", file=sys.stderr)
+        print(f"             at {where}", file=sys.stderr)
+    if len(block) > 30:
+        print(f"    … and {len(block) - 30} more (AEGIS_VERDICT lines in the console)", file=sys.stderr)
+    acceptable = sorted({f[1] for f in block if "exploited" not in f[7]})
+    exploited = sorted({f[1] for f in block if "exploited" in f[7]})
+    if exploited:
+        print(f"    exploited in the wild, no exception possible: {', '.join(exploited)}", file=sys.stderr)
+    if acceptable and not exploited:
+        until = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
+        print("    to accept them ALL in one call (one commit, one retry; each exception is scoped to the paths above):", file=sys.stderr)
+        print(f"      aegis image request {ref} --accept {','.join(acceptable)} --until {until} --reason \"<why it may run meanwhile>\"", file=sys.stderr)
+    sys.exit(0)
 target, rows = None, []
 for i, ln in enumerate(console):
     s = ln.strip()
@@ -885,11 +921,15 @@ do_request() {
         # the `paths:` of an exception would be scoped to them.
         slice="$SECRETS_TMP/mirror-console-entry.txt"
         console_slice "$console" "$dst" > "$slice"
-        log_error "$MIRROR_JOB #$MIRROR_BUILD went red — $dst was NOT mirrored (the scan runs BEFORE the push: nothing entered the registry)"
+        if grep -q "FAILED $dst: retained at the door" "$slice"; then
+            log_error "$MIRROR_JOB #$MIRROR_BUILD RETAINED $dst at the door: the vulnerability verdict stopped it (nothing entered the registry; the rest of the job did its work)"
+        else
+            log_error "$MIRROR_JOB #$MIRROR_BUILD went red — $dst was NOT mirrored (the scan runs BEFORE the push: nothing entered the registry)"
+        fi
         others="$(grep -vxF "$dst" <<< "$culprits" | tr '\n' ' ' || true)"
         [[ -z "${others// /}" ]] \
             || log_warn "that build also failed on: ${others}— each one is its own request, with its own measurement; nothing below is about them"
-        report_scan "$slice" "$dst"
+        report_scan "$slice" "$dst" "$REF"
 
         if [[ -z "$ALLOW" || $attempt -gt 1 ]]; then
             log_error "The two honest ways out:"
@@ -921,7 +961,11 @@ do_request() {
         # --allow in a row and the same ten CVEs. The tar name becomes a
         # glob: mirror-images scans mirror.tar and image-watch watch.tar.
         # An older console, with no such lines, falls back to the table.
-        targets="$(python3 - "$slice" "$ALLOW" <<'PY'
+        # Every CVE asked for is scoped BEFORE anything is written: one that
+        # the scan did not report stops the whole call with the file intact.
+        local cve all_targets=()
+        for cve in ${ALLOW//,/ }; do
+        targets="$(python3 - "$slice" "$cve" <<'PY'
 import re, sys
 console = open(sys.argv[1], errors="replace").read().split("\n")
 cve, target, hits = sys.argv[2], None, []
@@ -943,10 +987,17 @@ if not hits:
 print("\n".join(dict.fromkeys(hits)))
 PY
 )"
-        [[ -n "$targets" ]] || die "$ALLOW does not appear in the part of $MIRROR_JOB #$MIRROR_BUILD's console that belongs to $dst: an exception for a CVE this image's scan did not report would silence something nobody measured on it. If it is another entry's finding, that entry is its own request"
-        # shellcheck disable=SC2086
-        write_exception "$ALLOW" "$UNTIL" "$REASON" "$EXC_KIND" $targets \
-            || die "the exception could not be written (nothing was changed)"
+        [[ -n "$targets" ]] || die "$cve does not appear in the part of $MIRROR_JOB #$MIRROR_BUILD's console that belongs to $dst: an exception for a CVE this image's scan did not report would silence something nobody measured on it. If it is another entry's finding, that entry is its own request"
+        all_targets+=("$cve=$(tr '\n' '\t' <<< "$targets")")
+        done
+        local item
+        for item in "${all_targets[@]}"; do
+            cve="${item%%=*}"
+            IFS=$'\t' read -r -a targets <<< "${item#*=}"
+            write_exception "$cve" "$UNTIL" "$REASON" "$EXC_KIND" "${targets[@]}" \
+                || { git -C "$LIST_ROOT" checkout -- "$IGNORE_REL" 2>/dev/null || true
+                     die "the exception for $cve could not be written — the file is back as it was; nothing was committed"; }
+        done
         commit_list "fix(mirror): dated exception ($EXC_KIND) for $ALLOW on $dst" "$IGNORE_REL"
         log_warn "exception written and committed — retrying $MIRROR_JOB ONCE"
         attempt=2
