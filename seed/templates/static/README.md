@@ -5,32 +5,29 @@ library on the runtime the platform mirrors, scans and signs. From the
 second it is instantiated the template is gone from your life: what it
 wrote is yours (journeys/design.md §0.3).
 
-## Before it will instantiate: one image has to be mirrored
+## How it is built (since 2026-09-30)
 
-The build image, `node:22.23.1-alpine`, is not in
-`mirror-images/images.txt`. `aegis app new` therefore STOPS before
-writing a single file and prints the exact command that mirrors it —
-read that line off the screen rather than from here, so there is one
-place it can be wrong. The runtime image, `nodejs-distroless:22`, is
-already declared and needs nothing.
+The pipeline COMPILES the front, in its own `compile` stage, with
+`ci/compile.sh` running in `aegis-ci-node` — a container the platform
+builds itself. The Containerfile only copies `dist/` onto the runtime,
+`nodejs-distroless:22`, which is mirrored, scanned and signed. Nothing
+else has to be mirrored before the template instantiates.
 
-That build version is not a choice made here: it is the one
-`ci-images/node/Containerfile` already pins, so what a tenant builds in
-and what the platform's own CI is built from stay the same 22.23 line
-and the same libc.
-
-Images are mirrored when somebody needs one, not in advance
-(`docs/protocols/images.md` §2). Being told which one, before anything
-is written, is the mechanism working.
+It used to compile INSIDE the image build, on `node:22.23.1-alpine`. On
+Rob's instance that made an Astro site fail four builds of four (Vite and
+esbuild leave a process kaniko cannot snapshot), and on alpha-arch the
+door retained that image: its bundled npm carried eleven CVEs past their
+window. Neither can happen now.
 
 ## What you change
 
-- **`Containerfile`, the two ARGs at the top** — `BUILD_CMD` and
+- **`ci/compile.sh`, the two lines at the top** — `BUILD_CMD` and
   `OUT_DIR`. They are the only thing that differs between the four
   frameworks; the table with the four values is right above them.
 - **`package.json` + the source tree** — run `npm create astro@latest`
   (or vite, or the Angular CLI) here and let it overwrite them. Keep the
-  lock file: the build installs with `npm ci`, which refuses to guess.
+  lock file: the compile stage installs with `npm ci`, which refuses to
+  guess.
 - **`serve.mjs`, the `SPA_FALLBACK` constant at the top** — true for a
   single-page app (React, Vue, Angular), false for a multi-page build
   (Astro and friends). Get it wrong the second way and a typo answers
@@ -42,7 +39,7 @@ is written, is the mechanism working.
   admits edge -> 8080 only, and PSS restricted rejects a non-numeric
   user. The server binds 0.0.0.0: the probe comes from outside the
   process.
-- **The two `FROM` lines** — they are resolved against the internal
+- **The `FROM` line** — it is resolved against the internal
   registry when the template is instantiated, pinned by digest. A base
   pulled off the internet is unmirrored, unscanned and unsigned.
 - **`k8s/overlays/dev/kustomization.yaml`'s digest marker** — the

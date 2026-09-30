@@ -30,10 +30,19 @@ spec:
     resources:
       requests: { cpu: 250m, memory: 512Mi }
       limits:   { cpu: 1000m, memory: 1Gi }
-  # node: ONLY for the `desplegar` stage, which writes the digest into
-  # the overlay. It does not compile the app —kaniko does that from the
-  # Containerfile—, so the limits are small on purpose. If your app needs
-  # `npm ci` in the pipeline, raise them here.
+  # node: the `compile` stage, when the repo ships ci/compile.sh, and the
+  # `desplegar` stage, which writes the digest into the overlay. Since
+  # 2026-09-30 a front COMPILES here and not inside kaniko: Vite/esbuild
+  # inside kaniko's build stage failed 4 builds of 4 on Rob's instance
+  # (his H-08: «failed to execute command: permission denied» right after
+  # Astro's «Complete!»), and the build stage stood on node:*-alpine, an
+  # image whose bundled npm carried eleven CVEs past their window the day
+  # the static template was tried on alpha-arch. Here the compiler is
+  # aegis-ci-node, which the platform builds itself, and kaniko only
+  # copies the result onto the signed runtime. The limits are what an
+  # `npm ci` + a Vite build of a portfolio actually took on the house
+  # instance (2Gi is the realistic floor); check 36 holds them inside the
+  # CI quota with two builds overlapping.
   #
   # Image from the internal registry, same as crane and cosign: it comes
   # out of the same ci-images job, so it adds no new startup dependency.
@@ -47,8 +56,8 @@ spec:
     # At 500m this pod went over the ceiling and verify-static caught
     # it on the spot — check 36, the run #11 cascade.
     resources:
-      requests: { cpu: 50m, memory: 128Mi }
-      limits:   { cpu: 250m, memory: 256Mi }
+      requests: { cpu: 250m, memory: 512Mi }
+      limits:   { cpu: 1500m, memory: 2Gi }
   # kaniko: UNPRIVILEGED build (W-05). No /dev/fuse, no vfs, no
   # privileged — it extracts layers straight onto the FS (it works where
   # rootless buildah does not, Ubuntu 24.04). root inside the container
@@ -489,6 +498,29 @@ spec:
             echo "from-guard: ${N} base reference(s), every one from the internal registry, by digest, present and signed"
           fi
         '''
+      }
+    }
+    stage('compile') {
+      // The repo says whether it compiles: ci/compile.sh is ITS file (the
+      // static template ships one), run with sh in the workspace kaniko
+      // builds from, so what the Containerfile COPYs is what was compiled
+      // here. A repo without it (a Go service, a Containerfile that
+      // builds by itself) skips this stage and nothing changes for it.
+      when {
+        allOf {
+          expression { env.SKIP_BUILD != 'true' }
+          expression { fileExists('ci/compile.sh') }
+        }
+      }
+      steps {
+        container('node') {
+          sh '''
+            set -e
+            cd "${WORKSPACE}"
+            echo "compile: sh ci/compile.sh (aegis-ci-node, outside the image build)"
+            sh ci/compile.sh
+          '''
+        }
       }
     }
     stage('build') {
