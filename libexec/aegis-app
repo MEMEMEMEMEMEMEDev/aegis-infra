@@ -1157,8 +1157,10 @@ def _current_tag(name, old):
     return max(line or shaped)[3]
 
 
-def _rebase_repo(org, url, write, tot):
-    """One repo: check it out, and repoint what points at another installation."""
+def _rebase_repo(c, url, write, tot):
+    """One repo: check it out, repoint what points at another installation,
+    and bring its Jenkinsfile to the one this platform derives."""
+    org = c["organizacion"]
     try:
         owner, repo = _owner_repo(url)
     except Error as e:
@@ -1181,12 +1183,33 @@ def _rebase_repo(org, url, write, tot):
 
     touched = 0
     try:
+        # THE PIPELINE (2026-09-30, alpha-arch). The Jenkinsfile in an app's
+        # repo is the platform's contract (its pins, limits, stages), put
+        # there once by `app apply` and never again: the day the platform
+        # changed its scan to judge only the image's own layers, the
+        # portfolio kept the old one until somebody copied the new file by
+        # hand. The derived one waits in the staging area; this brings it,
+        # like a FROM — written, reviewed, and pushed by a person.
+        staging, _why = _staging_for(c, url)
+        derived = os.path.join(staging, "Jenkinsfile") if staging else None
+        mine = os.path.join(d, "Jenkinsfile")
+        if not derived or not os.path.isfile(derived):
+            mark(tot, "not_evaluable", f"{owner}/{repo} Jenkinsfile",
+                 f"no derived Jenkinsfile to compare with — run {cli.cmd('app new')} {org} first")
+        elif os.path.isfile(mine) and open(mine, encoding="utf-8").read() == open(derived, encoding="utf-8").read():
+            mark(tot, "already", f"{owner}/{repo} Jenkinsfile", "the pipeline this platform derives")
+        elif write:
+            shutil.copyfile(derived, mine)
+            mark(tot, "done", f"{owner}/{repo} Jenkinsfile", "brought to the pipeline this platform derives")
+            touched += 1
+        else:
+            mark(tot, "would", f"{owner}/{repo} Jenkinsfile", "bring it to the pipeline this platform derives")
         files = _containerfiles(d)
         if not files:
             mark(tot, "not_evaluable", f"{owner}/{repo}",
                  "no Containerfile in the checkout: either nothing here builds an image, "
                  "or the repo does not carry its own build")
-            return None
+            return d if (touched and not disposable) else None
         for f in files:
             rel = os.path.relpath(f, d)
             try:
@@ -1242,7 +1265,7 @@ def rebase(org, write, tot):
     ready = []
     for url, _name in sorted(repos.items()):
         print(f"\n{url}")
-        d = _rebase_repo(c["organizacion"], url, write, tot)
+        d = _rebase_repo(c, url, write, tot)
         if d:
             ready.append(d)
     if ready:
@@ -1251,7 +1274,7 @@ def rebase(org, write, tot):
         print(f"  review it, and then, per repo:")
         for d in ready:
             print(f"    git -C {d} diff")
-            print(f"    git -C {d} commit -am 'ci: bases repinned to this installation'"
+            print(f"    git -C {d} commit -am 'ci: bases and pipeline brought to this installation'"
                   f" && git -C {d} push")
     return 0
 
@@ -1357,7 +1380,8 @@ def plant_skeleton(r, write, tot):
         mark(tot, "not_evaluable", "skeleton", str(e))
         empty = None
     if empty is False:
-        mark(tot, "already", "skeleton", "the repo has history — it is never trampled")
+        mark(tot, "already", "skeleton", "the repo has history — it is never trampled; "
+             f"when the platform's pipeline changes it arrives with {cli.cmd('app rebase')} {c['organizacion']}")
     elif empty:
         staging, reason = _staging_for(c, url)
         if staging is None:
@@ -1460,8 +1484,9 @@ def main():
     s = sub.add_parser("rebase",
                        help="repoints every FROM of the organization's repos that names "
                             "the internal registry at the tag and digest THIS installation "
-                            "serves. It writes files and does not push: pinning an image "
-                            "and putting it in production are two decisions")
+                            "serves, and brings each repo's Jenkinsfile to the one this "
+                            "platform derives. It writes files and does not push: pinning an "
+                            "image and putting it in production are two decisions")
     s.add_argument("organization", metavar="ORG",
                    help="orgs/<n>.yaml or the name of the organization")
     s.add_argument("--check", action="store_true",
