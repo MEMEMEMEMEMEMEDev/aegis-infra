@@ -536,6 +536,13 @@ spec:
                   /^[[:space:]]*digest:/ { d = $0; sub(/.*digest:[[:space:]]*/, "", d); sub(/[[:space:]].*/, "", d); next }
                   END { if (n != "" && d != "") print n, d }
                 ' "$O" | tr -d '"'"'"'"'
+                # The FROMs of its Containerfiles, by digest: the layers the
+                # app INHERITS. The serving stage reads their configs so that
+                # the mirror's exceptions hold on those layers and only there.
+                find "${SCRATCH}" -type f -name 'Containerfile*' -not -path '*/.git/*' 2>/dev/null \
+                  | while read -r cf; do
+                      awk 'toupper($1) == "FROM" { for (i = 2; i <= NF; i++) if ($i ~ /@sha256:[0-9a-f]+$/) print "FROM", $i }' "$cf"
+                    done
               ''').trim()
             }
             sh 'rm -rf "${WORKSPACE}/.apps" "${WORKSPACE}/.gitconfig-apps" || true'
@@ -549,7 +556,20 @@ spec:
               echo "NOTICE: ${r.slug} has no k8s/overlays/dev/kustomization.yaml with an image — nothing of it is deployed by digest; not watched"
               continue
             }
+            // The FROM lines first: they are not images that run, they are
+            // what every image of this repo stands on.
+            def froms = []
+            def imageLines = []
             for (l in out.split('\n')) {
+              def t2 = l.trim()
+              if (t2.startsWith('FROM ')) {
+                def fr = t2.substring(5).trim()
+                if (fr.startsWith("${env.REGISTRY}/") && !froms.contains(fr)) { froms << fr }
+              } else if (t2) {
+                imageLines << t2
+              }
+            }
+            for (l in imageLines) {
               def f = l.trim().split(/\s+/)
               if (f.size() != 2) {
                 // Said, never skipped quietly: an app that is not in the
@@ -575,7 +595,7 @@ spec:
               def already = false
               for (o in TARGETS) { if (o.image == img) { already = true } }
               if (already) { continue }
-              TARGETS << [kind: 'app', image: img, dst: "${name}@${dg}".toString(), org: r.org, slug: r.slug]
+              TARGETS << [kind: 'app', image: img, dst: "${name}@${dg}".toString(), org: r.org, slug: r.slug, froms: froms]
               STATE[img] = [failed: 0, not_mirrored: 0, crit: null, high: null,
                             moved: null, candidate: null, digest: '', kind: 'app']
               echo "  ${img}  (runs ${dg}, from ${r.slug})"
@@ -674,15 +694,80 @@ spec:
             }
             st.digest = readFile('watch-digest').trim()
             echo "   serving ${st.digest}"
-            // --ignorefile ONLY for the mirror list: those are the
-            // measured exceptions of mirror-images/trivyignore.yaml, and
-            // the watch must see the image the way the mirror saw it.
-            // The bases we own have no exceptions, by construction.
-            def r = pullAndScan("${env.REGISTRY}/${dst}".toString(), t.kind == 'mirror',
+            // --ignorefile for the mirror list: those are the measured
+            // exceptions of mirror-images/trivyignore.yaml, and the watch
+            // must see the image the way the mirror saw it. The bases we
+            // own have no exceptions, by construction. An APP gets them
+            // too, but only on the layers it inherits (just below).
+            def r = pullAndScan("${env.REGISTRY}/${dst}".toString(), t.kind != 'base',
                                 "${n}.txt".toString())
             if (!r.ok) {
               st.failed = 1
               continue
+            }
+            if (t.kind == 'app') {
+              // FOUND ON alpha-arch, 2026-10-02: scanned WITHOUT the
+              // mirror's exceptions, the portfolio carried CVE-2026-14456
+              // as overdue — measured and excused in nodejs-distroless,
+              // the very base it stands on. Scanned WITH them everywhere,
+              // an app's OWN layer would be excused by a measurement made
+              // on somebody else's binary. So: a second scan without the
+              // exceptions, the base's layers from its FROMs' configs, and
+              // ledger.sh --inherit keeps an excused finding excused only
+              // when its layer is the base's. With no base read, nothing
+              // is excused: reported, never hidden.
+              def full = pullAndScan("${env.REGISTRY}/${dst}".toString(), false, "${n}.full".toString())
+              if (!full.ok) {
+                echo "NOTICE: the second scan of ${t.image} (without the mirror's exceptions) did not complete — NOT measured"
+                st.failed = 1
+                continue
+              }
+              env.APP_FROMS = (t.froms ?: []).join(' ')
+              env.N_SCAN = "${n}".toString()
+              container('crane') {
+                sh '''
+                  rm -f ledger-in/base-config-*.json
+                  i=0
+                  for ref in $APP_FROMS; do
+                    i=$((i+1))
+                    if ! crane config "$ref" > "ledger-in/base-config-$i.json" 2>/dev/null; then
+                      echo "NOTICE: the config of $ref could not be read — its layers are not known as inherited, and nothing on them is excused"
+                      rm -f "ledger-in/base-config-$i.json"
+                    fi
+                  done
+                '''
+              }
+              def mrc = -1
+              container('trivy') {
+                mrc = sh(returnStatus: true, script: '''
+                  set -e
+                  VP="${WORKSPACE}/k8s/base/platform/vuln-policy"
+                  : > ledger-in/base-diffids
+                  for c in ledger-in/base-config-*.json; do
+                    [ -f "$c" ] || continue
+                    sh "$VP/verdict.sh" --diff-ids < "$c" >> ledger-in/base-diffids
+                  done
+                  echo "   $(grep -c '^sha256:' ledger-in/base-diffids || true) layer(s) inherited from its base(s)"
+                  sh image-watch/ledger.sh --inherit "ledger-in/$N_SCAN.txt" "ledger-in/$N_SCAN.full" \
+                    ledger-in/base-diffids > "ledger-in/$N_SCAN.merged"
+                  mv "ledger-in/$N_SCAN.merged" "ledger-in/$N_SCAN.txt"
+                  rm -f ledger-in/base-config-*.json "ledger-in/$N_SCAN.full"
+                ''')
+              }
+              if (mrc != 0) {
+                echo "NOTICE: the exceptions could not be placed on ${t.image}'s inherited layers (exit ${mrc}) — NOT measured"
+                st.failed = 1
+                continue
+              }
+              int crit2 = 0
+              int high2 = 0
+              for (line in readFile("ledger-in/${n}.txt").split('\n')) {
+                def ff = line.split(/\|/)
+                if (ff.size() == 9 && ff[1] == 'CRITICAL') { crit2 += 1 }
+                if (ff.size() == 9 && ff[1] == 'HIGH') { high2 += 1 }
+              }
+              r.crit = crit2
+              r.high = high2
             }
             st.crit = r.crit
             st.high = r.high

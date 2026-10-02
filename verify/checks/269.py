@@ -17,6 +17,15 @@ and asserts what comes out. Then it reads the stage: the clone is depth
 1 with the token never in argv, nothing is pushed, the serving stage
 scans apps without the mirror's ignorefile, and the books name the app's
 repo as who fixes it.
+
+AND THE EXCEPTIONS OF ITS BASE (found on alpha-arch, 2026-10-02, the first
+run of the series): the first version scanned apps WITHOUT the mirror's
+trivyignore.yaml — this check even required it — and the portfolio carried
+CVE-2026-14456 as OVERDUE, a CVE measured and excused in nodejs-distroless,
+the base it stands on. Every round red over the same bytes the mirror had
+excused. Now an app is scanned with the exceptions AND without them, its
+FROMs (by digest) give the base's layers, and ledger.sh --inherit keeps an
+excused finding excused only on an inherited layer (check 267 runs it).
 """
 import os
 import re
@@ -64,9 +73,17 @@ with tempfile.TemporaryDirectory() as tmp:
         "    newName: registry.registry-system.svc.cluster.local:5000/vet-api2\n"
         "    digest: sha256:" + "0" * 64 + "\n"
         "patches: []\n")
+    with open(os.path.join(tmp, ".apps", "Containerfile"), "w") as cf:
+        cf.write("# FROM registry.registry-system.svc.cluster.local:5000/commented@sha256:" + "9" * 64 + "\n"
+                 "FROM --platform=linux/amd64 registry.registry-system.svc.cluster.local:5000/nodejs-distroless:22@sha256:" + "2" * 64 + "\n"
+                 "COPY dist/ ./public/\n")
     tail = clone_sh[clone_sh.index('O="'):]
     p = subprocess.run(["sh", "-c", 'SCRATCH="$PWD/.apps"\n' + tail], capture_output=True, text=True, cwd=tmp)
     lines = [l for l in p.stdout.splitlines() if l.strip()]
+    froms = [l for l in lines if l.startswith("FROM ")]
+    lines = [l for l in lines if not l.startswith("FROM ")]
+    if froms != ["FROM registry.registry-system.svc.cluster.local:5000/nodejs-distroless:22@sha256:" + "2" * 64]:
+        findings.append(f"the clone does not say the app's FROM by digest (a commented one skipped, --platform read past): got {froms}")
     if lines != ["registry.registry-system.svc.cluster.local:5000/vet-front sha256:" + "1" * 64,
                  "registry.registry-system.svc.cluster.local:5000/vet-api2 sha256:" + "0" * 64]:
         findings.append(f"the overlay's images are not read as «ref digest», newName winning over name and a trailing comment cut (got {lines})")
@@ -83,8 +100,18 @@ if not re.search(r"sha256:0\{64\}", code):
 if "kind: 'app'" not in code:
     findings.append("the apps found are not added to the watch's targets as KIND=app")
 serving = src[src.index("stage('serving')"):src.index("stage('upstream')")]
-if not re.search(r"pullAndScan\(\"\$\{env\.REGISTRY\}/\$\{dst\}\"\.toString\(\), t\.kind == 'mirror'", serving):
-    findings.append("the serving stage does not keep the mirror's ignorefile to mirrors: an app would be scanned with a third party's exceptions")
+if not re.search(r"pullAndScan\(\"\$\{env\.REGISTRY\}/\$\{dst\}\"\.toString\(\), t\.kind != 'base'", serving):
+    findings.append("the serving stage does not scan mirrors and apps with the mirror's exceptions (only a base we own has none): an app re-reports what its base has excused")
+app = serving.split("if (t.kind == 'app') {", 1)[1] if "if (t.kind == 'app') {" in serving else ""
+if not app:
+    findings.append("the serving stage has no second pass for apps: the mirror's exceptions would excuse the app's OWN layers")
+else:
+    if not re.search(r"pullAndScan\([^\n]*, false, \"\$\{n\}\.full\"", app):
+        findings.append("an app is not scanned a second time WITHOUT the exceptions: its own layers could be excused by a base's measurement")
+    if "crane config \"$ref\"" not in app or "$APP_FROMS" not in app:
+        findings.append("the base's layers are not read from the app's FROMs")
+    if not re.search(r"sh image-watch/ledger\.sh --inherit \"ledger-in/\$N_SCAN\.txt\" \"ledger-in/\$N_SCAN\.full\"", app):
+        findings.append("the two scans of an app are not merged by ledger.sh --inherit")
 if not re.search(r"if \(t\.unreadable\)", serving):
     findings.append("a repo that could not be cloned is scanned anyway instead of left unmeasured")
 ledger = src[src.index("stage('ledger')"):src.index("stage('publish')")]

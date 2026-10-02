@@ -773,7 +773,16 @@ contract in `orgs/` names, the digest its `k8s/overlays/dev/kustomization.yaml`
 deploys (the one the app's pipeline wrote, and ArgoCD applies), and the
 morning scan and the books (§4.1) cover it like any other image, with
 `KIND=app` and the app's repo as who fixes it. It reads with
-`github-token` and never pushes. What it still does not see: an image
+`github-token` and never pushes. The mirror's exceptions
+(`trivyignore.yaml`) hold on the layers an app INHERITS from its base —
+the layers of the `FROM`s its Containerfiles pin by digest — and on no
+other: the app is scanned with and without them, and a finding the
+exceptions removed comes back unless its layer is the base's
+(`ledger.sh --inherit`). Without that, a CVE measured and excused in a
+base reads as overdue in every app built on it (found on alpha-arch,
+2026-10-02, CVE-2026-14456 in the portfolio); with the exceptions
+everywhere, an app's own layer would be excused by a measurement made on
+somebody else's binary. What it still does not see: an image
 started by hand outside ArgoCD (Kyverno refuses an unsigned one, and a
 signed one is one of these), and a repo that cannot be cloned that
 morning, which is `unmeasured` in the books, never clean.

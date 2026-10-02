@@ -12,6 +12,10 @@
 #
 #   sh ledger.sh <inventory> [<previous-ledger>]   writes the ledger
 #   sh ledger.sh --metrics <ledger>                  its series, for vmsingle
+#   sh ledger.sh --inherit <excused> <full> <base-diffids>
+#                       an APP's findings: the mirror's exceptions hold on
+#                       the layers the app inherits from its base, and only
+#                       there (see below)
 #
 # <inventory>, one image per line:  IMAGE|KIND|DIGEST|FIXER|FINDINGS
 #   KIND      mirror · base · app
@@ -71,6 +75,43 @@ DFC='function dfc(s,   y, m, d, era, yoe, doy) {
     doy = int((153 * (m > 2 ? m - 3 : m + 9) + 2) / 5) + d - 1
     return era * 146097 + yoe * 365 + int(yoe / 4) - int(yoe / 100) + doy - 719468
 }'
+
+# --inherit — what an app image owes, once the platform's exceptions are
+# applied where they belong.
+#
+# FOUND ON alpha-arch, 2026-10-02 (the first run of the series): the watch
+# scanned app images WITHOUT the mirror's trivyignore.yaml, so a CVE the
+# platform had MEASURED and excused in nodejs-distroless (CVE-2026-14456)
+# came back as OVERDUE in the portfolio built on it — the same bytes,
+# excused at the mirror and twenty days past due in the app. Every round
+# red, a critical alert every day, for nothing.
+#
+# Scanning apps WITH the exceptions would be the opposite mistake: an app
+# whose OWN layer installs the same package would have it excused by a
+# measurement made on someone else's binary. So the app is scanned twice
+# (<excused>: with the mirror's exceptions; <full>: without), and a finding
+# the exceptions removed comes back unless its layer is one of the base's
+# (<base-diffids>, one diff_id per line). With no base layers known (the
+# FROM could not be read), nothing is excused: reported, never hidden.
+#
+# stdout: the app's findings, in verdict.sh's template.
+if [ "${1:-}" = "--inherit" ]; then
+    EXC="${2:?usage: sh ledger.sh --inherit <excused> <full> <base-diffids>}"
+    FULL="${3:?full}"; BASE="${4:?base-diffids}"
+    for f in "$EXC" "$FULL"; do [ -r "$f" ] || { echo "ledger: no scan at $f" >&2; exit 3; }; done
+    [ -r "$BASE" ] || BASE=/dev/null
+    awk -F'|' -v exc="$EXC" -v base="$BASE" '
+        BEGIN {
+            while ((getline l < exc) > 0) if (l != "") { E[l] = 1; print l }
+            while ((getline l < base) > 0) if (l ~ /^sha256:/) B[l] = 1
+        }
+        $0 == "" || ($0 in E) { next }
+        NF != 9 { print "ledger: malformed finding line (9 fields expected): " $0 > "/dev/stderr"; bad = 1; exit 3 }
+        !($8 in B) { print }
+        END { if (bad) exit 3 }
+    ' "$FULL"
+    exit $?
+fi
 
 if [ "${1:-}" = "--metrics" ]; then
     L="${2:?usage: sh ledger.sh --metrics <ledger>}"

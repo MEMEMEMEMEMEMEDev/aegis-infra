@@ -49,6 +49,9 @@ red_9() { _sub "$S267" '    "k8s/base/platform/vuln-policy/kev.txt", "image-watc
 # a fresh exploited list pushes no zero: the stale alert outlives the cure by two days
 red_10() { _sub "$L267" '        if (!("exploited-list|kev" in SEEN)) printf' '        if (0) printf'; }
 
+# --inherit forgets the base: whatever the exceptions removed stays removed, the app's own layer included
+red_12() { _sub "$L267" '        !($8 in B) { print }' '        0 { print }'; }
+
 # ── controls ──
 control_1() { _sub "$L267" 'the watch could not scan it this morning' 'the watch could not look at it this morning'; }
 control_2() { _sub "$W267" "echo 'publish: no ledger this morning — nothing is committed'" "echo 'publish: no books this morning — nothing is committed'"; }

@@ -164,6 +164,26 @@ for sh in shells:
             findings.append(f"[{who}] a stale exploited list is not 1 in aegis_vuln_unmeasured")
         if 'aegis_vuln_findings{image="garage"' in met:
             findings.append(f"[{who}] an unmeasured image carries finding counts (a zero that was not measured)")
+    # --inherit: the mirror's exceptions hold on an app's INHERITED layers only.
+    with tempfile.TemporaryDirectory() as tmp:
+        exc = "CVE-2026-0000001|HIGH|libssl3t64|1|2|2026-09-29||sha256:base|t (debian 13.6)"
+        base_ex = "CVE-2026-0000014|HIGH|libssl3t64|1|2|2026-08-13||sha256:base|t (debian 13.6)"
+        own_ex = "CVE-2026-0000014|HIGH|libssl3|1|2|2026-08-13||sha256:own|t (alpine 3.24)"
+        open(os.path.join(tmp, "exc"), "w").write(exc + "\n")
+        open(os.path.join(tmp, "full"), "w").write("\n".join([exc, base_ex, own_ex]) + "\n")
+        open(os.path.join(tmp, "base"), "w").write("sha256:base\n")
+        env = {"PATH": os.environ["PATH"]}
+        p = subprocess.run(sh + [LEDGER, "--inherit", "exc", "full", "base"], capture_output=True, text=True, env=env, cwd=tmp)
+        got = p.stdout.splitlines()
+        if p.returncode != 0 or got != [exc, own_ex]:
+            findings.append(f"[{who}] --inherit does not keep an excused finding excused on the base's layer and back on the app's own (got {got})")
+        p = subprocess.run(sh + [LEDGER, "--inherit", "exc", "full", "nowhere"], capture_output=True, text=True, env=env, cwd=tmp)
+        if sorted(p.stdout.splitlines()) != sorted([exc, base_ex, own_ex]):
+            findings.append(f"[{who}] with no base layers known, --inherit excuses something: it has to report, never hide")
+        open(os.path.join(tmp, "full2"), "w").write("broken|line\n")
+        p = subprocess.run(sh + [LEDGER, "--inherit", "exc", "full2", "base"], capture_output=True, text=True, env=env, cwd=tmp)
+        if p.returncode != 3:
+            findings.append(f"[{who}] --inherit over a malformed scan line exits {p.returncode}, not 3: an unjudged scan reads as judged")
     scope.append(who)
 
 # ── the watch ──

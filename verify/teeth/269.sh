@@ -20,8 +20,8 @@ red_2() { _sub "$W269" '                  /^[[:space:]]*newName:/ { n = $0; sub(
 # a never-built app is scanned as if it ran
 red_3() { _sub "$W269" "              if (dg ==~ /sha256:0{64}/) {" "              if (false) {"; }
 
-# an app is scanned with the mirror's exceptions
-red_4() { _sub "$W269" "            def r = pullAndScan(\"\${env.REGISTRY}/\${dst}\".toString(), t.kind == 'mirror'," "            def r = pullAndScan(\"\${env.REGISTRY}/\${dst}\".toString(), true,"; }
+# the watch as it was until 2026-10-02: apps scanned WITHOUT the mirror's exceptions (the portfolio's false overdue)
+red_4() { _sub "$W269" "            def r = pullAndScan(\"\${env.REGISTRY}/\${dst}\".toString(), t.kind != 'base'," "            def r = pullAndScan(\"\${env.REGISTRY}/\${dst}\".toString(), t.kind == 'mirror',"; }
 
 # a repo that could not be cloned is scanned anyway
 red_5() { _sub "$W269" '            if (t.unreadable) {' '            if (false) {'; }
@@ -45,6 +45,14 @@ red_9() { _sub "$W269" "            def series = []
 
 # the scan's file is found by List.indexOf again
 red_10() { _sub "$W269" '                                "${n}.txt".toString())' '                                "${TARGETS.indexOf(t)}.txt".toString())'; }
+
+# the other mistake: apps scanned only WITH the exceptions — an app's own layer excused by a base's measurement
+red_11() { _sub "$W269" "            if (t.kind == 'app') {
+              // FOUND ON alpha-arch, 2026-10-02" "            if (false) {
+              // FOUND ON alpha-arch, 2026-10-02"; }
+
+# the clone stops saying the FROMs: no layer is known as inherited
+red_12() { _sub "$W269" "                      awk 'toupper(\$1) == \"FROM\" { for (i = 2; i <= NF; i++) if (\$i ~ /@sha256:[0-9a-f]+\$/) print \"FROM\", \$i }' \"\$cf\"" "                      :"; }
 
 # ── controls ──
 control_1() { _sub "$W269" "echo 'apps: no contract in orgs/ names a repo — no tenant image runs on this instance'" "echo 'apps: no contract names a repo — nothing of a tenant runs here'"; }
