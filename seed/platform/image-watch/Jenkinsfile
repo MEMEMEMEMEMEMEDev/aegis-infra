@@ -40,15 +40,14 @@
 // there, and the tenants' builds read the list through the ConfigMap
 // ArgoCD makes of it.
 //
-// THE ONE GAP IT LEAVES OPEN (S11 of docs/protocols/images.md)
-// It watches what is MIRRORED and the BASES — not the application images
-// that actually run in the tenants. An app image built last month from a
-// then-clean base carries whatever that base carried, and this job does
-// not open it. v1 accepts that on purpose: the app images are rebuilt by
-// their own pipelines when the base's digest is propagated into their
-// FROM, and that propagation is what the base rebuild triggers. The
-// protocol names the gap so nobody mistakes "the watch is green" for
-// "the tenants are clean".
+// WHAT RUNS IN THE TENANTS (S11 of docs/protocols/images.md, closed
+// 2026-10-02). Until then the watch looked at what is MIRRORED and at the
+// BASES, never at the app images that actually run: an image built last
+// month from a then-clean base carried whatever that base carried, and
+// nobody re-opened it. Stage `apps` reads, for every repo a contract in
+// orgs/ names, the digest its overlay deploys, and the serving stage
+// scans it like any other image. Read-only: the token clones, never
+// pushes.
 //
 // THE SCHEDULE IS NOT HERE ON PURPOSE. A declarative `triggers { cron }`
 // only registers after the job's first run; the job-dsl in
@@ -457,6 +456,129 @@ spec:
       }
     }
 
+    stage('apps') {
+      // What RUNS in the tenants (S11 of docs/protocols/images.md, closed
+      // 2026-10-02). An app image is base + its own layers, built the day
+      // it was pushed; the CVEs published since were nobody's to see. The
+      // image that runs is the one the app's own pipeline wrote by digest
+      // into k8s/overlays/dev/kustomization.yaml (`desplegar`) and ArgoCD
+      // deploys from there — so that file, in each repo an organization's
+      // contract names, is what is read: the same file the tenant's own
+      // scan reads as «what runs today».
+      //
+      // Read with `github-token`, the credential base-images already uses
+      // to write into these same repos; here it only CLONES (depth 1) and
+      // nothing is ever pushed. A repo that cannot be cloned, or whose
+      // overlay still carries the 64 zeros of a never-built app, is said
+      // and skipped: there is no image of it to look at.
+      steps {
+        script {
+          def raw = sh(returnStdout: true, script: '''
+            set -e
+            for f in orgs/*.yaml; do
+              [ -f "$f" ] || continue
+              org="$(basename "$f" .yaml)"
+              sed -n 's/^[[:space:]]*-\\{0,1\\}[[:space:]]*repo:[[:space:]]*\\([^[:space:]#]*\\).*/\\1/p' "$f" \
+                | tr -d '"'"'"'"' | sed "s|^|$org |"
+            done
+          ''').trim()
+          if (!raw) {
+            echo 'apps: no contract in orgs/ names a repo — no tenant image runs on this instance'
+            return
+          }
+          def repos = []
+          for (line in raw.split('\n')) {
+            def p = line.trim().split(/\s+/)
+            if (p.size() != 2) { continue }
+            def slug = p[1]
+              .replaceFirst(/^git@github\.com:/, '')
+              .replaceFirst(/^https?:\/\//, '')
+              .replaceFirst(/^github\.com\//, '')
+              .replaceFirst(/\.git$/, '')
+            if (!(p[0] ==~ /[a-z0-9][a-z0-9-]*/) || !(slug ==~ /[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/)) {
+              echo "NOTICE: orgs/${p[0]}.yaml names a repo I cannot read as <owner>/<repo>: ${p[1]} — not watched"
+              continue
+            }
+            if (!repos.find { it.slug == slug }) { repos << [org: p[0], slug: slug] }
+          }
+          for (r in repos) {
+            env.REPO_URL = "https://github.com/${r.slug}.git"
+            def out = ''
+            withCredentials([usernamePassword(
+              credentialsId: 'github-token',
+              usernameVariable: 'GH_USER',
+              passwordVariable: 'GH_TOKEN')]) {
+              // SINGLE quotes: the shell expands $GH_TOKEN, not Groovy.
+              out = sh(returnStdout: true, script: '''
+                set -e
+                SCRATCH="${WORKSPACE}/.apps"
+                rm -rf "${SCRATCH}"
+                export GIT_CONFIG_GLOBAL="${WORKSPACE}/.gitconfig-apps"
+                rm -f "${GIT_CONFIG_GLOBAL}"
+                git config --global --add safe.directory '*'
+                git config --global credential.helper \
+                  '!f() { echo username=x-access-token; echo password=$GH_TOKEN; }; f'
+                git clone --quiet --depth 1 "${REPO_URL}" "${SCRATCH}" 2>/dev/null || { echo "CLONE-FAILED"; exit 0; }
+                O="${SCRATCH}/k8s/overlays/dev/kustomization.yaml"
+                [ -f "$O" ] || { echo "NO-OVERLAY"; exit 0; }
+                # images: entries — the name (or newName) and the digest the
+                # pipeline wrote. One line per image: «ref digest».
+                awk '
+                  /^[a-zA-Z]/ { inimg = ($0 ~ /^images:/); next }
+                  !inimg { next }
+                  /^[[:space:]]*-[[:space:]]*name:/ { if (n != "" && d != "") print n, d; n = $0; sub(/.*name:[[:space:]]*/, "", n); d = ""; next }
+                  /^[[:space:]]*newName:/ { n = $0; sub(/.*newName:[[:space:]]*/, "", n); next }
+                  /^[[:space:]]*digest:/ { d = $0; sub(/.*digest:[[:space:]]*/, "", d); next }
+                  END { if (n != "" && d != "") print n, d }
+                ' "$O" | tr -d '"'"'"'"'
+              ''').trim()
+            }
+            sh 'rm -rf "${WORKSPACE}/.apps" "${WORKSPACE}/.gitconfig-apps" || true'
+            if (out == 'CLONE-FAILED') {
+              echo "NOTICE: ${r.slug} (organization ${r.org}) could not be cloned — what it runs is NOT measured this morning"
+              def img = "${r.org}/${r.slug.split('/')[1]}".toString()
+              TARGETS << [kind: 'app', image: img, dst: '', org: r.org, slug: r.slug, unreadable: true]
+              continue
+            }
+            if (out == 'NO-OVERLAY' || !out) {
+              echo "NOTICE: ${r.slug} has no k8s/overlays/dev/kustomization.yaml with an image — nothing of it is deployed by digest; not watched"
+              continue
+            }
+            for (l in out.split('\n')) {
+              def f = l.trim().split(/\s+/)
+              if (f.size() != 2) { continue }
+              def ref = f[0], dg = f[1]
+              if (dg ==~ /sha256:0{64}/) {
+                echo "NOTICE: ${r.slug}: ${ref} still carries the 64 zeros — never built, nothing runs"
+                continue
+              }
+              if (!(dg ==~ /sha256:[0-9a-f]{64}/) || !ref.startsWith("${env.REGISTRY}/")) {
+                echo "NOTICE: ${r.slug}: ${ref}@${dg} is not an internal image by digest — not watched (Kyverno would not admit it either)"
+                continue
+              }
+              def name = ref.substring("${env.REGISTRY}/".length())
+              if (!(name ==~ /[A-Za-z0-9][A-Za-z0-9._\/-]*/)) {
+                echo "NOTICE: ${r.slug}: an image name I cannot turn into a label: ${name}"
+                continue
+              }
+              def img = "${r.org}/${name}".toString()
+              if (TARGETS.find { it.image == img }) { continue }
+              TARGETS << [kind: 'app', image: img, dst: "${name}@${dg}".toString(), org: r.org, slug: r.slug]
+              STATE[img] = [failed: 0, not_mirrored: 0, crit: null, high: null,
+                            moved: null, candidate: null, digest: '', kind: 'app']
+              echo "  ${img}  (runs ${dg}, from ${r.slug})"
+            }
+          }
+          for (t in TARGETS) {
+            if (t.kind == 'app' && t.unreadable && !STATE.containsKey(t.image)) {
+              STATE[t.image] = [failed: 1, not_mirrored: 0, crit: null, high: null,
+                                moved: null, candidate: null, digest: '', kind: 'app']
+            }
+          }
+        }
+      }
+    }
+
     stage('serving') {
       // Question 1: is what we SERVE still clean, against today's DB?
       // The pull comes from the internal registry: it is the very bytes
@@ -466,6 +588,10 @@ spec:
           for (t in TARGETS) {
             def st = STATE[t.image]
             echo "================ ${t.image} ================"
+            if (t.unreadable) {
+              echo "NOTICE: ${t.slug} could not be cloned this morning — NOT measured"
+              continue
+            }
             def dst = t.dst
             if (t.kind == 'base') {
               // Which tag is "current" for a base: the highest of the
@@ -748,6 +874,8 @@ spec:
             if (st.not_mirrored == 1) { continue }   // not served: nothing to keep books on
             def fixer = (t.kind == 'base')
               ? "the base loop: image-watch rebuilds aegis-base-${t.member} and propagates it"
+              : (t.kind == 'app')
+              ? "the app: a build of ${t.slug} (its base is the loop's; its own dependencies are its repo's)"
               : "upstream: aegis image request ${t.srcRepo}${t.srcTag ? ':' + t.srcTag : ''} --bump once upstream moves, or a dated exception"
             // st.crit is set only by a serving scan that completed: the
             // upstream stage may mark the image failed afterwards for a

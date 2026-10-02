@@ -743,20 +743,20 @@ on 2026-08-26.
 
 ## 7. Known gaps, named on purpose
 
-**S11 — the watch scans bases and mirrors, not the app images that
-actually run in tenants.** An app's image is base + its own layer,
-and the watch never looks at the result. After a base rebuild, a
-consumer whose OWN layer fails the scan stays on the old base while
-the base's `ImageWithFixableVulns` clears: the base is clean, the
-propagation succeeded, and what runs is still vulnerable.
-The alert `BasePropagationFailed` covers the bump; the app's own build
-failure is visible in Jenkins and in the `jenkins-build` events only. Closing
-it means the watch enumerating what runs (the tenants' Deployments)
-instead of what is listed — a different job, deliberately not this
-one. What the `from-guard` stage (§2) narrows is the other end of the
-same gap: an app can no longer build on a base that is outside the
-loop, so «what the watch does not look at» and «what the platform
-serves» stopped being two different sets.
+**S11 — CLOSED 2026-10-02: the watch looks at what runs in the
+tenants too.** Until then it scanned bases and mirrors and never the app
+images built on them: an image built last month from a then-clean base
+carried whatever that base carried, and after a base rebuild a consumer
+whose OWN layer failed its scan stayed on the old base while the base's
+alert cleared. Now stage `apps` of image-watch reads, for every repo a
+contract in `orgs/` names, the digest its `k8s/overlays/dev/kustomization.yaml`
+deploys (the one the app's pipeline wrote, and ArgoCD applies), and the
+morning scan and the books (§4.1) cover it like any other image, with
+`KIND=app` and the app's repo as who fixes it. It reads with
+`github-token` and never pushes. What it still does not see: an image
+started by hand outside ArgoCD (Kyverno refuses an unsigned one, and a
+signed one is one of these), and a repo that cannot be cloned that
+morning, which is `unmeasured` in the books, never clean.
 
 - **The platform's own node consumer is in the loop too.** The bucket
   provisioner Job (`bucket.aprovisionador` in `services.yaml`) stands on

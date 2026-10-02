@@ -1,0 +1,96 @@
+"""Check 269 — the watch looks at what runs in the tenants.
+
+S11 of docs/protocols/images.md, named on purpose since v1: image-watch
+scanned what is MIRRORED and the BASES, never the app images that run.
+An app built on last month's base carried its CVEs, and after a base
+rebuild an app whose own layer failed its scan stayed on the old base
+while the base's alert cleared. plan/21 needs the books to cover what
+runs, so the gap is closed (2026-10-02).
+
+Stage `apps` of image-watch/Jenkinsfile reads, for every repo a contract
+in orgs/ names, the digest its k8s/overlays/dev/kustomization.yaml
+deploys. This sidecar takes the stage's two shell blocks AS GROOVY HANDS
+THEM TO THE SHELL (`\\\\` → `\\`), runs them over fixture contracts (a
+top-level repo and a service's, quoted and commented, a postgres with
+none) and a fixture overlay (name, newName, a never-built 64-zero entry),
+and asserts what comes out. Then it reads the stage: the clone is depth
+1 with the token never in argv, nothing is pushed, the serving stage
+scans apps without the mirror's ignorefile, and the books name the app's
+repo as who fixes it.
+"""
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+ROOT = os.path.abspath(sys.argv[1])
+W = os.path.join(ROOT, "seed", "platform", "image-watch", "Jenkinsfile")
+findings = []
+src = open(W, encoding="utf-8").read()
+if "stage('apps')" not in src:
+    print("image-watch has no `apps` stage: what runs in the tenants is never scanned (S11 open again)")
+    sys.exit(0)
+stage = src[src.index("stage('apps')"):src.index("stage('serving')")]
+blocks = re.findall(r"script: '''\n(.*?)'''", stage, re.S)
+if len(blocks) != 2:
+    print(f"the apps stage carries {len(blocks)} shell block(s), not 2 (the repos, the overlay): re-aim this check")
+    sys.exit(0)
+unesc = lambda t: t.replace("\\\\", "\\")  # noqa: E731
+repos_sh, clone_sh = unesc(blocks[0]), unesc(blocks[1])
+
+with tempfile.TemporaryDirectory() as tmp:
+    os.makedirs(os.path.join(tmp, "orgs"))
+    open(os.path.join(tmp, "orgs", "vet.yaml"), "w").write(
+        "version: 1\norganizacion: vet\nrepo: git@github.com:Own/vet-app.git\nservicios:\n"
+        "  - nombre: front\n    tipo: estatico\n    repo: \"github.com/Own/vet-front\"   # the front\n"
+        "  - nombre: db\n    tipo: postgres\n")
+    open(os.path.join(tmp, "orgs", "infra.yaml"), "w").write(
+        "version: 1\norganizacion: infra\nservicios:\n  - nombre: db\n    tipo: postgres\n")
+    p = subprocess.run(["sh", "-c", repos_sh], capture_output=True, text=True, cwd=tmp)
+    got = sorted(p.stdout.split("\n"))
+    want = sorted(["vet git@github.com:Own/vet-app.git", "vet github.com/Own/vet-front", ""])
+    if p.returncode != 0 or [g for g in got if g] != [w for w in want if w]:
+        findings.append(f"the repos of the contracts are not read as «org repo» lines (got {[g for g in got if g]})")
+
+    sc = os.path.join(tmp, ".apps", "k8s", "overlays", "dev")
+    os.makedirs(sc)
+    open(os.path.join(sc, "kustomization.yaml"), "w").write(
+        "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - ../../base\n"
+        "images:\n"
+        "  - name: registry.registry-system.svc.cluster.local:5000/vet-front\n"
+        "    digest: sha256:" + "1" * 64 + "\n"
+        "  - name: \"registry.registry-system.svc.cluster.local:5000/vet-api\"\n"
+        "    newName: registry.registry-system.svc.cluster.local:5000/vet-api2\n"
+        "    digest: sha256:" + "0" * 64 + "\n"
+        "patches: []\n")
+    tail = clone_sh[clone_sh.index('O="'):]
+    p = subprocess.run(["sh", "-c", 'SCRATCH="$PWD/.apps"\n' + tail], capture_output=True, text=True, cwd=tmp)
+    lines = [l for l in p.stdout.splitlines() if l.strip()]
+    if lines != ["registry.registry-system.svc.cluster.local:5000/vet-front sha256:" + "1" * 64,
+                 "registry.registry-system.svc.cluster.local:5000/vet-api2 sha256:" + "0" * 64]:
+        findings.append(f"the overlay's images are not read as «ref digest», newName winning over name (got {lines})")
+
+code = "\n".join(l for l in stage.splitlines() if not l.lstrip().startswith("//"))
+if not re.search(r'git clone --quiet --depth 1 "\$\{REPO_URL\}"', code):
+    findings.append("the apps stage does not clone each repo shallow from REPO_URL")
+if re.search(r"\bgit\s+(push|commit)\b", code):
+    findings.append("the apps stage pushes or commits: the watch only READS the tenants' repos")
+if "$GH_TOKEN" not in code or re.search(r'https://[^"\s]*\$\{?GH_TOKEN', code):
+    findings.append("the token is not handed to git through the credential helper (it would land in argv or a URL)")
+if not re.search(r"sha256:0\{64\}", code):
+    findings.append("a never-built app (64 zeros) would be scanned as if it ran")
+if "kind: 'app'" not in code:
+    findings.append("the apps found are not added to the watch's targets as KIND=app")
+serving = src[src.index("stage('serving')"):src.index("stage('upstream')")]
+if not re.search(r"pullAndScan\(\"\$\{env\.REGISTRY\}/\$\{dst\}\"\.toString\(\), t\.kind == 'mirror'", serving):
+    findings.append("the serving stage does not keep the mirror's ignorefile to mirrors: an app would be scanned with a third party's exceptions")
+if not re.search(r"if \(t\.unreadable\)", serving):
+    findings.append("a repo that could not be cloned is scanned anyway instead of left unmeasured")
+ledger = src[src.index("stage('ledger')"):src.index("stage('publish')")]
+if "(t.kind == 'app')" not in ledger or "a build of ${t.slug}" not in ledger:
+    findings.append("the books do not name the app's repo as who fixes an app's finding")
+
+for x in findings:
+    print(x)
+print("SCOPE: the apps stage's two shell blocks run over 2 fixture contracts and 1 overlay (name, newName, 64 zeros); clone, push, token, serving and books read")
