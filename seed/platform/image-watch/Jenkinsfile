@@ -99,8 +99,9 @@ def postEvents(List events) {
 // Pulls `ref` to watch.tar and scans it. Returns
 //   [ok: true,  crit: n, high: n, findings: [[cve, severity, pkg, installed, fixed], ...]]
 //   [ok: false]  when the pull or the scan did not run to completion.
-// With `keep` (a file name), the findings are left in ledger-in/<keep> in
-// verdict.sh's own template — the line the ledger is written from.
+// With `keep` (a file name; '' for none), the findings are left in
+// ledger-in/<keep> in verdict.sh's own template — the line the ledger is
+// written from.
 //
 // THE WRAP IS THE POINT. trivy is run with --exit-code 0 (findings are
 // not failures here) and a template that prints one line per CVE. A
@@ -121,7 +122,7 @@ def postEvents(List events) {
 // publication date and the path), counted in Groovy. FixedVersion may
 // carry a comma-separated list with spaces ("3.0.19-r0, 3.1.2-r0"): the
 // separator is `|`, never a space.
-def pullAndScan(String ref, boolean withIgnorefile, String keep = '') {
+def pullAndScan(String ref, boolean withIgnorefile, String keep) {
   def out = [ok: false, crit: 0, high: 0, findings: []]
   env.PULL_REF = ref
   env.WATCH_IGNOREFILE = withIgnorefile ? "${env.WORKSPACE}/mirror-images/trivyignore.yaml" : ''
@@ -179,7 +180,9 @@ def pullAndScan(String ref, boolean withIgnorefile, String keep = '') {
     for (line in readFile('watch-scan.txt').split('\n')) {
       def l = line.trim()
       if (!l) { continue }
-      def f = l.split(/\|/, -1)
+      // The last field (the scan target) is never empty, so the plain
+      // split keeps all nine: it is the same call this loop always made.
+      def f = l.split(/\|/)
       if (f.size() != 9) {
         // Not skipped quietly: a line the watch cannot read is a finding
         // it cannot count, and the image is reported as not measured.
@@ -499,7 +502,9 @@ spec:
               echo "NOTICE: orgs/${p[0]}.yaml names a repo I cannot read as <owner>/<repo>: ${p[1]} — not watched"
               continue
             }
-            if (!repos.find { it.slug == slug }) { repos << [org: p[0], slug: slug] }
+            def known = false
+            for (q in repos) { if (q.slug == slug) { known = true } }
+            if (!known) { repos << [org: p[0], slug: slug] }
           }
           for (r in repos) {
             env.REPO_URL = "https://github.com/${r.slug}.git"
@@ -526,9 +531,9 @@ spec:
                 awk '
                   /^[a-zA-Z]/ { inimg = ($0 ~ /^images:/); next }
                   !inimg { next }
-                  /^[[:space:]]*-[[:space:]]*name:/ { if (n != "" && d != "") print n, d; n = $0; sub(/.*name:[[:space:]]*/, "", n); d = ""; next }
-                  /^[[:space:]]*newName:/ { n = $0; sub(/.*newName:[[:space:]]*/, "", n); next }
-                  /^[[:space:]]*digest:/ { d = $0; sub(/.*digest:[[:space:]]*/, "", d); next }
+                  /^[[:space:]]*-[[:space:]]*name:/ { if (n != "" && d != "") print n, d; n = $0; sub(/.*name:[[:space:]]*/, "", n); sub(/[[:space:]].*/, "", n); d = ""; next }
+                  /^[[:space:]]*newName:/ { n = $0; sub(/.*newName:[[:space:]]*/, "", n); sub(/[[:space:]].*/, "", n); next }
+                  /^[[:space:]]*digest:/ { d = $0; sub(/.*digest:[[:space:]]*/, "", d); sub(/[[:space:]].*/, "", d); next }
                   END { if (n != "" && d != "") print n, d }
                 ' "$O" | tr -d '"'"'"'"'
               ''').trim()
@@ -546,7 +551,12 @@ spec:
             }
             for (l in out.split('\n')) {
               def f = l.trim().split(/\s+/)
-              if (f.size() != 2) { continue }
+              if (f.size() != 2) {
+                // Said, never skipped quietly: an app that is not in the
+                // books reads exactly like an app that is clean.
+                echo "NOTICE: ${r.slug}: a line of its overlay's images I cannot read as «name digest»: ${l.trim()} — that image is NOT watched"
+                continue
+              }
               def ref = f[0], dg = f[1]
               if (dg ==~ /sha256:0{64}/) {
                 echo "NOTICE: ${r.slug}: ${ref} still carries the 64 zeros — never built, nothing runs"
@@ -562,7 +572,9 @@ spec:
                 continue
               }
               def img = "${r.org}/${name}".toString()
-              if (TARGETS.find { it.image == img }) { continue }
+              def already = false
+              for (o in TARGETS) { if (o.image == img) { already = true } }
+              if (already) { continue }
               TARGETS << [kind: 'app', image: img, dst: "${name}@${dg}".toString(), org: r.org, slug: r.slug]
               STATE[img] = [failed: 0, not_mirrored: 0, crit: null, high: null,
                             moved: null, candidate: null, digest: '', kind: 'app']
@@ -585,7 +597,11 @@ spec:
       // a tenant would receive, not what upstream serves under that tag.
       steps {
         script {
+          // `n` is the target's place in TARGETS: the ledger stage counts
+          // the same way and finds each scan under the same number.
+          int n = -1
           for (t in TARGETS) {
+            n += 1
             def st = STATE[t.image]
             echo "================ ${t.image} ================"
             if (t.unreadable) {
@@ -663,7 +679,7 @@ spec:
             // the watch must see the image the way the mirror saw it.
             // The bases we own have no exceptions, by construction.
             def r = pullAndScan("${env.REGISTRY}/${dst}".toString(), t.kind == 'mirror',
-                                "${TARGETS.indexOf(t)}.txt".toString())
+                                "${n}.txt".toString())
             if (!r.ok) {
               st.failed = 1
               continue
@@ -757,7 +773,7 @@ spec:
             // The candidate by digest, so that what is scanned is what
             // was seen — the tag could move again between the HEAD and
             // the pull.
-            def r = pullAndScan("${t.srcRepo}:${t.srcTag}@${upstream}".toString(), true)
+            def r = pullAndScan("${t.srcRepo}:${t.srcTag}@${upstream}".toString(), true, '')
             if (!r.ok) {
               st.failed = 1
             } else {
@@ -869,7 +885,9 @@ spec:
       steps {
         script {
           def inv = []
+          int n = -1
           for (t in TARGETS) {
+            n += 1
             def st = STATE[t.image]
             if (st.not_mirrored == 1) { continue }   // not served: nothing to keep books on
             def fixer = (t.kind == 'base')
@@ -880,7 +898,7 @@ spec:
             // st.crit is set only by a serving scan that completed: the
             // upstream stage may mark the image failed afterwards for a
             // lookup that has nothing to do with what is served.
-            def file = (st.crit != null) ? "${env.WORKSPACE}/ledger-in/${TARGETS.indexOf(t)}.txt" : ''
+            def file = (st.crit != null) ? "${env.WORKSPACE}/ledger-in/${n}.txt" : ''
             inv << "${t.image}|${t.kind}|${st.digest}|${fixer}|${file}".toString()
           }
           sh 'mkdir -p ledger-in'
@@ -895,7 +913,12 @@ spec:
                 sh image-watch/ledger.sh ledger-in/inventory.txt image-watch/ledger.txt > ledger.new
               sh image-watch/ledger.sh --metrics ledger.new > ledger.prom
               echo "-- the books this morning (clean images omitted):"
-              grep -v '^#' ledger.new | grep -v '^clean|' | sed 's/^/   /' || echo "   nothing: every image looked at is clean"
+              OWED=$(grep -v '^#' ledger.new | grep -vc '^clean|') || true
+              if [ "${OWED:-0}" -gt 0 ]; then
+                grep -v '^#' ledger.new | grep -v '^clean|' | sed 's/^/   /'
+              else
+                echo "   nothing: every image looked at is clean"
+              fi
             ''')
           }
           if (lrc != 0) {
@@ -903,7 +926,11 @@ spec:
             currentBuild.result = 'UNSTABLE'
             LEDGER_WRITTEN = 0
           } else {
-            LEDGER_METRICS = readFile('ledger.prom').split('\n').findAll { it.trim() }
+            def series = []
+            for (line in readFile('ledger.prom').split('\n')) {
+              if (line.trim()) { series << line.trim() }
+            }
+            LEDGER_METRICS = series
             LEDGER_WRITTEN = 1
           }
         }

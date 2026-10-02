@@ -58,8 +58,8 @@ with tempfile.TemporaryDirectory() as tmp:
     open(os.path.join(sc, "kustomization.yaml"), "w").write(
         "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - ../../base\n"
         "images:\n"
-        "  - name: registry.registry-system.svc.cluster.local:5000/vet-front\n"
-        "    digest: sha256:" + "1" * 64 + "\n"
+        "  - name: registry.registry-system.svc.cluster.local:5000/vet-front   # the front\n"
+        "    digest: sha256:" + "1" * 64 + "   # written by build 7\n"
         "  - name: \"registry.registry-system.svc.cluster.local:5000/vet-api\"\n"
         "    newName: registry.registry-system.svc.cluster.local:5000/vet-api2\n"
         "    digest: sha256:" + "0" * 64 + "\n"
@@ -69,7 +69,7 @@ with tempfile.TemporaryDirectory() as tmp:
     lines = [l for l in p.stdout.splitlines() if l.strip()]
     if lines != ["registry.registry-system.svc.cluster.local:5000/vet-front sha256:" + "1" * 64,
                  "registry.registry-system.svc.cluster.local:5000/vet-api2 sha256:" + "0" * 64]:
-        findings.append(f"the overlay's images are not read as «ref digest», newName winning over name (got {lines})")
+        findings.append(f"the overlay's images are not read as «ref digest», newName winning over name and a trailing comment cut (got {lines})")
 
 code = "\n".join(l for l in stage.splitlines() if not l.lstrip().startswith("//"))
 if not re.search(r'git clone --quiet --depth 1 "\$\{REPO_URL\}"', code):
@@ -90,6 +90,24 @@ if not re.search(r"if \(t\.unreadable\)", serving):
 ledger = src[src.index("stage('ledger')"):src.index("stage('publish')")]
 if "(t.kind == 'app')" not in ledger or "a build of ${t.slug}" not in ledger:
     findings.append("the books do not name the app's repo as who fixes an app's finding")
+
+if "NOT watched" not in stage or not re.search(r"if \(f\.size\(\) != 2\) \{\s*\n(\s*//.*\n)*\s*echo \"NOTICE:", stage):
+    findings.append("a line of the overlay the stage cannot read is skipped without a word: an app absent from the books reads like a clean one")
+
+# THE WHOLE FILE, not only this stage: a pipeline from SCM runs in the
+# Groovy sandbox, and this Jenkinsfile was written with plain `for` loops
+# from its first day. What was added on 2026-10-02 used closure methods,
+# List.indexOf, a split with a limit and a default parameter — none of
+# them ever run on this job. None of them is needed, so none stays: what
+# the first run of the series meets is what already ran.
+whole = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("//"))
+for pat, what in ((r"\.\s*(find|findAll|findResult|any|every|each|collect|inject|sort|groupBy)\s*\{", "a closure-taking collection method"),
+                  (r"TARGETS\.indexOf\(", "TARGETS.indexOf()"),
+                  (r"\.split\([^()]*,\s*-?[0-9]+\)", "a split with a limit"),
+                  (r"^def \w+\([^)]*=[^)]*\)\s*\{", "a default parameter")):
+    hit = re.search(pat, whole, re.M)
+    if hit:
+        findings.append(f"image-watch uses {what} ({hit.group(0).strip()[:40]}): never run under this job's sandbox — write it as the rest of the file does")
 
 for x in findings:
     print(x)
