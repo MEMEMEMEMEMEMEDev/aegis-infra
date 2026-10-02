@@ -48,3 +48,10 @@ Consolidates the rules that lived scattered in v1 (settles C4/C7/C8).
     a verbal confirmation.
 12. On the host side: python3+pyyaml, not yq. Revert/cleanup steps
     NEVER with `&&`.
+13. What tofu prints is filtered by the wrapper (`tofu-apply.sh`, the
+    only door, A14): for `plan`, `apply` and `destroy` every attribute
+    value and every `[id=…]` reads «(not shown)». A provider decides
+    what it marks sensitive, not this platform: `random_id` marks
+    nothing, and its ID IS the tunnel's secret (printed by `aegis
+    destroy` dry, 2026-09-30). `AEGIS_TOFU_SHOW_VALUES=1` shows them,
+    by hand, on purpose.

@@ -220,9 +220,46 @@ fi
 # re-encrypt. stdout still passes straight through —the callers capture
 # `output -raw tunnel_id` with $()— because nothing is redirected here.
 log "TF_VARs injected (${#INJECTED[@]}). Delegating to tofu: $*"
+
+# ── what tofu PRINTS about a plan is not shown with its values ──────────
+# MEASURED 2026-09-30 on alpha-arch: `aegis destroy` without --yes printed
+# the tunnel's secret. The hashicorp/random provider does not mark
+# random_id's values as sensitive, so `plan -destroy` shows
+# `b64_std = "…" -> null` — and a random_id's ID is the secret itself, so
+# every `Creation complete … [id=…]` of phase 25's apply wrote it into the
+# install log too. Changing the resource type would recreate the tunnel on
+# every live instance; the class is «tofu prints state values», and this
+# wrapper is the one door every tofu call goes through (A14). So for
+# plan / apply / destroy what tofu prints goes through a filter: the
+# resource addresses, the actions, the summary and the errors stay; every
+# attribute's VALUE and every `[id=…]` become «(not shown)». `output` and
+# the rest are untouched (stdout is sacred: phase 25 captures
+# `output -raw`). To see the values by hand while debugging:
+# AEGIS_TOFU_SHOW_VALUES=1 — explicit, never a default.
+_SUB=""
+for _a in "$@"; do case "$_a" in -*) ;; *) _SUB="$_a"; break ;; esac; done
+_redact() {
+    awk '
+        inheredoc { if ($0 ~ /^[[:space:]]*EOT[[:space:]]*$/) { inheredoc = 0; print } ; next }
+        {
+            gsub(/\[id=[^]]*\]/, "[id=(not shown)]")
+            if (match($0, /^[[:space:]]*([-+~]|-\/\+|\+\/-)?[[:space:]]*"?[A-Za-z0-9_.-]+"?[[:space:]]+=[[:space:]]/)) {
+                head = substr($0, 1, RLENGTH)
+                if ($0 ~ /<<-?EOT[[:space:]]*$/) inheredoc = 1
+                print head "(not shown)"
+                next
+            }
+            print
+        }'
+}
 set +e
-tofu "$@"
-RC=$?
+if [[ "${AEGIS_TOFU_SHOW_VALUES:-0}" != 1 && "$_SUB" =~ ^(plan|apply|destroy)$ ]]; then
+    tofu "$@" 2>&1 | _redact
+    RC=${PIPESTATUS[0]}
+else
+    tofu "$@"
+    RC=$?
+fi
 set -e
 
 # Re-encrypt ONLY if the state changed. sops produces different text on
