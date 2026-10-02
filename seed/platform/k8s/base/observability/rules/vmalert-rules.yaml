@@ -337,6 +337,23 @@ data:
             annotations:
               summary: "image-watch COULD NOT EVALUATE {{ $labels.image }}"
               description: "COULD NOT EVALUATE ≠ clean: the watch's last run could not scan this image (pull, transport or trivy error), so its fixable count is not a measurement. Read the image-watch console for the error; the rest of the images ARE measured."
+          # The books (image-watch/ledger.sh, plan/21 §4.3). A morning
+          # whose ledger could not be written keeps YESTERDAY's books in
+          # the platform repo, and aegis vulns would read them as today's
+          # without this. The ladder over the books' own series is the
+          # next step; this one is the books' heartbeat.
+          - alert: VulnLedgerNotWritten
+            # The second leg: the watch ran (its heartbeat is there) and
+            # pushed no books series at all — absent, not false.
+            expr: >-
+              last_over_time(aegis_vuln_ledger_written[2d]) == 0
+              or (absent(last_over_time(aegis_vuln_ledger_written[2d]))
+                  and on() last_over_time(aegis_image_watch_timestamp_seconds[2d]) > 0)
+            for: 1h
+            labels: {severity: warning}
+            annotations:
+              summary: "image-watch could not write the vulnerability ledger"
+              description: "The watch ran but its books (image-watch/ledger.txt) could not be written this morning: what aegis vulns, aegis check and the console show is yesterday's. Read the `ledger` stage of the image-watch console (verdict.sh, the policy, or an inventory line it could not read)."
           # Build cadence, so 30d and no `for`: the series says «the
           # last rebuild of this base, seen from this consumer», and
           # until there is another rebuild that is the truth.

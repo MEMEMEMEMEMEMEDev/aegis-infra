@@ -40,6 +40,10 @@ INSTANCE_OWNS = (
     "k8s/base/platform/argocd-secrets/secret-generator.yaml",
     # hand-written content the operator edits (the seed ships them empty)
     "k8s/base/ai-system/prompts.yaml", "mirror-images/trivyignore.yaml", "ai/tasks.yaml",
+    # rewritten by image-watch every morning (stage `publish`): the seed's
+    # copy of the exploited list is only as fresh as the release, and
+    # bringing it over would roll the instance's list back by weeks
+    "k8s/base/platform/vuln-policy/kev.txt", "image-watch/ledger.txt",
 )
 # MIXED: the seed ships the structure and the init's phases APPEND to
 # it (a secret entry per phase, a resource the phase turns on). Neither

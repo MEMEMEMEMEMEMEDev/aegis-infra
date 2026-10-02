@@ -611,6 +611,41 @@ same questions without the alerts:
 | `aegis_trivyignore_expires_in_seconds{id}` | exception; negative = already expired; no series = no exceptions, which is health |
 | `aegis_image_watch_timestamp_seconds` | run — the heartbeat |
 
+### 4.1 The books (since 2026-10-02)
+
+The door lets a finding in as **debt** with a due date (§1.1); the
+watch keeps the books of that debt. Every morning it writes
+`image-watch/ledger.txt` (by `image-watch/ledger.sh`, through the same
+`verdict.sh` the door uses, so the two never disagree about a date) and
+commits it to this repo **only when it changed**, together with CISA's
+exploited-in-the-wild list (`k8s/base/platform/vuln-policy/kev.txt`),
+which it fetches fresh — that commit is what carries the list into the
+ConfigMap the tenants' builds read. The commit may touch those two files
+and nothing else, or nothing is pushed.
+
+One line per finding of what is served:
+`STATE|IMAGE|KIND|DIGEST|CVE|SEVERITY|PKG|INSTALLED|FIXED|PKGPATH|SINCE|CLOCK|DUE|FIXER`.
+
+| state | it means |
+|---|---|
+| `clean` | scanned this morning, nothing found — one line per image, so «looked at and clean» never reads like «not in the books» |
+| `debt` | inside its window (critical 15 days, high 30, from the CVE's publication); `DUE` is the day it closes |
+| `overdue` | past `DUE`. Nothing stops; it is said every day |
+| `exploited` | on the exploited-in-the-wild list: no window at all |
+| `unmeasured` | the image (or the exploited list itself, when it is older than `kev_max_age_days`) could not be looked at. Never clean |
+| `excused` | an exception in force in `trivyignore.yaml`; `CLOCK` says its class (`measured` · `accepted`), `DUE` the day it lapses |
+
+`SINCE` is the CVE's publication day; when trivy's database has none,
+it is the day the watch first saw the finding (`CLOCK=first-seen`), kept
+from one morning's books to the next so the window does not restart.
+
+The series of the books: `aegis_vuln_findings{image,kind,state}` with
+`state` in `debt`, `due_soon` (the last third of the window, carved out of
+debt), `overdue`, `exploited`, explicit zeros included;
+`aegis_vuln_unmeasured{image,kind}`; `aegis_vuln_excused{class}`; and
+`aegis_vuln_ledger_written` (0 = the books could not be written this
+morning, and yesterday's stay).
+
 `base-images` publishes `aegis_build_*{image="aegis-base-<member>"}`
 like any build, plus `aegis_base_propagation_failed{image,repo}` and
 `aegis_base_propagated_timestamp_seconds{image,repo}` per consumer.
