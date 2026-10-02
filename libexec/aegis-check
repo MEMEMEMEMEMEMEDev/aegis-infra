@@ -1007,11 +1007,27 @@ except OSError as e:
 
 # job -> (owner, repo). From the SAME file that aegis-webhook and the CI
 # quota use: a new repo enters on its own, without touching this script.
-jobs = re.findall(
-    r"multibranchPipelineJob\('([^']+)'\).*?repoOwner\('([^']+)'\)\s*\n\s*repository\('([^']+)'\)",
-    text, re.S)
+#
+# EACH JOB READ INSIDE ITS OWN BLOCK (2026-10-02, alpha-debian). The first
+# reading was one regex with `.*?` between the job's name and its repo, and
+# on an instance with AI=no the ai-gateway job carries `repository('')`: the
+# regex, wanting a non-empty repo, stretched to the NEXT job's — so the AI
+# job was judged against the portfolio's repo («no build at all») and the
+# portfolio's own job was never looked at. The text is cut at every job
+# declaration, and a job with no repo has no push to build: said, skipped.
+starts = [(m.start(), m.group(1)) for m in re.finditer(r"multibranchPipelineJob\('([^']+)'\)", text)]
+jobs, inert = [], []
+for i, (pos, job) in enumerate(starts):
+    block = text[pos:starts[i + 1][0] if i + 1 < len(starts) else len(text)]
+    m = re.search(r"repoOwner\('([^']*)'\)\s*\n\s*repository\('([^']*)'\)", block)
+    if not m or not m.group(1) or not m.group(2):
+        inert.append(job)
+        continue
+    jobs.append((job, m.group(1), m.group(2)))
+for job in inert:
+    print(f"NOTE: {job} names no repository (a lane this instance has switched off): no push to build")
 if not jobs:
-    print("NOT EVALUATED: no multibranch job in the values.yaml"); sys.exit(2)
+    print("NOT EVALUATED: no multibranch job with a repository in the values.yaml"); sys.exit(2)
 
 def jenkins(cmd):
     r = subprocess.run(["kubectl", "exec", "-n", "jenkins-system", "jenkins-0",
