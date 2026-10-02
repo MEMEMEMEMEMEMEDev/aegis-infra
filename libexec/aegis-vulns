@@ -51,7 +51,7 @@ import urllib.request
 _AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
     os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
-from aegis import cli, outcomes, paths    # noqa: E402
+from aegis import cli, outcomes, paths, window    # noqa: E402
 
 grey = "\033[90m"
 red = "\033[31m"
@@ -111,11 +111,19 @@ def read_books(platform):
     if not (platform / ".git").exists():
         src["why"] = f"{platform} is not a git checkout of the platform repo"
         return None, src
-    f = subprocess.run(["git", "-C", str(platform), "fetch", "--quiet"],
-                       capture_output=True, text=True, timeout=90)
-    src["fetched"] = f.returncode == 0
-    if f.returncode != 0:
-        src["fetch_error"] = (f.stderr or f.stdout).strip()[:200]
+    # A fetch that would stop to ASK (a credential prompt) is a fetch that
+    # failed: this runs inside the round and behind the console, where
+    # nobody is there to answer. And one that hangs is said, not waited on.
+    try:
+        f = subprocess.run(["git", "-C", str(platform), "fetch", "--quiet"],
+                           capture_output=True, text=True, timeout=90,
+                           env=dict(os.environ, GIT_TERMINAL_PROMPT="0"))
+        src["fetched"] = f.returncode == 0
+        if f.returncode != 0:
+            src["fetch_error"] = (f.stderr or f.stdout).strip()[:200]
+    except subprocess.TimeoutExpired:
+        src["fetched"] = False
+        src["fetch_error"] = "git fetch did not answer in 90s"
     r = subprocess.run(["git", "-C", str(platform), "rev-parse", "--abbrev-ref", "@{upstream}"],
                        capture_output=True, text=True)
     ref = r.stdout.strip() if r.returncode == 0 else "HEAD"
@@ -136,16 +144,21 @@ def read_books(platform):
 
 
 def _vm_query(query):
-    """One instant query against vmsingle by its ClusterIP, as the round
-    does. Raises when it cannot be asked: «could not ask» is never «0»."""
-    def kc(*a):
-        r = subprocess.run(["kubectl", "-n", "observability", "get", "svc", "vmsingle", "-o",
-                            "jsonpath={%s}" % a[0]], capture_output=True, text=True, timeout=20)
-        return r.stdout.strip() if r.returncode == 0 else ""
-    ip, port = kc(".spec.clusterIP"), kc(".spec.ports[0].port")
-    if not ip or ip == "None" or not port:
-        raise RuntimeError("the vmsingle Service was not found")
-    url = f"http://{ip}:{port}/api/v1/query?" + urllib.parse.urlencode({"query": query})
+    """One instant query against vmsingle, as the round asks it. Raises
+    when it cannot be asked: «could not ask» is never «0».
+
+    THE ADDRESS COMES FROM window.service_endpoint AND NOT FROM
+    .spec.clusterIP. vmsingle is a HEADLESS Service here (clusterIP is
+    the word `None`), and the first version of this function read only
+    the clusterIP: it answered «the vmsingle Service was not found» on
+    every instance, so `aegis vulns` exited 2 for ever, the round said
+    COULD NOT EVALUATE every time, and Security drew «could not look» —
+    found re-reading before the series, 2026-10-02. aegis-traffic and the
+    round already fell back to the endpoint; this is the same helper."""
+    where = window.service_endpoint("observability", "vmsingle")
+    if not where:
+        raise RuntimeError("vmsingle could not be found (neither a clusterIP nor an endpoint)")
+    url = f"http://{where}/api/v1/query?" + urllib.parse.urlencode({"query": query})
     with urllib.request.urlopen(url, timeout=10) as resp:
         res = json.load(resp)["data"]["result"]
     return float(res[0]["value"][1]) if res else None

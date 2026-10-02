@@ -16,8 +16,18 @@ remote, injects the watch's heartbeat, and asserts:
     silent watch, books never written → rc 2;
 And it RUNS the round's reader (the heredoc in libexec/aegis-check, fed
 by `aegis_exec vulns --json`) on those documents.
+
+THE HEARTBEAT IS READ THROUGH A HEADLESS SERVICE (2026-10-02, found
+re-reading before the series): vmsingle's clusterIP is the word `None`
+here, and the first aegis-vulns read only the clusterIP — so on every
+instance it could not read the watch and exited 2 for ever. The cases
+above inject the heartbeat and could not see it. So read_watch() is also
+RUN, with a `kubectl` that answers like the cluster does (clusterIP None,
+an endpoint) against a local HTTP server standing in for vmsingle.
 """
 import contextlib
+import http.server
+import threading
 import importlib.machinery
 import importlib.util
 import io
@@ -171,6 +181,39 @@ with tempfile.TemporaryDirectory() as tmp:
     if "TOTAL" not in read_round(doc) or "BAD" in read_round(doc):
         findings.append("the round does not reach its green on clean books")
 
+# ── the heartbeat, read the way the cluster serves it ──
+class _VM(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = json.dumps({"data": {"result": [{"metric": {}, "value": [0, "1790000000"]}]}}).encode()
+        self.send_response(200); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+
+    def log_message(self, *_a):
+        pass
+
+
+srv = http.server.HTTPServer(("127.0.0.1", 0), _VM)
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+with tempfile.TemporaryDirectory() as tmp:
+    kc = os.path.join(tmp, "kubectl")
+    with open(kc, "w") as f:
+        f.write("#!/bin/sh\ncase \"$*\" in\n"
+                "  *endpoints*) printf 127.0.0.1 ;;\n"
+                "  *clusterIP*) printf None ;;\n"
+                f"  *ports*) printf {srv.server_address[1]} ;;\n"
+                "  *) exit 1 ;;\nesac\n")
+    os.chmod(kc, 0o755)
+    old = os.environ["PATH"]
+    os.environ["PATH"] = tmp + os.pathsep + old
+    try:
+        w = load(tmp).read_watch()
+    finally:
+        os.environ["PATH"] = old
+        srv.shutdown()
+    cases += 1
+    if w.get("heartbeat") != 1790000000.0:
+        findings.append(f"with vmsingle headless (clusterIP None, an endpoint) the heartbeat is not read ({w.get('error') or w}): aegis vulns exits 2 on every instance")
+
 for x in findings:
     print(x)
-print(f"SCOPE: aegis vulns loaded against a bare remote and a clone, {cases} situations (no books, remote≠working tree, debt, overdue+exploited, unmeasured, silent, not written, unreadable heartbeat, clean); the round's reader run on each document")
+print(f"SCOPE: read_watch run through a headless Service; aegis vulns loaded against a bare remote and a clone, {cases} situations (no books, remote≠working tree, debt, overdue+exploited, unmeasured, silent, not written, unreadable heartbeat, clean); the round's reader run on each document")

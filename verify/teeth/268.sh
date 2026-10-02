@@ -32,6 +32,9 @@ red_6() { _sub "$C268" '            print(f"BAD|{img}: " + ", ".join(parts))' ' 
 # the round turns debt inside its window into a failure
 red_7() { _sub "$C268" '            print(f"NOTICE|{img}: {len(found)} known vulnerability(ies) inside the window, the next due {nxt}"' '            print(f"BAD|{img}: {len(found)} known vulnerability(ies) inside the window, the next due {nxt}"'; }
 
+# the heartbeat is looked for at the clusterIP alone: vmsingle is headless, and it is never found
+red_8() { _sub "$V268" '    where = window.service_endpoint("observability", "vmsingle")' '    where = None if window._kubectl("get", "svc", "-n", "observability", "vmsingle", "-o", "jsonpath={.spec.clusterIP}")[1] in ("", "None") else window.service_endpoint("observability", "vmsingle")'; }
+
 # ── controls ──
 control_1() { _sub "$V268" '"EXPLOITED in the wild: it has no window"' '"EXPLOITED in the wild: no window applies"'; }
 control_2() { _sub "$C268" "who fixes it: {s.get('fixer', '?')}" "fixed by: {s.get('fixer', '?')}"; }
