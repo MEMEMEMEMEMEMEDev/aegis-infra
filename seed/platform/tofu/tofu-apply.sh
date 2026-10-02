@@ -236,25 +236,76 @@ log "TF_VARs injected (${#INJECTED[@]}). Delegating to tofu: $*"
 # the rest are untouched (stdout is sacred: phase 25 captures
 # `output -raw`). To see the values by hand while debugging:
 # AEGIS_TOFU_SHOW_VALUES=1 — explicit, never a default.
+#
+# TOFU COLOURS WHAT IT PRINTS EVEN INTO A PIPE (measured 2026-10-02,
+# OpenTofu 1.12.6: `+ input = "…"` arrives as `ESC[32m+ESC[0m input = "…"`),
+# and the first version of this filter, which matched plain lines, let the
+# value through — its check passed against a fake tofu that printed no
+# colour. So `-no-color` is put right after the subcommand (not at the end:
+# after a positional plan file it would be read as a second positional),
+# and the filter strips whatever escape codes still arrive before it looks.
+#
+# python3 AND NOT awk (this wrapper already needs python3 twice above):
+# mawk — the awk of Ubuntu and Debian — holds a pipe's input until a block
+# fills, so a minute-long apply would print nothing and then everything;
+# and tofu's prompt («Enter a value: ») ends without a newline, which a
+# line filter never lets out: an apply by hand would sit mute, waiting for
+# an answer to a question nobody saw. This one writes each line as it
+# arrives and lets the prompt through.
 _SUB=""
 for _a in "$@"; do case "$_a" in -*) ;; *) _SUB="$_a"; break ;; esac; done
-_redact() {
-    awk '
-        inheredoc { if ($0 ~ /^[[:space:]]*EOT[[:space:]]*$/) { inheredoc = 0; print } ; next }
-        {
-            gsub(/\[id=[^]]*\]/, "[id=(not shown)]")
-            if (match($0, /^[[:space:]]*([-+~]|-\/\+|\+\/-)?[[:space:]]*"?[A-Za-z0-9_.-]+"?[[:space:]]+=[[:space:]]/)) {
-                head = substr($0, 1, RLENGTH)
-                if ($0 ~ /<<-?EOT[[:space:]]*$/) inheredoc = 1
-                print head "(not shown)"
-                next
-            }
-            print
-        }'
-}
+_REDACT_PY='
+import os, re, sys
+ansi = re.compile(rb"\x1b\[[0-9;?]*[A-Za-z]")
+attr = re.compile(rb"^(\s*(?:[-+~]|-/\+|\+/-)?\s*\"?[A-Za-z0-9_.-]+\"?\s+=\s)")
+ident = re.compile(rb"\[id=[^\]]*\]")
+out = sys.stdout.buffer
+heredoc = False
+def line(raw):
+    global heredoc
+    s = ansi.sub(b"", raw)
+    if heredoc:
+        if s.strip() == b"EOT":
+            heredoc = False
+            return s
+        return None
+    s = ident.sub(b"[id=(not shown)]", s)
+    m = attr.match(s)
+    if m:
+        if re.search(rb"<<-?EOT\s*$", s):
+            heredoc = True
+        return m.group(1) + b"(not shown)"
+    return s
+pending = b""
+while True:
+    chunk = os.read(0, 65536)
+    if not chunk:
+        break
+    pending += chunk
+    parts = pending.split(b"\n")
+    pending = parts.pop()
+    for p in parts:
+        r = line(p)
+        if r is not None:
+            out.write(r + b"\n")
+    if ansi.sub(b"", pending).rstrip().endswith(b"Enter a value:"):
+        out.write(ansi.sub(b"", pending))
+        pending = b""
+    out.flush()
+if pending:
+    r = line(pending)
+    if r is not None:
+        out.write(r)
+out.flush()
+'
 set +e
 if [[ "${AEGIS_TOFU_SHOW_VALUES:-0}" != 1 && "$_SUB" =~ ^(plan|apply|destroy)$ ]]; then
-    tofu "$@" 2>&1 | _redact
+    _ARGS=() ; _PLACED=0
+    for _a in "$@"; do
+        _ARGS+=("$_a")
+        if [[ $_PLACED -eq 0 && "$_a" == "$_SUB" ]]; then _ARGS+=(-no-color); _PLACED=1; fi
+    done
+    tofu "${_ARGS[@]}" 2>&1 | python3 -u -c "$_REDACT_PY"
     RC=${PIPESTATUS[0]}
 else
     tofu "$@"
