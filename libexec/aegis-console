@@ -367,6 +367,9 @@ def listing():
 SOURCES = ("org list", "repos list", "traffic show", "capacity show",
            "builds show --last 60", "check", "edge check", "data remote status",
            "quota list",
+           # The books of known vulnerabilities (image-watch's ledger),
+           # drawn on Security and as a chip on each project's card.
+           "vulns",
            # The two the Updates page draws. `update status` reads a file
            # and is instant; `update inventory` asks fifty-odd public
            # registries, and it leans on the six-hour cache the daily

@@ -67,6 +67,11 @@ READ_ONLY = {
     # not here, and are caught by the blunt half below if the console
     # ever builds a call to them out of variables.
     "update inventory", "update status",
+    # The books of known vulnerabilities (2026-10-02, plan/21 stage 7).
+    # `aegis vulns` runs a `git fetch` on the platform checkout — it moves
+    # the remote-tracking refs and nothing else: no working tree, no
+    # commit, no push, no cluster write. Its reading of vmsingle is a GET.
+    "vulns",
 }
 WRITES_FILES_HERE = {"org apply", "secret create", "quota add", "quota set"}
 ALLOWED = READ_ONLY | WRITES_FILES_HERE

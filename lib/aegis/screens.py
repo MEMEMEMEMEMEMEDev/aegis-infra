@@ -108,7 +108,7 @@ PAGES = (
     ("traffic", "Traffic", "/traffic", ("traffic show",)),
     ("storage", "Storage", "/storage", ("data remote status",)),
     ("plans", "Plans", "/plans", ("quota list",)),
-    ("security", "Security", "/security", ()),
+    ("security", "Security", "/security", ("vulns",)),
     ("machine", "Machine", "/machine", ("capacity show",)),
     ("health", "Health", "/health", ("check",)),
     ("updates", "Updates", "/updates", ("update inventory", "update status")),
@@ -475,6 +475,7 @@ def projects_of(readings, context=None):
     src = list(readings or []) + list(context or [])
     langs = languages_of(src)
     traffic = _per_org(src, "traffic:")
+    vulns = vulns_by_org(src) if reading_for(src, "vulns") is not None else None
     window = window_read(src)
     out = []
     for step in steps_of(reading_for(src, "org list")):
@@ -497,6 +498,9 @@ def projects_of(readings, context=None):
             "ai": step.get("ai"), "contract": step.get("contract"),
             "services": services, "traffic": traffic.get(org),
             "push": last_push(src, org, [{"nombre": s["name"]} for s in services]),
+            # None: the books were not read on this page; []: read, and
+            # no image of this project is in them.
+            "vulns": None if vulns is None else vulns.get(org, []),
             "window": window})
     return out
 
@@ -769,6 +773,10 @@ def _project_card(p):
         icons = '<span class="faint">no service declared</span>'
     push = p.get("push")
     state = worst({p["state"], state_of(push)} if push else {p["state"]})
+    vul = p.get("vulns")
+    if vul:
+        vstate = worst({state_of(st) for st in vul})
+        state = worst({state, vstate})
     # THE FOOT OF THE CARD, one line, segmented: each fact with its own
     # label, never one grey sentence. The operator read the old line
     # («plan mediana · bucket · 7 services») and could not tell what
@@ -784,6 +792,10 @@ def _project_card(p):
         extras.append(f'<span class="x" title="AI plan {_e(p["ai"])}">{_icon("ai")}</span>')
     if extras:
         foot.append(f'<span class="kv"><span class="k">also</span><span class="v">{"".join(extras)}</span></span>')
+    if vul:
+        owed = sum(len(st.get("findings") or []) for st in vul)
+        foot.append(f'<span class="kv" data-state="{vstate}"><span class="k">vulns</span>'
+                    f'<a class="v num" href="/security#vulns">{_pip(vstate)}{owed}</a></span>')
     domain = (f'<a class="host mono" href="https://{_e(p["domain"])}/" rel="noreferrer">'
               f'{_icon("globe")}{_e(p["domain"])}</a>' if p["domain"] else
               '<span class="host mono faint">no public domain</span>')
@@ -1702,11 +1714,137 @@ def _signing_summary(reading):
     return _section(reading, "Signed and scanned", body, states, "signing", icon="shield")
 
 
+# ── known vulnerabilities ────────────────────────────────────────────
+# THE BOOKS image-watch keeps (plan/21 §4.3), read through `aegis vulns`
+# — the same document the round reads, so this page and `aegis check`
+# cannot disagree about a date.
+#
+# DEBT INSIDE ITS WINDOW IS DRAWN AS WHAT ITS STEP IS: `done`, which is
+# fine. The platform measured it and accepted it on purpose (plan/21 §2),
+# and what this page adds is the date, in words: «due 29 Oct». Colouring
+# it `attention` would be a state the document does not carry — the same
+# temptation the Updates page refused for «behind». The round's notice
+# for it reaches Security through the round's own section, above.
+# Overdue and exploited are `wrong`; an image nobody could scan is
+# `unseen`, and so is a silent watch.
+def vulns_by_org(readings):
+    """The app images of the books, by organization (KIND=app is named
+    `<org>/<image>` by the watch)."""
+    out = {}
+    for st in steps_of(reading_for(readings, "vulns")):
+        name = st.get("step", "")
+        if name.startswith("image:") and st.get("kind") == "app" and "/" in name:
+            out.setdefault(name[len("image:"):].split("/", 1)[0], []).append(st)
+    return out
+
+
+def _due_words(f):
+    if f.get("state") == "exploited":
+        return "exploited in the wild: no window"
+    d = f.get("days_to_due")
+    if d is None:
+        return "no due date"
+    if d < 0:
+        return f"{-d} day(s) past due ({f.get('due')})"
+    return "due today" if d == 0 else f"due in {d} day(s), {f.get('due')}"
+
+
+def _vulns_section(reading):
+    if reading is None:
+        return ""
+    if blind(reading):
+        return _blind_section(reading, "Known vulnerabilities", "vulns", ident="vulns", icon="shield")
+    steps = steps_of(reading)
+    states = states_in(reading)
+    images = [st for st in steps if st.get("step", "").startswith("image:")]
+    others = [st for st in steps if not st.get("step", "").startswith("image:")
+              and st.get("step") != "books"]
+    books = next((st for st in steps if st.get("step") == "books"), None)
+    count = {"exploited": 0, "overdue": 0, "soon": 0, "window": 0}
+    for st in images:
+        for f in st.get("findings") or []:
+            if f.get("state") in ("exploited", "overdue"):
+                count[f["state"]] += 1
+            elif f.get("due_soon"):
+                count["soon"] += 1
+            else:
+                count["window"] += 1
+    clean = sum(1 for st in images if not st.get("findings") and state_of(st) == FINE)
+    facts = (f'<div class="facts-row head">{_fact("exploited", _num(count["exploited"]))}'
+             f'{_fact("past due", _num(count["overdue"]))}'
+             f'{_fact("due soon", _num(count["soon"]))}'
+             f'{_fact("inside the window", _num(count["window"]))}'
+             f'{_fact("images clean", _num(clean))}'
+             + (_fact("exceptions in force", _num(books.get("excused", 0))) if books else "")
+             + '</div>')
+    # What could not be looked at goes FIRST and by name: the watch, the
+    # books, the exploited list. Each is a row with its own state.
+    side = []
+    for st in others:
+        name, why = st.get("step", ""), st.get("why") or st.get("reason") or ""
+        words = {"watch": (f'the watch looked {st.get("age_hours")}h ago' if state_of(st) == FINE
+                           else f'the watch: {why}' + (f' ({st.get("age_hours")}h)' if st.get("age_hours") else "")),
+                 "exploited-list": f"the exploited-in-the-wild list: {why}",
+                 "remote": "the platform repo could not be fetched: read as the last fetch left it",
+                 "books-unreadable": f'{st.get("lines")} line(s) of the books cannot be read'}.get(name, f"{name}: {why}")
+        side.append(f'<li data-state="{state_of(st)}">{_pip(state_of(st))} {_e(words)}</li>')
+    rows = []
+    order = {WRONG: 0, UNSEEN: 1, FINE: 2}
+    owed_or_unseen = [st for st in images if st.get("findings") or state_of(st) != FINE]
+    for st in sorted(owed_or_unseen, key=lambda s: (order.get(state_of(s), 3), s.get("step", ""))):
+        img = st["step"][len("image:"):]
+        state = state_of(st)
+        kind = st.get("kind", "")
+        link = (f'<a class="mono" href="/projects/{_e(img.split("/", 1)[0])}">{_e(img)}</a>'
+                if kind == "app" else f'<span class="mono">{_e(img)}</span>')
+        found = st.get("findings") or []
+        if state == UNSEEN:
+            what = _e(st.get("why") or "could not be looked at")
+        else:
+            nxt = min((f.get("due") for f in found if f.get("due") not in (None, "", "?")
+                       and f.get("state") == "debt"), default=None)
+            ex = sum(1 for f in found if f.get("state") == "exploited")
+            ov = sum(1 for f in found if f.get("state") == "overdue")
+            win = len(found) - ex - ov
+            what = " · ".join(w for w in (
+                f"{ex} exploited in the wild" if ex else "",
+                f"{ov} past due" if ov else "",
+                f"{win} inside the window" + (f", next due {_e(nxt)}" if nxt else "") if win else "") if w)
+        cves = "".join(
+            f'<tr data-state="{WRONG if f.get("state") in ("exploited", "overdue") else FINE}">'
+            f'<td>{_pip(WRONG if f.get("state") in ("exploited", "overdue") else FINE)}</td>'
+            f'<td class="mono">{_e(f.get("severity"))}</td><td class="mono">{_e(f.get("cve"))}</td>'
+            f'<td class="mono">{_e(f.get("pkg"))} {_e(f.get("installed"))} → {_e(f.get("fixed"))}</td>'
+            f'<td class="note">since {_e(f.get("since"))}'
+            + (" (first seen)" if f.get("clock") == "first-seen" else "") +
+            f' · {_e(_due_words(f))}</td></tr>' for f in found)
+        detail = (f'<details class="cves"><summary>{_e(len(found))} finding(s)</summary>'
+                  f'<table class="rows"><tbody>{cves}</tbody></table>'
+                  f'<p class="note">Who fixes it: {_e(st.get("fixer", "?"))}. '
+                  f'<code class="mono">aegis vulns --image {_e(img)}</code></p></details>') if found else (
+                  f'<p class="note">Who fixes it: {_e(st.get("fixer", "?"))}.</p>' if st.get("fixer") else "")
+        rows.append(f'<tr data-state="{state}"><td>{_pip(state)}</td><td>{link}</td>'
+                    f'<td class="faint">{_e(kind)}</td><td>{what}</td></tr>'
+                    f'<tr class="more"><td></td><td colspan="3">{detail}</td></tr>')
+    table = (f'<table class="rows"><thead><tr><th></th><th>image</th><th>kind</th><th>what it owes</th>'
+             f'</tr></thead><tbody>{"".join(rows)}</tbody></table>' if rows else
+             f'<p class="empty" data-state="{FINE}">nothing owed: every image looked at is clean</p>')
+    body = (facts + (f'<ul class="tail plain">{"".join(side)}</ul>' if side else "") + table
+            + '<p class="note">A finding the platform lets in has a window from its publication: '
+              '15 days for a critical, 30 for a high. Inside it, nothing stops; past it, it is said '
+              'every day; one exploited in the wild has no window. '
+              '<code class="mono">aegis vulns</code> reads the same books.</p>')
+    if not images and not others:
+        states.add(UNSEEN)
+    return _section(reading, "Known vulnerabilities", body, states, "vulns", ident="vulns", icon="shield")
+
+
 def security(readings):
     v = verdict_of(readings)
     projects = projects_of(readings)
     parts = [_round_subset(reading_for(readings, "check"), "security"),
-             _signing_summary(reading_for(readings, "builds show"))]
+             _signing_summary(reading_for(readings, "builds show")),
+             _vulns_section(reading_for(readings, "vulns"))]
     org = reading_for(readings, "org list")
     if org is not None and not blind(org):
         parts.append(_section(org, "What each service may reach", _reach_table(projects),

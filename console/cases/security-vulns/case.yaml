@@ -1,0 +1,34 @@
+version: 1
+caso: security-vulns
+que: 'los libros de vulnerabilidades sobre las tres organizaciones: deuda en plazo
+  (python, shop-api), una vencida (shop-stock), una app sin medir (drop), imagenes
+  limpias y una excepcion medida'
+procedencia: sintetico
+por_que: ninguna instancia lleva todavia el libro de image-watch (etapa 6 de plan/21,
+  2026-10-02; la primera corrida del vigia nuevo es la serie de plan/22). vulns.json
+  lo produjo el `aegis vulns` real leyendo un libro escrito a mano con la forma de
+  image-watch/ledger.sh; org.json es el medido de instance-with-organizations
+producido_por:
+- comando: org list
+  documento: org.json
+  rc: 0
+- comando: vulns
+  documento: vulns.json
+  rc: 2
+medido_en: '2026-10-20T09:06:00-03:00'
+forma:
+  org.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+  vulns.json:
+    claves:
+    - rc
+    - steps
+    estados:
+    - already
+    - done
+    - not-evaluable
+    - wrong
