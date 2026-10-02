@@ -84,13 +84,16 @@ taken out.
 
    ┌───────────────────────────────────────────────────────────────┐
    │ image-watch  (cron H 6 * * *, declared in the job-dsl)        │
-   │ re-scans every mirror and every base against TODAY's DB;      │
-   │ asks whether each upstream tag moved and whether the          │
-   │ candidate is clean; checks trivyignore expiries.              │
-   │ NEVER blocks. Pushes metrics + events.                        │
+   │ re-scans every mirror, every base and every app image that    │
+   │ runs in a tenant against TODAY's DB; asks whether each        │
+   │ upstream tag moved and whether the candidate is clean;        │
+   │ checks trivyignore expiries.                                  │
+   │ NEVER blocks. Pushes metrics + events, and keeps the BOOKS:   │
+   │ each finding with its due date, committed to this repo with   │
+   │ the exploited-in-the-wild list when they change (§4.1).       │
    │ base with a fixable CVE  → fires base-images with those       │
    │                            members                            │
-   │ third party with one     → an alert; a human decides          │
+   │ third party with one     → the alert ladder; a human decides  │
    └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -572,18 +575,22 @@ appears written into the product, or if the verb ever pushes.
 Every day at `H 6 * * *` — the cron is in the job-dsl, not in the
 Jenkinsfile, so it exists the moment JCasC seeds the job and not
 after somebody's first manual run — the watch asks four questions
-about every mirrored image and every base aegis owns:
+about every mirrored image, every base aegis owns and, since
+2026-10-02, every app image a tenant runs (the digest each contract's
+repo deploys from its overlay; §7, S11):
 
 1. Against TODAY's vulnerability DB, does this image have a **fixable**
    CVE? (`--ignore-unfixed`: theoretical ones do not count.)
 2. Did the **upstream tag** move since we pinned it, and does the
-   candidate digest scan **clean**?
+   candidate digest scan **clean**? (Mirrors only: a base's upstream is
+   the apk index, an app's is its own repo.)
 3. Which `trivyignore.yaml` exceptions **expire** within the month?
 4. Could I actually **evaluate** this image today?
 
-It never blocks anything. It pushes metrics and events, and for a
-base aegis owns with a fixable CVE it fires `base-images` with those
-members — the same morning. Third parties are NEVER re-mirrored on
+It never blocks anything. It pushes metrics and events, keeps the
+books of what it found (§4.1) — the one thing it commits, to this repo,
+and only when they change — and for a base aegis owns with a fixable
+CVE it fires `base-images` with those members — the same morning. Third parties are NEVER re-mirrored on
 their own: that is a human's decision, and the watch gives it the
 three facts it needs.
 
@@ -616,6 +623,13 @@ same questions without the alerts:
 | `aegis_trivyignore_expires_in_seconds{id}` | exception; negative = already expired; no series = no exceptions, which is health |
 | `aegis_image_watch_timestamp_seconds` | run — the heartbeat |
 
+Because the watch commits to this repo every morning the books change,
+**a clone of it on the operator's machine goes stale overnight**. The
+commands that write here take the remote in first (`aegis image
+request`, `aegis image gc`, `aegis update`); before editing it by hand —
+a contract, an exception — `git pull --ff-only` in the clone, or the
+push is refused.
+
 ### 4.1 The books (since 2026-10-02)
 
 The door lets a finding in as **debt** with a due date (§1.1); the
@@ -647,7 +661,8 @@ from one morning's books to the next so the window does not restart.
 The series of the books: `aegis_vuln_findings{image,kind,state}` with
 `state` in `debt`, `due_soon` (the last third of the window, carved out of
 debt), `overdue`, `exploited`, explicit zeros included;
-`aegis_vuln_unmeasured{image,kind}`; and
+`aegis_vuln_unmeasured{image,kind}` (`image="exploited-list"` is the list
+itself: 1 too old to trust, 0 fresh); and
 `aegis_vuln_ledger_written` (0 = the books could not be written this
 morning, and yesterday's stay).
 

@@ -53,5 +53,8 @@ Consolidates the rules that lived scattered in v1 (settles C4/C7/C8).
     value and every `[id=…]` reads «(not shown)». A provider decides
     what it marks sensitive, not this platform: `random_id` marks
     nothing, and its ID IS the tunnel's secret (printed by `aegis
-    destroy` dry, 2026-09-30). `AEGIS_TOFU_SHOW_VALUES=1` shows them,
-    by hand, on purpose.
+    destroy` dry, 2026-09-30). tofu is told `-no-color` there, and the
+    filter strips escape codes anyway: tofu colours its lines even into
+    a pipe, and a filter that expects plain text lets the value through
+    (measured 2026-10-02). `AEGIS_TOFU_SHOW_VALUES=1` shows them, by
+    hand, on purpose.

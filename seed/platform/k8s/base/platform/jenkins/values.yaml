@@ -192,7 +192,7 @@ controller:
           - script: >
               pipelineJob('image-watch') {
                 displayName('image-watch (daily: what we serve, against today\'s vulnerability DB)')
-                description('Every morning it re-scans every mirrored image and every base aegis owns against the CURRENT trivy DB, asks whether each upstream moved and whether the candidate is clean, and checks how long each trivyignore exception has left. It never blocks anything: it pushes metrics and events, and for the bases aegis OWNS it fires base-images with the members that have a fixable CVE. Third parties are never re-mirrored on their own.')
+                description('Every morning it re-scans every mirrored image, every base aegis owns and every app image a tenant runs against the CURRENT trivy DB, asks whether each upstream moved and whether the candidate is clean, and checks how long each trivyignore exception has left. It never blocks anything: it pushes metrics and events, keeps the books of what it found with each due date (image-watch/ledger.txt, committed to the platform repo with the exploited-in-the-wild list when they change), and for the bases aegis OWNS it fires base-images with the members that have a fixable CVE. Third parties are never re-mirrored on their own.')
                 triggers {
                   cron('H 6 * * *')
                 }

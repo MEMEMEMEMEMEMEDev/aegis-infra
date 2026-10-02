@@ -4,6 +4,55 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-10-02 — a known vulnerability costs a date, not a red build
+
+Until now every scan had one answer: a fixable CRITICAL or HIGH stops.
+On 2026-09-30 a clean install died in phase 80 over two OpenSSL CVEs
+published the day before, in upstream images nobody here could rebuild.
+The platform now tells what a CHANGE brings from what TIME brought
+(`seed/platform/docs/protocols/images.md` §1.1, §1.2, §4.1).
+
+- **One policy, one verdict** (`k8s/base/platform/vuln-policy/`): a finding
+  the platform lets in has a window from the CVE's publication, 15 days
+  for a critical and 30 for a high. One on CISA's exploited-in-the-wild
+  list has none.
+- **The mirror** lets an image in with debt inside its window and RETAINS
+  one past it; a retained image stops the install only if the platform
+  itself runs it. An image already mirrored and signed is not judged again
+  at the door.
+- **A tenant's build** is judged on the layers it adds: what its base
+  carries is the platform's, and what already ran passes as debt. A new
+  finding of its own still stops it. Existing apps take the new pipeline
+  with `aegis app rebase <org>`.
+- **image-watch keeps the books**: every finding of what is served, and of
+  what runs in the tenants, with its due date and who fixes it. `aegis
+  vulns` reads them; `aegis check` reports debt inside its window as a
+  notice and only what is overdue or exploited as a failure; the console
+  draws them on Security and on each project's card.
+- **The alerts are a ladder**: `VulnDebt` (once a day), `VulnDebtDueSoon`,
+  `VulnDebtOverdue`, `VulnExploited`. `ImageWithFixableVulns` is gone.
+- **The `static` and `service-node` templates** compile, install and test
+  in the pipeline's own agent; the image build only copies. Neither needs
+  `node:22.23.1-alpine` mirrored any more.
+- **`tofu-apply.sh` no longer shows values**: for `plan`, `apply` and
+  `destroy` every attribute value and every `[id=…]` reads «(not shown)».
+  `aegis destroy` without `--yes` used to print the tunnel's secret, and
+  phase 25 wrote it into the install log.
+  `AEGIS_TOFU_SHOW_VALUES=1` shows them.
+- **The platform repo now has a writer in the cluster every morning**:
+  image-watch commits `image-watch/ledger.txt` and
+  `k8s/base/platform/vuln-policy/kev.txt` when they change. A clone on
+  your machine goes stale overnight: `aegis image request`, `aegis image
+  gc` and `aegis update` take the remote in by themselves; before an edit
+  by hand, `git pull --ff-only`.
+- **If your instance is live**: `aegis seed diff` names what it lacks
+  (the `vuln-policy` Application and directory, the two platform
+  Jenkinsfiles, `image-watch/ledger.sh`, the alert rules, the alertmanager
+  route, `tofu/tofu-apply.sh`); `aegis seed apply` brings it and you push.
+  This path has not been run on a live instance yet — the first one will
+  be the reference instance, and this entry will say what it took.
+  Checks 255 to 273.
+
 ## 2026-09-27 — downloads reach the visitor without a copy on the system disk
 
 - The `-cuerpo` sibling of 2026-09-25 only caught `GET`s that announced a

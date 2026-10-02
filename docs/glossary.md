@@ -186,8 +186,9 @@ retiring `organizacion` flagged `aegis-organizaciones`, and the first
 group below could not even begin.
 
 One thing this inventory does NOT contain, on purpose: the image chain
-born on 2026-08-27 — the `base-images` and `image-watch` jobs, the six
-alerts of `images.yaml` (the ladder `VulnDebt` … `VulnExploited`, then `UpstreamFixAvailable` … `ImageWatchSilent`),
+born on 2026-08-27 — the `base-images` and `image-watch` jobs, the
+alerts of `images.yaml` (the ladder `VulnDebt` … `VulnExploited`, then
+`UpstreamFixAvailable` … `ImageWatchSilent`),
 the `aegis_image_*` and `aegis_base_*` metrics, the `jenkins-watch` and
 `jenkins-base` event sources. All of it is English from birth
 (`seed/platform/docs/protocols/images.md`), so it adds no row here and
