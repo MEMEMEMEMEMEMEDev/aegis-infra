@@ -63,6 +63,11 @@ fi
 # With an explicit argument, the argument wins, so as not to break
 # anyone already invoking it that way.
 BACKUPS="${AEGIS_BACKUPS:-$HOME/aegis-backups}"
+# An OUTPUT that starts with «-» is a flag nobody here understands, never a
+# file name: it would be written as one (the «--help» bundle of 2026-10-02).
+case "${1:-}" in
+    -*) printf '[backup] «%s» is not a file name and this command takes no flags (usage: aegis state backup [OUTPUT])\n' "$1" >&2; exit 3 ;;
+esac
 OUT="${1:-$BACKUPS/platform/aegis-state-$(date +%Y%m%d-%H%M%S).age}"
 mkdir -p "$(dirname "$OUT")"
 
