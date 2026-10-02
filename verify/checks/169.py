@@ -31,7 +31,13 @@ def code_of(text):
     return "\n".join(HASH.sub(r'\1', l) for l in text.splitlines())
 
 used = set()
-for cf in sorted(seed.rglob("Containerfile*")):
+# What the pipeline RUNS to build, not only what the image build runs: since
+# 2026-09-30 (static) and 2026-10-02 (service-node) the templates' npm lives
+# in ci/compile.sh, run in the agent, and no Containerfile of the seed calls
+# npm any more — this check stopped seeing it, and its npm tooth stopped
+# biting, with npm still downloading on every tenant build.
+sources = sorted(seed.rglob("Containerfile*")) + sorted(seed.rglob("ci/*.sh"))
+for cf in sources:
     if not cf.is_file():
         continue
     body = code_of(cf.read_text(encoding="utf-8", errors="replace"))

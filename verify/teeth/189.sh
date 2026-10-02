@@ -11,7 +11,8 @@ red_2() {
     python3 - "$_TPL" <<'PYEOF'
 import re, sys
 p = sys.argv[1]; s = open(p, encoding="utf-8").read()
-s = s.replace("                  --no-progress \\\n                  $IGN", "                  --no-progress")
+assert s.count("--no-progress $IGN ") == 2, "re-aim this tooth: the ignore flag is not where it was"
+s = s.replace("--no-progress $IGN ", "--no-progress ")
 open(p, "w", encoding="utf-8").write(s)
 PYEOF
 }

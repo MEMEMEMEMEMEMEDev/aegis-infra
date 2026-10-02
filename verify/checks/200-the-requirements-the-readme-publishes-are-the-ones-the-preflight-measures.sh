@@ -91,10 +91,21 @@ for path, label in ((es_p, "README.md"), (en_p, "README.en.md")):
 # The requirements table is where somebody decides whether their
 # machine will do. A product that can MEASURE that and does not say so
 # there is keeping the answer to itself.
-for path, label in ((es_p, "README.md"), (en_p, "README.en.md")):
-    txt = open(path, encoding="utf-8").read()
-    if "aegis host" not in txt:
-        print("FAIL%s never mentions `aegis host`: it is the command that answers the "
+# THE SECTION, not the file (2026-10-02): the check read the whole README,
+# and the commands table further down always names `aegis host`, so its
+# tooth — take the commands out of the requirements — never bit.
+for path, label, head in ((es_p, "README.md", "## Antes de empezar"),
+                          (en_p, "README.en.md", "## Before you start")):
+    full = open(path, encoding="utf-8").read()
+    if head not in full:
+        print(f"FAIL{label} has no «{head}» section: the requirements have nowhere to be read")
+        continue
+    txt = full.split(head, 1)[1].split("\n## ", 1)[0]
+    # The command that ANSWERS «will this machine do»: measure or budget.
+    # `aegis host show` in the GPU row is legitimate and answers another
+    # question, so a bare «aegis host» is not enough to count.
+    if "aegis host measure" not in txt and "aegis host budget" not in txt:
+        print("FAIL%s's requirements never offer `aegis host measure` or `budget`: they are the commands that answer the "
               "question that section exists to raise — will this machine do — and the "
               "reader is left estimating instead" % label)
 

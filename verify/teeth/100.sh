@@ -65,7 +65,14 @@ P
 
 # the sentence describing a command changes: the rule is about the
 # command being NAMED, not about how it is described
-control_1() { sed -i 's/La ronda rutinaria\./La ronda de siempre./' "$R100"; }
+control_1() { python3 - "$R100" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+a = "| `aegis check` | La ronda: mide el clúster vivo contra lo declarado. No escribe nada. |"
+assert s.count(a) == 1, "re-aim this control"
+p.write_text(s.replace(a, "| `aegis check` | La ronda de siempre: mide el clúster vivo contra lo declarado. |"))
+P
+}
 
 # a maintainer's tool is added, hidden from the menu the way `aegis dev`
 # already is: what is not offered is not something the README owes
