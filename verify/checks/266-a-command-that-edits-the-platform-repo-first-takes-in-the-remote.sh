@@ -21,6 +21,6 @@ printf '    %s\n' "${SCOPE266:-the scope was not reported}"
 if [[ -n "$D266" ]]; then
     fail "a command edits the platform repo on a clone the remote has moved past:$D266"
 else
-    pass "update's refusals take in the remote before the first edit and refuse when they cannot; image request/gc sync before a real run (${SCOPE266})"
+    pass "update's refusals take in the remote before the first edit, say so, and refuse when they cannot; image request/gc sync before a real run and the reads do not (${SCOPE266})"
 fi
 }

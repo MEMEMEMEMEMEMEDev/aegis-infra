@@ -727,13 +727,19 @@ class Refusal:
         return f"<Refusal {self.name}>"
 
 
-def preflight(platform=None, conf=None, hooks=None, budget_minutes=240):
+def preflight(platform=None, conf=None, hooks=None, budget_minutes=240, notes=None):
     """Every reason to stop, collected before anything is touched.
 
     ALL of them, not the first one: an operator who fixes one refusal
     and runs again only to meet the next is being made to discover the
     list one night at a time. The window runs this once, prints
     everything, and does not proceed while the list is not empty.
+
+    `notes` (a list, optional) receives what this did that is NOT a
+    refusal and that the operator should still read: today, that the
+    clone was fast-forwarded to its remote, and by how many commits. A
+    merge nobody was told about is the kind of silence this file exists
+    to end, even when the merge is the right thing.
     """
     root = pathlib.Path(platform) if platform else paths.platform_dir()
     hooks = hooks if hooks is not None else Hooks(conf)
@@ -773,7 +779,11 @@ def preflight(platform=None, conf=None, hooks=None, budget_minutes=240):
                            "set an upstream for this branch"))
     if not out:
         try:
-            catch_up(root)
+            took = catch_up(root)
+            if took and notes is not None:
+                notes.append(f"the platform clone was {took} commit(s) behind its remote "
+                             f"(the watch's books, a base's bump) and was fast-forwarded "
+                             f"before anything else: git -C {root} log -{took} --oneline")
         except GitTrouble as e:
             out.append(Refusal(
                 "platform-behind",

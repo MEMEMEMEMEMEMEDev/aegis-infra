@@ -14,20 +14,44 @@ PY
 # update as it was: the refusals look at the clone and never at the remote
 red_1() { _sub "$W266" '    if not out:
         try:
-            catch_up(root)' '    if False:
+            took = catch_up(root)' '    if False:
         try:
-            catch_up(root)'; }
+            took = catch_up(root)'; }
 
 # the catch-up asks the remote-tracking ref without fetching: it answers what the clone already knew
 red_2() { _sub "$W266" '    git(root, "fetch", "--quiet")
 ' ''; }
 
 # image request edits the list on whatever the clone holds
-red_3() { _sub "$I266" '        platform_repo_sync
-    fi
-}' '        :
-    fi
+red_3() { _sub "$I266" 'do_request() {
+    need_list
+    sync_before_writing
+' 'do_request() {
+    need_list
+'; }
+
+# image gc decides its prune on pins that moved
+red_4() { _sub "$I266" '    sync_before_writing
+    secrets_workdir
+    reg_ready
+    gc_registry_target' '    secrets_workdir
+    reg_ready
+    gc_registry_target'; }
+
+# the sync is back in the list loader: `image list` and `image check` fetch, merge and die offline
+red_5() { _sub "$I266" '    IMAGES="$LIST_ROOT/$IMAGES_REL"
+    IGNORE="$LIST_ROOT/$IGNORE_REL"
+}' '    IMAGES="$LIST_ROOT/$IMAGES_REL"
+    IGNORE="$LIST_ROOT/$IGNORE_REL"
+    dry || platform_repo_sync
 }'; }
+
+# a dry run takes in the remote too
+red_6() { _sub "$I266" '    dry && return 0
+' ''; }
+
+# the clone is fast-forwarded and nobody is told
+red_7() { _sub "$W266" '            if took and notes is not None:' '            if False:'; }
 
 # ── controls ──
 control_1() { _sub "$W266" '"git -C {root} pull --ff-only, and look at what it says"' '"git -C {root} pull --ff-only, and read what it answers"'; }

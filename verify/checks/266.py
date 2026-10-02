@@ -11,8 +11,10 @@ half written; `aegis image request` commits the list and dies at the push
 
 The sidecar builds a remote and a clone, moves the remote, and RUNS
 window.preflight on the clone: the clone must be at the remote's head
-afterwards, with no refusal; a clone that diverged must be refused, never
-merged. aegis-image's list loader is read for the call, outside a dry run.
+afterwards, with no refusal, and SAY it took commits in; a clone that
+diverged must be refused, never merged. In aegis-image the two verbs that
+act (request, gc) take in the remote on a real run, and the reads (list,
+check) do not.
 """
 import os
 import pathlib
@@ -50,7 +52,10 @@ with tempfile.TemporaryDirectory() as tmp:
     want = g(other, "rev-parse", "HEAD")
 
     hooks = window.Hooks({})
-    refusals = window.preflight(platform=str(clone), conf={}, hooks=hooks)
+    notes = []
+    refusals = window.preflight(platform=str(clone), conf={}, hooks=hooks, notes=notes)
+    if len(notes) != 1 or "1 commit(s) behind" not in notes[0]:
+        findings.append(f"the clone was fast-forwarded and nobody was told (notes: {notes}): a merge in silence")
     if False:
         pass
     else:
@@ -74,14 +79,34 @@ with tempfile.TemporaryDirectory() as tmp:
             findings.append("a clone that diverged was merged by the refusals instead of refused")
 
 img = (pathlib.Path(ROOT) / "libexec" / "aegis-image").read_text(encoding="utf-8")
-m = re.search(r"^need_list\(\) \{\n(.*?)^\}", img, re.S | re.M)
-if not m:
-    findings.append("aegis-image has no need_list(): re-aim this check")
-else:
-    body = "\n".join(l for l in m.group(1).splitlines() if not l.lstrip().startswith("#"))
-    if not re.search(r'if ! dry && \[\[ "\$LIST_ROOT" == "\$PLATFORM_DIR" \]\]; then\s*\n\s*platform_repo_sync\b', body):
-        findings.append("aegis-image loads the list without platform_repo_sync on a real run: request and gc work on a clone the remote moved past")
+
+
+def body_of(fn):
+    m = re.search(r"^%s\(\) \{\n(.*?)^\}" % re.escape(fn), img, re.S | re.M)
+    if not m:
+        findings.append(f"aegis-image has no {fn}(): re-aim this check")
+        return ""
+    return "\n".join(l for l in m.group(1).splitlines() if not l.lstrip().startswith("#"))
+
+
+sync = body_of("sync_before_writing")
+if sync and not (re.search(r"^\s*dry && return 0$", sync, re.M)
+                 and re.search(r'^\s*\[\[ "\$LIST_ROOT" == "\$PLATFORM_DIR" \]\] \|\| return 0$', sync, re.M)
+                 and re.search(r"^\s*platform_repo_sync$", sync, re.M)):
+    findings.append("sync_before_writing does not take in the remote on a real run against the instance (or does it on a dry one)")
+# THE TWO THAT ACT take in the remote, right after the list is found...
+for fn in ("do_request", "do_gc"):
+    b_ = body_of(fn)
+    if b_ and not re.search(r"^\s*need_list\n(?:.*\n)*?\s*sync_before_writing$", b_, re.M):
+        findings.append(f"aegis image's {fn} does not take in the remote before it acts: it works on a clone the remote moved past")
+# ...and the ones that only READ do not: a read that fetches, merges and
+# dies without a network is not a read (it sat in need_list for a few
+# hours on 2026-10-02).
+for fn in ("need_list", "do_list", "do_check"):
+    b_ = body_of(fn)
+    if re.search(r"\b(platform_repo_sync|sync_before_writing)\b", b_):
+        findings.append(f"aegis image's {fn} is a read and takes in the remote: `image list` and `image check` fetch, merge and die offline")
 
 for x in findings:
     print(x)
-print("SCOPE: update's preflight runs between a bare remote and two clones (behind; diverged); aegis-image's need_list read")
+print("SCOPE: update's preflight runs between a bare remote and two clones (behind; diverged); aegis-image's five list-reading functions read")

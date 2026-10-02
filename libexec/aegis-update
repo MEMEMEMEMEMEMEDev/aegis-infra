@@ -737,7 +737,11 @@ def run_layer(ctx, layer, before_round):
 # DRY BY DEFAULT, like `aegis destroy`. Without --yes not one hook runs.
 
 def _refusals(steps, hooks, budget, narrate):
-    bad = win.preflight(hooks=hooks, budget_minutes=budget)
+    notes = []
+    bad = win.preflight(hooks=hooks, budget_minutes=budget, notes=notes)
+    if narrate:
+        for n in notes:
+            print(f"  {grey}{n}{off}", file=sys.stderr)
     for r in bad:
         if narrate:
             print(f"  {bold}refused{off} {r.name}: {r.why}", file=sys.stderr)

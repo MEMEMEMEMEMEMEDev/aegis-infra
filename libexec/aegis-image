@@ -259,14 +259,23 @@ need_list() {
     fi
     IMAGES="$LIST_ROOT/$IMAGES_REL"
     IGNORE="$LIST_ROOT/$IGNORE_REL"
-    # The platform writes to this repo too: image-watch commits the ledger
-    # and the exploited-in-the-wild list every morning, base-images the
-    # provisioner's base. An edit made on yesterday's clone is a push the
-    # remote refuses (or, for gc, a prune decided on pins that moved). So a
-    # real run first takes in what the remote has, fast-forward only.
-    if ! dry && [[ "$LIST_ROOT" == "$PLATFORM_DIR" ]]; then
-        platform_repo_sync
-    fi
+}
+
+# sync_before_writing — the platform writes to this repo too: image-watch
+# commits the ledger and the exploited-in-the-wild list every morning,
+# base-images the provisioner's base. An edit made on yesterday's clone is
+# a push the remote refuses (or, for gc, a prune decided on pins that
+# moved). So the two verbs that ACT first take in what the remote has,
+# fast-forward only.
+#
+# ONLY THOSE TWO, and only on a real run. It sat in need_list for a few
+# hours (2026-10-02), which made `image list` and `image check` — reads —
+# fetch, merge and die without a network. A read answers from the clone
+# it has; `aegis vulns` is the one that fetches to read, and says so.
+sync_before_writing() {
+    dry && return 0
+    [[ "$LIST_ROOT" == "$PLATFORM_DIR" ]] || return 0
+    platform_repo_sync
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -802,6 +811,7 @@ commit_list() {   # <message> <paths...>
 
 do_request() {
     need_list
+    sync_before_writing
     resolve_ref "$REF"
     local dst; dst="$(dst_of)"
     local repo_name="${dst%%:*}"
@@ -1680,6 +1690,7 @@ do_gc() {
     # may fall back to it; this one may not.
     [[ "$LIST_ROOT" == "$PLATFORM_DIR" ]] \
         || could_not "there is no instance at $PLATFORM_DIR: what may be pruned is decided by what this instance fixes, and the seed's copy of the list fixes nothing real"
+    sync_before_writing
     secrets_workdir
     reg_ready
     gc_registry_target
