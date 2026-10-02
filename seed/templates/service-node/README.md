@@ -1,37 +1,31 @@
 # Template `service-node` — a JavaScript server behind the edge
 
-Tested and installed with a node image that carries npm, run on a node
-runtime that carries neither npm nor a shell. From the second it is
-instantiated the template is gone from your life: what it wrote is
-yours (§0.3).
+Installed and tested by the pipeline, run on a node runtime that
+carries neither npm nor a shell. From the second it is instantiated the
+template is gone from your life: what it wrote is yours (§0.3).
 
-## Before it will instantiate: one image has to be mirrored
+## How it is built (since 2026-10-02)
 
-The build image, `node:22.23.1-alpine`, is not in
-`mirror-images/images.txt`. `aegis app new` therefore STOPS before
-writing a single file and prints the exact command that mirrors it —
-read that line off the screen rather than from here, so there is one
-place it can be wrong. The runtime image, `nodejs-distroless:22`, is
-already declared and needs nothing.
+The pipeline's `compile` stage runs `ci/compile.sh` in `aegis-ci-node`,
+a container the platform builds and scans itself: `npm ci`, `npm test`,
+`npm prune --omit=dev`. The Containerfile only copies the manifest, the
+production `node_modules` and `src/` onto the runtime,
+`nodejs-distroless:22`, which is mirrored, scanned and signed. Nothing has
+to be mirrored before the template instantiates.
 
-That build version is not a choice made here: it is the one
-`ci-images/node/Containerfile` already pins, so what a tenant builds in
-and what the platform's own CI is built from stay the same 22.23 line
-and the same libc — which is what makes the `node_modules` this build
-produces the ones the runtime expects.
-
-Images are mirrored when somebody needs one, not in advance
-(`docs/protocols/images.md` §2). Being told which one, before anything
-is written, is the mechanism working.
+It used to install and test INSIDE the image build, on
+`node:22.23.1-alpine`. That image had to be mirrored first, and on
+alpha-arch the door retained it: its bundled npm carried eleven CVEs past
+their window. The static template made the same move on 2026-09-30.
 
 ## What you change
 
 - **`src/server.js`** — your app. It starts as node's stdlib and
   nothing else, which is a deliberate zero: an empty dependency tree
   cannot rot and has nothing for the scan to argue about.
-- **`tests/`** — the suite `npm test` runs INSIDE the build. It is the
-  image's only gate: the canonical Jenkinsfile does not run tests, so a
-  red test here is the one thing that stops a bad image from existing.
+- **`tests/`** — the suite `npm test` runs in the pipeline's `compile`
+  stage, before the image is built. It is the image's door: a red test
+  stops the pipeline there and the image never comes to exist.
 - **`package.json` + the lock** — add dependencies normally. Commit the
   lock: the build installs with `npm ci`, which refuses to guess.
 - **The contract** — `usa: [postgres]`, `usa: [bucket]`, `usa: [ai]`.
@@ -43,14 +37,17 @@ is written, is the mechanism working.
   admits edge -> 8080 only, and PSS restricted rejects a non-numeric
   user. Listen on 0.0.0.0, not on localhost: the probe comes from
   outside the process.
-- **The two `FROM` lines** — resolved against the internal registry at
-  instantiation and pinned by digest. The build image carries npm, the
-  runtime one does not, and that asymmetry is the point.
-- **`RUN npm ci ... && mkdir -p node_modules`** — the `mkdir` is load
-  bearing while your dependency tree is empty: `npm ci` creates no
-  `node_modules` at all in that case (measured: «up to date in 134ms»,
-  and no directory), and the runtime stage's `COPY` of a path that does
-  not exist aborts the build with an error that never mentions npm.
+- **The `FROM` line** — resolved against the internal registry at
+  instantiation and pinned by digest. The runtime carries no npm and no
+  shell; the npm that installs is the pipeline's.
+- **`ci/compile.sh`** — `npm ci`, `npm test`, `npm prune --omit=dev`,
+  `mkdir -p node_modules`. The `mkdir` is load bearing while your
+  dependency tree is empty: `npm ci` creates no `node_modules` at all in
+  that case (measured: «up to date in 134ms», and no directory), and the
+  Containerfile's `COPY` of a path that does not exist aborts the build
+  with an error that never mentions npm.
+- **`.dockerignore`** — an allowlist (the manifest, `node_modules`,
+  `src/`): the tests and anything you add tomorrow stay out of the image.
 - **The digest marker in `k8s/overlays/dev/`** — the pipeline writes
   the real one on every build.
 - **The public route** — derived by the platform from the contract;
@@ -75,4 +72,7 @@ maintenance to the base-images job: it rewrites the digest on every
 rebuild of the base.
 The contract that image keeps is the same one this file assumes — uid
 65532, `/app` as WORKDIR, port 8080, node as the ENTRYPOINT — so the
-`FROM` is the only line that changes.
+`FROM` is the only line that changes. It is also the move to make before
+a dependency with a native addon (bcrypt, sharp…): those are compiled in
+`aegis-ci-node`, which is Alpine (musl), and they run on
+`aegis-base-node` (Alpine) but not on `nodejs-distroless` (glibc).

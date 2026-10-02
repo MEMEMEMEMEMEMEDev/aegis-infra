@@ -1,0 +1,9 @@
+# The image is the runtime plus what ci/compile.sh left: the manifest, the
+# production node_modules and the source. Nothing else of this repo has any
+# business in the build context. An allowlist, so a file added tomorrow (a
+# .env, the tests, a coverage report) does not travel by default.
+*
+!package.json
+!package-lock.json
+!node_modules
+!src

@@ -84,7 +84,7 @@ red_7() {
 # name out of the README and the template becomes one that stops
 # halfway through an afternoon with no warning anywhere.
 red_8() {
-    sed -i '/node:22.23.1-alpine/d' "$AEGIS_ROOT/seed/templates/service-node/README.md"
+    sed -i '/eclipse-temurin:21-jdk-alpine/d' "$AEGIS_ROOT/seed/templates/service-java/README.md"
 }
 
 # control: a row in _FROM_IMAGES that no template uses yet cannot turn

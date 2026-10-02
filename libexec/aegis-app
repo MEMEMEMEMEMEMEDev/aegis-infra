@@ -504,13 +504,9 @@ _FROM_IMAGES = {
     "__FROM_ALPINE__": "alpine:3.21",
     "__FROM_PYTHON__": "python:3.12-slim",
     "__FROM_NODE__": "nodejs-distroless:22",
-    # NOT declared yet, and not an oversight: an image is mirrored when
-    # somebody needs it, not in advance (images.md §2). The version is
-    # not invented either — it is the one ci-images/node/Containerfile
-    # already pins, so the image a tenant builds in and the image the
-    # platform's own CI is built from are the same 22.23 line and the
-    # same libc.
-    "__FROM_NODE_BUILD__": "node:22.23.1-alpine",
+    # (`__FROM_NODE_BUILD__`, node:22.23.1-alpine, lived here until
+    # 2026-10-02: the build stage of static and service-node. Both compile
+    # in the pipeline's aegis-ci-node now, and no template asks for it.)
     # A JDK/JRE pair NOBODY has mirrored yet either: no service in this
     # tree runs on a JVM. The java template exists so that whoever needs
     # java is told, in one command, exactly what to ask for.
