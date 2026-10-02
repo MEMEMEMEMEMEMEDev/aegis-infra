@@ -95,6 +95,27 @@ def unpushed(root):
             if ln.strip()]
 
 
+def catch_up(root):
+    """Brings the clone up to the remote, fast-forward only. Returns how
+    many commits it took in.
+
+    The platform repo is not written only from here: image-watch commits
+    the vulnerability ledger and the exploited-in-the-wild list to it every
+    morning, and base-images commits the bucket provisioner's base. A
+    window that starts on yesterday's clone commits on top of it and dies
+    at the push, after the first layer has already been written. Asked
+    BEFORE anything is edited, and only fast-forward: a clone with work of
+    its own is refused by the checks around this one, never merged."""
+    git(root, "fetch", "--quiet")
+    rc, n, _ = git(root, "rev-list", "--count", "HEAD..@{upstream}", check=False)
+    if rc != 0:
+        raise GitTrouble("this branch tracks no remote: nobody can say what the remote has")
+    if int(n or 0) == 0:
+        return 0
+    git(root, "merge", "--ff-only", "--quiet", "@{upstream}")
+    return int(n)
+
+
 def commit(root, files, subject):
     """One commit, with exactly the files named. Returns its sha.
 
@@ -750,6 +771,16 @@ def preflight(platform=None, conf=None, hooks=None, budget_minutes=240):
     except GitTrouble as e:
         out.append(Refusal("platform-untracked-branch", str(e),
                            "set an upstream for this branch"))
+    if not out:
+        try:
+            catch_up(root)
+        except GitTrouble as e:
+            out.append(Refusal(
+                "platform-behind",
+                f"the platform repo could not be brought up to its remote: {e}. The "
+                f"platform writes to it too (the watch's ledger, the bases), and a window "
+                f"that commits on an old clone dies at the push with a layer half done",
+                f"git -C {root} pull --ff-only, and look at what it says"))
     if not hooks.coherent:
         which = "MAINTENANCE_ON" if hooks.on else "MAINTENANCE_OFF"
         out.append(Refusal(

@@ -259,6 +259,14 @@ need_list() {
     fi
     IMAGES="$LIST_ROOT/$IMAGES_REL"
     IGNORE="$LIST_ROOT/$IGNORE_REL"
+    # The platform writes to this repo too: image-watch commits the ledger
+    # and the exploited-in-the-wild list every morning, base-images the
+    # provisioner's base. An edit made on yesterday's clone is a push the
+    # remote refuses (or, for gc, a prune decided on pins that moved). So a
+    # real run first takes in what the remote has, fast-forward only.
+    if ! dry && [[ "$LIST_ROOT" == "$PLATFORM_DIR" ]]; then
+        platform_repo_sync
+    fi
 }
 
 # ═══════════════════════════════════════════════════════════════════
