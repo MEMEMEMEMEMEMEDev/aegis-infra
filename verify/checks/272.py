@@ -86,6 +86,8 @@ if shutil.which("npm") and os.path.isfile(cs_path):
             findings.append(f"the template's ci/compile.sh fails on the template itself (rc {p.returncode}): {(p.stderr or p.stdout).strip()[-160:]}")
         elif not os.path.isdir(os.path.join(work, "node_modules")):
             findings.append("with an empty dependency tree ci/compile.sh leaves no node_modules: the Containerfile's COPY aborts the build")
+        elif not os.listdir(os.path.join(work, "node_modules")):
+            findings.append("with an empty dependency tree ci/compile.sh leaves node_modules EMPTY: whether the COPY works then is the builder's business (an empty directory in an allowlisted context)")
         t = os.path.join(work, "tests", "handle.test.js")
         with open(t, "a", encoding="utf-8") as fh:
             fh.write("\ntest('check 272 breaks this on purpose', () => { assert.equal(1, 2) })\n")

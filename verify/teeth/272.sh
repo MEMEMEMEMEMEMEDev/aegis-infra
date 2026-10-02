@@ -39,5 +39,9 @@ red_5() { _sub "$S272" 'npm test
 ' 'npm test || true
 '; }
 
+# node_modules is left empty: the first build depends on how the builder carries an empty directory
+red_6() { _sub "$S272" ': > node_modules/.aegis-compiled
+' ''; }
+
 # ── controls ──
 control_1() { _sub "$S272" 'echo "compile: tests green;' 'echo "compile: the tests are green;'; }
