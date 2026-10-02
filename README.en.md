@@ -371,7 +371,7 @@ which uses 0, 1 and 3.
 |---|---|
 | setup | `aegis preflight`, `aegis init`, `aegis init-log`, `aegis verify`, `aegis destroy` |
 | apps | `aegis app`, `aegis org`, `aegis quota`, `aegis repos`, `aegis image`, `aegis secret` |
-| operate | `aegis check`, `aegis console`, `aegis update`, `aegis tenant`, `aegis traffic`, `aegis capacity`, `aegis builds`, `aegis host`, `aegis sync`, `aegis seed`, `aegis ai` |
+| operate | `aegis check`, `aegis console`, `aegis update`, `aegis tenant`, `aegis traffic`, `aegis capacity`, `aegis builds`, `aegis vulns`, `aegis host`, `aegis sync`, `aegis seed`, `aegis ai` |
 | infra | `aegis ci`, `aegis edge`, `aegis registry`, `aegis rotate`, `aegis webhook` |
 | backup | `aegis data`, `aegis state` |
 
@@ -410,6 +410,7 @@ which uses 0, 1 and 3.
 | `aegis traffic` | What reached each organization, read from Traefik's metrics, reconciled against the total. |
 | `aegis capacity` | Does another organization fit? The node against what the plans cost. |
 | `aegis builds` | What happened to each push: built, scanned, signed, digest written down. |
+| `aegis vulns` | The known vulnerabilities of what runs: what is owed, since when, until when, and who fixes it. Read from the books image-watch keeps every morning. |
 | `aegis host` | `measure` the machine; `show`; `floor` the desktop's memory floor; `budget` whether the platform fits; `metrics`. |
 | `aegis sync` | An ArgoCD sync of the named apps; `--drifted` everything not Synced. |
 | `aegis seed` | `diff` what the seed changed and this instance lacks; `apply` brings it over keeping pins and derived blocks, in a commit you read and push. |

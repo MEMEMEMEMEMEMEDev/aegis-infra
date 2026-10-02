@@ -369,7 +369,7 @@ uno. Todos devuelven los mismos cuatro códigos de salida, salvo
 |---|---|
 | setup | `aegis preflight`, `aegis init`, `aegis init-log`, `aegis verify`, `aegis destroy` |
 | apps | `aegis app`, `aegis org`, `aegis quota`, `aegis repos`, `aegis image`, `aegis secret` |
-| operate | `aegis check`, `aegis console`, `aegis update`, `aegis tenant`, `aegis traffic`, `aegis capacity`, `aegis builds`, `aegis host`, `aegis sync`, `aegis seed`, `aegis ai` |
+| operate | `aegis check`, `aegis console`, `aegis update`, `aegis tenant`, `aegis traffic`, `aegis capacity`, `aegis builds`, `aegis vulns`, `aegis host`, `aegis sync`, `aegis seed`, `aegis ai` |
 | infra | `aegis ci`, `aegis edge`, `aegis registry`, `aegis rotate`, `aegis webhook` |
 | backup | `aegis data`, `aegis state` |
 
@@ -408,6 +408,7 @@ uno. Todos devuelven los mismos cuatro códigos de salida, salvo
 | `aegis traffic` | Lo que llegó a cada organización, leído de las métricas de Traefik, reconciliado contra el total. |
 | `aegis capacity` | ¿Entra otra organización? El nodo contra lo que los planes cuestan. |
 | `aegis builds` | Qué le pasó a cada push: construir, escanear, firmar, anotar el digest. |
+| `aegis vulns` | Las vulnerabilidades conocidas de lo que corre: qué se debe, desde cuándo, hasta cuándo y quién lo arregla. Lo lee del libro que image-watch lleva cada mañana. |
 | `aegis host` | `measure` la máquina; `show`; `floor` el piso de memoria del escritorio; `budget` si la plataforma entra; `metrics`. |
 | `aegis sync` | Un sync de ArgoCD de las apps nombradas; `--drifted` todo lo que no esté Synced. |
 | `aegis seed` | `diff` lo que la semilla cambió y esta instancia no tiene; `apply` lo trae conservando pines y bloques derivados, en un commit que tú lees y empujas. |

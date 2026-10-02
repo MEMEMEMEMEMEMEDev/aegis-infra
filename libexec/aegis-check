@@ -1540,59 +1540,87 @@ except Exception:
   #     ...and did anybody scan it AGAIN? The round above answers for
   #     the BUILD: the image went through Trivy the day it was pushed.
   #     It says nothing about the CVEs published since. image-watch
-  #     (Jenkins, once a day) re-scans every mirrored image against
-  #     today's DB and leaves a heartbeat; a run that dies leaves none.
-  #     The same four outcomes, and the seams matter:
-  #       · heartbeat in the last 2d and no fixable CVE → green
-  #       · heartbeat in the last 2d and fixable CVEs   → failure
-  #       · no heartbeat in 2d but one in 30d           → failure: the
-  #         watch STOPPED (that is ImageWatchSilent, seen from here)
-  #       · no heartbeat in 30d either                  → COULD NOT
-  #         EVALUATE: never ran, or the cron is older than the window
-  #     The [2d] is 2 × the job's period (check 092 §8's floor): with
-  #     [1d] one late run reads as silence. The second query, at [30d],
-  #     exists so that «stopped» and «never» do not print the same line:
-  #     the alert cannot tell them apart, this round can.
-  hb=$(_vm_num 'last_over_time(aegis_image_watch_timestamp_seconds[2d])')
-  if [[ -z "$hb" ]]; then
-      hb30=$(_vm_num 'last_over_time(aegis_image_watch_timestamp_seconds[30d])')
-      if [[ -n "$hb30" ]]; then
-          bad "image-watch STOPPED: its last heartbeat is $(( ($(date +%s) - hb30) / 86400 )) day(s) old — what is running has not been re-scanned since"
-          note "the cron is gone from job-dsl, the job is broken, or vmsingle rejected the push: read the image-watch console"
-      else
-          notice "COULD NOT EVALUATE: image-watch has never run (or its heartbeat is older than 2 days) — nothing on this instance has re-scanned what it serves"
-      fi
-  else
-      age_h=$(( ($(date +%s) - hb) / 3600 ))
-      if [[ "$age_h" -gt 48 ]]; then
-          bad "image-watch's heartbeat is ${age_h}h old: the daily run is missing"
-      else
-          fixable=$(_vm 'sum by (image) (last_over_time(aegis_image_fixable_vulns[2d])) > 0' \
-              | python3 -c 'import sys,json
+  #     re-scans what is served every morning and keeps the BOOKS of what
+  #     it finds (plan/21 §4.3, image-watch/ledger.txt): each finding
+  #     with the day its window closes. `aegis vulns` reads them, and so
+  #     does this round — through it, never with its own arithmetic, so
+  #     the round, the command and the console cannot disagree.
+  #
+  #     Until 2026-10-02 this section had two answers: no fixable CVE =
+  #     green, any = failure. Since the door lets findings in as debt
+  #     with a date, the honest answers are the policy's:
+  #       · inside its window                → NOTICE (attention): the
+  #         platform accepted it on purpose, and it says until when
+  #       · past its window, or exploited    → failure
+  #       · the watch silent, the books not written, an image or the
+  #         exploited list not looked at     → COULD NOT EVALUATE
+  #       · nothing owed, the watch fresh    → green
+  #     «Stopped» (a heartbeat older than 2 days) stays a failure, as it
+  #     was: that is ImageWatchSilent seen from here, and what runs has
+  #     not been re-scanned since.
+  vulns_json=$(aegis_exec vulns --json 2>/dev/null); vulns_rc=$?
+  vulns_lines=$(VULNS_JSON="$vulns_json" python3 - <<'PY'
+import json, os
 try:
-    for r in json.load(sys.stdin)["data"]["result"]:
-        print(r["metric"].get("image","?") + "=" + str(int(float(r["value"][1]))))
+    doc = json.loads(os.environ.get("VULNS_JSON", ""))
 except Exception:
-    pass' 2>/dev/null | sort | tr '\n' ' ')
-          could_not=$(_vm 'last_over_time(aegis_image_watch_failed[2d]) == 1' \
-              | python3 -c 'import sys,json
-try:
-    for r in json.load(sys.stdin)["data"]["result"]:
-        print(r["metric"].get("image","?"))
-except Exception:
-    pass' 2>/dev/null | sort | tr '\n' ' ')
-          if [[ -n "$fixable" ]]; then
-              bad "image-watch ran ${age_h}h ago and found fixable CVE(s) against today's DB: ${fixable% }"
-              note "for an aegis-base-* the loop already tried a rebuild; for a third party read UpstreamFixAvailable (crane digest on the upstream tag)"
-          else
-              ok "image-watch ran ${age_h}h ago: nothing running has a fixable CVE against today's DB"
-          fi
-          # A zero the watch could not measure is not a zero. It is
-          # reported as its own line so that the ✓ above never covers
-          # it: «COULD NOT EVALUATE ≠ clean».
-          [[ -n "$could_not" ]] \
-              && notice "COULD NOT EVALUATE: image-watch could not scan ${could_not% } — their fixable count is not a measurement"
-      fi
+    print("NOTEVAL|aegis vulns gave no document: the books were not read")
+    raise SystemExit
+for s in doc.get("steps", []):
+    name, st, why = s.get("step", ""), s.get("state", ""), s.get("why", "")
+    if name == "watch":
+        if why == "silent":
+            print(f"BAD|image-watch STOPPED: its last run was {s.get('age_hours')}h ago — what runs has not been re-scanned since, and the books are not today's")
+        elif why == "never-ran":
+            print("NOTEVAL|image-watch has never run (no heartbeat in 30 days): nothing on this instance has re-scanned what it serves")
+        elif why == "books-not-written":
+            print("NOTEVAL|image-watch ran but could not write the books this morning: what follows is the previous ledger")
+        elif st == "not-evaluable":
+            print(f"NOTEVAL|the watch's heartbeat could not be read ({str(s.get('detail', ''))[:120]})")
+    elif name == "books" and st == "not-evaluable":
+        print(f"NOTEVAL|{why or 'no books'}: no ledger to read")
+    elif name == "remote":
+        print("NOTEVAL|the platform repo could not be fetched: the books are read as the last fetch left them")
+    elif name == "books-unreadable":
+        print(f"NOTEVAL|{s.get('lines')} line(s) of the books cannot be read")
+    elif name == "exploited-list":
+        print(f"NOTEVAL|{why}: a finding on it cannot be told apart from one that is not")
+    elif name.startswith("image:"):
+        img = name[len("image:"):]
+        found = s.get("findings", [])
+        if st == "not-evaluable":
+            print(f"NOTEVAL|image-watch could not look at {img}: {why}")
+        elif st == "wrong":
+            ex = sum(1 for x in found if x.get("state") == "exploited")
+            ov = sum(1 for x in found if x.get("state") == "overdue")
+            parts = [p for p in (f"{ex} EXPLOITED in the wild" if ex else "", f"{ov} past its window" if ov else "") if p]
+            print(f"BAD|{img}: " + ", ".join(parts))
+            print(f"NOTE|who fixes it: {s.get('fixer', '?')} — aegis vulns --image {img}")
+        elif s.get("attention"):
+            nxt = min((x["due"] for x in found if x.get("due") not in ("", "?", None)), default="?")
+            soon = sum(1 for x in found if x.get("due_soon"))
+            print(f"NOTICE|{img}: {len(found)} known vulnerability(ies) inside the window, the next due {nxt}"
+                  + (f" ({soon} in the last third of its window)" if soon else ""))
+    elif name == "books":
+        t = s.get("totals", {})
+        owed = sum(t.get(k, 0) for k in ("exploited", "overdue", "debt", "due_soon"))
+        print(f"TOTAL|{t.get('clean', 0)}|{owed}")
+PY
+)
+  vulns_total=""
+  while IFS='|' read -r kind text extra; do
+      case "$kind" in
+          BAD)     bad "$text" ;;
+          NOTE)    note "$text" ;;
+          NOTICE)  notice "$text" ;;
+          NOTEVAL) notice "COULD NOT EVALUATE: $text" ;;
+          TOTAL)   vulns_total="$text|$extra" ;;
+      esac
+  done <<< "$vulns_lines"
+  if [[ "$vulns_rc" == 0 && -n "$vulns_total" && "${vulns_total#*|}" == 0 ]]; then
+      ok "image-watch's books: ${vulns_total%%|*} image(s) looked at, nothing owed"
+  elif [[ -z "$vulns_lines" ]]; then
+      notice "COULD NOT EVALUATE: aegis vulns said nothing (rc $vulns_rc) — the books were not read"
   fi
 fi
 

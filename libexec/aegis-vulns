@@ -1,0 +1,321 @@
+#!/usr/bin/env python3
+# aegis-summary: Known vulnerabilities: what is owed, until when, who fixes it
+# aegis-group:   operate
+# aegis-help:
+# Usage: aegis vulns [--image NAME] [--all] [--json]
+#
+# Reads the books image-watch keeps (image-watch/ledger.txt in the
+# platform repo's REMOTE) and the watch's heartbeat. WRITES NOTHING.
+#
+#   --image NAME  only that image (a mirror, a base, or an app)
+#   --all         also the images scanned clean and each exception in force
+#   --json        the document of states instead of the narration
+#
+# What the exit code says:
+#   0  nothing is past its window (debt inside its window is not a failure)
+#   1  something is overdue, or on the exploited-in-the-wild list
+#   2  the books could not be read, the watch is silent, or an image (or
+#      the exploited list) could not be looked at
+"""aegis-vulns — the books of known vulnerabilities, read in one place.
+
+WHY. Since plan/21 the door lets a finding in as DEBT: it enters signed,
+with the day its window closes (15 days for a critical, 30 for a high,
+from the CVE's publication), and the platform stops cutting installs and
+builds over what TIME brought. Debt nobody can see is the old red with
+extra steps, so image-watch keeps the books (image-watch/ledger.sh) and
+commits them to the platform repo when they change. This command reads
+them, and `aegis check`, the console and the alerts read the same lines:
+one book, four readers, no reader with its own arithmetic.
+
+WHERE IT READS. The books are read from the REMOTE of the platform repo
+(`git fetch`, then `@{upstream}:image-watch/ledger.txt`), never from the
+working tree: the watch commits from the cluster, and the clone on this
+disk only learns of it when somebody fetches. A fetch that fails is said,
+and the books are read as the last fetch left them.
+
+WHAT «FRESH» MEANS. The books change only when the debt does, so the age
+of their commit says nothing about whether the watch looked this morning.
+The watch's heartbeat does (aegis_image_watch_timestamp_seconds, the same
+series ImageWatchSilent reads), and a watch silent for two days makes
+every line here yesterday's news: COULD NOT EVALUATE, never clean.
+"""
+import datetime
+import json
+import os
+import subprocess
+import sys
+import urllib.parse
+import urllib.request
+
+# ── canonical python preamble (V-102) ────────────────────────────────
+_AEGIS_ROOT = os.environ.get("AEGIS_ROOT") or os.path.dirname(
+    os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(_AEGIS_ROOT, "lib"))
+from aegis import cli, outcomes, paths    # noqa: E402
+
+grey = "\033[90m"
+red = "\033[31m"
+yellow = "\033[33m"
+off = "\033[0m"
+
+LEDGER_REL = "image-watch/ledger.txt"
+FIELDS = ("state", "image", "kind", "digest", "cve", "severity", "pkg", "installed",
+          "fixed", "pkgpath", "since", "clock", "due", "fixer")
+# How old the watch's heartbeat may be: twice its period, the same floor
+# ImageWatchSilent and the round use (check 092 §8).
+SILENT_AFTER_H = 48
+ORDER = {"exploited": 0, "overdue": 1, "debt": 2, "unmeasured": 3, "clean": 4, "excused": 5}
+
+
+def parse(text):
+    """The books, as dicts. A line that does not carry the 14 fields is
+    returned apart: a book with a line nobody can read is not a book that
+    lacks that line."""
+    rows, bad = [], []
+    for ln in text.splitlines():
+        if not ln.strip() or ln.startswith("#"):
+            continue
+        parts = ln.split("|")
+        if len(parts) != len(FIELDS):
+            bad.append(ln)
+            continue
+        rows.append(dict(zip(FIELDS, parts)))
+    return rows, bad
+
+
+def days_to(due, today):
+    """Days from today to DUE (negative once past), or None with no date."""
+    try:
+        return (datetime.date.fromisoformat(due) - today).days
+    except ValueError:
+        return None
+
+
+def due_soon(row, today):
+    """The last third of the window: the same carve-out ledger.sh makes
+    for aegis_vuln_findings{state="due_soon"}."""
+    if row["state"] != "debt":
+        return False
+    try:
+        due = datetime.date.fromisoformat(row["due"])
+        since = datetime.date.fromisoformat(row["since"])
+    except ValueError:
+        return False
+    return today >= due - datetime.timedelta(days=(due - since).days // 3)
+
+
+def read_books(platform):
+    """(text, source) — source says what was read and how fresh the read is.
+    text is None when there are no books to read."""
+    src = {"repo": str(platform), "path": LEDGER_REL}
+    if not (platform / ".git").exists():
+        src["why"] = f"{platform} is not a git checkout of the platform repo"
+        return None, src
+    f = subprocess.run(["git", "-C", str(platform), "fetch", "--quiet"],
+                       capture_output=True, text=True, timeout=90)
+    src["fetched"] = f.returncode == 0
+    if f.returncode != 0:
+        src["fetch_error"] = (f.stderr or f.stdout).strip()[:200]
+    r = subprocess.run(["git", "-C", str(platform), "rev-parse", "--abbrev-ref", "@{upstream}"],
+                       capture_output=True, text=True)
+    ref = r.stdout.strip() if r.returncode == 0 else "HEAD"
+    src["ref"] = ref
+    s = subprocess.run(["git", "-C", str(platform), "show", f"{ref}:{LEDGER_REL}"],
+                       capture_output=True, text=True)
+    if s.returncode != 0:
+        src["why"] = (f"{ref} carries no {LEDGER_REL}: image-watch has not written the books "
+                      f"on this instance yet (it runs every morning; `aegis ci build image-watch` "
+                      f"runs it now)")
+        return None, src
+    c = subprocess.run(["git", "-C", str(platform), "log", "-1", "--format=%h %cI", ref, "--", LEDGER_REL],
+                       capture_output=True, text=True)
+    if c.returncode == 0 and c.stdout.strip():
+        sha, when = c.stdout.strip().split(" ", 1)
+        src["commit"], src["committed"] = sha, when
+    return s.stdout, src
+
+
+def _vm_query(query):
+    """One instant query against vmsingle by its ClusterIP, as the round
+    does. Raises when it cannot be asked: «could not ask» is never «0»."""
+    def kc(*a):
+        r = subprocess.run(["kubectl", "-n", "observability", "get", "svc", "vmsingle", "-o",
+                            "jsonpath={%s}" % a[0]], capture_output=True, text=True, timeout=20)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    ip, port = kc(".spec.clusterIP"), kc(".spec.ports[0].port")
+    if not ip or ip == "None" or not port:
+        raise RuntimeError("the vmsingle Service was not found")
+    url = f"http://{ip}:{port}/api/v1/query?" + urllib.parse.urlencode({"query": query})
+    with urllib.request.urlopen(url, timeout=10) as resp:
+        res = json.load(resp)["data"]["result"]
+    return float(res[0]["value"][1]) if res else None
+
+
+def read_watch():
+    """The watch's last heartbeat and whether that run wrote the books."""
+    out = {}
+    try:
+        out["heartbeat"] = _vm_query("last_over_time(aegis_image_watch_timestamp_seconds[30d])")
+        out["written"] = _vm_query("last_over_time(aegis_vuln_ledger_written[2d])")
+    except Exception as e:                                 # noqa: BLE001
+        out["error"] = str(e)[:200]
+    return out
+
+
+def _line(r, today):
+    d = days_to(r["due"], today)
+    when = ("EXPLOITED in the wild: it has no window" if r["state"] == "exploited" else
+            "no due date" if d is None else
+            f"due in {d} day(s), {r['due']}" if d > 0 else
+            f"due TODAY, {r['due']}" if d == 0 else
+            f"{-d} day(s) past due ({r['due']})")
+    since = f"since {r['since']}" + (" (first seen; no publication date)" if r["clock"] == "first-seen" else "")
+    where = f" in {r['pkgpath']}" if r["pkgpath"] else ""
+    return (f"    {r['severity']:<8} {r['cve']:<17} {r['pkg']} {r['installed']} -> {r['fixed']}{where}\n"
+            f"             {since} · {when}")
+
+
+def show(steps, narrate, only=None, everything=False, today=None, books=None, watch=None):
+    today = today or datetime.datetime.now(datetime.timezone.utc).date()
+    platform = paths.platform_dir()
+    text, src = books if books is not None else read_books(platform)
+    if text is None:
+        if narrate:
+            print(f"\n{yellow}COULD NOT EVALUATE{off}: {src.get('why')}")
+        steps.not_evaluable("books", **{**src, "reason": "no-books"})
+        steps.finish()
+    rows, bad = parse(text)
+
+    # ── the watch: are these books today's? ──
+    w = watch if watch is not None else read_watch()
+    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    if "error" in w:
+        steps.not_evaluable("watch", why="metrics-silent", detail=w["error"])
+        watch_note = f"the watch's heartbeat could not be read ({w['error']}): these books may be old"
+    elif w.get("heartbeat") is None:
+        steps.not_evaluable("watch", why="never-ran")
+        watch_note = "image-watch has no heartbeat in 30 days: nothing has re-scanned what is served"
+    else:
+        age_h = int((now - w["heartbeat"]) // 3600)
+        if age_h > SILENT_AFTER_H:
+            steps.not_evaluable("watch", why="silent", age_hours=age_h)
+            watch_note = f"image-watch is SILENT: its last run was {age_h}h ago — these are not today's books"
+        elif w.get("written") == 0:
+            steps.not_evaluable("watch", why="books-not-written", age_hours=age_h)
+            watch_note = f"image-watch ran {age_h}h ago and could NOT write the books: these are the previous ones"
+        else:
+            steps.already("watch", age_hours=age_h)
+            watch_note = f"image-watch looked {age_h}h ago"
+
+    if not src.get("fetched", True):
+        steps.not_evaluable("remote", why="fetch-failed", detail=src.get("fetch_error", ""))
+    if bad:
+        steps.not_evaluable("books-unreadable", lines=len(bad), first=bad[0][:160])
+
+    if only:
+        rows = [r for r in rows if r["image"] == only or (r["kind"] == "exception")
+                or r["image"] == "exploited-list"]
+        if not any(r["image"] == only for r in rows):
+            print(f"aegis: {only!r} is not in the books (`aegis vulns --all` lists every image)",
+                  file=sys.stderr)
+            sys.exit(outcomes.RC_USAGE)
+
+    images = {}
+    for r in rows:
+        if r["kind"] == "exception":
+            continue
+        images.setdefault(r["image"], []).append(r)
+
+    if narrate:
+        head = f"commit {src.get('commit', '?')} of {src.get('ref', '?')}, {src.get('committed', '?')}"
+        print(f"\nknown vulnerabilities  {grey}({head}; {watch_note}){off}")
+        if not src.get("fetched", True):
+            print(f"  {yellow}the remote could not be fetched{off} {grey}— read as the last fetch left it{off}")
+
+    totals = {"exploited": 0, "overdue": 0, "due_soon": 0, "debt": 0, "unmeasured": 0, "clean": 0}
+    for img in sorted(images, key=lambda i: (min(ORDER.get(r["state"], 9) for r in images[i]), i)):
+        rs = sorted(images[img], key=lambda r: (ORDER.get(r["state"], 9), r["due"], r["cve"]))
+        kind = rs[0]["kind"]
+        states = {r["state"] for r in rs}
+        if img == "exploited-list":
+            totals["unmeasured"] += 1
+            steps.not_evaluable("exploited-list", why=rs[0]["pkgpath"])
+            if narrate:
+                print(f"\n  {yellow}the exploited-in-the-wild list{off}: {rs[0]['pkgpath']} — "
+                      f"a finding on it cannot be told apart from one that is not")
+            continue
+        if "unmeasured" in states:
+            totals["unmeasured"] += 1
+            steps.not_evaluable(f"image:{img}", kind=kind, why=rs[0]["pkgpath"], fixer=rs[0]["fixer"])
+            if narrate:
+                print(f"\n  {img}  {grey}{kind}{off}  {yellow}COULD NOT EVALUATE{off}: {rs[0]['pkgpath']}")
+            continue
+        if states == {"clean"}:
+            totals["clean"] += 1
+            steps.already(f"image:{img}", kind=kind, digest=rs[0]["digest"], findings=[])
+            if narrate and everything:
+                print(f"\n  {img}  {grey}{kind} · scanned clean{off}")
+            continue
+        found = [r for r in rs if r["state"] != "clean"]
+        n = {s: sum(1 for r in found if r["state"] == s) for s in ("exploited", "overdue", "debt")}
+        soon = sum(1 for r in found if due_soon(r, today))
+        totals["exploited"] += n["exploited"]
+        totals["overdue"] += n["overdue"]
+        totals["due_soon"] += soon
+        totals["debt"] += n["debt"] - soon
+        data = {"kind": kind, "digest": rs[0]["digest"], "fixer": rs[0]["fixer"],
+                "findings": [{k: r[k] for k in FIELDS if k not in ("image", "kind", "digest", "fixer")}
+                             | {"due_soon": due_soon(r, today), "days_to_due": days_to(r["due"], today)}
+                             for r in found]}
+        if narrate:
+            # The step line a person reads carries the counts; the
+            # findings themselves are printed below in words.
+            data = {"kind": kind, "exploited": n["exploited"], "overdue": n["overdue"],
+                    "due_soon": soon, "debt": n["debt"] - soon}
+        if n["exploited"] or n["overdue"]:
+            steps.wrong(f"image:{img}", **data)
+        else:
+            # Debt inside its window is MEASURED and ACCEPTED by the policy:
+            # attention, not failure (plan/21 §2, decision 1).
+            steps.done(f"image:{img}", **{**data, "attention": True})
+        if narrate:
+            tag = (f"{red}{n['exploited']} exploited{off} · " if n["exploited"] else "") + \
+                  (f"{red}{n['overdue']} overdue{off} · " if n["overdue"] else "") + \
+                  (f"{yellow}{soon} due soon{off} · " if soon else "") + \
+                  f"{n['debt'] - soon} in their window"
+            print(f"\n  {img}  {grey}{kind}{off}  {tag}")
+            print(f"  {grey}who fixes it: {rs[0]['fixer']}{off}")
+            for r in found:
+                print(_line(r, today))
+
+    excused = [r for r in rows if r["kind"] == "exception"]
+    if narrate and excused:
+        acc = sum(1 for r in excused if r["clock"] == "accepted")
+        print(f"\n  exceptions in force: {len(excused)} {grey}({len(excused) - acc} measured, {acc} accepted "
+              f"without measuring — trivyignore.yaml){off}")
+        if everything:
+            for r in sorted(excused, key=lambda r: r["due"]):
+                print(f"    {r['cve']:<17} {r['clock']:<9} until {r['due']}  {grey}{r['pkgpath']}{off}")
+    if narrate:
+        print(f"\n  {grey}{totals['clean']} image(s) scanned clean"
+              + ("" if everything else " (--all lists them)") + f"{off}")
+    shown = {k: src[k] for k in ("commit", "committed") if k in src} if narrate else src
+    steps.already("books", **{**shown, "totals": totals, "excused": len(excused)})
+    steps.finish()
+
+
+def main():
+    ap = cli.parser("vulns", __doc__.split("\n")[0])
+    ap.add_argument("--json", action="store_true", dest="json_mode",
+                    help="the document of states instead of the narration")
+    ap.add_argument("--image", default=None, metavar="NAME",
+                    help="only that image")
+    ap.add_argument("--all", action="store_true", dest="everything",
+                    help="also the images scanned clean and every exception in force")
+    a = ap.parse_args()
+    steps = outcomes.Steps(json_mode=a.json_mode)
+    return show(steps, not a.json_mode, a.image, a.everything)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
