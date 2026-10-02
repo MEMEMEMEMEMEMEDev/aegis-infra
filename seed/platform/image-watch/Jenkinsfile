@@ -737,9 +737,9 @@ spec:
                   done
                 '''
               }
-              def mrc = -1
+              def irc = -1
               container('trivy') {
-                mrc = sh(returnStatus: true, script: '''
+                irc = sh(returnStatus: true, script: '''
                   set -e
                   VP="${WORKSPACE}/k8s/base/platform/vuln-policy"
                   : > ledger-in/base-diffids
@@ -754,8 +754,8 @@ spec:
                   rm -f ledger-in/base-config-*.json "ledger-in/$N_SCAN.full"
                 ''')
               }
-              if (mrc != 0) {
-                echo "NOTICE: the exceptions could not be placed on ${t.image}'s inherited layers (exit ${mrc}) — NOT measured"
+              if (irc != 0) {
+                echo "NOTICE: the exceptions could not be placed on ${t.image}'s inherited layers (exit ${irc}) — NOT measured"
                 st.failed = 1
                 continue
               }
