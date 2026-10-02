@@ -174,6 +174,20 @@ with tempfile.TemporaryDirectory() as tmp:
     if rc != 2:
         findings.append(f"a heartbeat that could not be read gave rc {rc}, not 2")
 
+    # The exploited list too old to trust: its line as ledger.sh writes it.
+    STALE = "unmeasured|exploited-list|kev|||||||the exploited-in-the-wild list is 9 days old||||the watch refreshes it every morning\n"
+    if STALE.count("|") != 13:
+        findings.append("re-aim this check: the stale-list line is not 14 fields")
+    publish(H + CLEAN + STALE)
+    rc, doc = run(m, fresh); cases += 1
+    st = {s_["step"]: s_ for s_ in doc.get("steps", [])}
+    if rc != 2 or st.get("exploited-list", {}).get("why") != "the exploited-in-the-wild list is 9 days old":
+        findings.append(f"a stale exploited list gave rc {rc} and step {st.get('exploited-list')}: it is not said as what it is")
+    if "books-unreadable" in st:
+        findings.append("the stale-list line is read as an unreadable line of the books")
+    if "NOTEVAL" not in read_round(doc):
+        findings.append("the round does not say COULD NOT EVALUATE for a stale exploited list")
+
     publish(H + CLEAN)
     rc, doc = run(m, fresh); cases += 1
     if rc != 0:
@@ -237,4 +251,4 @@ with tempfile.TemporaryDirectory() as tmp:
 
 for x in findings:
     print(x)
-print(f"SCOPE: read_watch run through a headless Service; aegis vulns loaded against a bare remote and a clone, {cases} situations (no books, remote≠working tree, debt, overdue+exploited, unmeasured, silent, not written, unreadable heartbeat, clean); the round's reader run on each document")
+print(f"SCOPE: read_watch run through a headless Service; aegis vulns loaded against a bare remote and a clone, {cases} situations (no books, remote≠working tree, debt, overdue+exploited, unmeasured, silent, not written, unreadable heartbeat, stale exploited list, clean); the round's reader run on each document")

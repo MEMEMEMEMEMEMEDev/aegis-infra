@@ -48,6 +48,7 @@
 #       exploited, explicit zeros included (due_soon is the debt in the last
 #       third of its window, carved out of debt)
 #   aegis_vuln_unmeasured{image,kind}      1 when it could not be looked at
+#       (image="exploited-list" is the list itself: 1 too old, 0 fresh)
 # (The exceptions in force are in the books, not in a series: their lapse
 # is TrivyIgnoreExpiring's, read from aegis_trivyignore_expires_in_seconds.)
 #
@@ -96,6 +97,12 @@ if [ "${1:-}" = "--metrics" ]; then
             if (ORDER[i] in U) continue
             for (j = 1; j <= 4; j++) printf "aegis_vuln_findings{%s,state=\"%s\"} %d\n", lab, st[j], C[ORDER[i] "|" st[j]] + 0
         }
+        # The exploited list is in the books only while it is too old to
+        # trust. Without this zero its series would simply stop the morning
+        # it is fresh again, and VulnExploitedListStale, which reads the
+        # last value of two days, would keep firing for two days after the
+        # cure.
+        if (!("exploited-list|kev" in SEEN)) printf "aegis_vuln_unmeasured{image=\"exploited-list\",kind=\"kev\"} 0\n"
     }' "$L"
     exit 0
 fi
@@ -188,7 +195,7 @@ BEGIN {
     why = ""
     if (rel == "" || dfc(rel) < 0) why = "the exploited-in-the-wild list is missing or has no date"
     else if (max >= 0 && dfc(today) - dfc(rel) > max) why = "the exploited-in-the-wild list is " (dfc(today) - dfc(rel)) " days old"
-    if (why != "") print "unmeasured|exploited-list|kev||||||" why "||||the watch refreshes it every morning"
+    if (why != "") print "unmeasured|exploited-list|kev|||||||" why "||||the watch refreshes it every morning"
 }' >> "$WORK/body"
 
 # The exceptions in force: each `- id:` of trivyignore.yaml with its paths,

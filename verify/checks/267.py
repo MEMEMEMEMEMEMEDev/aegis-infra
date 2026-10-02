@@ -134,11 +134,15 @@ for sh in shells:
         # Tomorrow and beyond: the first-seen clock is kept; a stale list is said.
         rc, out3, err = run(sh, tmp, ["inv", "led1"], "2026-11-20", kevday="2026-10-01")
         rs3 = rows(out3)
+        if any(len(r) != 14 for r in rs3):
+            findings.append(f"[{who}] a line of the second morning's ledger does not carry the 14 fields "
+                            f"({[r[1] for r in rs3 if len(r) != 14]}): the series and aegis vulns skip it")
         fs = find(rs3, None, "python", "CVE-2026-0000003")
         if not fs or fs[0][10] != "2026-10-02" or fs[0][0] != "overdue":
             findings.append(f"[{who}] yesterday's first-seen day was not kept: the window restarts every morning")
-        if not find(rs3, "unmeasured", "exploited-list"):
-            findings.append(f"[{who}] an exploited list 50 days old is not said in the books")
+        stale = find(rs3, "unmeasured", "exploited-list")
+        if not stale or "50 days old" not in stale[0][9]:
+            findings.append(f"[{who}] an exploited list 50 days old is not said in the books, in the field its readers read")
         # The series.
         w("led2", out)
         rc, met, err = run(sh, tmp, ["--metrics", "led2"], "2026-10-20")
@@ -152,6 +156,12 @@ for sh in shells:
             findings.append(f"[{who}] the last third of a window is not carved out of debt as due_soon")
         if mv('aegis_vuln_unmeasured{image="garage",kind="mirror"}') != "1":
             findings.append(f"[{who}] an unmeasured image is not 1 in aegis_vuln_unmeasured")
+        if mv('aegis_vuln_unmeasured{image="exploited-list",kind="kev"}') != "0":
+            findings.append(f"[{who}] a fresh exploited list has no explicit zero in the series: VulnExploitedListStale keeps firing two days after the cure")
+        w("led3", out3)
+        rc, met3, err = run(sh, tmp, ["--metrics", "led3"], "2026-11-20")
+        if 'aegis_vuln_unmeasured{image="exploited-list",kind="kev"} 1' not in met3:
+            findings.append(f"[{who}] a stale exploited list is not 1 in aegis_vuln_unmeasured")
         if 'aegis_vuln_findings{image="garage"' in met:
             findings.append(f"[{who}] an unmeasured image carries finding counts (a zero that was not measured)")
     scope.append(who)

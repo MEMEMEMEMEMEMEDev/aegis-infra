@@ -25,7 +25,10 @@ red_2() { _sub "$L267" "        printf 'clean|%s|%s|%s||||||||||%s\\n' \"\$img\"
 red_3() { _sub "$L267" '$6 = (k in F) ? F[k] : today' '$6 = today'; }
 
 # a stale exploited list is not said
-red_4() { _sub "$L267" '    if (why != "") print "unmeasured|exploited-list|kev||||||" why' '    if (0) print "unmeasured|exploited-list|kev||||||" why'; }
+red_4() { _sub "$L267" '    if (why != "") print "unmeasured|exploited-list|kev|||||||" why' '    if (0) print "unmeasured|exploited-list|kev|||||||" why'; }
+
+# the stale-list line as it was written first: thirteen fields, skipped by every reader
+red_11() { _sub "$L267" '    if (why != "") print "unmeasured|exploited-list|kev|||||||" why' '    if (why != "") print "unmeasured|exploited-list|kev||||||" why'; }
 
 # the series have no explicit zeros for a clean image
 red_5() { _sub "$L267" '            for (j = 1; j <= 4; j++) printf' '            for (j = 1; j <= 4; j++) if (C[ORDER[i] "|" st[j]] > 0) printf'; }
@@ -42,6 +45,9 @@ red_8() { _sub "$W267" '              elif [ "$NEW" -lt $(( OLD * 9 / 10 )) ]; t
 
 # the seed takes the instance's exploited list back on every apply
 red_9() { _sub "$S267" '    "k8s/base/platform/vuln-policy/kev.txt", "image-watch/ledger.txt",' '    "image-watch/ledger.txt",'; }
+
+# a fresh exploited list pushes no zero: the stale alert outlives the cure by two days
+red_10() { _sub "$L267" '        if (!("exploited-list|kev" in SEEN)) printf' '        if (0) printf'; }
 
 # ── controls ──
 control_1() { _sub "$L267" 'the watch could not scan it this morning' 'the watch could not look at it this morning'; }
