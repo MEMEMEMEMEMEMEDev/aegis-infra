@@ -181,6 +181,27 @@ with tempfile.TemporaryDirectory() as tmp:
     if "TOTAL" not in read_round(doc) or "BAD" in read_round(doc):
         findings.append("the round does not reach its green on clean books")
 
+# ── the books are a section of the round, and Security draws it ──
+# 2026-10-02: the block was the tail of «observability», which the console
+# draws on Machine — the books' notices never reached the page the books
+# are on. The section is found in the round's source, and then a round
+# document carrying it is DRAWN: Security has to show its notice.
+order = [(m_.start(), m_.group(1)) for m_ in re.finditer(r'^heading "([^"]+)"', src, re.M)]
+call = re.search(r"^\s*vulns_json=\$\(aegis_exec vulns --json", src, re.M)
+last = [name for pos, name in order if call and pos < call.start()][-1:]
+if last != ["known vulnerabilities"]:
+    findings.append(f"the round reports the books under the section {last or ['none']}, not under one of their own: the console files them on another page")
+sys.path.insert(0, os.path.join(ROOT, "lib"))
+from aegis import screens  # noqa: E402
+round_doc = {"steps": [{"step": "known vulnerabilities", "state": "already", "notes": [],
+                        "measures": [{"measure": "python: 2 known vulnerability(ies) inside the window, the next due 2026-10-29",
+                                      "state": "notice", "notes": []}],
+                        "counts": {"notice": 1}}], "failures": 0, "notices": 1, "rc": 0}
+page = screens.security([{"comando": "check", "rc": 0, "documento": round_doc,
+                          "sin_documento": None, "medido_en": "2026-10-20T09:00:00-03:00"}])
+if "inside the window, the next due 2026-10-29" not in page or 'data-state="attention"' not in page:
+    findings.append("Security does not draw the round's «known vulnerabilities» section: debt inside its window has no notice on the page the books are on")
+
 # ── the heartbeat, read the way the cluster serves it ──
 class _VM(http.server.BaseHTTPRequestHandler):
     def do_GET(self):

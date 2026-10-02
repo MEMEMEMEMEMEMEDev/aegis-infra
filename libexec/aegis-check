@@ -15,7 +15,10 @@
 # IT WRITES NOTHING. All it does is read and, in the case of the
 # signature check, ask the apiserver for an ADMISSION verdict with
 # --dry-run=server: it goes through the webhooks but does not create the
-# pod.
+# pod. The one thing it moves on disk is the platform clone's
+# remote-tracking refs: `aegis vulns` fetches, because the books it reads
+# are committed from the cluster and a clone only learns of them that way.
+# No working tree, no branch, no commit.
 #
 # ── why it exists ─────────────────────────────────────────────────
 # Phase 80 of the init tests the supply chain thoroughly (negative,
@@ -1536,30 +1539,40 @@ except Exception:
       [[ "$n_ok" -gt 0 ]] \
           && ok "$n_ok deployed image(s) with their last build scanned"
   fi
+fi
 
-  #     ...and did anybody scan it AGAIN? The round above answers for
-  #     the BUILD: the image went through Trivy the day it was pushed.
-  #     It says nothing about the CVEs published since. image-watch
-  #     re-scans what is served every morning and keeps the BOOKS of what
-  #     it finds (plan/21 §4.3, image-watch/ledger.txt): each finding
-  #     with the day its window closes. `aegis vulns` reads them, and so
-  #     does this round — through it, never with its own arithmetic, so
-  #     the round, the command and the console cannot disagree.
-  #
-  #     Until 2026-10-02 this section had two answers: no fixable CVE =
-  #     green, any = failure. Since the door lets findings in as debt
-  #     with a date, the honest answers are the policy's:
-  #       · inside its window                → NOTICE (attention): the
-  #         platform accepted it on purpose, and it says until when
-  #       · past its window, or exploited    → failure
-  #       · the watch silent, the books not written, an image or the
-  #         exploited list not looked at     → COULD NOT EVALUATE
-  #       · nothing owed, the watch fresh    → green
-  #     «Stopped» (a heartbeat older than 2 days) stays a failure, as it
-  #     was: that is ImageWatchSilent seen from here, and what runs has
-  #     not been re-scanned since.
-  vulns_json=$(aegis_exec vulns --json 2>/dev/null); vulns_rc=$?
-  vulns_lines=$(VULNS_JSON="$vulns_json" python3 - <<'PY'
+# ── known vulnerabilities: the books ──────────────────────────────
+# ITS OWN SECTION, and outside the branch above. It was written as the
+# tail of «observability», inside the `else` that needs vmsingle, and two
+# things were wrong with that (found re-reading, 2026-10-02): the console
+# draws the round's sections BY NAME, so the books' notices landed on
+# Machine and never on Security, where the books are drawn; and nothing
+# here uses the query helper of that branch — `aegis vulns` finds vmsingle
+# by itself and says so when it cannot.
+heading "known vulnerabilities"
+#     ...and did anybody scan it AGAIN? The round above answers for
+#     the BUILD: the image went through Trivy the day it was pushed.
+#     It says nothing about the CVEs published since. image-watch
+#     re-scans what is served every morning and keeps the BOOKS of what
+#     it finds (plan/21 §4.3, image-watch/ledger.txt): each finding
+#     with the day its window closes. `aegis vulns` reads them, and so
+#     does this round — through it, never with its own arithmetic, so
+#     the round, the command and the console cannot disagree.
+#
+#     Until 2026-10-02 this section had two answers: no fixable CVE =
+#     green, any = failure. Since the door lets findings in as debt
+#     with a date, the honest answers are the policy's:
+#       · inside its window                → NOTICE (attention): the
+#         platform accepted it on purpose, and it says until when
+#       · past its window, or exploited    → failure
+#       · the watch silent, the books not written, an image or the
+#         exploited list not looked at     → COULD NOT EVALUATE
+#       · nothing owed, the watch fresh    → green
+#     «Stopped» (a heartbeat older than 2 days) stays a failure, as it
+#     was: that is ImageWatchSilent seen from here, and what runs has
+#     not been re-scanned since.
+vulns_json=$(aegis_exec vulns --json 2>/dev/null); vulns_rc=$?
+vulns_lines=$(VULNS_JSON="$vulns_json" python3 - <<'PY'
 import json, os
 try:
     doc = json.loads(os.environ.get("VULNS_JSON", ""))
@@ -1607,21 +1620,20 @@ for s in doc.get("steps", []):
         print(f"TOTAL|{t.get('clean', 0)}|{owed}")
 PY
 )
-  vulns_total=""
-  while IFS='|' read -r kind text extra; do
-      case "$kind" in
-          BAD)     bad "$text" ;;
-          NOTE)    note "$text" ;;
-          NOTICE)  notice "$text" ;;
-          NOTEVAL) notice "COULD NOT EVALUATE: $text" ;;
-          TOTAL)   vulns_total="$text|$extra" ;;
-      esac
-  done <<< "$vulns_lines"
-  if [[ "$vulns_rc" == 0 && -n "$vulns_total" && "${vulns_total#*|}" == 0 ]]; then
-      ok "image-watch's books: ${vulns_total%%|*} image(s) looked at, nothing owed"
-  elif [[ -z "$vulns_lines" ]]; then
-      notice "COULD NOT EVALUATE: aegis vulns said nothing (rc $vulns_rc) — the books were not read"
-  fi
+vulns_total=""
+while IFS='|' read -r kind text extra; do
+    case "$kind" in
+        BAD)     bad "$text" ;;
+        NOTE)    note "$text" ;;
+        NOTICE)  notice "$text" ;;
+        NOTEVAL) notice "COULD NOT EVALUATE: $text" ;;
+        TOTAL)   vulns_total="$text|$extra" ;;
+    esac
+done <<< "$vulns_lines"
+if [[ "$vulns_rc" == 0 && -n "$vulns_total" && "${vulns_total#*|}" == 0 ]]; then
+    ok "image-watch's books: ${vulns_total%%|*} image(s) looked at, nothing owed"
+elif [[ -z "$vulns_lines" ]]; then
+    notice "COULD NOT EVALUATE: aegis vulns said nothing (rc $vulns_rc) — the books were not read"
 fi
 
 # ── verdict ───────────────────────────────────────────────────────

@@ -35,6 +35,13 @@ red_7() { _sub "$C268" '            print(f"NOTICE|{img}: {len(found)} known vul
 # the heartbeat is looked for at the clusterIP alone: vmsingle is headless, and it is never found
 red_8() { _sub "$V268" '    where = window.service_endpoint("observability", "vmsingle")' '    where = None if window._kubectl("get", "svc", "-n", "observability", "vmsingle", "-o", "jsonpath={.spec.clusterIP}")[1] in ("", "None") else window.service_endpoint("observability", "vmsingle")'; }
 
+# the books are the tail of «observability» again: the console files their notices on Machine
+red_9() { _sub "$C268" 'heading "known vulnerabilities"
+' ''; }
+
+# Security does not pick the section up
+red_10() { _sub "$AEGIS_ROOT/lib/aegis/screens.py" '    "security": ("supply chain", "known vulnerabilities", "certificates", "CI webhooks",' '    "security": ("supply chain", "certificates", "CI webhooks",'; }
+
 # ── controls ──
 control_1() { _sub "$V268" '"EXPLOITED in the wild: it has no window"' '"EXPLOITED in the wild: no window applies"'; }
 control_2() { _sub "$C268" "who fixes it: {s.get('fixer', '?')}" "fixed by: {s.get('fixer', '?')}"; }

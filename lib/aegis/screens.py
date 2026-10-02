@@ -75,8 +75,8 @@ ROUND_PAGES = {
     "deployments": ("argocd", "stuck syncs", "CI quota", "CI webhooks", "every push built"),
     "domains": ("edge", "certificates", "whose the routing is"),
     "storage": ("backups",),
-    "security": ("supply chain", "certificates", "CI webhooks", "whose the routing is",
-                 "argocd"),
+    "security": ("supply chain", "known vulnerabilities", "certificates", "CI webhooks",
+                 "whose the routing is", "argocd"),
     "machine": ("node", "pods", "observability", "ai"),
 }
 
