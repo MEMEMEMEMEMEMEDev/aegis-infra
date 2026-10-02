@@ -48,7 +48,8 @@
 #       exploited, explicit zeros included (due_soon is the debt in the last
 #       third of its window, carved out of debt)
 #   aegis_vuln_unmeasured{image,kind}      1 when it could not be looked at
-# and aegis_vuln_excused{class} for the exceptions in force.
+# (The exceptions in force are in the books, not in a series: their lapse
+# is TrivyIgnoreExpiring's, read from aegis_trivyignore_expires_in_seconds.)
 #
 # SINCE is the CVE's publication day (CLOCK=published) or, when the
 # database has none, the day the watch first saw it (CLOCK=first-seen).
@@ -75,7 +76,7 @@ if [ "${1:-}" = "--metrics" ]; then
     [ -r "$L" ] || { echo "ledger: no ledger at $L" >&2; exit 3; }
     awk -F'|' -v today="${TODAY:-$(date -u +%Y-%m-%d)}" "$DFC"'
     /^#/ || NF != 14 { next }
-    $1 == "excused" { X[$12]++; next }
+    $1 == "excused" { next }
     {
         k = $2 "|" $3
         if (!(k in SEEN)) { SEEN[k] = 1; ORDER[++n] = k }
@@ -95,8 +96,6 @@ if [ "${1:-}" = "--metrics" ]; then
             if (ORDER[i] in U) continue
             for (j = 1; j <= 4; j++) printf "aegis_vuln_findings{%s,state=\"%s\"} %d\n", lab, st[j], C[ORDER[i] "|" st[j]] + 0
         }
-        printf "aegis_vuln_excused{class=\"measured\"} %d\n", X["measured"] + 0
-        printf "aegis_vuln_excused{class=\"accepted\"} %d\n", X["accepted"] + 0
     }' "$L"
     exit 0
 fi

@@ -294,28 +294,66 @@ data:
   # «absent»); [30d] for base-images, which is a build and can go
   # weeks without one (same policy as suministro.yaml).
   #
-  # Alertmanager has ONE route, so the `info` below pages like the
-  # rest. That is acceptable ON PURPOSE: each firing of it is a
-  # decision the operator has to take (re-mirror or not), not noise
-  # to be filed — if a day comes when it is noise, the fix is a route,
-  # not deleting the alert.
+  # Alertmanager pages every severity alike, so the `info` below pages
+  # like the rest. That is acceptable ON PURPOSE: UpstreamFixAvailable
+  # is a decision the operator has to take (re-mirror or not), and
+  # VulnDebt is a once-a-day reminder — it has its own route with a
+  # 24h repeat (alertmanager.yaml), which is how «noise» was answered:
+  # a route, never a deleted alert.
   images.yaml: |
     groups:
       - name: images
         rules:
-          # `for: 24h` is the rebuild window: when the watch finds a
-          # fixable CVE in an aegis-base-* it triggers the rebuild the
-          # same morning. A day later, still there, means one of two
-          # things a loop cannot fix: the distro has not shipped the
-          # fix yet, or the image is a third party's and a human has
-          # to decide.
-          - alert: ImageWithFixableVulns
-            expr: sum by (image) (last_over_time(aegis_image_fixable_vulns[2d])) > 0
-            for: 24h
+          # THE LADDER OF THE BOOKS (plan/21 §4.4), replacing the one
+          # red ImageWithFixableVulns used to be. Since the door lets a
+          # finding in as DEBT with a window (15 days critical, 30 high,
+          # from the CVE's publication), «there is a fixable CVE» stopped
+          # being one fact: it is a debt on its way somewhere. Four rungs,
+          # read from ledger.sh's aegis_vuln_findings{state}, each with
+          # what to do in words a person reads on the phone:
+          #   VulnDebt         info      inside its window — once a day,
+          #                              grouped: a summary, not a page
+          #   VulnDebtDueSoon  warning   the last third of the window
+          #   VulnDebtOverdue  critical  past the window — every day
+          #   VulnExploited    critical  on CISA's exploited list: now
+          # The daily cadence of the first three is alertmanager's route
+          # (repeat_interval 24h), not a `for:` here.
+          - alert: VulnDebt
+            expr: sum by (image) (last_over_time(aegis_vuln_findings{state="debt"}[2d])) > 0
+            for: 1h
+            labels: {severity: info}
+            annotations:
+              summary: "{{ $labels.image }} carries {{ $value }} known vulnerability(ies), still inside the window"
+              description: "Nothing is broken and nothing stops: the platform let these in on purpose, each with a date to be fixed by (15 days for a critical, 30 for a high, from its publication). `aegis vulns --image {{ $labels.image }}` says which, until when and who fixes them. This is a reminder, once a day."
+          - alert: VulnDebtDueSoon
+            expr: sum by (image) (last_over_time(aegis_vuln_findings{state="due_soon"}[2d])) > 0
+            for: 1h
             labels: {severity: warning}
             annotations:
-              summary: "{{ $labels.image }} has {{ $value }} fixable CVE(s) against today's DB, a day after the watch saw them"
-              description: "Fixable, not theoretical: --ignore-unfixed. For an aegis-base-* the loop already tried (base-images rebuilt it the morning it appeared): either the distro has no fix yet or the rebuild failed — check the base-images console. For a third party run `crane digest` on the upstream tag and read UpstreamFixAvailable: if it fires, re-mirroring helps; if not, the fix is not published upstream yet."
+              summary: "{{ $labels.image }}: {{ $value }} known vulnerability(ies) close to their due date"
+              description: "They are in the last third of their window. After the due date the alert turns critical every day. `aegis vulns --image {{ $labels.image }}` says the date and who fixes each one: a rebuild for a base or an app, a newer upstream (aegis image request --bump) for a third party."
+          - alert: VulnDebtOverdue
+            expr: sum by (image) (last_over_time(aegis_vuln_findings{state="overdue"}[2d])) > 0
+            for: 1h
+            labels: {severity: critical}
+            annotations:
+              summary: "{{ $labels.image }}: {{ $value }} known vulnerability(ies) PAST their due date"
+              description: "The window closed and the fix is not running. It keeps working, and this alert repeats every day until it is fixed. `aegis vulns --image {{ $labels.image }}` says what and who fixes it. If the fix cannot come yet, write down why with a date: `aegis image request <image> --accept <CVE> --until <date> --reason ...`."
+          - alert: VulnExploited
+            expr: sum by (image) (last_over_time(aegis_vuln_findings{state="exploited"}[2d])) > 0
+            labels: {severity: critical}
+            annotations:
+              summary: "{{ $labels.image }} runs a vulnerability that is being EXPLOITED in the wild"
+              description: "CISA lists it as exploited right now: it has no window and cannot be accepted, only fixed. `aegis vulns --image {{ $labels.image }}` names it and who fixes it. Fix it first, before anything else."
+          # The exploited list itself: older than kev_max_age_days, it
+          # cannot tell an exploited finding from any other.
+          - alert: VulnExploitedListStale
+            expr: last_over_time(aegis_vuln_unmeasured{image="exploited-list"}[2d]) == 1
+            for: 1h
+            labels: {severity: warning}
+            annotations:
+              summary: "the list of vulnerabilities exploited in the wild is too old to trust"
+              description: "image-watch could not refresh CISA's list for several days, so a vulnerability that started being exploited would not be told apart. Read the `exploited list` stage of the image-watch console (the network to cisa.gov, or a download refused as too short)."
           # All three legs on the same `image`: vulnerable today, the
           # upstream tag moved, AND the candidate scans clean. Only
           # then does re-mirroring help; without the third leg it is a
@@ -326,7 +364,7 @@ data:
             labels: {severity: info}
             annotations:
               summary: "{{ $labels.image }}: the upstream moved and the candidate scans clean"
-              description: "Re-mirroring WILL help: the upstream tag points at a new digest and that digest has no fixable CVE. Edit images.txt (tag+digest), run mirror-images, bump the consumer. Until then ImageWithFixableVulns keeps firing for this image."
+              description: "Re-mirroring WILL help: the upstream tag points at a new digest and that digest has no fixable CVE. Edit images.txt (tag+digest), run mirror-images, bump the consumer. Until then the image's debt keeps its rung on the ladder (VulnDebt … VulnDebtOverdue)."
           # Not «clean»: the watch could not run trivy on this image
           # (transport, registry, scan error). A 0 in fixable_vulns
           # next to a 1 here is a zero that measured nothing.
@@ -343,12 +381,18 @@ data:
           # without this. The ladder over the books' own series is the
           # next step; this one is the books' heartbeat.
           - alert: VulnLedgerNotWritten
-            # The second leg: the watch ran (its heartbeat is there) and
-            # pushed no books series at all — absent, not false.
+            # The other legs: the watch ran (its heartbeat is there) and
+            # pushed no books series at all, or said it wrote the books
+            # and the ladder's series are missing — absent, not false:
+            # without them the four rungs above go empty, not quiet.
             expr: >-
               last_over_time(aegis_vuln_ledger_written[2d]) == 0
               or (absent(last_over_time(aegis_vuln_ledger_written[2d]))
                   and on() last_over_time(aegis_image_watch_timestamp_seconds[2d]) > 0)
+              or (absent(last_over_time(aegis_vuln_findings[2d]))
+                  and on() last_over_time(aegis_vuln_ledger_written[2d]) == 1)
+              or (absent(last_over_time(aegis_vuln_unmeasured[2d]))
+                  and on() last_over_time(aegis_vuln_ledger_written[2d]) == 1)
             for: 1h
             labels: {severity: warning}
             annotations:
@@ -403,7 +447,7 @@ data:
             labels: {severity: critical}
             annotations:
               summary: "image-watch did not leave its daily heartbeat"
-              description: "The daily job did not push in the last two days: the cron is gone from job-dsl, the job is broken, or vmsingle rejected the POST. Without it ImageWithFixableVulns, UpstreamFixAvailable and ImageWatchCouldNotEvaluate are mute, not green — and what is running has not been re-scanned since the last heartbeat. Phase 85 fires it once at birth: silent means stopped, not «not yet»."
+              description: "The daily job did not push in the last two days: the cron is gone from job-dsl, the job is broken, or vmsingle rejected the POST. Without it the ladder of the books (VulnDebt … VulnExploited), UpstreamFixAvailable and ImageWatchCouldNotEvaluate are mute, not green — and what is running has not been re-scanned since the last heartbeat. Phase 85 fires it once at birth: silent means stopped, not «not yet»."
   backups.yaml: |
     groups:
       # ── the off-site copy ─────────────────────────────────────────

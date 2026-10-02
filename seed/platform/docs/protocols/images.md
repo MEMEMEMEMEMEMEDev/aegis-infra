@@ -494,7 +494,7 @@ written.
 
 Over-listing costs one clone and one grep. The hole the list closes
 is the other direction: a consumer that is **not** listed is the
-`FROM` nobody bumps — the base's alert `ImageWithFixableVulns` clears,
+`FROM` nobody bumps — the base's rung on the alert ladder clears,
 the propagation reports success, and what runs still stands on the
 old base. That is why the block is derived and never written by hand.
 
@@ -587,12 +587,17 @@ members — the same morning. Third parties are NEVER re-mirrored on
 their own: that is a human's decision, and the watch gives it the
 three facts it needs.
 
-The six alerts, and what to do:
+The alerts, and what to do:
 
 | alert | severity | it means | what to do |
 |---|---|---|---|
-| alert `ImageWithFixableVulns` | warning, after 24h | a fixable CVE seen by the watch a day ago is still there. The 24h is the rebuild window: for a base the loop already tried | for an `aegis-base-*`: the distro has no fix yet or the rebuild failed — read the `base-images` console. For a third party: §6, which starts by asking the command again |
-| alert `UpstreamFixAvailable` | info | three legs on one image: it is vulnerable today, AND the upstream tag moved, AND the candidate scans clean. Only then does re-mirroring help | `aegis image request <repo>:<tag> --bump`, then bump the consumer (§2). Until then `ImageWithFixableVulns` keeps firing for it |
+| alert `VulnDebt` | info, once a day | the image carries findings inside their window (§4.1): nothing stops | `aegis vulns --image <image>`: what, until when, who fixes it |
+| alert `VulnDebtDueSoon` | warning | a finding is in the last third of its window | the fix named in `aegis vulns`: for an `aegis-base-*` the loop already tried (the distro has no fix yet, or the rebuild failed — the `base-images` console); for a third party §6; for an app, a build of its repo |
+| alert `VulnDebtOverdue` | critical, every day | a finding is past its due date | the same fix, now; if it cannot come yet, an accepted risk with a date (`aegis image request … --accept`) |
+| alert `VulnExploited` | critical, now | a finding of what runs is on CISA's exploited-in-the-wild list | fix it first: it has no window and cannot be accepted |
+| alert `VulnExploitedListStale` | warning | the exploited list could not be refreshed for days | the `exploited list` stage of the image-watch console |
+| alert `VulnLedgerNotWritten` | warning | the watch ran and could not write the books | the `ledger` stage of the image-watch console |
+| alert `UpstreamFixAvailable` | info | three legs on one image: it is vulnerable today, AND the upstream tag moved, AND the candidate scans clean. Only then does re-mirroring help | `aegis image request <repo>:<tag> --bump`, then bump the consumer (§2). Until then the image keeps its rung on the ladder |
 | alert `ImageWatchCouldNotEvaluate` | warning | the watch could not scan this image (pull, transport, trivy). Its fixable count is not a measurement | read the `image-watch` console for the error. COULD NOT EVALUATE ≠ clean; the rest of the images ARE measured |
 | alert `BasePropagationFailed` | warning | the base was rebuilt and signed, but this consumer's `FROM` was not bumped: what it deploys still stands on the old base, and nothing in its own pipeline will say so | `base-images` console for that repo; bump by hand if need be, then a build. The alert clears on the next rebuild that propagates |
 | alert `TrivyIgnoreExpiring` | warning, 30 days' notice | an exception in `trivyignore.yaml` has under a month left | re-measure it (its statement says how it was justified and what would close it) or let it expire. Expired = the next mirror run and the next watch go red ON PURPOSE |
@@ -642,7 +647,7 @@ from one morning's books to the next so the window does not restart.
 The series of the books: `aegis_vuln_findings{image,kind,state}` with
 `state` in `debt`, `due_soon` (the last third of the window, carved out of
 debt), `overdue`, `exploited`, explicit zeros included;
-`aegis_vuln_unmeasured{image,kind}`; `aegis_vuln_excused{class}`; and
+`aegis_vuln_unmeasured{image,kind}`; and
 `aegis_vuln_ledger_written` (0 = the books could not be written this
 morning, and yesterday's stay).
 
@@ -682,7 +687,7 @@ Never, and by design:
   a fact for the human, not a knob for the scanner.
 - **add an exception to a base we own.** `trivyignore.yaml` is read by
   `mirror-images` only. A base that scans red is rebuilt, or it waits
-  for the distro, and `ImageWithFixableVulns` says so every day until
+  for the distro, and its rung on the alert ladder (§4) says so until
   then. The exception path exists for a binary we cannot rebuild
   (postgres' `gosu`, with its symbol-by-symbol measurement and its
   `expired_at`), never for one we can.
@@ -699,7 +704,7 @@ Never, and by design:
 ## 6. Handling a CVE by hand when the loop cannot
 
 The loop cannot decide for a third party. When
-alert `ImageWithFixableVulns` fires for one, the first move is to ask
+ladder (§4) names one, the first move is to ask
 the command again for the same thing:
 
 ```

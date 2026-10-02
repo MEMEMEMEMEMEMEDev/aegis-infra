@@ -187,6 +187,15 @@ def jenkinsfile_producer(jf, rel, cadence, minimum):
         return
     for met in set(JF_METRIC.findall(txt)):
         producers.setdefault(met, (rel, cadence, minimum))
+    # A script of this tree the pipeline RUNS (`sh image-watch/ledger.sh
+    # --metrics …`, 2026-10-02) writes series the same push carries: it is
+    # the same producer, at the same cadence. Only a path the Jenkinsfile
+    # invokes with `sh` and that exists here — a name in prose is not a run.
+    for script in set(re.findall(r"\bsh\s+([A-Za-z0-9_./-]+\.sh)\b", txt)):
+        f = P / script
+        if f.is_file():
+            for met in set(JF_METRIC.findall(f.read_text())):
+                producers.setdefault(met, (f"{rel} -> {script}", cadence, minimum))
 for jf in sorted((P / "docs/protocols/templates").glob("Jenkinsfile*")):
     jenkinsfile_producer(jf, str(jf.relative_to(P)), "every build", BUILD_FLOOR)
 for jf in sorted(P.glob("*/Jenkinsfile")):

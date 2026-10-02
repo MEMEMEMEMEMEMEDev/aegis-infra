@@ -31,6 +31,12 @@ data:
           receiver: ntfy
           group_wait: 0s
           repeat_interval: __OBS_DEADMAN_REPEAT__
+        # The books' ladder (plan/21 §4.4): debt is a daily reminder, not a
+        # twice-a-day page, and an overdue debt is said every day until it
+        # is fixed. VulnExploited stays on the default 12h: it is urgent.
+        - matchers: ['alertname=~"VulnDebt|VulnDebtDueSoon|VulnDebtOverdue"']
+          receiver: ntfy
+          repeat_interval: 24h
     receivers:
       - name: ntfy
         webhook_configs:

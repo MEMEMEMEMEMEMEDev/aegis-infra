@@ -386,7 +386,7 @@ data:
               }
             ]
           },
-          "description": "What is RUNNING, re-scanned every morning by image-watch against today's trivy DB, fixable only (--ignore-unfixed). A build-time green says nothing about the CVEs published after the push; this does. Alert ImageWithFixableVulns (after the 24h rebuild window). A 0 next to 'could not evaluate' in the watch console is a zero that measured nothing."
+          "description": "What is RUNNING, re-scanned every morning by image-watch against today's trivy DB, fixable only (--ignore-unfixed). A build-time green says nothing about the CVEs published after the push; this does. The alerts are the ladder of the books (VulnDebt, VulnDebtDueSoon, VulnDebtOverdue, VulnExploited), read from aegis_vuln_findings. A 0 next to 'could not evaluate' in the watch console is a zero that measured nothing."
         },
         {
           "id": 9,
