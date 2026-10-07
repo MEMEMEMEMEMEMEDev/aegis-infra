@@ -54,5 +54,9 @@ red_11() { _sub "$W269" "            if (t.kind == 'app') {
 # the clone stops saying the FROMs: no layer is known as inherited
 red_12() { _sub "$W269" "                      awk 'toupper(\$1) == \"FROM\" { for (i = 2; i <= NF; i++) if (\$i ~ /@sha256:[0-9a-f]+\$/) print \"FROM\", \$i }' \"\$cf\"" "                      :"; }
 
+# the app's events are the excused scan's, not the merged lines: its own finding the exceptions hid never reaches vlogs
+red_13() { _sub "$W269" '              r.findings = findings2
+' ''; }
+
 # ── controls ──
 control_1() { _sub "$W269" "echo 'apps: no contract in orgs/ names a repo — no tenant image runs on this instance'" "echo 'apps: no contract names a repo — nothing of a tenant runs here'"; }

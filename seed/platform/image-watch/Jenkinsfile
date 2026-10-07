@@ -759,15 +759,23 @@ spec:
                 st.failed = 1
                 continue
               }
+              // The counts AND the events come from the merged lines: the
+              // first scan's findings are the excused ones, and an app's
+              // own finding the exceptions hid (and the merge gave back)
+              // would be counted and never told to vlogs.
               int crit2 = 0
               int high2 = 0
+              def findings2 = []
               for (line in readFile("ledger-in/${n}.txt").split('\n')) {
                 def ff = line.split(/\|/)
-                if (ff.size() == 9 && ff[1] == 'CRITICAL') { crit2 += 1 }
-                if (ff.size() == 9 && ff[1] == 'HIGH') { high2 += 1 }
+                if (ff.size() != 9) { continue }
+                if (ff[1] == 'CRITICAL') { crit2 += 1 }
+                if (ff[1] == 'HIGH') { high2 += 1 }
+                findings2 << [ff[0], ff[1], ff[2], ff[3], ff[4]]
               }
               r.crit = crit2
               r.high = high2
+              r.findings = findings2
             }
             st.crit = r.crit
             st.high = r.high

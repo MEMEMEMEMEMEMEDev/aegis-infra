@@ -112,6 +112,10 @@ else:
         findings.append("the base's layers are not read from the app's FROMs")
     if not re.search(r"sh image-watch/ledger\.sh --inherit \"ledger-in/\$N_SCAN\.txt\" \"ledger-in/\$N_SCAN\.full\"", app):
         findings.append("the two scans of an app are not merged by ledger.sh --inherit")
+    # the events come from the merged lines too, not from the excused scan
+    if not re.search(r"^\s*r\.findings = findings2$", app, re.M) or not re.search(r"findings2 << \[ff\[0\]", app):
+        findings.append("an app's events are the excused scan's findings, not the merged ones: its own "
+                        "finding the exceptions hid is counted and never told to vlogs")
 if not re.search(r"if \(t\.unreadable\)", serving):
     findings.append("a repo that could not be cloned is scanned anyway instead of left unmeasured")
 ledger = src[src.index("stage('ledger')"):src.index("stage('publish')")]
