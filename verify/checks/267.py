@@ -140,6 +140,20 @@ for sh in shells:
         fs = find(rs3, None, "python", "CVE-2026-0000003")
         if not fs or fs[0][10] != "2026-10-02" or fs[0][0] != "overdue":
             findings.append(f"[{who}] yesterday's first-seen day was not kept: the window restarts every morning")
+        # A bad morning in between: python cannot be looked at on 10-03.
+        # Its dateless clock must survive that morning and be read back on
+        # the next one (found in review, 2026-10-06: it restarted).
+        w("inv-bad", "\n".join([f"python|mirror|sha256:111|upstream|",
+                                f"node|base|sha256:222|the base loop|{tmp}/clean.txt"]) + "\n")
+        rc, outb, err = run(sh, tmp, ["inv-bad", "led1"], "2026-10-03")
+        w("ledb", outb)
+        if find(rows(outb), None, "python", "CVE-2026-0000003"):
+            findings.append(f"[{who}] an image not looked at this morning still lists a finding as if measured")
+        rc, outc, err = run(sh, tmp, ["inv", "ledb"], "2026-11-20")
+        fs = find(rows(outc), None, "python", "CVE-2026-0000003")
+        if not fs or fs[0][10] != "2026-10-02":
+            findings.append(f"[{who}] a morning the image could not be scanned restarted its first-seen clock "
+                            f"(SINCE {fs[0][10] if fs else 'absent'}, not 2026-10-02): a bad morning buys a new window")
         stale = find(rs3, "unmeasured", "exploited-list")
         if not stale or "50 days old" not in stale[0][9]:
             findings.append(f"[{who}] an exploited list 50 days old is not said in the books, in the field its readers read")
@@ -217,4 +231,4 @@ for rel in ("k8s/base/platform/vuln-policy/kev.txt", "image-watch/ledger.txt"):
 
 for x in findings:
     print(x)
-print(f"SCOPE: ledger.sh run under {', '.join(scope) or 'no shell'} on 4 images, 3 exceptions, two mornings and the series; the watch's stages and the seed's ownership read")
+print(f"SCOPE: ledger.sh run under {', '.join(scope) or 'no shell'} on 4 images, 3 exceptions, three mornings (one of them bad) and the series; the watch's stages and the seed's ownership read")

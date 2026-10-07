@@ -58,6 +58,10 @@
 #
 # SINCE is the CVE's publication day (CLOCK=published) or, when the
 # database has none, the day the watch first saw it (CLOCK=first-seen).
+# A morning the image cannot be looked at, its first-seen clocks are
+# kept as comment lines (`#first-seen|IMAGE|CVE|PKG|PKGPATH|SINCE`, which
+# every reader skips) and read back the next morning: a bad morning does
+# not restart a window.
 #
 # POSIX sh + awk: it runs in the trivy container (busybox), next to
 # verdict.sh. Invoked with `sh` (nothing in the seed is executable).
@@ -167,8 +171,15 @@ trap 'rm -rf "$WORK"' EXIT
 # The first-seen clocks of yesterday, keyed IMAGE|CVE|PKG|PKGPATH.
 : > "$WORK/firstseen"
 if [ -n "$PREV" ]; then
-    awk -F'|' '!/^#/ && NF == 14 && $12 == "first-seen" { print $2 "|" $5 "|" $7 "|" $10 "|" $11 }' "$PREV" > "$WORK/firstseen"
+    awk -F'|' '!/^#/ && NF == 14 && $12 == "first-seen" { print $2 "|" $5 "|" $7 "|" $10 "|" $11 }
+               /^#first-seen\|/ && NF == 6 { print $2 "|" $3 "|" $4 "|" $5 "|" $6 }' "$PREV" > "$WORK/firstseen"
 fi
+# An image not looked at this morning keeps yesterday's first-seen clocks
+# in the books, as comments, so tomorrow can read them back. Without this
+# a single bad morning restarted every dateless window of that image.
+carry_clocks() {   # <image>
+    awk -F'|' -v img="$1" '$1 == img { print "#first-seen|" $0 }' "$WORK/firstseen" >> "$WORK/body"
+}
 
 n=0
 while IFS= read -r entry || [ -n "$entry" ]; do
@@ -185,6 +196,7 @@ while IFS= read -r entry || [ -n "$entry" ]; do
     if [ -z "$file" ] || [ ! -r "$file" ]; then
         printf 'unmeasured|%s|%s|%s||||||the watch could not scan it this morning||||%s\n' \
             "$img" "$kind" "$dig" "$fixer" >> "$WORK/body"
+        carry_clocks "$img"
         continue
     fi
     # The clock of a finding with no publication date: the day it was first
@@ -210,6 +222,7 @@ while IFS= read -r entry || [ -n "$entry" ]; do
         why="$(tail -1 "$WORK/e.$n" | tr '|' '/' | cut -c1-160)"
         printf 'unmeasured|%s|%s|%s||||||its findings could not be judged: %s||||%s\n' \
             "$img" "$kind" "$dig" "$why" "$fixer" >> "$WORK/body"
+        carry_clocks "$img"
         continue
     fi
     # verdict.sh prints one line per finding, in order: the three files are

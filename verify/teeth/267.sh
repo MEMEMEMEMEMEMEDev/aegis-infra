@@ -15,7 +15,9 @@ PY
 # an image the watch could not scan drops out of the books (absent reads as clean)
 red_1() { _sub "$L267" "        printf 'unmeasured|%s|%s|%s||||||the watch could not scan it this morning||||%s\\n' \\
             \"\$img\" \"\$kind\" \"\$dig\" \"\$fixer\" >> \"\$WORK/body\"
-        continue" "        continue"; }
+        carry_clocks \"\$img\"
+        continue" "        carry_clocks \"\$img\"
+        continue"; }
 
 # an image scanned clean is not written down
 red_2() { _sub "$L267" "        printf 'clean|%s|%s|%s||||||||||%s\\n' \"\$img\" \"\$kind\" \"\$dig\" \"\$fixer\" >> \"\$WORK/body\"
@@ -51,6 +53,17 @@ red_10() { _sub "$L267" '        if (!("exploited-list|kev" in SEEN)) printf' ' 
 
 # --inherit forgets the base: whatever the exceptions removed stays removed, the app's own layer included
 red_12() { _sub "$L267" '        !($8 in B) { print }' '        0 { print }'; }
+
+# an unmeasured morning drops the image's first-seen clocks: the window restarts after a bad morning
+red_13() { _sub "$L267" '        carry_clocks "$img"
+        continue
+    fi
+    # The clock' '        continue
+    fi
+    # The clock'; }
+
+# the carried clocks are written but never read back
+red_14() { _sub "$L267" '               /^#first-seen\|/ && NF == 6 { print $2 "|" $3 "|" $4 "|" $5 "|" $6 }' '               0 { print }'; }
 
 # ── controls ──
 control_1() { _sub "$L267" 'the watch could not scan it this morning' 'the watch could not look at it this morning'; }
