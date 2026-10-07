@@ -78,6 +78,32 @@ with tempfile.TemporaryDirectory() as tmp:
         if g(clone, "rev-parse", "HEAD") != before:
             findings.append("a clone that diverged was merged by the refusals instead of refused")
 
+# A git that cannot answer is a refusal, never a hang or a traceback:
+# a remote that asks for credentials, or one that does not answer. Driven
+# with a git on PATH that records what it was given and then hangs.
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = pathlib.Path(tmp)
+    fake = tmp / "git"
+    fake.write_text('#!/bin/sh\nprintf "%s" "${GIT_TERMINAL_PROMPT:-unset}" > "$(dirname "$0")/prompt"\nexec sleep 30\n')
+    fake.chmod(0o755)
+    path_was, timeout_was = os.environ["PATH"], window.GIT_TIMEOUT
+    os.environ["PATH"] = f"{tmp}:{path_was}"
+    window.GIT_TIMEOUT = 1
+    try:
+        window.catch_up(str(tmp))
+        findings.append("a git that never answered let catch_up return: the window would act on a clone nobody brought up")
+    except window.GitTrouble:
+        pass
+    except Exception as e:                                # noqa: BLE001
+        findings.append(f"a git that does not answer ends in {type(e).__name__}, not GitTrouble: "
+                        f"the preflight of update and app apply dies in a traceback instead of a refusal")
+    finally:
+        os.environ["PATH"], window.GIT_TIMEOUT = path_was, timeout_was
+    seen = (tmp / "prompt").read_text() if (tmp / "prompt").is_file() else "never ran"
+    if seen != "0":
+        findings.append(f"git runs with GIT_TERMINAL_PROMPT={seen}: a remote that asks for "
+                        f"credentials waits on a prompt nobody sees")
+
 img = (pathlib.Path(ROOT) / "libexec" / "aegis-image").read_text(encoding="utf-8")
 
 
@@ -109,4 +135,4 @@ for fn in ("need_list", "do_list", "do_check"):
 
 for x in findings:
     print(x)
-print("SCOPE: update's preflight runs between a bare remote and two clones (behind; diverged); aegis-image's five list-reading functions read")
+print("SCOPE: update's preflight runs between a bare remote and two clones (behind; diverged); a git that hangs; aegis-image's five list-reading functions read")

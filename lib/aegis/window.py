@@ -18,6 +18,7 @@ look, and it never rounds the second one down to the first.
 """
 import datetime
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -55,9 +56,24 @@ class GitTrouble(Exception):
     """git could not be asked, or answered something nobody should act on."""
 
 
+# A git that cannot answer is a refusal with a remedy, never a hang or a
+# traceback. A remote that asks for credentials waits on a prompt
+# nobody sees (stdout is captured): GIT_TERMINAL_PROMPT=0 makes it fail
+# instead. One that does not answer at all runs into the timeout, and
+# the timeout is GitTrouble like any other failure: catch_up() runs
+# first in the preflight of `aegis update` and `aegis app apply`, and
+# catches only that.
+GIT_TIMEOUT = 120
+
+
 def git(root, *args, check=True):
-    r = subprocess.run(["git", "-C", str(root), *args],
-                       capture_output=True, text=True, timeout=120)
+    try:
+        r = subprocess.run(["git", "-C", str(root), *args],
+                           capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, timeout=GIT_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise GitTrouble(f"git {' '.join(args)}: no answer in {GIT_TIMEOUT}s (a remote that "
+                         f"does not answer, or one waiting for credentials)") from None
     if check and r.returncode != 0:
         raise GitTrouble(f"git {' '.join(args)}: {(r.stderr or r.stdout).strip()[:300]}")
     return r.returncode, (r.stdout or "").rstrip("\n"), (r.stderr or "").rstrip("\n")

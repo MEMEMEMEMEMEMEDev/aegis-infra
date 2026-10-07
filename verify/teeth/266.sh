@@ -53,5 +53,13 @@ red_6() { _sub "$I266" '    dry && return 0
 # the clone is fast-forwarded and nobody is told
 red_7() { _sub "$W266" '            if took and notes is not None:' '            if False:'; }
 
+# a git that does not answer ends in a traceback (TimeoutExpired), not a refusal
+red_8() { _sub "$W266" '    except subprocess.TimeoutExpired:
+        raise GitTrouble(' '    except ZeroDivisionError:
+        raise GitTrouble('; }
+
+# a remote that asks for credentials waits on a prompt nobody sees
+red_9() { _sub "$W266" 'env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}' 'env=dict(os.environ)'; }
+
 # ── controls ──
 control_1() { _sub "$W266" '"git -C {root} pull --ff-only, and look at what it says"' '"git -C {root} pull --ff-only, and read what it answers"'; }
