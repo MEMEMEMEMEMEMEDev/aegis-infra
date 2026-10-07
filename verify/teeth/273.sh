@@ -11,8 +11,10 @@ PY
 }
 
 # the wrapper as it was until 2026-09-30: tofu prints whatever it prints
-red_1() { _sub "$W273" '    tofu "${_ARGS[@]}" 2>&1 | python3 -u -c "$_REDACT_PY"
-' '    tofu "${_ARGS[@]}" 2>&1
+red_1() { _sub "$W273" '    { { tofu "${_ARGS[@]}"; echo $? > "$_RCF"; } 2>&1 1>&3 3>&- \
+        | python3 -u -c "$_REDACT_PY" >&2; } 3>&1 \
+        | python3 -u -c "$_REDACT_PY"
+' '    tofu "${_ARGS[@]}" 2>&1; echo $? > "$_RCF"
 '; }
 
 # the IDs pass: a random_id's ID is the secret
@@ -20,7 +22,7 @@ red_2() { _sub "$W273" '    s = ident.sub(b"[id=(not shown)]", s)
 ' ''; }
 
 # the exit code read is the filter's, not tofu's (plan -detailed-exitcode's 2 reads as 0)
-red_3() { _sub "$W273" '    RC=${PIPESTATUS[0]}' '    RC=${PIPESTATUS[1]}'; }
+red_3() { _sub "$W273" '    RC="$(cat "$_RCF" 2>/dev/null)"; rm -f "$_RCF"' '    RC=${PIPESTATUS[0]}; rm -f "$_RCF"'; }
 
 # a heredoc's body passes untouched
 red_4() { _sub "$W273" '        if re.search(rb"<<-?EOT\s*$", s):
@@ -44,6 +46,12 @@ red_8() { _sub "$W273" '    _ARGS=() ; _PLACED=0' '    _ARGS=() ; _PLACED=1; set
 
 # the prompt is held until the line ends, which it never does: an apply by hand waits mute
 red_9() { _sub "$W273" '    if ansi.sub(b"", pending).rstrip().endswith(b"Enter a value:"):' '    if False:'; }
+
+# the first version's merge: tofu's errors land on stdout, and a caller that silences stdout loses them
+red_10() { _sub "$W273" '        | python3 -u -c "$_REDACT_PY" >&2; } 3>&1 \' '        | python3 -u -c "$_REDACT_PY"; } 3>&1 \'; }
+
+# stderr goes around the filter: an error that names a resource prints its [id=…]
+red_11() { _sub "$W273" '        | python3 -u -c "$_REDACT_PY" >&2; } 3>&1 \' '        | cat >&2; } 3>&1 \'; }
 
 # ── controls ──
 control_1() { _sub "$W273" '# AEGIS_TOFU_SHOW_VALUES=1 — explicit, never a default.' '# AEGIS_TOFU_SHOW_VALUES=1, explicit and never a default.'; }

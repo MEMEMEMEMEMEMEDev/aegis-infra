@@ -305,8 +305,17 @@ if [[ "${AEGIS_TOFU_SHOW_VALUES:-0}" != 1 && "$_SUB" =~ ^(plan|apply|destroy)$ ]
         _ARGS+=("$_a")
         if [[ $_PLACED -eq 0 && "$_a" == "$_SUB" ]]; then _ARGS+=(-no-color); _PLACED=1; fi
     done
-    tofu "${_ARGS[@]}" 2>&1 | python3 -u -c "$_REDACT_PY"
-    RC=${PIPESTATUS[0]}
+    # ONE FILTER PER STREAM: tofu's errors stay on stderr. Merged into
+    # stdout (as the first version did), a caller that silences stdout
+    # lost the errors with it. Both filters are pipeline members, so both
+    # have flushed when this line returns; tofu's exit code comes back
+    # through a file because its group runs in a subshell.
+    _RCF="$(mktemp)"
+    { { tofu "${_ARGS[@]}"; echo $? > "$_RCF"; } 2>&1 1>&3 3>&- \
+        | python3 -u -c "$_REDACT_PY" >&2; } 3>&1 \
+        | python3 -u -c "$_REDACT_PY"
+    RC="$(cat "$_RCF" 2>/dev/null)"; rm -f "$_RCF"
+    [[ "$RC" =~ ^[0-9]+$ ]] || RC=1
 else
     tofu "$@"
     RC=$?

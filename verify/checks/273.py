@@ -70,8 +70,12 @@ cat <<PLAN
     }
 ${B}Plan:${Z} 0 to add, 1 to change, 1 to destroy.
 module.tunnel.random_id.tunnel_secret: Destroying... [id=SECRETVALUE]
-│ ${R}Error: ${Z}tunnel has active connections
 PLAN
+# the errors go to stderr, as the binary's do, and may name a value too
+cat >&2 <<ERR
+│ ${R}Error: ${Z}tunnel has active connections
+│   with module.tunnel.random_id.tunnel_secret [id=SECRETVALUE],
+ERR
 if [ "${FAKE_PROMPT:-0}" = 1 ]; then
   printf '  %sEnter a value:%s ' "$B" "$Z"
   read -r answer
@@ -115,6 +119,10 @@ with tempfile.TemporaryDirectory() as tmp:
                 findings.append(f"[{mode}] `{sub[0]}` hid the addresses or the summary: the operator cannot read what it does")
             if "Error: tunnel has active connections" not in out:
                 findings.append(f"[{mode}] `{sub[0]}` hid tofu's error (aegis destroy retries on its words)")
+            elif "Error: tunnel has active connections" in p.stdout:
+                findings.append(f"[{mode}] `{sub[0]}` moved tofu's error to stdout: a caller that silences stdout loses it")
+            if "will be destroyed" in p.stderr:
+                findings.append(f"[{mode}] `{sub[0]}` moved the plan to stderr: stdout is where tofu prints it")
             want = 2 if sub[0] == "plan" else 0
             if p.returncode != want:
                 findings.append(f"[{mode}] `{sub[0]}` exited {p.returncode}, not tofu's {want}: the filter ate the exit code")
