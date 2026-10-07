@@ -17,7 +17,7 @@
 #        cp puts the seed's placeholders back into a rendered tree —
 #        measured 2026-09-01), and commits them in the instance's
 #        platform repo. DRY unless --yes. Refuses files the instance
-#        owns. It never pushes: the commit is yours to read and push.
+#        owns, once it has them (the first copy is the seed's). It never pushes: the commit is yours to read and push.
 #
 # WHY. A fix made in the product used to never reach a live instance,
 # and said nothing while not reaching it (measured three times on

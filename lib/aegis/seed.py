@@ -23,7 +23,8 @@ from . import markers, pins, window
 # ── who owns what ────────────────────────────────────────────────────
 # THE INSTANCE'S: the seed ships a sample and the instance fills it in,
 # or `aegis org apply` / the init / the tenants write it wholesale. They
-# differ by construction and they are never brought over. Derived from
+# differ by construction and they are never brought over once the
+# instance has them; one the instance lacks is brought over once. Derived from
 # what org.py declares it writes, plus the instance's own data files.
 INSTANCE_OWNS = (
     "orgs/*", "plans.yaml", "services.yaml", "edge.yaml",
@@ -102,6 +103,13 @@ def _normalised(text, rel):
     return text
 
 
+def refused(platform_dir, rels):
+    """The paths `seed apply` must not bring over: the instance's (owned
+    or mixed) files the instance HAS. One it lacks is brought once."""
+    inst = pathlib.Path(platform_dir)
+    return [r for r in rels if (instance_owns(r) or is_mixed(r)) and (inst / r).is_file()]
+
+
 def classify(rendered_seed, platform_dir):
     """Every file the seed ships, against the instance's copy.
 
@@ -114,8 +122,15 @@ def classify(rendered_seed, platform_dir):
         if rel.endswith(".tpl"):
             continue
         g = inst / rel
+        # THE FIRST COPY OF THE INSTANCE'S FILE IS THE SEED'S. An instance
+        # older than the file has none: skipping it (as this did) left the
+        # instance without it for good, and `seed apply` refused it. Measured
+        # 2026-10-06: vuln-policy/kev.txt, which the kustomization's
+        # configMapGenerator needs, never reached the house instance.
+        if (instance_owns(rel) or is_mixed(rel)) and not g.is_file():
+            out["added"].append(rel); continue
         if instance_owns(rel) or is_mixed(rel):
-            if g.is_file() and _normalised(f.read_text(errors="replace"), rel) != _normalised(g.read_text(errors="replace"), rel):
+            if _normalised(f.read_text(errors="replace"), rel) != _normalised(g.read_text(errors="replace"), rel):
                 out["mixed" if is_mixed(rel) else "owned"].append(rel)
             continue
         if not g.is_file():
@@ -300,8 +315,9 @@ if __name__ == "__main__":
                 print(col("90", "  " + os.environ.get("AEGIS_CMD", "aegis") + " seed apply <path>... --yes"))
         sys.exit(rc)
     elif verb == "owns":
-        # owns <any> <rel>... → rc 1 if any is the instance's, printing it
-        bad = [r for r in sys.argv[3:] if instance_owns(r) or is_mixed(r)]
+        # owns <platform> <rel>... → rc 1 if any is the instance's and the
+        # instance has it, printing it
+        bad = refused(platform, sys.argv[3:])
         for r in bad:
             print(r)
         sys.exit(1 if bad else 0)

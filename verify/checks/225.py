@@ -108,14 +108,25 @@ with tempfile.TemporaryDirectory() as td:
     blk_i = markers.JOBS_BLOCK_START + "\n          - script: >\n              multibranchPipelineJob('shop-web-mb') {}\n" + markers.JOBS_BLOCK_END
     put(S, j, "controller:\n  x: 1\n" + blk_s + "\n")
     put(I, j, "controller:\n  x: 1\n" + blk_i + "\n")
+    # the instance's, and the instance has none yet: an instance older
+    # than the file (kev.txt, 2026-10-06) gets the seed's copy once
+    put(S, "k8s/base/platform/vuln-policy/kev.txt", "CVE-2021-44228\n")
     c = seed.classify(S, I); driven += 1
     want = {"same": 3, "owned": ["plans.yaml"], "mixed": ["k8s/base/garage-system/kustomization.yaml"],
             "pinned": ["ci-images/Jenkinsfile", "k8s/argocd-apps/x.yaml"],
-            "added": ["k8s/base/new.yaml"], "differs": ["base-images/Jenkinsfile"]}
+            "added": ["k8s/base/new.yaml", "k8s/base/platform/vuln-policy/kev.txt"],
+            "differs": ["base-images/Jenkinsfile"]}
     for k, v in want.items():
         got = c.get(k)
         if (sorted(got) if isinstance(got, list) else got) != v:
             findings.append(f"classify: {k} = {got!r}, expected {v!r}")
+
+    # apply refuses the instance's file she HAS, and brings the one she lacks
+    got = seed.refused(I, ["plans.yaml", "k8s/base/platform/vuln-policy/kev.txt", "k8s/base/new.yaml"])
+    driven += 1
+    if got != ["plans.yaml"]:
+        findings.append(f"seed apply refuses {got!r}, expected only ['plans.yaml']: it must refuse "
+                        f"the instance's file she has and bring the one she lacks")
 
     # ── 4. apply keeps the instance's derived block and pins ────────
     # the derived block

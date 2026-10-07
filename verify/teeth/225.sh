@@ -28,6 +28,12 @@ red_7() { _s225 "$C225" '    printf '"'"'%sread it (git -C %s show), then push i
 red_8() { _s225 "$S225" '    text = _PEM.sub(r"\1__PEM__", text)' '    pass'; }
 # the per-site re-pin is gone: a copied file keeps the seed's older tag beside sixteen newer ones
 red_9() { _s225 "$S225" '                    lines[i] = old_line + ("\n" if ln.endswith("\n") else "")' '                    pass'; }
+# an instance's file the instance lacks is skipped: kev.txt never reaches an older instance (2026-10-06)
+red_10() { _s225 "$S225" '        if (instance_owns(rel) or is_mixed(rel)) and not g.is_file():
+            out["added"].append(rel); continue
+' ''; }
+# apply refuses an instance's file the instance lacks: the one listed as added cannot be brought
+red_11() { _s225 "$S225" '    return [r for r in rels if (instance_owns(r) or is_mixed(r)) and (inst / r).is_file()]' '    return [r for r in rels if instance_owns(r) or is_mixed(r)]'; }
 # ── controls ──
 control_1() { _s225 "$S225" '# GENERATED placeholders: rendered by a phase, not by the config' '# GENERATED placeholders (a phase writes them, not the config render)'; }
 control_2() { _s225 "$S225" '    "k8s/base/ai-system/prompts.yaml", "mirror-images/trivyignore.yaml",' '    "k8s/base/ai-system/prompts.yaml", "mirror-images/trivyignore.yaml", "notes/*",'; }
