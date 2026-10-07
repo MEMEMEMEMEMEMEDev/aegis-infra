@@ -154,6 +154,15 @@ for sh in shells:
         if not fs or fs[0][10] != "2026-10-02":
             findings.append(f"[{who}] a morning the image could not be scanned restarted its first-seen clock "
                             f"(SINCE {fs[0][10] if fs else 'absent'}, not 2026-10-02): a bad morning buys a new window")
+        # A finding the verdict stops (a severity with no window): the books
+        # say why, not the verdict's summary line.
+        w("med.txt", "CVE-2026-0000005|MEDIUM|x|1|2|2026-09-28||sha256:c|py (debian 13)\n")
+        w("inv-med", f"medium|mirror|sha256:555|upstream|{tmp}/med.txt\n")
+        rc, outm, err = run(sh, tmp, ["inv-med"], "2026-10-02")
+        um = find(rows(outm), "unmeasured", "medium")
+        if not um or "MEDIUM has no window" not in um[0][9]:
+            findings.append(f"[{who}] an image whose finding the verdict stops says {um[0][9] if um else 'nothing'!r}, "
+                            f"not the reason (a severity with no window)")
         stale = find(rs3, "unmeasured", "exploited-list")
         if not stale or "50 days old" not in stale[0][9]:
             findings.append(f"[{who}] an exploited list 50 days old is not said in the books, in the field its readers read")
@@ -231,4 +240,4 @@ for rel in ("k8s/base/platform/vuln-policy/kev.txt", "image-watch/ledger.txt"):
 
 for x in findings:
     print(x)
-print(f"SCOPE: ledger.sh run under {', '.join(scope) or 'no shell'} on 4 images, 3 exceptions, three mornings (one of them bad) and the series; the watch's stages and the seed's ownership read")
+print(f"SCOPE: ledger.sh run under {', '.join(scope) or 'no shell'} on 4 images, 3 exceptions, three mornings (one of them bad), a stopped verdict and the series; the watch's stages and the seed's ownership read")

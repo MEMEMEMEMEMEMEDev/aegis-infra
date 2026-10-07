@@ -65,6 +65,9 @@ red_13() { _sub "$L267" '        carry_clocks "$img"
 # the carried clocks are written but never read back
 red_14() { _sub "$L267" '               /^#first-seen\|/ && NF == 6 { print $2 "|" $3 "|" $4 "|" $5 "|" $6 }' '               0 { print }'; }
 
+# the reason of an unjudged image is the verdict's summary line again
+red_15() { _sub "$L267" '        why="$(awk -F'"'"'|'"'"' '"'"'$1 == "block" { print $NF; exit }'"'"' "$WORK/v.$n")"' '        why=""'; }
+
 # ── controls ──
 control_1() { _sub "$L267" 'the watch could not scan it this morning' 'the watch could not look at it this morning'; }
 control_2() { _sub "$W267" "echo 'publish: no ledger this morning — nothing is committed'" "echo 'publish: no books this morning — nothing is committed'"; }

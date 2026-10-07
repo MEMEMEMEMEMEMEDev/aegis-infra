@@ -219,7 +219,12 @@ while IFS= read -r entry || [ -n "$entry" ]; do
     rc=0
     sh "$VP/verdict.sh" "$WORK/f.$n" "$WORK/f.$n" > "$WORK/v.$n" 2> "$WORK/e.$n" || rc=$?
     if [ "$rc" -ne 0 ]; then
-        why="$(tail -1 "$WORK/e.$n" | tr '|' '/' | cut -c1-160)"
+        # The reason, not the summary: a stop names its own (a severity
+        # with no window), an error is verdict's last line before it quit.
+        why="$(awk -F'|' '$1 == "block" { print $NF; exit }' "$WORK/v.$n")"
+        [ -n "$why" ] || why="$(grep -v '^verdict (' "$WORK/e.$n" | tail -1)"
+        [ -n "$why" ] || why="$(tail -1 "$WORK/e.$n")"
+        why="$(printf '%s' "$why" | tr '|' '/' | cut -c1-160)"
         printf 'unmeasured|%s|%s|%s||||||its findings could not be judged: %s||||%s\n' \
             "$img" "$kind" "$dig" "$why" "$fixer" >> "$WORK/body"
         carry_clocks "$img"
