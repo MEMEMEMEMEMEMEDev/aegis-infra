@@ -60,8 +60,30 @@ ports:
 additionalArguments:
   - "--serversTransport.forwardingTimeouts.dialTimeout=5s"
   - "--serversTransport.forwardingTimeouts.responseHeaderTimeout=60s"
+# WHERE traefik buffers bodies, and how much of it (plan/20 B, 2026-09-27).
+# The buffering middleware (`<org>-cuerpo`, 10 MiB cap, 1 MiB in RAM)
+# spills the rest to `temp-multibuf-*` files in Go's temp dir, and the
+# chart's /tmp is an `emptyDir: {}` with NO ceiling that the values cannot
+# reach (chart 40.3.0, _podtemplate.tpl: the `tmp` volume is written out
+# literally). A buffer orphaned by a killed process survives a container
+# restart —an emptyDir lives as long as the POD— and they piled up to
+# 9.7 GB on the system disk on 2026-09-27. So the temp dir is moved:
+# TMPDIR points Go at a volume of our own, with a ceiling. Past it the
+# kubelet evicts the pod, the replica takes the traffic, and the
+# replacement starts with an empty buffer: a restart instead of a full
+# disk. 2Gi is two hundred requests at the cap in flight at once.
+env:
+  - name: TMPDIR
+    value: /buffer
+additionalVolumeMounts:
+  - name: buffer
+    mountPath: /buffer
 deployment:
   replicas: 2
+  additionalVolumes:
+    - name: buffer
+      emptyDir:
+        sizeLimit: 2Gi
 resources:
   requests: {cpu: 200m, memory: 256Mi}
   limits: {cpu: "1", memory: 512Mi}
