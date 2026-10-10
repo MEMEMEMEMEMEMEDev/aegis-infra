@@ -407,9 +407,12 @@ equally obvious and has to be said out loud:
 > disk — if they live together, a single accident takes both halves.
 
 And why the encryption is not ceremony: the state bundle carries the
-tunnel's `terraform.tfstate` **with the `tunnel_token` in the
-clear**. There is no second layer there; the bundle's `age` *is*
-what protects it.
+store and the init's trail, and the store holds every credential of
+the instance. The edge's state goes in its own encrypted copy
+(`terraform.tfstate.enc.json`); a bundle from before 2026-10-10 may
+also carry the plaintext `terraform.tfstate` **with the
+`tunnel_token` in the clear**, and there the bundle's `age` *is* what
+protects it.
 
 **Opening one without the tool.** This is what matters in the
 scenario a backup exists for: a disk plugged into another machine,

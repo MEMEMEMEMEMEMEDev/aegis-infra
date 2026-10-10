@@ -91,7 +91,11 @@ collect() {  # collect <label> <src...>  — copies CONTENTS (dir/.) or the file
 }
 collect state-secrets "$STATE_SECRETS"
 collect init-state    "$INIT_STATE"
-collect tfstate       "$TUNNEL_ENV/terraform.tfstate" "$TUNNEL_ENV/terraform.tfstate.backup"
+# The encrypted copy is the edge's state (the wrapper shreds the plaintext
+# after every call, 2026-10-10); git holds it too, but the bundle must not
+# depend on the last commit having been pushed. A plaintext left by an
+# instance from before #46 is still taken.
+collect tfstate       "$TUNNEL_ENV/terraform.tfstate.enc.json" "$TUNNEL_ENV/terraform.tfstate" "$TUNNEL_ENV/terraform.tfstate.backup"
 
 # HARD GUARD: the age key NEVER enters the bundle (the irreducible goes apart).
 if grep -q . < <(find "$PAY" -type f \( -name 'aegis.key' -o -name '*.agekey' \) \

@@ -326,7 +326,12 @@ set -e
 # every run even when the content is identical (a fresh data key), so
 # re-encrypting always would fill git with diffs that mean nothing —
 # and a diff that means nothing is a diff that stops being read.
-if [[ -n "$PLAIN" && -f "$PLAIN" && "$(fingerprint "$PLAIN")" != "$FINGERPRINT_BEFORE" ]]; then
+# A plaintext state with NO encrypted twin (an instance from before #46,
+# or a first apply) is encrypted even if this call did not change it:
+# the plaintext is about to be shredded below, and it must not be the
+# only copy when that happens.
+if [[ -n "$PLAIN" && -f "$PLAIN" \
+      && ( ! -f "$ENCRYPTED" || "$(fingerprint "$PLAIN")" != "$FINGERPRINT_BEFORE" ) ]]; then
     command -v sops >/dev/null || die "the state changed and sops is not in PATH"
     umask 077
     # --config NAMED, not looked up. sops searches for .sops.yaml
@@ -345,6 +350,33 @@ if [[ -n "$PLAIN" && -f "$PLAIN" && "$(fingerprint "$PLAIN")" != "$FINGERPRINT_B
     mv "$ENCRYPTED.tmp" "$ENCRYPTED"
     log "state re-encrypted -> $(basename "$ENCRYPTED")  — COMMIT IT"
     log "  without that commit, the next recovery does not know this exists."
+fi
+
+# ── THE PLAINTEXT DOES NOT OUTLIVE THE CALL ─────────────────────────────
+# MEASURED 2026-10-09 on the home instance: terraform.tfstate and its
+# .backup had been sitting in the env since 25-09 —600, ignored by git,
+# and with the tunnel's token and the Access service token's secret IN
+# THE CLEAR— and one `grep` over the tofu tree printed both. The
+# encrypted copy is the truth (#46) and every call decrypts it again, so
+# the plaintext is a working file of THIS call and dies with it.
+# Shredded only once the encrypted copy is PROVEN to hold the same state
+# (decrypted and compared as JSON, never shown): a state that cannot be
+# proven is left in place, loudly — losing it would be worse than
+# leaving it. tofu's own .backup and the `state rm` backups go too: they
+# are the previous state, and git already has that, encrypted.
+if [[ -n "$PLAIN" && -f "$PLAIN" ]]; then
+    if [[ -f "$ENCRYPTED" ]] && sops -d --output-type json "$ENCRYPTED" 2>/dev/null \
+         | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin) == json.load(open(sys.argv[1])) else 1)' \
+             "$PLAIN" 2>/dev/null; then
+        shred -u "$PLAIN"
+        [[ -f "$PLAIN.backup" ]] && shred -u "$PLAIN.backup"
+        find "$(dirname "$PLAIN")" -maxdepth 1 -name 'terraform.tfstate.*.backup' -exec shred -u {} +
+        log "plaintext state shredded — the encrypted copy holds the same state"
+    else
+        log "WARNING: the plaintext state was LEFT in $(dirname "$PLAIN"): the encrypted copy"
+        log "  could not be proven to hold the same state (no age key to decrypt it, or they differ)."
+        log "  It holds the tunnel's secrets in the clear: re-run with SOPS_AGE_KEY_FILE exported."
+    fi
 fi
 
 exit $RC

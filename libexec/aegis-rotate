@@ -1298,8 +1298,11 @@ age_of() {   # <name> → "18d" or "?"
     # not live in the store —tofu produces it— so its age comes from the
     # tfstate, which is where it really got recorded.
     local f="$STATE_SECRETS/$1.enc"
+    # The ENCRYPTED copy: the plaintext only lives during a wrapper call
+    # (2026-10-10), and the encrypted one is rewritten exactly when the
+    # state changes.
     [[ "$1" == "tunnel_token" ]] && \
-        f="$PLATFORM_DIR/tofu/envs/cloudflare-tunnel/terraform.tfstate"
+        f="$PLATFORM_DIR/tofu/envs/cloudflare-tunnel/terraform.tfstate.enc.json"
     [[ -f "$f" ]] || { printf '%s' "?"; return; }
     printf '%dd' $(( ( $(date +%s) - $(stat -c %Y "$f") ) / 86400 ))
 }

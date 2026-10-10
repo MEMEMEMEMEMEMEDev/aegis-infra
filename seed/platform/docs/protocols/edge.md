@@ -196,6 +196,17 @@ people stop reading. The plaintext `.tfstate` is still ignored; the
 encrypted one is not —`*.tfstate` does not reach it because it ends in
 `.json`, checked with `git check-ignore`.
 
+**The plaintext dies with the call** (2026-10-10). Before, the working
+`terraform.tfstate` and tofu's `.backup` stayed in the env between
+calls, at 600 and ignored by git, but with the tunnel's secret and the
+Access service token in the clear: one `grep` over the tree printed
+them. Now the wrapper, once the encrypted copy is proven to hold the
+same state (decrypted and compared, never shown), `shred`s the
+plaintext and its backups. If it cannot prove it —no age key, or the
+two differ— it leaves the plaintext and says so. `aegis destroy`,
+`aegis state backup|restore` and `aegis rotate` read the encrypted
+copy.
+
 Verified by moving the plaintext state out of the repo and running the
 wrapper: it decrypted the 5 resources, `state list` returned the 9
 objects, and the `plan` gave **0 to add, 0 to destroy**. A virgin clone

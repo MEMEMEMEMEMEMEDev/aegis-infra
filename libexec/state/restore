@@ -80,6 +80,25 @@ place() {  # place <label> <dest-dir> <guard-path>
 }
 place state-secrets "$STATE_SECRETS" "$STATE_SECRETS"
 place init-state    "$INIT_STATE"    "$INIT_STATE"
-place tfstate       "$TUNNEL_ENV"     "$TUNNEL_ENV/terraform.tfstate"
+# The edge's state is the ENCRYPTED copy (2026-10-10), and that one is also
+# in git: a clone of the platform repo already brings it. So the guard is
+# not «a file is there» —it always is— but «a file is there and SAYS
+# SOMETHING ELSE»: the bundle's copy would take the edge back to an older
+# state in silence. Identical bytes are not a conflict.
+place_tfstate() {
+  local src="$PAY/tfstate" f clash=""
+  if [[ ! -d "$src" ]]; then say "tfstate: not in the bundle — skipped"; return 0; fi
+  for f in "$src"/*; do
+    [[ -e "$TUNNEL_ENV/$(basename "$f")" ]] || continue
+    cmp -s "$f" "$TUNNEL_ENV/$(basename "$f")" || clash="$clash $(basename "$f")"
+  done
+  if [[ -n "$clash" && $FORCE -eq 0 ]]; then
+    die "tfstate:$clash ALREADY exists in $TUNNEL_ENV with other contents — aborted (use --force to overwrite; I do not break live state blindly)"
+  fi
+  mkdir -p "$TUNNEL_ENV"
+  cp -a "$src"/. "$TUNNEL_ENV"/
+  say "tfstate → $TUNNEL_ENV (restored)"
+}
+place_tfstate
 
 say "restore complete. Next: resume the init if appropriate (aegis init --from <phase>)."

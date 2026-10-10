@@ -142,7 +142,12 @@ export CF_ACCOUNT_ID CF_ZONE_ID ROOT_DOMAIN
 say "mode: $([[ $YES -eq 1 ]] && echo 'DESTROY (--yes)' || echo 'DRY-RUN (pass --yes to act)')"
 
 # ── 1) Cloudflare through tofu destroy (through the wrapper) ─────────────
-if [[ -f "$TUNNEL_ENV/terraform.tfstate" ]]; then
+# The state's truth is the ENCRYPTED copy: the wrapper decrypts it for the
+# call and shreds the plaintext after (2026-10-10). Asking only for the
+# plaintext would read «nothing to destroy» on every instance and leave
+# the whole edge standing in Cloudflare. The plaintext still counts: an
+# instance from before #46, or a call interrupted halfway.
+if [[ -f "$TUNNEL_ENV/terraform.tfstate.enc.json" || -f "$TUNNEL_ENV/terraform.tfstate" ]]; then
   say "cloudflare-tunnel: init of the env…"
   "$TOFU" -chdir="$TUNNEL_ENV" init -input=false >/dev/null \
     || die "tofu init failed (are the age key / SOPS available to the wrapper?)"
@@ -171,7 +176,7 @@ if [[ -f "$TUNNEL_ENV/terraform.tfstate" ]]; then
     "$TOFU" -chdir="$TUNNEL_ENV" plan -destroy || true
   fi
 else
-  say "no local tfstate in $TUNNEL_ENV — nothing to destroy through tofu"
+  say "no tfstate (encrypted or plain) in $TUNNEL_ENV — nothing to destroy through tofu"
   say "  (leftovers from another VM without state: phase 25's pre-check sweeps them when re-creating)"
 fi
 
