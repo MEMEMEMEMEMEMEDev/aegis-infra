@@ -330,4 +330,25 @@ gate "nodos-ready" bash -c \
 # evidence (which pod is Pulling/BackOff) — slow ≠ mute ≠ failure:
 gate "coredns-vivo" wait_rollout kube-system deploy/coredns 900
 
+# The node defends ITS DISK (plan/19 B-6). Asked of the running kubelet
+# (configz), not of the drop-in: a file that says nodefs and a kubelet
+# that did not read it are the 2026-09-10 lesson of this same phase. A
+# kubelet given only `memory.available` drops its disk defaults, and a
+# disk filling up meets no eviction at all.
+_kubelet_evicts_on_disk() {
+    local n nodes
+    nodes="$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')" || return 1
+    [[ -n "$nodes" ]] || return 1
+    for n in $nodes; do
+        kubectl get --raw "/api/v1/nodes/$n/proxy/configz" | python3 -c '
+import json, sys
+h = json.load(sys.stdin)["kubeletconfig"].get("evictionHard") or {}
+missing = [s for s in ("nodefs.available", "imagefs.available", "nodefs.inodesFree") if s not in h]
+if missing:
+    print("the kubelet evicts on no " + ", ".join(missing) + ": evictionHard=" + json.dumps(h), file=sys.stderr)
+    sys.exit(1)' || return 1
+    done
+}
+gate "kubelet-desaloja-por-disco" retry_net 3 _kubelet_evicts_on_disk
+
 log_ok "K3s alive, kubeconfig verified, default storage present"

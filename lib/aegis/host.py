@@ -202,6 +202,19 @@ def floor_dropin_text(f, facts):
 # deleting it.
 KUBELET_DROPIN = "/etc/rancher/k3s/config.yaml.d/10-aegis-node-reserved.yaml"
 
+# THE DISK HALF OF `eviction-hard`, and why it is written at all
+# (plan/19 B-6, «the node does not defend itself from a full disk»).
+# `eviction-hard` is ONE map, and a kubelet given any of it does not
+# merge in its defaults for the signals left out (unless
+# mergeDefaultEvictionSettings, which nobody sets): writing only
+# `memory.available` —what this drop-in did since 2026-09-10— switched
+# OFF the kubelet's own nodefs/imagefs thresholds. A disk filling up
+# (traefik's buffers on 2026-09-27, an image cache, a log) then met no
+# eviction at all, only the disk-full itself. These are the kubelet's
+# documented defaults, put back; they are not aegis's numbers to tune.
+DISK_EVICTION = ("nodefs.available<10%", "nodefs.inodesFree<5%",
+                 "imagefs.available<15%", "imagefs.inodesFree<5%")
+
 
 def kubelet_dropin_text(r):
     """The k3s fragment, with the arithmetic that produced it above it."""
@@ -233,7 +246,8 @@ def kubelet_dropin_text(r):
         "# file would move the scheduler's opinion and not the kernel's.",
         "kubelet-arg:",
         '  - "system-reserved=memory=%s"' % r["system_reserved"],
-        '  - "eviction-hard=memory.available<%s"' % r["eviction"],
+        '  - "eviction-hard=%s"' % ",".join(
+            ("memory.available<%s" % r["eviction"],) + DISK_EVICTION),
         '  - "enforce-node-allocatable=pods"',
     ]
     return "\n".join(lines) + "\n"

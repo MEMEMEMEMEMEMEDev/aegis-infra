@@ -562,6 +562,19 @@ data:
             annotations:
               summary: "a human shares this machine and the floor meant to protect them is not in effect"
               description: "The floor is declared in plans.yaml and the kernel is not holding it: /sys/fs/cgroup/user.slice/memory.min is zero. Until it is applied, nothing stops the cluster reclaiming the session's memory. Apply it with `aegis host floor --apply`, and `--off` undoes it in one command."
+          # THE DISK THE NODE LIVES ON (plan/19 B-6). The kubelet evicts
+          # at the defaults aegis writes back into its drop-in: images
+          # at 15 % free, pods at 10 %. This warns at 20 %, while there
+          # is still room to choose what goes, instead of learning it
+          # from which pod the kubelet chose. Before 2026-10-10 nothing
+          # warned and nothing evicted: the disk just filled.
+          - alert: DiscoDelNodoPorLlenarse
+            expr: (last_over_time(aegis_host_disk_free_bytes[5m]) / last_over_time(aegis_host_disk_size_bytes[5m])) < 0.20
+            for: 30m
+            labels: {severity: warning}
+            annotations:
+              summary: "the disk the node lives on ({{ $labels.mount }}) has less than 20% free"
+              description: "At 15% free the kubelet starts evicting images, and at 10% it evicts pods. `sudo du -xh --max-depth=2 {{ $labels.mount }} | sort -h | tail` says what grew; `sudo k3s crictl rmi --prune` frees unused images; traefik's buffers have their own ceiling (check 279)."
           # THE SCHEDULER STILL BELIEVING IT OWNS THE MACHINE. A ratio
           # of 1 means the kubelet reserves nothing, so `allocatable`
           # equals `capacity` and pods are placed against memory the
@@ -598,7 +611,7 @@ data:
           # than a single series, because the producer can lose one
           # probe and keep the others.
           - alert: MedicionDelAnfitrionAusente
-            expr: absent(last_over_time(aegis_host_metrics_timestamp_seconds[15m])) or absent(last_over_time(aegis_host_ram_total_bytes[15m])) or absent(last_over_time(aegis_host_memory_stall_seconds_total[15m])) or absent(last_over_time(aegis_host_shared_with_a_human[15m])) or absent(last_over_time(aegis_host_cgroup_memory_peak_bytes[15m])) or absent(last_over_time(aegis_host_cgroup_memory_current_bytes[15m])) or absent(last_over_time(aegis_host_ram_available_bytes[15m])) or absent(last_over_time(aegis_host_swap_total_bytes[15m])) or absent(last_over_time(aegis_host_swap_used_bytes[15m])) or absent(last_over_time(aegis_host_desktop_floor_bytes[15m])) or absent(last_over_time(aegis_host_desktop_floor_enforced[15m])) or absent(last_over_time(aegis_host_node_allocatable_ratio[15m])) or absent(last_over_time(aegis_host_vram_total_mib[15m])) or absent(last_over_time(aegis_host_vram_used_mib[15m])) or absent(last_over_time(aegis_host_vram_peak_mib[15m]))
+            expr: absent(last_over_time(aegis_host_metrics_timestamp_seconds[15m])) or absent(last_over_time(aegis_host_ram_total_bytes[15m])) or absent(last_over_time(aegis_host_memory_stall_seconds_total[15m])) or absent(last_over_time(aegis_host_shared_with_a_human[15m])) or absent(last_over_time(aegis_host_cgroup_memory_peak_bytes[15m])) or absent(last_over_time(aegis_host_cgroup_memory_current_bytes[15m])) or absent(last_over_time(aegis_host_ram_available_bytes[15m])) or absent(last_over_time(aegis_host_swap_total_bytes[15m])) or absent(last_over_time(aegis_host_swap_used_bytes[15m])) or absent(last_over_time(aegis_host_desktop_floor_bytes[15m])) or absent(last_over_time(aegis_host_desktop_floor_enforced[15m])) or absent(last_over_time(aegis_host_node_allocatable_ratio[15m])) or absent(last_over_time(aegis_host_vram_total_mib[15m])) or absent(last_over_time(aegis_host_vram_used_mib[15m])) or absent(last_over_time(aegis_host_vram_peak_mib[15m])) or absent(last_over_time(aegis_host_disk_free_bytes[15m])) or absent(last_over_time(aegis_host_disk_size_bytes[15m]))
             for: 30m
             labels: {severity: critical}
             annotations:

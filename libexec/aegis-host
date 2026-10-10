@@ -593,6 +593,26 @@ def metrics(args):
          None if shared is None else int(bool(shared)),
          help_="1 when a graphical session shares this machine")
 
+    # THE DISK the node lives on (plan/19 B-6: «the node does not defend
+    # itself from a full disk, nor warn»). The kubelet's disk eviction
+    # defends it; this is the warning that comes BEFORE eviction starts.
+    # The root and k3s' data dir, once per filesystem: on most hosts they
+    # are the same one, and publishing it twice would double an alert.
+    seen_dev = set()
+    for mount in ("/", "/var/lib/rancher"):
+        try:
+            st = os.statvfs(mount)
+            dev = os.stat(mount).st_dev
+        except OSError:
+            continue
+        if dev in seen_dev:
+            continue
+        seen_dev.add(dev)
+        emit("aegis_host_disk_size_bytes", st.f_blocks * st.f_frsize, {"mount": mount},
+             help_="size of a filesystem the node lives on")
+        emit("aegis_host_disk_free_bytes", st.f_bavail * st.f_frsize, {"mount": mount},
+             help_="bytes an unprivileged writer can still use there")
+
     total_mib = probe_vram_total_mib()
     used_mib = _vram_used_mib()
     emit("aegis_host_vram_total_mib", total_mib, help_="VRAM on the card")
@@ -720,7 +740,8 @@ def reservation(args):
     print(f"{bold}what the kubelet keeps away from pods{reset}")
     print(f"  system-reserved   {r['system_reserved']}"
           f"   {gray}the human's floor plus the host's own daemons{reset}")
-    print(f"  eviction-hard     {r['eviction']}")
+    print(f"  eviction-hard     memory {r['eviction']}"
+          f"   {gray}and the kubelet's disk defaults: {', '.join(hostlib.DISK_EVICTION)}{reset}")
     print(f"  allocatable       {_gib(r['allocatable_bytes'])}"
           f"   {gray}of {_gib(r['ram_total_bytes'])}{reset}")
     return 0
