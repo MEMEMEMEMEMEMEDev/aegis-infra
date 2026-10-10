@@ -137,3 +137,38 @@ edge_origin_responds() {
         "$code" "$url" "$acceptable" >&2
     return 1
 }
+
+# argocd_admin_login_ok <base-url> — the CONSUMER test of the ArgoCD
+# admin password that phase 30 takes from the store (#86): the store's
+# password GETS IN (200) and a made-up one is REJECTED (401), through
+# the edge as a person logs in. The negative half is not decoration:
+# without it an ArgoCD that accepted anything would come out green.
+# Both requests are built the same way and differ only in the password.
+# The password never reaches argv: it goes in a body file in tmpfs, 600,
+# shredded on the way out.
+argocd_admin_login_ok() {
+    local base="$1" d code_ok code_bad
+    [[ -f "$STATE_SECRETS/argocd_admin_pass.enc" ]] || {
+        printf 'argocd_admin_pass is not in the store: phase 30 did not leave it\n' >&2; return 1; }
+    d="$(mktemp -d /dev/shm/aegis-argologin.XXXXXX)"; chmod 700 "$d"
+    sops -d --input-type binary --output-type binary \
+        "$STATE_SECRETS/argocd_admin_pass.enc" > "$d/good" 2>/dev/null && [[ -s "$d/good" ]] || {
+        rm -rf "$d"; printf 'argocd_admin_pass.enc does not decrypt (age key?)\n' >&2; return 1; }
+    head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' > "$d/bad"
+    for w in good bad; do
+        python3 -c 'import json,sys; print(json.dumps({"username": "admin", "password": open(sys.argv[1]).read()}))' \
+            "$d/$w" > "$d/$w.json"
+    done
+    code_ok="$(curl_access -s -o /dev/null -w '%{http_code}' -m 20 -X POST \
+        -H 'Content-Type: application/json' -d @"$d/good.json" "$base/api/v1/session" 2>/dev/null)"
+    code_bad="$(curl_access -s -o /dev/null -w '%{http_code}' -m 20 -X POST \
+        -H 'Content-Type: application/json' -d @"$d/bad.json" "$base/api/v1/session" 2>/dev/null)"
+    find "$d" -type f -exec shred -u {} +
+    rm -rf "$d"
+    if [[ "$code_ok" != 200 ]]; then
+        printf 'the store password got %s from ArgoCD (expected 200)\n' "${code_ok:-no answer}" >&2; return 1
+    fi
+    if [[ "$code_bad" != 401 ]]; then
+        printf 'a made-up password got %s (expected 401): the 200 above proves nothing\n' "${code_bad:-no answer}" >&2; return 1
+    fi
+}

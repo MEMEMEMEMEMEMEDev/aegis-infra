@@ -245,6 +245,12 @@ if [[ "${EDGE:-cloudflare}" == local ]]; then
         # and the wildcard. Minutes, not tens of minutes.
         gate_diag "edge-responde" "$DIAG35L" \
           poll 300 10 edge_origin_responds "https://argocd.$ROOT_DOMAIN" '^(200|404)$'
+        # #86: the admin password phase 30 took from the store, measured as
+        # its consumer measures it — a login through this same edge, and a
+        # made-up password rejected. retry_net 3 and not a poll: every try
+        # spends one failed login on «admin», and ArgoCD locks the account
+        # out after five.
+        gate "argocd-admin-entra" retry_net 3 argocd_admin_login_ok "https://argocd.$ROOT_DOMAIN"
         unset CURL_CA_BUNDLE
         EDGE_VERDICT="local edge answering at $EDGE_BIND_IP"
     else
@@ -312,6 +318,13 @@ else
     DIAG35='kubectl -n infra-edge get pods 2>/dev/null | tail -n 3; kubectl -n infra-edge logs deploy/cloudflared --tail=15 2>/dev/null'
     gate_diag "edge-responde" "$DIAG35" \
       poll 600 10 edge_origin_responds "https://argocd.$ROOT_DOMAIN" '^(200|404)$'
+
+    # #86: the admin password phase 30 took from the store, measured as
+    # its consumer measures it — a login through this same edge, and a
+    # made-up password rejected. retry_net 3 and not a poll: every try
+    # spends one failed login on «admin», and ArgoCD locks the account
+    # out after five.
+    gate "argocd-admin-entra" retry_net 3 argocd_admin_login_ok "https://argocd.$ROOT_DOMAIN"
 
     # a functional GitHub→ArgoCD webhook (the HMAC on BOTH sides is the
     # same because phase 15 always RE-SYNCHRONIZES it — a PATCH over

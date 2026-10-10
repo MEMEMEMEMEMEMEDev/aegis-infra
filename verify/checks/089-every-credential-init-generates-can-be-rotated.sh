@@ -105,8 +105,7 @@ for n, where in sorted(generated.items()):
 # associated task, init and the instance are drifting apart.
 NOT_GENERATED_BY_INIT = {
     "tunnel_token":            "produced by tofu in phase 25",
-    "argocd_admin_pass":       "debt #86: phase 30 should produce it",
-    "argocd_server_secretkey": "debt #86: phase 30 should produce it",
+    "argocd_server_secretkey": "ArgoCD's own: generated on its first boot, consumed by nothing outside it",
     "cf_access_token":         "debt #88: phase 15 does not know how to mint it yet",
     "access_st_id":            "created by tofu along with the Access apps (#76)",
     "access_st_secret":        "created by tofu along with the Access apps (#76)",

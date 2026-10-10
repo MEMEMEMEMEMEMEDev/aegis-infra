@@ -110,6 +110,65 @@ else
         --version "$ARGO_VER" -f "$VALUES" --wait --timeout 10m
 fi
 
+# ── the admin password: FROM THE STORE, not the installer's (#86) ──
+# Until 2026-10-10 a new instance was born with the password argocd-server
+# writes into argocd-initial-admin-secret on its first boot: outside the
+# store, so `aegis rotate check` could not measure it, a state backup did
+# not carry it, and it went unrotated (#77 found one eighteen days old;
+# the home instance still had the installer's on 2026-10-09). Now it is
+# one more credential of the store, the same pattern as Jenkins' and
+# Grafana's: gen_or_restore, never shown, never in argv.
+#
+# ArgoCD keeps a BCRYPT hash in argocd-secret (admin.password) and
+# admin.passwordMtime; a new mtime closes every open session, so the
+# Secret is only patched when the store's password is not the one it
+# holds. Which one it holds is said by an annotation with the first 16
+# hex of the password's sha256 (64 bits of a hash of 256 random bits: it
+# names the password without giving it away), because comparing a
+# bcrypt here would need a bcrypt verifier on the host. The installer's
+# Secret is deleted afterwards: ArgoCD's own docs ask for it, and while
+# it exists it is a second, stale copy of a credential. (SECRETS_TMP is
+# the one opened for argocd-redis above: a second secrets_workdir would
+# orphan the first without shredding it.)
+ARGO_ADMIN="$(gen_or_restore argocd_admin_pass gen_password_b64)"
+assert_no_newline "$ARGO_ADMIN" argocd_admin_pass
+wait_for 180 5 "the chart's argocd-secret" kubectl -n argocd get secret argocd-secret
+ARGO_MARK="$(sha256sum < "$ARGO_ADMIN" | cut -c1-16)"
+ARGO_LIVE_MARK="$(kubectl -n argocd get secret argocd-secret \
+    -o jsonpath='{.metadata.annotations.aegis\.dev/admin-from-store}' 2>/dev/null || true)"
+if [[ "$ARGO_LIVE_MARK" != "$ARGO_MARK" ]]; then
+    # bcrypt through stdin (htpasswd -i, never argv). htpasswd writes the
+    # $2y$ prefix; Go's bcrypt reads it, but ArgoCD documents $2a$ and the
+    # two are the same algorithm: the documented one is written.
+    htpasswd -nBi -C 10 admin < "$ARGO_ADMIN" | head -n1 | cut -d: -f2- \
+        | sed 's/^\$2y\$/$2a$/' | tr -d '\n' > "$SECRETS_TMP/argocd_admin_bcrypt"
+    [[ "$(head -c4 "$SECRETS_TMP/argocd_admin_bcrypt")" == '$2a$' ]] \
+        || die "htpasswd did not produce a bcrypt hash for the ArgoCD admin (is apache2-utils installed?)"
+    python3 - "$SECRETS_TMP/argocd_admin_bcrypt" "$ARGO_MARK" > "$SECRETS_TMP/argocd_admin_patch.json" <<'PY'
+import base64, datetime, json, sys
+h = open(sys.argv[1], "rb").read()
+now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ").encode()
+print(json.dumps({
+    "metadata": {"annotations": {"aegis.dev/admin-from-store": sys.argv[2]}},
+    "data": {"admin.password": base64.b64encode(h).decode(),
+             "admin.passwordMtime": base64.b64encode(now).decode()},
+}))
+PY
+    chmod 600 "$SECRETS_TMP/argocd_admin_patch.json"
+    run_cmd kubectl -n argocd patch secret argocd-secret --type merge \
+        --patch-file "$SECRETS_TMP/argocd_admin_patch.json" >/dev/null
+    log_ok "ArgoCD admin password set from the store (argocd_admin_pass)"
+else
+    log_info "ArgoCD admin already holds the store's password — not re-patched (a new mtime would close every session)"
+fi
+run_cmd kubectl -n argocd delete secret argocd-initial-admin-secret --ignore-not-found >/dev/null
+gate "admin-del-almacen" bash -c \
+  "kubectl -n argocd get secret argocd-secret \
+     -o jsonpath='{.metadata.annotations.aegis\\.dev/admin-from-store}' | grep -qx '$ARGO_MARK' \
+   && ! kubectl -n argocd get secret argocd-initial-admin-secret >/dev/null 2>&1"
+# the CONSUMER test —a real login through the edge, and a made-up
+# password rejected— is phase 35's, once argocd.<domain> answers.
+
 # ── gates: KSOPS TRULY operational (not 'the pod is running') ─────
 gate "repo-server-ready" bash -c \
   "kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=300s >/dev/null"

@@ -323,9 +323,13 @@ from behind Access.
 
 ### The ArgoCD admin password
 
-Since 2026-08-12 it lives in the store, encrypted with the age key —
-there is no need to write it down separately (principle D11: the
-operator safeguards the age key and nothing else). To read it:
+Phase 30 generates it into the store (`argocd_admin_pass`, since
+2026-10-10; before that a new instance was born with the installer's,
+debt #86), encrypted with the age key — there is no need to write it
+down separately (principle D11: the operator safeguards the age key
+and nothing else). Phase 35 proves it with a real login through the
+edge, and `aegis rotate check argocd_admin_pass` measures it any day.
+To read it:
 
 ```bash
 export SOPS_AGE_KEY_FILE=~/.config/sops/age/aegis.key
@@ -333,8 +337,10 @@ sops -d --input-type binary --output-type binary \
   "$AEGIS_HOME/.state-secrets/argocd_admin_pass.enc"
 ```
 
-`argocd-initial-admin-secret` no longer exists: it was deleted on
-rotation, which is what ArgoCD expects you to do and nobody did.
+`argocd-initial-admin-secret` no longer exists: phase 30 deletes it once
+the store's password is in place, which is what ArgoCD expects you to
+do. An instance installed before 2026-10-10 still has it until phase 30
+runs again (or `aegis rotate run argocd_admin_pass --yes`).
 
 ### The backups: two halves and a separate disk
 

@@ -141,6 +141,7 @@ dk_app_ro|normal|15-third-parties|jenkins-secrets|check_dk_app_ro|GitHub|Jenkins
 dk_app_argocd_ro|normal|15-third-parties|argocd-secrets|check_dk_app_argocd|GitHub|ArgoCD cannot read the app's repo
 jenkins_admin_pass|normal|50-jenkins|jenkins-secrets|check_jenkins_admin|-|nobody gets into Jenkins
 redis_auth|normal|30-argocd|-|check_redis|-|ArgoCD stops answering
+argocd_admin_pass|normal|30-argocd|-|check_argocd_admin|-|nobody gets into ArgoCD through the UI (every open session is closed)
 cf_api_token|normal|15-third-parties|jenkins-secrets|check_cf_api|Cloudflare|tofu cannot apply the edge
 cf_dns_token|normal|15-third-parties|cert-manager-issuers|check_cf_dns|Cloudflare|cert-manager does not renew certificates
 cf_access_token|normal|15-third-parties|-|check_cf_access|Cloudflare|tofu cannot manage Access: the operator plane stays as it is
@@ -165,19 +166,18 @@ TABLA
 # owner is the state, not the store: invalidating the .enc rotates
 # nothing.
 #
-# argocd_admin_pass and argocd_server_secretkey are still `manual`, and
-# that is NOT the same thing: they are a declared debt (#86). The right
-# thing is for phase 30 to produce them like any other credential. In
-# the meantime, a new instance is born with the password the ArgoCD
-# installer generates — exactly what #77 found unrotated for eighteen
-# days.
+# argocd_server_secretkey is still `manual`, and that is NOT the same
+# thing: ArgoCD generates it on its first boot and nothing outside
+# ArgoCD consumes it (it signs the sessions). argocd_admin_pass WAS here
+# too, as debt #86, until 2026-10-10: a new instance was born with the
+# password the installer generates — exactly what #77 found unrotated
+# for eighteen days. Phase 30 produces it now, like any other.
 RECIPES_EXTRA=$(cat <<'TABLA'
 tunnel_token|tofu|25-edge-tofu|-|check_tunnel|Cloudflare|ALL the public hostnames go down
 access_st_id|tofu|25-edge-tofu|-|check_access_st|Cloudflare|automation stops crossing Access (it is rotated together with the secret)
 access_st_secret|tofu|25-edge-tofu|-|check_access_st|Cloudflare|automation stops crossing Access (it is rotated together with the id)
 r2_access_key_id|manual|15-third-parties|-|check_r2_pair|Cloudflare|the backups stop leaving the machine (rotated together with the secret)
 r2_secret_access_key|manual|15-third-parties|-|check_r2_pair|Cloudflare|the backups stop leaving the machine (rotated together with the id)
-argocd_admin_pass|manual|-|-|check_argocd_admin|-|nobody gets into ArgoCD through the UI
 argocd_server_secretkey|manual|-|-|-|-|ALL ArgoCD sessions are closed
 TABLA
 )
