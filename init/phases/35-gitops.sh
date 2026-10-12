@@ -345,10 +345,14 @@ else
     gate "hook-tiene-deliveries" test -n "$DELIVERY_ID"
     run_cmd gh api -X POST \
         "repos/$GH_OWNER/$PLATFORM_REPO/hooks/$HOOK_ID/deliveries/$DELIVERY_ID/attempts"
-    # the redeliver is asynchronous; the most recent delivery must end 2xx:
-    gate "webhook-redeliver-2xx" poll 180 5 bash -c \
-        "gh api 'repos/$GH_OWNER/$PLATFORM_REPO/hooks/$HOOK_ID/deliveries' \
-           --jq '.[0].status_code' | grep -q '^2'"
+    # the redeliver is asynchronous, and it can fail the way the first
+    # delivery did (alpha-ubuntu 2026-10-12: a 502 four seconds after
+    # cloudflared connected; the same redeliver by hand, minutes later,
+    # 200). Only a delivery newer than the one just re-sent counts, and a
+    # failed one is re-delivered inside the wait (lib/access.sh):
+    gate_diag "webhook-redeliver-2xx" \
+      'gh api "repos/$GH_OWNER/$PLATFORM_REPO/hooks/$HOOK_ID/deliveries" --jq ".[0:5][] | \"\(.delivered_at) event=\(.event) status_code=\(.status_code) \(.status)\"" 2>/dev/null; log_warn "status_code=400 with a green edge: the HMAC of the hook and the one in argocd-secret differ"' \
+      hook_delivery_2xx "$GH_OWNER/$PLATFORM_REPO" "$HOOK_ID" "" "$DELIVERY_ID" 300
 
     EDGE_VERDICT="edge answering"
 fi

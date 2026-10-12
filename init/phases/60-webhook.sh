@@ -99,6 +99,9 @@ if [[ "${EDGE:-cloudflare}" == local ]]; then
     log_info "e2e: push to the app's repo → Jenkins' periodic scan (up to 2m) → build #$NEXT_MB"
 else
     log_info "e2e: push to the app's repo → hook delivery → build #$NEXT_MB"
+    # the newest push delivery BEFORE this push: only a newer one is
+    # this push's (an old 2xx says nothing about the HMAC live now)
+    PUSH_SINCE="$(hook_newest_delivery "$GH_OWNER/$APP_REPO" "$HOOK_ID" push)"
 fi
 run_cmd retry_net 3 bash -c "cd \$(mktemp -d) && \
   git clone --depth 1 https://github.com/$GH_OWNER/$APP_REPO.git app && \
@@ -118,7 +121,8 @@ run_cmd retry_net 3 bash -c "cd \$(mktemp -d) && \
 # right there), the old poll re-read the SAME dead delivery for 300s.
 # Now, with the edge already green (60.1), a failed delivery is
 # RE-DELIVERED (redeliver) every ~60s within the wait; a delivery in
-# flight (status null) is merely waited for.
+# flight (status null) is merely waited for. Since 2026-10-12 the wait
+# is lib/access.sh's hook_delivery_2xx, shared with phase 35.
 #
 # Under EDGE=local there are no deliveries to read: no hook, no POST,
 # no attempt list. And with it goes the only thing that ever exercised
@@ -128,34 +132,12 @@ if [[ "${EDGE:-cloudflare}" == local ]]; then
     _gate_record "delivery-push-2xx" not-evaluated 0
     log_warn "GATE delivery-push-2xx has NO SUBJECT (recorded, not silent) — EDGE=local: there is no hook, so there is no delivery whose status_code to read. Consequence to keep in mind: the HMAC/plugin link (the receiver validating GitHub's signature) is NOT measured under this edge — it is not that it works, it is that nothing exercised it"
 else
-    _delivery_wait_2xx() {
-        local timeout=300 t0=$SECONDS did code line redelivered=0
-        while :; do
-            line="$(gh api "repos/$GH_OWNER/$APP_REPO/hooks/$HOOK_ID/deliveries" \
-                --jq '[.[] | select(.event=="push")][0] | "\(.id) \(.status_code)"' \
-                2>/dev/null || true)"
-            did="${line%% *}"; code="${line##* }"
-            [[ "$code" == 2* ]] && return 0
-            (( SECONDS - t0 >= timeout )) && return 1
-            if [[ -n "$did" && "$did" != "null" && "$code" =~ ^[0-9]+$ ]] \
-               && (( (SECONDS - t0) / 60 >= redelivered )); then
-                redelivered=$(( redelivered + 1 ))
-                log_warn "push delivery status=$code — redeliver #$redelivered (a 530/timeout from the edge is NOT re-delivered on its own)"
-                if ! gh api -X POST \
-                     "repos/$GH_OWNER/$APP_REPO/hooks/$HOOK_ID/deliveries/$did/attempts" \
-                     >/dev/null 2>&1; then
-                    log_warn "the redeliver failed (gh/network) — it is retried on the next lap"
-                fi
-            fi
-            sleep 10
-        done
-    }
     gate_diag "delivery-push-2xx" \
       'gh api "repos/$GH_OWNER/$APP_REPO/hooks/$HOOK_ID/deliveries" \
          --jq ".[0:5][] | \"\(.delivered_at) event=\(.event) status_code=\(.status_code) \(.status)\"" 2>/dev/null;
        log_warn "if status_code=400 with a green edge: desynchronized HMAC — the plugin loads the HMAC AT BOOT (lesson #12): if the store regenerated hmac_jenkins with Jenkins already up, kubectl -n jenkins-system rollout restart sts/jenkins and re-run with --from 60";
        kubectl -n jenkins-system logs sts/jenkins -c jenkins --since=10m 2>/dev/null | grep -iE "webhook|github" | tail -n 8' \
-      _delivery_wait_2xx
+      hook_delivery_2xx "$GH_OWNER/$APP_REPO" "$HOOK_ID" push "$PUSH_SINCE" 300
 fi
 
 # ── 60.4 the webhook CREATED the build (multibranch scan) ──────────

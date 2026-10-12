@@ -27,7 +27,9 @@ L_NEXT="$(grep -n 'NEXT_MB=' "$PHASES/60-webhook.sh" | head -1 | cut -d: -f1)"
 if [[ -z "$L_IDX" || -z "$L_NEXT" ]] || (( L_IDX > L_NEXT )); then
     D67="$D67 phase 60 captures NEXT_MB without waiting for the branch indexing;"
 fi
-nc "$PHASES/60-webhook.sh" | grep -q 'deliveries/\$did/attempts' \
+# the re-delivering wait lives in lib/access.sh since 2026-10-12 (shared
+# with phase 35); check 281 drives it — here, that phase 60 still uses it:
+nc "$PHASES/60-webhook.sh" | grep -q 'hook_delivery_2xx ' \
     || D67="$D67 the delivery wait does not re-deliver (GitHub does not retry a 530 from the tunnel on its own);"
 if [[ -n "$D67" ]]; then fail "asynchrony/order:$D67"
 else pass "every asynchronous step with poll+evidence; webhook re-delivered; effect after its cause"; fi

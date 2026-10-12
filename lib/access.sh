@@ -172,3 +172,65 @@ argocd_admin_login_ok() {
         printf 'a made-up password got %s (expected 401): the 200 above proves nothing\n' "${code_bad:-no answer}" >&2; return 1
     fi
 }
+
+# ═══ A GITHUB DELIVERY, WAITED FOR THE WAY GITHUB DELIVERS ═══════════
+#
+# GitHub does NOT re-deliver on its own. A delivery that landed on a 530
+# from a tunnel still connecting, or on a «failed to connect to host»
+# from a resolver that has not seen the CNAME yet, stays failed forever:
+# reading it again for minutes measures nothing. Phase 60 learned it in
+# the P1.5 audit (2026-07-18) and re-delivered inside its own wait;
+# phase 35 kept the old shape —redeliver once, then poll that one
+# finished delivery for 180s— and lost alpha-ubuntu on 2026-10-12: a 502
+# four seconds after cloudflared connected, and the same redeliver by
+# hand, minutes later, 200 OK. Same class twice → one helper.
+#
+# Only deliveries NEWER than <since_id> count: an old 2xx (a previous
+# run, a hook signing with the HMAC from before a rotation) proves
+# nothing about the signature that is live now. Delivery ids grow.
+#
+# What each answer means:
+#   2xx    the receiver took it, and with it the signature: pass.
+#   400    the receiver REJECTED it — an HMAC out of sync. It converged
+#          to an error; re-delivering will not change it: stop now.
+#   null   in flight: wait.
+#   other  5xx, a connection error (GitHub reports it as 502), a 403/404
+#          from an edge still settling: re-deliver it, at most once a
+#          minute, until the timeout.
+
+# hook_newest_delivery <owner/repo> <hook_id> [event] — the id of the
+# newest delivery (of that event), 0 when there is none. stdout = the id.
+hook_newest_delivery() {
+    local sel='.'
+    [[ -n "${3:-}" ]] && sel="[.[] | select(.event==\"$3\")]"
+    local id
+    id="$(gh api "repos/$1/hooks/$2/deliveries" --jq "$sel | .[0].id" 2>/dev/null || true)"
+    [[ "$id" =~ ^[0-9]+$ ]] && printf '%s\n' "$id" || printf '0\n'
+}
+
+# hook_delivery_2xx <owner/repo> <hook_id> <event|""> <since_id> [timeout_s]
+hook_delivery_2xx() {
+    local repo="$1" hook="$2" event="${3:-}" since="${4:-0}" timeout="${5:-300}"
+    local t0=$SECONDS line did code redelivered=0 sel='.'
+    [[ -n "$event" ]] && sel="[.[] | select(.event==\"$event\")]"
+    while :; do
+        line="$(gh api "repos/$repo/hooks/$hook/deliveries" \
+            --jq "$sel | .[0] | \"\(.id) \(.status_code)\"" 2>/dev/null || true)"
+        did="${line%% *}"; code="${line##* }"
+        if [[ "$did" =~ ^[0-9]+$ ]] && (( did > since )); then
+            [[ "$code" == 2* ]] && return 0
+            if [[ "$code" == 400 ]]; then
+                log_warn "delivery $did answered 400: the receiver rejected the signature — re-delivering will not change that"
+                return 1
+            fi
+            if [[ "$code" =~ ^[0-9]+$ ]] && (( (SECONDS - t0) / ${AEGIS_HOOK_REDELIVER_S:-60} >= redelivered )); then
+                redelivered=$(( redelivered + 1 ))
+                log_warn "delivery $did status=$code — redeliver #$redelivered (GitHub does not re-deliver on its own)"
+                gh api -X POST "repos/$repo/hooks/$hook/deliveries/$did/attempts" >/dev/null 2>&1 \
+                    || log_warn "the redeliver failed (gh/network) — it is retried on the next lap"
+            fi
+        fi
+        (( SECONDS - t0 >= timeout )) && return 1
+        sleep "${AEGIS_HOOK_POLL_S:-10}"
+    done
+}
