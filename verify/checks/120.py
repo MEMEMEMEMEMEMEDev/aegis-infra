@@ -104,6 +104,32 @@ for path in sorted(f for f in files if f.endswith(".json")):
                   f"declares is somebody's private work that happens to live in the same "
                   f"account, and this corpus is published")
 
+# ── the third kind: a home that is not this machine's ────────────────
+# Found on 2026-10-12, on a lab VM: the security-vulns case is synthetic
+# —built by hand in an agent's scratchpad, never through the capture
+# that scrubs— and carried that scratchpad's path, which spells the
+# operator's login with dashes (/tmp/claude-1000/-home-<login>-…), plus
+# the GitHub owner of the lab conf it was made with. Checked from the
+# operator's machine, neither was «this instance's»: the conf there
+# names another owner, and $HOME is spelled with slashes. So a home is
+# also recognised by its SHAPE, whoever runs the check: the capture
+# writes every home as /home/operator, and anything else is somebody's.
+HOME_SHAPES = (
+    _re.compile(r'(?:^|[\s"\'(=:])(/home/(?!operator\b)[a-z_][a-z0-9_.-]*|/Users/[A-Za-z_][A-Za-z0-9_.-]*)'),
+    _re.compile(r'/-home-[a-z_][a-z0-9_.]*-'),
+)
+for path in sorted(files):
+    try:
+        text = open(path, encoding="utf-8").read()
+    except (OSError, UnicodeDecodeError):
+        continue
+    for shape in HOME_SHAPES:
+        m = shape.search(text)
+        if m:
+            print(f"{os.path.relpath(path, ROOT)} carries a home that is not /home/operator "
+                  f"({m.group(0).strip()[:40]}…): it spells a person's login, and this corpus is published")
+            break
+
 if live is None:
     print(f"SCOPE: without {os.path.relpath(CONF, home_dir) if CONF.startswith(home_dir) else CONF} "
           f"only $HOME was contrasted — the values of the conf could not be read")

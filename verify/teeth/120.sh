@@ -103,3 +103,24 @@ for path in sorted(root.rglob("*.json")):
         break
 P
 }
+
+# ── the third kind: a home by its shape (2026-10-12) ─────────────────
+V120="$C120/security-vulns/documents/vulns.json"
+_sub120() {   # <old> <new> — exactly one occurrence, or the tooth is mis-aimed
+    python3 - "$V120" "$1" "$2" <<'P'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text()
+assert s.count(sys.argv[2]) == 1, "re-aim this tooth: " + sys.argv[2]
+p.write_text(s.replace(sys.argv[2], sys.argv[3], 1))
+P
+}
+
+# THE ONE: the synthetic case as it was committed — an agent's scratchpad
+# path, which spells a login with dashes, and not this machine's login
+red_8() { _sub120 '"/home/operator/aegis/platform"' '"/tmp/claude-1000/-home-someone-Escritorio-workspace/scratchpad/case/platform"'; }
+
+# somebody else's home, spelled with slashes (made on another machine)
+red_9() { _sub120 '"/home/operator/aegis/platform"' '"/home/someone/aegis/platform"'; }
+
+# the capture's own spelling of a home stays legal
+control_5() { _sub120 '"/home/operator/aegis/platform"' '"/home/operator/aegis/platform/"'; }
