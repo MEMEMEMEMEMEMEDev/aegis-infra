@@ -3,10 +3,23 @@
 # All four reds are regressions that were LIVE on 2026-08-26, the day
 # the artifact was first measured as what ships to everybody.
 
+# WHO the reds plant: the login, unless the login is the product's own
+# name (the lab VMs run as `aegis`, which the check declares NOT
+# measured since 2026-10-12) — then the GitHub account, which it does
+# measure. A tooth that plants what the check is told to ignore aims at
+# nothing.
+_who117() {
+    local who; who="$(id -un)"
+    [[ "${who,,}" == aegis ]] && who="$(gh api user --jq .login 2>/dev/null)"
+    [[ -n "$who" ]] || return 1
+    printf '%s\n' "$who"
+}
+
 # the worst one, and it was not a comment: the VM's admin account
 # created with the name of whoever wrote the template
 red_1() {
-    sed -i 's/^  - name: aegis$/  - name: '"$(id -un)"'/' \
+    local who; who="$(_who117)" || return 1
+    sed -i 's/^  - name: aegis$/  - name: '"$who"'/' \
         "$AEGIS_ROOT/seed/platform/vps/clouding-lab.cloud-init.yaml.tpl"
 }
 
@@ -26,7 +39,8 @@ red_3() {
 # the identity of whoever is building it, quoted in a comment. A name in
 # a comment is still a name.
 red_4() {
-    printf '\n# handed over by %s during the rehearsal\n' "$(id -un)" \
+    local who; who="$(_who117)" || return 1
+    printf '\n# handed over by %s during the rehearsal\n' "$who" \
         >> "$AEGIS_ROOT/libexec/aegis-verify"
 }
 

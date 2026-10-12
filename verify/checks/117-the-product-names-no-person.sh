@@ -100,6 +100,14 @@ _name_absent() {   # <name> <what it is>
         printf '    %s is "%s", too short to search for without false positives: NOT measured\n' "$what" "$name"
         return 0
     fi
+    # A login named after the product names nobody: the lab VMs run as
+    # `aegis` (the lab's preparation script makes that user), and every
+    # file of the product says its own name. Measured on alpha-ubuntu, 2026-10-12: the only red
+    # the full verify had there, on every run. Declared, not skipped.
+    if [[ "${name,,}" == aegis ]]; then
+        printf '    %s is "%s", the product'"'"'s own name — it names no person: NOT measured\n' "$what" "$name"
+        return 0
+    fi
     N117=$((N117+1))
     hits="$(cd "$AEGIS_ROOT" && command grep -rIln --exclude-dir=.git -F -- "$name" \
         "${PRODUCT_DIRS[@]}" 2>/dev/null || true)"
