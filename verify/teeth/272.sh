@@ -43,5 +43,10 @@ red_5() { _sub "$S272" 'npm test
 red_6() { _sub "$S272" ': > node_modules/.aegis-compiled
 ' ''; }
 
+# without errexit a red `npm test` falls through to prune and the echo
+red_7() { _sub "$S272" 'set -eu
+' 'set -u
+'; }
+
 # ── controls ──
 control_1() { _sub "$S272" 'echo "compile: tests green;' 'echo "compile: the tests are green;'; }

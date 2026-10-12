@@ -13,7 +13,9 @@ repo's own ci/compile.sh in aegis-ci-node, and the Containerfile only
 COPYs dist/ onto the signed runtime. This check reads the template and the
 tenant pipeline, and RUNS the template's ci/compile.sh on a copy of it
 (when this machine has npm) to prove it leaves dist/ where the
-Containerfile looks.
+Containerfile looks. What the run proves is ALSO read, comment-stripped:
+the full teeth of 2026-10-12 ran on a lab VM with no npm, and a tooth
+that only the run could see (the OUT_DIR move) did not bite there.
 """
 import os
 import re
@@ -46,9 +48,16 @@ cs_path = os.path.join(APP, "ci", "compile.sh")
 if not os.path.isfile(cs_path):
     findings.append("the static template ships no ci/compile.sh: its repo would never compile")
 else:
-    cs = read(cs_path)
-    if "npm ci" not in cs:
+    # comment-stripped: the script's own prose says «`npm ci` and NOT `npm
+    # install`», and a read of the raw file found the promise there
+    cs = "\n".join(l for l in read(cs_path).splitlines() if not l.lstrip().startswith("#"))
+    if not re.search(r"^\s*npm ci\b", cs, re.M):
         findings.append("ci/compile.sh does not install with `npm ci`: the lock stops being what is built")
+    # read as well as run: a machine without npm (an aegis host, a lab VM)
+    # never runs it, and the move is what an Angular front depends on
+    if not re.search(r'^\s*mv\s+"\$OUT_DIR"\s+dist\s*$', cs, re.M):
+        findings.append("ci/compile.sh does not move an OUT_DIR elsewhere into dist/: Angular's dist/<project>/browser "
+                        "would never reach the one path the Containerfile copies")
 
 di = [l.strip() for l in read(os.path.join(APP, ".dockerignore")).splitlines() if l.strip() and not l.startswith("#")]
 if not di or di[0] != "*" or "!dist" not in di or "!serve.mjs" not in di:

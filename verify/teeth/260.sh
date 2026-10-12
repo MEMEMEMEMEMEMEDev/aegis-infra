@@ -36,5 +36,10 @@ red_4() { _sub "$S260" '    mv "$OUT_DIR" dist' '    :'; }
 # the compile stage runs for every repo, a Go service included
 red_5() { _sub "$J260" "          expression { fileExists('ci/compile.sh') }" "          expression { true }"; }
 
+# the lock stops being what is built (the script's own comment still says `npm ci`)
+red_6() { _sub "$S260" 'npm ci --no-audit --no-fund
+' 'npm install --no-audit --no-fund
+'; }
+
 # ── controls ──
 control_1() { _sub "$S260" 'echo "compile: dist/ holds' 'echo "compile: dist/ now holds'; }

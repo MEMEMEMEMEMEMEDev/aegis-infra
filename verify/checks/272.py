@@ -11,7 +11,10 @@ aegis-ci-node, and the Containerfile is one FROM, no RUN, three COPYs.
 
 This sidecar reads the template and RUNS its ci/compile.sh on a copy
 (when this machine has npm): green on the template, red with a broken
-test, and node_modules present with an empty dependency tree.
+test, and node_modules present with an empty dependency tree. What the
+run proves is ALSO read, comment-stripped (set -e, a bare `npm test`, a
+file written into node_modules): the full teeth of 2026-10-12 ran on a
+lab VM with no npm, and two teeth only the run could see did not bite.
 """
 import os
 import re
@@ -58,6 +61,17 @@ else:
     order = [cs.find(s) for s in ("npm ci", "npm test", "npm prune --omit=dev", "mkdir -p node_modules")]
     if -1 in order or order != sorted(order):
         findings.append("ci/compile.sh does not run npm ci → npm test → npm prune --omit=dev → mkdir -p node_modules, in that order")
+    # read as well as run: a machine without npm (an aegis host, a lab VM)
+    # never runs it, and the full teeth of 2026-10-12 ran on one
+    if not re.search(r"^\s*set\s+-[a-z]*e", cs, re.M):
+        findings.append("ci/compile.sh runs without `set -e`: a red `npm test` does not stop it, and an image is built from a failing suite")
+    if not re.search(r"^\s*npm test\s*$", cs, re.M):
+        findings.append("ci/compile.sh does not run `npm test` as a statement of its own: a red test that is `|| true`-ed "
+                        "or piped never stops the build")
+    tail = cs[cs.find("mkdir -p node_modules"):] if "mkdir -p node_modules" in cs else ""
+    if not re.search(r"^\s*(?::\s*)?>\s*node_modules/\S+|^\s*touch\s+node_modules/\S+", tail, re.M):
+        findings.append("ci/compile.sh writes nothing into node_modules after creating it: with an empty dependency tree "
+                        "the first build depends on how the builder carries an empty directory")
 
 tpl = os.path.join(ROOT, "seed", "templates")
 for dp, _dn, fn in os.walk(tpl):
