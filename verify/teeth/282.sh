@@ -18,7 +18,9 @@ red_2() { _sub "$P282" '    _ALPINE="$(_canary_from alpine)" || _ALPINE=""' '   
 # going on in silence
 red_3() { _sub "$P282" '        log_warn "the mirror does not serve golang/alpine yet' '        : log_warn "the mirror does not serve golang/alpine yet'; }
 # the repoint that points at nothing
-red_4() { _sub "$P282" '            -e "s|^FROM docker\\.io/library/golang:[^ ]*|FROM $_GOLANG|" \' '            -e "s|^FROM docker\\.io/library/nothing:[^ ]*|FROM $_GOLANG|" \'; }
+red_4() { _sub "$P282" '            -e "s|^FROM ([^ ]*/)?golang:[^ ]*|FROM $_GOLANG|" \' '            -e "s|^FROM ([^ ]*/)?nothing:[^ ]*|FROM $_GOLANG|" \'; }
+# the pattern as on 2026-10-13: only the public FROM, a resume keeps the stale internal digest
+red_5() { _sub "$P282" '            -e "s|^FROM ([^ ]*/)?golang:[^ ]*|FROM $_GOLANG|" \' '            -e "s|^FROM docker\\.io/library/golang:[^ ]*|FROM $_GOLANG|" \'; }
 
 # ── controls ──
 # the comment over it is words

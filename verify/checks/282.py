@@ -13,7 +13,10 @@ cut from `_canary_from() {` to the `fi` of its warning, runs under
   · the mirror does not declare golang → the phase goes on and warns;
   · it declares both, but the registry does not hold them (alpha-ubuntu)
     → the phase goes on and warns;
-  · it serves both → the Containerfile is repointed, by digest.
+  · it serves both → the Containerfile is repointed, by digest;
+  · a resume, over a canary already repointed to an older internal digest
+    → repointed to what the mirror declares now (alpha-ubuntu, golang
+    1.26.6 -> 1.26.9).
 """
 import os
 import re
@@ -83,7 +86,17 @@ with tempfile.TemporaryDirectory() as tmp:
     if p.returncode != 0 or "golang@sha256:abc" not in cf or "alpine@sha256:abc" not in cf:
         findings.append(f"the mirror serves golang and alpine, and the canary's Containerfile is not repointed "
                         f"by digest (rc {p.returncode})")
+    # a resumed phase 80 clones the canary it already repointed and pushed,
+    # at a digest the mirror no longer declares (alpha-ubuntu, 2026-10-13)
+    CONTAINERFILE_BEFORE = CONTAINERFILE
+    CONTAINERFILE = ("FROM registry.registry-system.svc.cluster.local:5000/golang:1.26.6-alpine@sha256:old AS build\n"
+                     "RUN true\nFROM registry.registry-system.svc.cluster.local:5000/alpine:3.21@sha256:old\n")
+    p, cf = world("a resume over a canary already repointed", declared, "serves")
+    if p.returncode != 0 or "sha256:old" in cf or "golang@sha256:abc" not in cf or "alpine@sha256:abc" not in cf:
+        findings.append("a resumed phase 80 leaves the canary on the internal digest it pushed last time: the "
+                        "pattern only knows the public FROM, and the phase still says «repointed»")
+    CONTAINERFILE = CONTAINERFILE_BEFORE
 
 for x in findings:
     print(x)
-print("SCOPE: phase 80's canary repoint driven under set -euo pipefail in three worlds (undeclared, held at the door, served)")
+print("SCOPE: phase 80's canary repoint driven under set -euo pipefail in four worlds (undeclared, held at the door, served, resumed over a stale repoint)")

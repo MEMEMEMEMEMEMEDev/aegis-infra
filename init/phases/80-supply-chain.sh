@@ -362,10 +362,14 @@ else
     # nothing else, with golang and alpine held at the door):
     _GOLANG="$(_canary_from golang)" || _GOLANG=""
     _ALPINE="$(_canary_from alpine)" || _ALPINE=""
+    # Any registry, not only docker.io: a resumed phase 80 clones the
+    # canary it ALREADY repointed and pushed, and a pattern for the public
+    # FROM alone would leave the old internal digest in place and still
+    # say «repointed» (alpha-ubuntu, 2026-10-13, golang 1.26.6 -> 1.26.9):
     if [[ -n "$_GOLANG" && -n "$_ALPINE" ]]; then
         run_cmd sed -i -E \
-            -e "s|^FROM docker\\.io/library/golang:[^ ]*|FROM $_GOLANG|" \
-            -e "s|^FROM docker\\.io/library/alpine:[^ ]*|FROM $_ALPINE|" \
+            -e "s|^FROM ([^ ]*/)?golang:[^ ]*|FROM $_GOLANG|" \
+            -e "s|^FROM ([^ ]*/)?alpine:[^ ]*|FROM $_ALPINE|" \
             "$CANARY_TMP/app/Containerfile"
         log_ok "canary's Containerfile repointed at the internal registry, by digest"
     else
