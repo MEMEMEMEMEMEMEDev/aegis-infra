@@ -41,6 +41,11 @@ red_8() { _sub "$K255" '      - verdict.sh
 # the ConfigMap is generated and never lands in jenkins-system
 red_9() { _sub "$A255" '    path: k8s/base/platform/vuln-policy' '    path: k8s/base/platform/vuln-policy-nowhere'; }
 
+# the age as on 2026-10-13: from CISA's release, a list fetched that minute judged «5 days old»
+red_10() { _sub "$V255" '            if (line ~ /fetched=/) { r = line; sub(/.*fetched=/, "", r); r = substr(r, 1, 10) }
+' ''; }
+# the mirror's fetch that does not say when
+red_11() { _sub "$AEGIS_ROOT/seed/platform/mirror-images/Jenkinsfile" "printf '# CISA KEV dateReleased=%s fetched=%s (by mirror-images #%s)\\\\n' \"\$REL\" \"\$(date -u +%Y-%m-%d)\" \"\$BUILD_NUMBER\"" "printf '# CISA KEV dateReleased=%s (by mirror-images #%s)\\\\n' \"\$REL\" \"\$BUILD_NUMBER\""; }
 # ── controls ──
 # the reasons are words: rewording one changes no verdict
 control_1() { _sub "$V255" '"already running, past its window"' '"already running, and its window has closed"'; }

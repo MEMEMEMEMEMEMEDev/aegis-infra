@@ -54,7 +54,8 @@ def line(cve, sev, pkg, pub, path="", installed="1.0", fixed="1.1, 2.0"):
     return f"{cve}|{sev}|{pkg}|{installed}|{fixed}|{pub}|{path}|sha256:x|t (debian 13.7)"
 
 
-def run(tmp, findings_lines, reference_lines=None, today=TODAY, kev=KEVDAY, policy=POLICY, env_extra=None):
+def run(tmp, findings_lines, reference_lines=None, today=TODAY, kev=KEVDAY, policy=POLICY, env_extra=None,
+        fetched=None):
     fp = os.path.join(tmp, "findings.txt")
     with open(fp, "w", encoding="utf-8") as f:
         f.write("\n".join(findings_lines) + ("\n" if findings_lines else ""))
@@ -66,7 +67,8 @@ def run(tmp, findings_lines, reference_lines=None, today=TODAY, kev=KEVDAY, poli
         args.append(rp)
     kp = os.path.join(tmp, "kev.txt")
     with open(kp, "w", encoding="utf-8") as f:
-        f.write(f"# CISA KEV catalogVersion=t dateReleased={kev} count=1\nCVE-2026-9000001\n")
+        got = f" fetched={fetched}" if fetched else ""
+        f.write(f"# CISA KEV catalogVersion=t dateReleased={kev}{got} count=1\nCVE-2026-9000001\n")
     env = {"PATH": os.environ["PATH"], "TODAY": today, "KEV": kp, "POLICY": policy}
     env.update(env_extra or {})
     p = subprocess.run(args, capture_output=True, text=True, env=env, timeout=30)
@@ -118,6 +120,12 @@ with tempfile.TemporaryDirectory() as tmp:
     stale = (datetime.date(2026, 9, 29) - datetime.timedelta(days=KEVAGE + 1)).isoformat()
     g = run(tmp, [fresh], kev=stale)
     expect("new admission, exploited-in-the-wild list too old", g, "CVE-2026-75804", "block")
+    # alpha-ubuntu, 2026-10-13: CISA had not released for 5 days, the list was
+    # fetched that minute — it is today's list, and the copy ages from the fetch
+    g = run(tmp, [fresh], kev=stale, fetched=TODAY)
+    expect("new admission, a list released days ago but fetched today", g, "CVE-2026-75804", "debt", due_fresh)
+    g = run(tmp, [fresh], kev=KEVDAY, fetched=stale)
+    expect("new admission, a copy fetched too long ago", g, "CVE-2026-75804", "block")
 
     # ── a change, judged against what runs ─────────────────────────────
     g = run(tmp, [fresh, old, kev], reference_lines=[fresh, old, kev])
@@ -163,6 +171,14 @@ with tempfile.TemporaryDirectory() as tmp:
     else:
         engines = "sh+awk of this runner (no busybox here)"
 
+# ── the door's own fetch says when it fetched ──────────────────────────
+MIRROR = os.path.join(ROOT, "seed", "platform", "mirror-images", "Jenkinsfile")
+msrc = "\n".join(l for l in open(MIRROR, encoding="utf-8").read().splitlines() if not l.lstrip().startswith("//"))
+mk = re.search(r"known_exploited_vulnerabilities\.json(.*?)\belse\b", msrc, re.S)
+if not mk or not re.search(r"printf '# CISA KEV dateReleased=%s fetched=%s[^']*'[^\n]*\"\$REL\" \"\$\(date -u \+%Y-%m-%d\)\"", mk.group(1)):
+    findings.append("the mirror's fresh fetch of the exploited list does not write the day it was fetched "
+                    "(fetched=$(date -u ...)): a list fetched that minute ages from CISA's last release")
+
 # ── the template the callers use yields the nine fields ────────────────
 p = subprocess.run(["sh", VERDICT, "--template"], capture_output=True, text=True, timeout=30)
 tpl = p.stdout.strip()
@@ -202,7 +218,7 @@ else:
     if not (sp.get("syncPolicy") or {}).get("automated"):
         findings.append("the vuln-policy Application does not sync by itself: this morning's KEV list would wait for a person")
 
-print(f"SCOPE: 16 cases through verdict.sh ({engines}) against the seed's policy "
-      f"(critical {CRIT}d, high {HIGH}d, KEV trusted {KEVAGE}d); its template; the ConfigMap")
+print(f"SCOPE: 18 cases through verdict.sh ({engines}) against the seed's policy "
+      f"(critical {CRIT}d, high {HIGH}d, KEV trusted {KEVAGE}d from its fetch); the mirror's fetch; its template; the ConfigMap")
 for x in findings:
     print(x)

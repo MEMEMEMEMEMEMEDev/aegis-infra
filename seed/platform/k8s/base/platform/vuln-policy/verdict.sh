@@ -114,10 +114,15 @@ BEGIN {
     }
     days["CRITICAL"] = P["critical_days"]; days["HIGH"] = P["high_days"]
     # The KEV list: a header line with the day CISA released it, then one id per line.
+    # What ages a copy is the day it was FETCHED: CISA can go a week without a
+    # release, and a list fetched this morning is today's list (alpha-ubuntu,
+    # 2026-10-13: released 10-08, fetched that minute, judged «5 days old»).
+    # A copy that does not say when it was fetched ages from its release.
     kevknown = 0; kevwhy = "the exploited-in-the-wild list is missing"
     while ((getline line < kevfile) > 0) {
         if (line ~ /^# .*dateReleased=/) {
             r = line; sub(/.*dateReleased=/, "", r); r = substr(r, 1, 10)
+            if (line ~ /fetched=/) { r = line; sub(/.*fetched=/, "", r); r = substr(r, 1, 10) }
             age = t - dfc(r)
             if (dfc(r) < 0) kevwhy = "the exploited-in-the-wild list has no readable date"
             else if (age > P["kev_max_age_days"]) kevwhy = "the exploited-in-the-wild list is " age " days old"

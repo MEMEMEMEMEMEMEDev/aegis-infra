@@ -30,6 +30,8 @@ high_days: 30
 # (`aegis image request --accept`): a date further out is refused.
 acceptance_max_days: 90
 # How old the exploited-in-the-wild list may be before a verdict stops
-# trusting it. image-watch refreshes kev.txt every morning; past this
-# age a NEW admission gets no debt credit, and says why.
+# trusting it, counted from the day the copy was FETCHED (CISA can go a
+# week without a release; a list fetched today is today's). image-watch
+# refreshes kev.txt every morning; past this age a NEW admission gets no
+# debt credit, and says why.
 kev_max_age_days: 3

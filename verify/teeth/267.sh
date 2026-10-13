@@ -68,6 +68,11 @@ red_14() { _sub "$L267" '               /^#first-seen\|/ && NF == 6 { print $2 "
 # the reason of an unjudged image is the verdict's summary line again
 red_15() { _sub "$L267" '        why="$(awk -F'"'"'|'"'"' '"'"'$1 == "block" { print $NF; exit }'"'"' "$WORK/v.$n")"' '        why=""'; }
 
+# the age as on 2026-10-13: from CISA's release, not from the fetch
+red_16() { _sub "$L267" '        if (l ~ /fetched=/) { rel = l; sub(/.*fetched=/, "", rel); rel = substr(rel, 1, 10) }
+' ''; }
+# the watch's copy that does not say when it was fetched
+red_17() { _sub "$W267" "printf '# CISA KEV dateReleased=%s fetched=%s count=%s\\\\n' \"\$REL\" \"\$(date -u +%Y-%m-%d)\" \"\$NEW\"" "printf '# CISA KEV dateReleased=%s count=%s\\\\n' \"\$REL\" \"\$NEW\""; }
 # ── controls ──
 control_1() { _sub "$L267" 'the watch could not scan it this morning' 'the watch could not look at it this morning'; }
 control_2() { _sub "$W267" "echo 'publish: no ledger this morning — nothing is committed'" "echo 'publish: no books this morning — nothing is committed'"; }

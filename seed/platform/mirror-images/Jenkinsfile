@@ -236,7 +236,7 @@ spec:
             if wget -q -T 20 -O kev.json https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json 2>/dev/null; then
               REL="$(grep -o '"dateReleased": *"[0-9-]*' kev.json | head -1 | sed 's/.*"//')"
               {
-                printf '# CISA KEV dateReleased=%s (fetched by mirror-images #%s)\\n' "$REL" "$BUILD_NUMBER"
+                printf '# CISA KEV dateReleased=%s fetched=%s (by mirror-images #%s)\\n' "$REL" "$(date -u +%Y-%m-%d)" "$BUILD_NUMBER"
                 grep -o '"cveID": *"CVE-[0-9]*-[0-9]*"' kev.json | sed 's/.*"\\(CVE-[^"]*\\)"/\\1/'
               } > kev.txt
               echo "exploited-in-the-wild list: $(grep -c '^CVE-' kev.txt) CVE(s), released $REL"

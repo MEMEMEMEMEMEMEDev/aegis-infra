@@ -50,13 +50,14 @@ if shutil.which("busybox"):
     shells.append(["busybox", "sh"])
 
 
-def run(shell, tmp, args, today, kevday="2026-10-01"):
+def run(shell, tmp, args, today, kevday="2026-10-01", fetched=None):
     vp = os.path.join(tmp, "vp")
     os.makedirs(vp, exist_ok=True)
     for f in ("verdict.sh", "policy.yaml"):
         shutil.copy(os.path.join(VP, f), vp)
     with open(os.path.join(vp, "kev.txt"), "w") as f:
-        f.write(f"# CISA KEV catalogVersion=t dateReleased={kevday} count=1\nCVE-2026-0000009\n")
+        got = f" fetched={fetched}" if fetched else ""
+        f.write(f"# CISA KEV catalogVersion=t dateReleased={kevday}{got} count=1\nCVE-2026-0000009\n")
     env = {"PATH": os.environ["PATH"], "VP": vp, "TODAY": today,
            "IGNOREFILE": os.path.join(tmp, "ign.yaml")}
     p = subprocess.run(shell + [LEDGER] + args, capture_output=True, text=True, env=env, timeout=60, cwd=tmp)
@@ -166,6 +167,11 @@ for sh in shells:
         stale = find(rs3, "unmeasured", "exploited-list")
         if not stale or "50 days old" not in stale[0][9]:
             findings.append(f"[{who}] an exploited list 50 days old is not said in the books, in the field its readers read")
+        # released 50 days ago but fetched this morning: today's list (alpha-ubuntu, 2026-10-13)
+        rc, outf, err = run(sh, tmp, ["inv", "led1"], "2026-11-20", kevday="2026-10-01", fetched="2026-11-20")
+        if find(rows(outf), "unmeasured", "exploited-list"):
+            findings.append(f"[{who}] an exploited list fetched this morning is called stale because CISA released "
+                            f"it weeks ago: the books (and VulnExploitedListStale) cry wolf")
         # The series.
         w("led2", out)
         rc, met, err = run(sh, tmp, ["--metrics", "led2"], "2026-10-20")
@@ -231,6 +237,9 @@ if not kev or "known_exploited_vulnerabilities.json" not in kev:
     findings.append("the watch does not fetch the exploited-in-the-wild list")
 elif not re.search(r'\[ "\$NEW" -lt \$\(\( OLD \* 9 / 10 \)\) \]', kev):
     findings.append("a short download of the exploited list would replace the copy (no shrink guard)")
+elif not re.search(r"printf '# CISA KEV dateReleased=%s fetched=%s[^']*'[^\n]*\"\$REL\" \"\$\(date -u \+%Y-%m-%d\)\"", kev):
+    findings.append("the watch writes the exploited list without the day it fetched it: the copy ages from "
+                    "CISA's last release, and the tenants' verdict stops trusting this morning's list")
 
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 from aegis import seed  # noqa: E402

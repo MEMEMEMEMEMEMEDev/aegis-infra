@@ -250,7 +250,11 @@ BEGIN {
     max = -1
     while ((getline l < pol) > 0) if (l ~ /^kev_max_age_days:/) { sub(/^[^:]*:[ \t]*/, "", l); max = l + 0 }
     rel = ""
-    while ((getline l < kev) > 0) if (l ~ /dateReleased=/) { rel = l; sub(/.*dateReleased=/, "", rel); rel = substr(rel, 1, 10) }
+    # aged from the day the copy was fetched when it says so (verdict.sh, same rule)
+    while ((getline l < kev) > 0) if (l ~ /dateReleased=/) {
+        rel = l; sub(/.*dateReleased=/, "", rel); rel = substr(rel, 1, 10)
+        if (l ~ /fetched=/) { rel = l; sub(/.*fetched=/, "", rel); rel = substr(rel, 1, 10) }
+    }
     why = ""
     if (rel == "" || dfc(rel) < 0) why = "the exploited-in-the-wild list is missing or has no date"
     else if (max >= 0 && dfc(today) - dfc(rel) > max) why = "the exploited-in-the-wild list is " (dfc(today) - dfc(rel)) " days old"

@@ -347,7 +347,7 @@ spec:
                 echo "NOTICE: the download names ${NEW} CVE(s) and the copy ${OLD} — the list does not shrink like that; the copy stays"
               else
                 {
-                  printf '# CISA KEV dateReleased=%s count=%s\\n' "$REL" "$NEW"
+                  printf '# CISA KEV dateReleased=%s fetched=%s count=%s\\n' "$REL" "$(date -u +%Y-%m-%d)" "$NEW"
                   echo "# CVEs exploited in the wild (cisa.gov KEV). image-watch rewrites this file every morning; verdict.sh stops"
                   echo "# trusting it after policy.yaml's kev_max_age_days. The seed's copy is only as fresh as the release."
                   cat kev.ids
