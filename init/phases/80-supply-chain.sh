@@ -356,8 +356,12 @@ else
         [[ -n "$dest" ]] || return 1
         "$AEGIS_ROOT/libexec/aegis-image" from "$dest" 2>/dev/null | sed 's/^FROM //'
     }
-    _GOLANG="$(_canary_from golang)"
-    _ALPINE="$(_canary_from alpine)"
+    # `|| …=""`: under set -e a bare assignment from a failing $() ends the
+    # phase right here, and the warning below — the only line that says
+    # why — never prints (alpha-ubuntu, 2026-10-13: «phase 80 FAILED» and
+    # nothing else, with golang and alpine held at the door):
+    _GOLANG="$(_canary_from golang)" || _GOLANG=""
+    _ALPINE="$(_canary_from alpine)" || _ALPINE=""
     if [[ -n "$_GOLANG" && -n "$_ALPINE" ]]; then
         run_cmd sed -i -E \
             -e "s|^FROM docker\\.io/library/golang:[^ ]*|FROM $_GOLANG|" \
