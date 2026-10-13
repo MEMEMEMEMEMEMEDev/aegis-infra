@@ -500,7 +500,7 @@ PLACEHOLDER = re.compile(r"__[A-Z0-9_]+__")
 _FROM_IMAGES = {
     # Declared in images.txt: these resolve on any instance whose mirror
     # job has run, which is every instance past phase 80.
-    "__FROM_GOLANG__": "golang:1.26.6-alpine",
+    "__FROM_GOLANG__": "golang:1.26.9-alpine",
     "__FROM_ALPINE__": "alpine:3.21",
     "__FROM_PYTHON__": "python:3.12-slim",
     "__FROM_NODE__": "nodejs-distroless:22",

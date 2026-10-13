@@ -73,7 +73,7 @@ public.ecr.aws/docker/library/redis:8.6.7-alpine@sha256:79aff60c78f59416f3f639f8
 public.ecr.aws/docker/library/postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24	postgres:17.11-alpine
 
 # --- CI toolchains --------------------------------------------------
-# golang:1.26.6-alpine — compiles the ai-gateway in the pipeline.
+# golang:1.26.9-alpine — compiles the ai-gateway in the pipeline.
 #
 # WHY HERE AND NOT AN aegis-ci-go IN ci-images/. The aegis-ci-* images
 # exist when something has to be ADDED to the official one: aegis-ci-node
@@ -100,7 +100,14 @@ public.ecr.aws/docker/library/postgres:17.11-alpine@sha256:b0f9560a2de083e2cc738
 # encoding/xml, net/url, crypto/tls — all fixed in 1.26.6). Trivy reads
 # the buildinfo of the ELF, so the patch belongs to the COMPILER: no
 # line of gateway code can fix this.
-public.ecr.aws/docker/library/golang:1.26.6-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83	golang:1.26.6-alpine
+#
+# 1.26.6 -> 1.26.9 on 2026-10-13, the same story: alpha-ubuntu's canary
+# (also compiled with this golang) was stopped at its first signed build
+# by three HIGH of the 1.26.6 stdlib (CVE-2026-78667, CVE-2026-78669,
+# CVE-2026-97031: net/http, http2, crypto/tls — fixed in 1.26.9,
+# released 2026-10-10). The digest is the index's, read from
+# public.ecr.aws and Docker Hub (they agree).
+public.ecr.aws/docker/library/golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade	golang:1.26.9-alpine
 
 # --- application runtimes -------------------------------------------
 # python:3.12-slim — base of the engine-cpu (#26), build AND runtime.
@@ -178,7 +185,7 @@ gcr.io/distroless/nodejs22-debian13:nonroot@sha256:22d2f0480e59548ad14cf10d8921b
 # `docker.io/library/golang:1.26-alpine` straight off the internet.
 #
 # THE golang IS NOT ADDED HERE, and that is deliberate: the platform
-# ALREADY mirrors `golang:1.26.6-alpine` to compile the ai-gateway.
+# ALREADY mirrors `golang:1.26.9-alpine` to compile the ai-gateway.
 # Adding a second golang would duplicate a toolchain and, above all,
 # duplicate the place where somebody has to remember to patch. The
 # canary moves to the one that already exists.
