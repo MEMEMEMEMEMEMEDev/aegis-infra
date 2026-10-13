@@ -18,6 +18,7 @@ import importlib.machinery
 import importlib.util
 import os
 import re
+import subprocess
 import sys
 import tempfile
 
@@ -45,6 +46,10 @@ with tempfile.TemporaryDirectory() as tmp:
         def repos_of(self, c):
             return {url: "demo-app"}
 
+    # gh's session too: apply asks `gh auth status` before any repo, and
+    # a machine with no session (the public CI, 2026-10-13) stopped there
+    # with «calls: []» — the order was never reached, so never measured.
+    m._gh = lambda *a, **k: subprocess.CompletedProcess(["gh", *a], 0, "", "")
     m._contract = lambda arg: (os.path.join(tmp, "platform", "orgs", "demo.yaml"), contract)
     m._generator = lambda: Gen()
     m._repo_exists = lambda o, r: calls.append("exists?") or False
