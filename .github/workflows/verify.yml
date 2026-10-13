@@ -21,10 +21,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0          # the teeth of a PR need the base to know which checks changed
-      - name: the tools the checks drive (python+yaml, jq; no cluster, no cloud)
+      - name: the tools the checks drive (python+yaml, jq, age, sops; no cluster, no cloud)
+        # 277 and 278 drive a REAL sops and age over a throwaway key: without
+        # them they are a FAIL, not a skip (2026-10-13, the first push that
+        # carried them). The pins are the seed's, the same ones phase 05
+        # installs: age from apt, sops as the raw binary its checksums.txt covers.
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q python3-yaml jq
+          sudo apt-get install -y -q python3-yaml jq age
+          pin="$(python3 -c "import yaml; print(yaml.safe_load(open('seed/platform/ansible/inventory/group_vars/all.yml'))['userland_pins']['sops'])")"
+          rel="https://github.com/getsops/sops/releases/download/v${pin}"
+          curl -fsSLo /tmp/sops "$rel/sops-v${pin}.linux.amd64"
+          curl -fsSLo /tmp/sops.sums "$rel/sops-v${pin}.checksums.txt"
+          (cd /tmp && grep " sops-v${pin}.linux.amd64\$" sops.sums | sed "s| sops-v${pin}.linux.amd64\$| sops|" | sha256sum -c -)
+          sudo install -m755 /tmp/sops /usr/local/bin/sops
+          sops --version
+          age-keygen --version
       - name: aegis verify --profile both
         run: ./bin/aegis verify --profile both
       - name: the teeth of every check this change touches
