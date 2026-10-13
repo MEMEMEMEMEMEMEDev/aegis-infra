@@ -115,7 +115,7 @@ BEGIN {
     days["CRITICAL"] = P["critical_days"]; days["HIGH"] = P["high_days"]
     # The KEV list: a header line with the day CISA released it, then one id per line.
     # What ages a copy is the day it was FETCHED: CISA can go a week without a
-    # release, and a list fetched this morning is today's list (alpha-ubuntu,
+    # release, and a list fetched this morning is the list of today (alpha-ubuntu,
     # 2026-10-13: released 10-08, fetched that minute, judged «5 days old»).
     # A copy that does not say when it was fetched ages from its release.
     kevknown = 0; kevwhy = "the exploited-in-the-wild list is missing"
