@@ -41,5 +41,5 @@ control_1() { _sub "$AEGIS_ROOT/README.md" \
 
 # control: the resources row moves; the host row does not
 control_2() { _sub "$AEGIS_ROOT/README.en.md" \
-    '| **Resources** | 4 CPU and 8 GB of RAM are enough' \
-    '| **Resources** | 4 CPU and 8 GB of RAM are enough (measured)'; }
+    '| **Resources** | 4 CPU and 16 GB of RAM is what has been run' \
+    '| **Resources** | 4 CPU and 16 GB of RAM is what has been run (measured)'; }

@@ -8,7 +8,7 @@ _180_add() { python3 - "$AEGIS_ROOT/README.md" "$1" <<'PYEOF'
 import re, sys
 p, linea = sys.argv[1], sys.argv[2]
 s = open(p, encoding="utf-8").read()
-anchor = "- El perfil `cloudflare` no se ha corrido en una máquina ajena.\n"
+anchor = "- Un repositorio por servicio. El monorepo no es de primera clase.\n"
 assert s.count(anchor) == 1
 open(p, "w", encoding="utf-8").write(s.replace(anchor, anchor + linea + "\n", 1))
 PYEOF
@@ -39,7 +39,7 @@ _180_add_en() { python3 - "$AEGIS_ROOT/README.en.md" "$1" <<'PYEOF'
 import re, sys
 p, linea = sys.argv[1], sys.argv[2]
 s = open(p, encoding="utf-8").read()
-anchor = "- The `cloudflare` profile has not been run on a foreign machine.\n"
+anchor = "- One repository per service. The monorepo is not first class.\n"
 assert s.count(anchor) == 1
 open(p, "w", encoding="utf-8").write(s.replace(anchor, anchor + linea + "\n", 1))
 PYEOF
