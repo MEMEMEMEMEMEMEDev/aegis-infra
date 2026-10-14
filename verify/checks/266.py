@@ -87,6 +87,12 @@ with tempfile.TemporaryDirectory() as tmp:
     fake.write_text('#!/bin/sh\nprintf "%s" "${GIT_TERMINAL_PROMPT:-unset}" > "$(dirname "$0")/prompt"\nexec sleep 30\n')
     fake.chmod(0o755)
     path_was, timeout_was = os.environ["PATH"], window.GIT_TIMEOUT
+    # the operator's shell (and every agent's) exports GIT_TERMINAL_PROMPT=0,
+    # and the product's git would inherit it: the fake git below would then
+    # read 0 whether or not window.git sets it, and the tooth that takes
+    # the setting away would not bite (measured 2026-10-14, review of
+    # 2026-10-13, 4B-7). What is measured is what the PRODUCT sets.
+    prompt_was = os.environ.pop("GIT_TERMINAL_PROMPT", None)
     os.environ["PATH"] = f"{tmp}:{path_was}"
     window.GIT_TIMEOUT = 1
     try:
@@ -99,6 +105,8 @@ with tempfile.TemporaryDirectory() as tmp:
                         f"the preflight of update and app apply dies in a traceback instead of a refusal")
     finally:
         os.environ["PATH"], window.GIT_TIMEOUT = path_was, timeout_was
+        if prompt_was is not None:
+            os.environ["GIT_TERMINAL_PROMPT"] = prompt_was
     seen = (tmp / "prompt").read_text() if (tmp / "prompt").is_file() else "never ran"
     if seen != "0":
         findings.append(f"git runs with GIT_TERMINAL_PROMPT={seen}: a remote that asks for "

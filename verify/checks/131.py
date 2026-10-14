@@ -18,8 +18,10 @@ to the one question an operator asks under pressure.
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 
 import yaml
 
@@ -39,12 +41,25 @@ def code(path):
 
 # ── 1 · blind, behaviourally ─────────────────────────────────────────
 # KUBECONFIG at /dev/null: kubectl starts, finds no cluster and fails.
-# Nothing is created, nothing is contacted.
-env = {k: v for k, v in os.environ.items() if not k.startswith("AEGIS_")}
+# Nothing is created, nothing is contacted. The instance is a sandbox
+# of this check's own, with the SEED's plans.yaml in it: without one,
+# the `capacity:plans` step comes out not-evaluable on its own and a
+# command that answered zeros for everything else would still pass as
+# «declared not-evaluable» (the tooth that plants the zeros did not
+# bite on a clean clone; measured 2026-10-14, review of 2026-10-13,
+# 4B-7). The instance's variables never reach it (the 286 pattern).
+env = {k: v for k, v in os.environ.items()
+       if not (k.startswith("AEGIS_") or k in ("PLATFORM_DIR", "SOPS_AGE_KEY_FILE", "AGE_PUBLIC"))}
+sandbox = tempfile.mkdtemp(prefix="aegis-131.")
+os.makedirs(os.path.join(sandbox, "platform"))
+shutil.copy(PLANS, os.path.join(sandbox, "platform", "plans.yaml"))
 env["AEGIS_ROOT"] = ROOT
+env["AEGIS_HOME"] = sandbox
+env["HOME"] = sandbox
 env["KUBECONFIG"] = "/dev/null"
 run = subprocess.run([os.path.join(ROOT, "bin", "aegis"), "capacity", "show", "--json"],
                      capture_output=True, text=True, env=env)
+shutil.rmtree(sandbox, ignore_errors=True)
 blind_ok = False
 try:
     doc = json.loads(run.stdout)
@@ -65,6 +80,12 @@ if doc is not None:
     else:
         blind_ok = True
     for step in doc.get("steps") or []:
+        # a capacity «measured» as zero by a command nobody could ask is
+        # the same lie one step earlier
+        if step.get("step", "").startswith("capacity:") and step.get("state") == "already" \
+                and step.get("allocatable") == 0:
+            print(f"with no cluster the command files {step['step']} as measured (already) with "
+                  f"allocatable 0: a blind read reported as a full machine")
         if step.get("step", "").startswith("fits:") and step.get("room") == 0:
             print(f"with no cluster the command still answers {step['step']} with room 0: "
                   f"«no room» and «I could not look» are the same sentence on a screen and "
