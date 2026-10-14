@@ -11,7 +11,7 @@ aegis-init ≡ task #56 ≡ DR Level 3 ≡ Hetzner bootstrap. ONE
 artifact, profiles: greenfield (full v1) | hetzner (deltas) |
 re-bootstrap (NOT implemented — known limit, see §Known limits).
 
-## The sequence (15 phases, init/phases/)
+## The sequence (sixteen phases, init/phases/; 85 and 87 came after this table)
 
 ```
 00 preflight      GUIDED config (wizard: it asks + validates +
