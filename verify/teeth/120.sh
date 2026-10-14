@@ -9,21 +9,40 @@ C120="$AEGIS_ROOT/console/cases"
 CONF120="${AEGIS_CONF:-${AEGIS_HOME:-$HOME/aegis}/aegis.conf}"
 _val() { grep -E "^\s*$1=" "$CONF120" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'"'"''; }
 
+# WHAT THESE PLANT is a value of THIS instance, and the check measures
+# only what this instance has: on a clean clone there is no aegis.conf
+# and only $HOME is contrasted (the check says so in its scope). A red
+# that plants an empty value mutates a document into itself and was
+# reported as DOES NOT BITE on CI and as root (2026-10-14, review of
+# 2026-10-13, 4B-2). With no value to plant the red says so with 75;
+# the same for a home the sidecar does not measure (`/` and `/root`
+# name nobody).
+_need120() {   # <KEY> — the conf value on stdout, or 75 with the reason on stdout
+    local v; v="$(_val "$1")"
+    [[ -n "$v" ]] || { echo "there is no aegis.conf here ($CONF120), so $1 has no value to plant: only \$HOME is measured on this machine"; return 75; }
+    printf '%s\n' "$v"
+}
+
 # the domain comes back into a document: the one value that names the
 # operator in every hostname of every case
-red_1() { sed -i "s/example\.test/$(_val ROOT_DOMAIN)/" \
-              "$C120/round-with-findings/documents/edge.json"; }
+red_1() { local v; v="$(_need120 ROOT_DOMAIN)" || { printf '%s\n' "$v"; return 75; }
+          sed -i "s/example\.test/$v/" "$C120/round-with-findings/documents/edge.json"; }
 
 # the GitHub owner, in the sentence a case carries about a repo
-red_2() { printf '  duenno: %s\n' "$(_val GH_OWNER)" >> "$C120/round-with-findings/case.yaml"; }
+red_2() { local v; v="$(_need120 GH_OWNER)" || { printf '%s\n' "$v"; return 75; }
+          printf '  duenno: %s\n' "$v" >> "$C120/round-with-findings/case.yaml"; }
 
 # the operator's home, inside the REASON a command gave for having no
 # document — exactly where the first capture leaked it
-red_3() { sed -i "s|/home/operator|$HOME|" "$C120/console-blind/case.yaml"; }
+red_3() {
+    case "$HOME" in /|/root) echo "the home is $HOME, which names nobody and the sidecar does not measure: nothing to plant"; return 75 ;; esac
+    sed -i "s|/home/operator|$HOME|" "$C120/console-blind/case.yaml"
+}
 
 # a value nobody thought about: the cloudflare account id, pasted into a
 # case as a note
-red_4() { printf '  nota: cuenta %s\n' "$(_val CF_ACCOUNT_ID)" >> "$C120/contract-invalid/case.yaml"; }
+red_4() { local v; v="$(_need120 CF_ACCOUNT_ID)" || { printf '%s\n' "$v"; return 75; }
+          printf '  nota: cuenta %s\n' "$v" >> "$C120/contract-invalid/case.yaml"; }
 
 # ── controls: real changes that must NOT move the verdict ────────────
 

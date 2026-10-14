@@ -215,4 +215,37 @@ m=0; [[ -f "$TMP/verify/ran-015" ]] && m="$(wc -l < "$TMP/verify/ran-015")"
     || bad "with a check that reads the profile, the passes were $n and $m, not 2 and 2 (rc=$RC)"
 rm -f "$TMP/verify/checks/014-counts.sh" "$TMP/verify/checks/015-reads-profile.sh" "$TMP/verify/ran-014" "$TMP/verify/ran-015"
 
+# 14. a mutation that does not apply HERE says so (rc 75 + the reason on
+# stdout): it is neither a bite nor a failure, and the summary says it.
+# Until 2026-10-14 a tooth that plants the login of whoever runs it was
+# reported as DOES NOT BITE on a CI runner, where the check does not
+# measure the login (review of 2026-10-13, 4B-2).
+cat > "$TMP/verify/checks/016-with-tooth.sh" <<'C'
+# title: check with a tooth that sometimes does not apply
+check() { grep -q 'sentinel' "$AEGIS_ROOT/verify/mark.txt" && pass "the mark is there" || fail "the mark is missing"; }
+C
+echo "sentinel" > "$TMP/verify/mark.txt"
+cat > "$TMP/verify/teeth/016.sh" <<'C'
+red_1()     { sed -i 's/sentinel/something-else/' "$AEGIS_ROOT/verify/mark.txt"; }
+red_2()     { echo "no identity is measured on this machine"; return 75; }
+control_1() { printf 'a new comment\n' >> "$AEGIS_ROOT/verify/mark.txt"; }
+control_2() { echo "there is no aegis.conf here"; return 75; }
+C
+OUT="$(V --only 016 --teeth --profile cloudflare 2>&1)"; RC=$?
+[[ $RC == 0 ]] && grep -q 'red_2 not applicable here: no identity is measured on this machine' <<<"$OUT" \
+    && grep -q 'control_2 not applicable here: there is no aegis.conf here' <<<"$OUT" \
+    && grep -q '1/1 bite · 1/1 controls healthy · 2 not applicable here' <<<"$OUT" \
+    && ! grep -q 'DOES NOT BITE' <<<"$OUT" \
+    && ok "a mutation that returns 75 is reported as not applicable, with its reason, and is neither a bite nor a failure" \
+    || bad "a mutation that returns 75 was not reported as not applicable (rc=$RC): $(grep -E 'red_2|control_2|bite' <<<"$OUT" | tr '\n' ' ')"
+# ...and any other non-zero return is still a broken tooth, not a declaration
+cat > "$TMP/verify/teeth/016.sh" <<'C'
+red_1() { echo "this is not a declaration"; return 74; }
+C
+OUT="$(V --only 016 --teeth --profile cloudflare 2>&1)"; RC=$?
+[[ $RC == 1 ]] && grep -q 'could not be applied' <<<"$OUT" \
+    && ok "only 75 declares: a mutation that returns 74 is still a broken tooth" \
+    || bad "a mutation that returned 74 was not reported as broken (rc=$RC)"
+rm -f "$TMP/verify/checks/016-with-tooth.sh" "$TMP/verify/teeth/016.sh"
+
 exit $FAILURES

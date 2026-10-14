@@ -3,22 +3,36 @@
 # All four reds are regressions that were LIVE on 2026-08-26, the day
 # the artifact was first measured as what ships to everybody.
 
-# WHO the reds plant: the login, unless the login is the product's own
-# name (the lab VMs run as `aegis`, which the check declares NOT
-# measured since 2026-10-12) — then the GitHub account, which it does
-# measure. A tooth that plants what the check is told to ignore aims at
-# nothing.
+# WHO the reds plant: an identity the check MEASURES in this
+# environment, mirrored from the check itself. On a CI platform the
+# login is the platform's service account and the check does not
+# measure it (it measures the account that pushed); elsewhere the login,
+# unless it is the product's own name (the lab VMs run as `aegis`,
+# declared NOT measured since 2026-10-12); then the GitHub account this
+# machine is authenticated as, which it measures everywhere. A tooth
+# that plants what the check is told to ignore aims at nothing — and
+# measured on 2026-10-14, that is what red_1 and red_4 did under CI=1:
+# they planted the login and were reported as DOES NOT BITE. When no
+# identity is measured here (a CI runner with gh not authenticated, a
+# clean container), there is nothing to plant: the reds say so with 75.
 _who117() {
-    local who; who="$(id -un)"
-    [[ "${who,,}" == aegis ]] && who="$(gh api user --jq .login 2>/dev/null)"
-    [[ -n "$who" ]] || return 1
+    local who=""
+    if [[ -n "${GITHUB_ACTIONS:-}${CI:-}" ]]; then
+        who="${GITHUB_ACTOR:-}"
+    else
+        who="${SUDO_USER:-${USER:-$(id -un 2>/dev/null)}}"
+        [[ "${who,,}" == aegis ]] && who=""
+    fi
+    [[ -n "$who" && ${#who} -ge 4 ]] || who="$(gh api user --jq .login 2>/dev/null)"
+    [[ -n "$who" && ${#who} -ge 4 ]] || return 1
     printf '%s\n' "$who"
 }
+_none117() { echo "no identity is measured here: the login is not a person's (CI, or the product's own name) and this machine has no authenticated GitHub account"; return 75; }
 
 # the worst one, and it was not a comment: the VM's admin account
 # created with the name of whoever wrote the template
 red_1() {
-    local who; who="$(_who117)" || return 1
+    local who; who="$(_who117)" || _none117 || return $?
     sed -i 's/^  - name: aegis$/  - name: '"$who"'/' \
         "$AEGIS_ROOT/seed/platform/vps/clouding-lab.cloud-init.yaml.tpl"
 }
@@ -39,7 +53,7 @@ red_3() {
 # the identity of whoever is building it, quoted in a comment. A name in
 # a comment is still a name.
 red_4() {
-    local who; who="$(_who117)" || return 1
+    local who; who="$(_who117)" || _none117 || return $?
     printf '\n# handed over by %s during the rehearsal\n' "$who" \
         >> "$AEGIS_ROOT/libexec/aegis-verify"
 }
