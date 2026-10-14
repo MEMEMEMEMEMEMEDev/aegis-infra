@@ -100,6 +100,27 @@ case "${PROFILES:=both}" in
 esac
 export AEGIS_VERIFY_WITH_CHARTS="$WITH_CHARTS"
 
+# ── two profiles are two passes only when a check reads the profile ──
+# A check learns the profile through AEGIS_VERIFY_PROFILE (lib.sh's
+# current_profile). DERIVED, never declared: while no check file reads
+# it, the second pass runs exactly the same code over exactly the same
+# tree and announces a coverage that does not exist — the 2026-10-13
+# review measured `both` as 291 identical verdicts twice (F1). So `both`
+# is one pass until a check reads the profile, and it is said; the day
+# one does, the second pass comes back on its own. Harness test 13.
+profile_aware() {
+    local f
+    for f in "$VERIFY"/checks/*; do
+        [[ -f "$f" ]] || continue
+        grep -vE '^[[:space:]]*#' "$f" | grep -qE 'AEGIS_VERIFY_PROFILE|current_profile' && return 0
+    done
+    return 1
+}
+if [[ ${#PROFILE_LIST[@]} -gt 1 ]] && ! profile_aware; then
+    PROFILE_LIST=(cloudflare)
+    PROFILE_NOTICE="no check reads the profile yet (AEGIS_VERIFY_PROFILE): both profiles are one pass, run once as cloudflare — the second comes back the day a check reads it"
+fi
+
 # Hygiene: __pycache__ is GENERATED state, not artifact, and it was the
 # prime suspect in the non-deterministic false red of run #15. The checks
 # are a pure function of the VERSIONED tree.
