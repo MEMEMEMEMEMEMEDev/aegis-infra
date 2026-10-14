@@ -506,7 +506,15 @@ ceremony_backup() {
     # operator reads it from ANOTHER terminal, outside this pane. It is
     # the SAME mechanism as the --non-interactive path above. The
     # validation roundtrip is kept.
-    local shm_out="/dev/shm/aegis-resguardo-$$"   # without $label: EV-12
+    # The copy lives INSIDE the phase's tmpfs dir, so the EXIT/INT/TERM
+    # traps of secrets_workdir shred it whatever happens next. Until
+    # 2026-10-14 it sat at /dev/shm/aegis-resguardo-$$, outside that dir
+    # and removed only after a successful validation, so a wrong paste, a
+    # die in the validator or a Ctrl-C left the root of trust in the clear
+    # until the next reboot (review of 2026-10-13, A-9). The name carries
+    # no $label (EV-12). Check 285.
+    : "${SECRETS_TMP:?ceremony_backup needs secrets_workdir first: the copy the operator reads lives in the tmpfs of the phase}"
+    local shm_out="$SECRETS_TMP/resguardo"
     ( umask 077; run_cmd install -m 600 "$file" "$shm_out" )
     gate_red "Backup of ${label}: it is read from ANOTHER terminal, NOT in this pane"
     human_step "Backup of ${label} (HOW, step by step)" \

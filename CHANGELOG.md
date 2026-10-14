@@ -36,6 +36,17 @@ says what an instance will have to do.
   phase where it happens: that is the point, and the reason this one is
   owed a full run before it is called done. Not yet run on a live
   instance. Check 284.
+- **The copy of the age key the operator reads dies with the phase.** The
+  backup ceremony writes the key to tmpfs so that the operator reads it
+  from another terminal, never from the pane. That copy sat at
+  `/dev/shm/aegis-resguardo-<pid>`, outside the directory the phase's
+  EXIT/INT/TERM traps shred, and was removed only after a successful
+  validation: a wrong paste, a die in the validator or a Ctrl-C at the
+  pause left the root of trust in the clear until the next reboot. The copy
+  now lives inside the phase's tmpfs directory, so the same cleanup takes
+  it however the phase ends. Instances: nothing to do; the ceremony only
+  runs on a fresh phase 10 or a key rotation, and the step reads
+  `cat <path>` as before. Not yet run on a live instance. Check 285.
 
 ## 2026-10-13 — the first signed build on a clean Ubuntu, and what it took
 
