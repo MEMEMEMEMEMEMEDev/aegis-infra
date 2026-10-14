@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: A security problem
+    url: https://github.com/MEMEMEMEMEMEMEDev/aegis-infra/security/advisories/new
+    about: Never in a public issue. Private vulnerability reporting reaches the maintainer and nobody else.
+  - name: A question before installing
+    url: https://github.com/MEMEMEMEMEMEMEDev/aegis-infra/blob/main/docs/journeys/your-machine.md
+    about: What to prepare, what each phase does, what to send when something stops.
