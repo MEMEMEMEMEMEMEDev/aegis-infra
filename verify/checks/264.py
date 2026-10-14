@@ -1,6 +1,6 @@
 """Check 264 — `aegis app apply` plants the skeleton LAST, and `app new` tells the steps in the order that works.
 
-MEASURED 2026-09-30 on alpha-arch, mounting the Astro portfolio:
+MEASURED 2026-09-30 on the Arch lab VM, mounting the Astro portfolio:
 - `app apply` created the repo, pushed the skeleton, registered the deploy
   key, and only then the webhook. The skeleton's push reached GitHub with
   nobody to tell Jenkins: the multibranch never scanned and the first
@@ -86,7 +86,7 @@ with tempfile.TemporaryDirectory() as tmp:
         hook = next(i for i, c in enumerate(order) if c.startswith("webhook"))
         plant = order.index("plant skeleton")
         if plant < hook:
-            findings.append(f"app apply plants the skeleton BEFORE the webhook exists ({order}): its push tells nobody and the first build never starts (alpha-arch)")
+            findings.append(f"app apply plants the skeleton BEFORE the webhook exists ({order}): its push tells nobody and the first build never starts (the Arch lab VM)")
         if "deploy key" in order and order.index("deploy key") > plant:
             findings.append(f"the deploy key is registered after the first build was triggered ({order}): ArgoCD cannot read the repo it deploys")
 

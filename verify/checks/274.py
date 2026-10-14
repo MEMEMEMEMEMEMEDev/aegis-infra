@@ -1,6 +1,6 @@
 """Check 274 — no variable of a platform pipeline is declared twice in one scope chain.
 
-MEASURED 2026-10-02 on alpha-arch: image-watch #3 died before running a
+MEASURED 2026-10-02 on the Arch lab VM: image-watch #3 died before running a
 step — «WorkflowScript: 740: The current scope already contains a variable
 of the name mrc». The fix of 9468a84 declared `def mrc` inside the serving
 loop, where an enclosing block already had one. Groovy refuses a name an

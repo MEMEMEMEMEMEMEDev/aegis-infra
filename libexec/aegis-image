@@ -611,10 +611,10 @@ console, dst, ref = open(sys.argv[1], errors="replace").read().split("\n"), sys.
 # finding, since the mirror judges with vuln-policy/verdict.sh). It is
 # what decided, so it is what is reported: which findings stopped the
 # image and why, which ones would have entered as debt, and the path
-# each exception has to name. Measured 2026-09-30 on alpha-arch: the
+# each exception has to name. Measured 2026-09-30 on the Arch lab VM: the
 # table-reading below said «3 blocking findings» for 13, glued titles
 # into the fixed-in column, and pointed the exception at «Node.js
-# (node-pkg)» — the scope that matched nothing on Rob's instance.
+# (node-pkg)» — the scope that matched nothing on a user's instance.
 verdicts = []
 for ln in console:
     m = re.search(r"AEGIS_VERDICT \S+ (.*)$", ln)
@@ -970,7 +970,7 @@ do_request() {
         # the exception did not cover what was blocking, and retrying
         # again would only be a loop with a file growing inside it.
         local targets
-        # WHAT AN EXCEPTION IS SCOPED TO (Rob's H-06, 2026-09-28): the
+        # WHAT AN EXCEPTION IS SCOPED TO (a user's H-06, 2026-09-28): the
         # scan's own finding lines (`AEGIS_SCAN <image> …`, printed since
         # the door judges with vuln-policy/verdict.sh) carry, per finding,
         # the package's PATH for language packages and the target for OS

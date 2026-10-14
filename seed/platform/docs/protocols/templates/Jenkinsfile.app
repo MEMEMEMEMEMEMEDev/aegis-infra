@@ -33,11 +33,11 @@ spec:
   # node: the `compile` stage, when the repo ships ci/compile.sh, and the
   # `desplegar` stage, which writes the digest into the overlay. Since
   # 2026-09-30 a front COMPILES here and not inside kaniko: Vite/esbuild
-  # inside kaniko's build stage failed 4 builds of 4 on Rob's instance
-  # (his H-08: «failed to execute command: permission denied» right after
+  # inside kaniko's build stage failed 4 builds of 4 on a user's instance
+  # (their H-08: «failed to execute command: permission denied» right after
   # Astro's «Complete!»), and the build stage stood on node:*-alpine, an
   # image whose bundled npm carried eleven CVEs past their window the day
-  # the static template was tried on alpha-arch. Here the compiler is
+  # the static template was tried on the Arch lab VM. Here the compiler is
   # aegis-ci-node, which the platform builds itself, and kaniko only
   # copies the result onto the signed runtime. The limits are what an
   # `npm ci` + a Vite build of a portfolio actually took on the house
@@ -569,12 +569,12 @@ spec:
       // WHAT THE SCAN JUDGES, since 2026-09-30 (plan/21, stage 5).
       //
       // Until then a fixable CRITICAL/HIGH anywhere in the image stopped
-      // the build — including the layers of the BASE. On alpha-arch the
+      // the build — including the layers of the BASE. On the Arch lab VM the
       // first build of an Astro portfolio died on three OpenSSL CVEs of
       // nodejs-distroless:22 that the platform had already judged at the
       // mirror (one excused with its measurement, two admitted as dated
-      // debt); on Rob's instance the same class cost half an hour of
-      // trivyignore path forms in the app's repo (his H-09). The base is
+      // debt); on a user's instance the same class cost half an hour of
+      // trivyignore path forms in the app's repo (their H-09). The base is
       // the platform's: judged at its door, re-scanned every morning by
       // image-watch. So the findings are split BY LAYER — trivy says
       // which layer each one lives in, and the FROM is pinned by digest:

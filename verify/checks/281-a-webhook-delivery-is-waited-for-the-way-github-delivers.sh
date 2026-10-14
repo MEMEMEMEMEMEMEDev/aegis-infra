@@ -1,5 +1,5 @@
 # title: a webhook delivery is waited for the way GitHub delivers: a failed one is re-delivered, a 400 stops at once, an old 2xx never counts
-# origin: new in v3 — 2026-10-12, alpha-ubuntu lost phase 35 to a redelivery that hit a 502 four seconds after cloudflared connected, read again for 180s and never re-sent
+# origin: new in v3 — 2026-10-12, the Ubuntu lab VM lost phase 35 to a redelivery that hit a 502 four seconds after cloudflared connected, read again for 180s and never re-sent
 check() {
 D281=""
 [[ -f "$AEGIS_ROOT/verify/checks/281.py" ]] || { fail "check 281 has no sidecar"; return; }

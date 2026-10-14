@@ -1,5 +1,5 @@
 # teeth of check 282 — phase 80 says why the canary keeps its public bases
-# (alpha-ubuntu, 2026-10-13).
+# (the Ubuntu lab VM, 2026-10-13).
 P282="$AEGIS_ROOT/init/phases/80-supply-chain.sh"
 
 _sub() {   # <file> <old> <new> — exactly one occurrence, or the tooth is mis-aimed

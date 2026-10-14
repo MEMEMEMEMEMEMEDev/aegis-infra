@@ -19,7 +19,7 @@ ships, code only.
 WHAT DECLARES A CALL HARMLESS IS THE ACTION, NOT THE WORD. Until
 2026-09-30 this check looked for `|| echo 'NOTICE: …'`. mirror-images
 said the same thing with `WARNING:` and the check never saw it; that day,
-on alpha-arch, its two curls printed «Could not resolve host» and a scan
+on the Arch lab VM, its two curls printed «Could not resolve host» and a scan
 that had found CVEs was re-fired twice as a network failure. A fallback
 that echoes a SENTENCE (three words or more, whatever the first one is)
 is the pipeline swallowing a failure; one that echoes a value

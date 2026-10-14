@@ -13,7 +13,7 @@ p.write_text(s.replace(sys.argv[2], sys.argv[3], 1))
 PY
 }
 
-# the template as Rob used it: the build stage back inside the image
+# the template as a user used it: the build stage back inside the image
 red_1() { _sub "$C260" 'FROM __FROM_NODE__
 ' 'FROM __FROM_NODE_BUILD__ AS build
 WORKDIR /app

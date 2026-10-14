@@ -1,5 +1,5 @@
 # title: --help after a verb is help, and writes nothing
-# origin: new in v3 — 2026-10-02, alpha-debian: `aegis state backup --help` wrote a real bundle to a file named «--help»
+# origin: new in v3 — 2026-10-02, the Debian lab VM: `aegis state backup --help` wrote a real bundle to a file named «--help»
 check() {
 D275=""
 [[ -f "$AEGIS_ROOT/verify/checks/275.py" ]] || { fail "check 275 has no sidecar"; return; }

@@ -36,7 +36,7 @@ esac
 # --help AFTER the verb is help, not an argument. Until 2026-10-02 only the
 # word before the verb was looked at, so the verb's script took «--help» as
 # whatever it reads first: `aegis state backup --help` wrote a real bundle
-# to a file named «--help» (found on alpha-debian). The verb's scripts do
+# to a file named «--help» (found on the Debian lab VM). The verb's scripts do
 # not parse flags of their own for this; the dispatcher answers for them.
 for _a in "$@"; do
     case "$_a" in -h|--help) usage; exit 0 ;; esac

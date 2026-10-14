@@ -1,5 +1,5 @@
 # teeth of check 281 — a webhook delivery is waited for the way GitHub
-# delivers (alpha-ubuntu, 2026-10-12).
+# delivers (the Ubuntu lab VM, 2026-10-12).
 P35="$AEGIS_ROOT/init/phases/35-gitops.sh"
 P60="$AEGIS_ROOT/init/phases/60-webhook.sh"
 L281="$AEGIS_ROOT/lib/access.sh"
@@ -13,7 +13,7 @@ p.write_text(s.replace(sys.argv[2], sys.argv[3], 1))
 PY
 }
 
-# phase 35 as it lost alpha-ubuntu: one finished delivery, polled
+# phase 35 as it lost the Ubuntu lab VM: one finished delivery, polled
 red_1() { _sub "$P35" '      hook_delivery_2xx "$GH_OWNER/$PLATFORM_REPO" "$HOOK_ID" "" "$DELIVERY_ID" 300' \
 '      poll 180 5 bash -c "gh api repos/$GH_OWNER/$PLATFORM_REPO/hooks/$HOOK_ID/deliveries --jq .[0].status_code | grep -q ^2"'; }
 

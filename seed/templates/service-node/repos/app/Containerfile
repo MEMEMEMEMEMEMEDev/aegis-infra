@@ -4,7 +4,7 @@
 #
 # There is no build stage here on purpose, since 2026-10-02: it stood on
 # node:22.23.1-alpine, which had to be mirrored before the template could be
-# instantiated, and which the door retained on alpha-arch (its bundled npm
+# instantiated, and which the door retained on the Arch lab VM (its bundled npm
 # carried CVEs past their window). The static template made the same move
 # on 2026-09-30.
 #

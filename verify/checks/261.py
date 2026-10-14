@@ -1,6 +1,6 @@
 """Check 261 — what the product stages for another repo is ignored by the platform repo.
 
-MEASURED 2026-09-30 on alpha-arch: after `aegis app new portafolio`, every
+MEASURED 2026-09-30 on the Arch lab VM: after `aegis app new portafolio`, every
 `aegis seed apply` refused to run («the platform repo has uncommitted
 changes») because of one untracked directory, .aegis-app/ — the staging
 area where the app's skeleton and Jenkinsfile wait for `aegis app apply`

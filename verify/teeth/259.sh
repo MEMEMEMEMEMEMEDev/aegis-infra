@@ -10,7 +10,7 @@ p.write_text(s.replace(sys.argv[2], sys.argv[3], 1))
 PY
 }
 
-# the lookup as Rob and alpha-arch met it: only beside the instance
+# the lookup as a user and the Arch lab VM met it: only beside the instance
 red_1() { _sub "$A259" '    for d in (os.path.join(str(paths.aegis_root()), "seed", "templates"),
               os.path.join(os.path.dirname(PLATFORM_DIR), "seed", "templates")):' '    for d in (os.path.join(os.path.dirname(PLATFORM_DIR), "seed", "templates"),):'; }
 

@@ -12,7 +12,7 @@ p.write_text(s.replace(sys.argv[2], sys.argv[3], 1))
 PY
 }
 
-# aegis image request as Rob ran it on 2026-09-28: the only culprit, and --allow died mute
+# aegis image request as a user ran it on 2026-09-28: the only culprit, and --allow died mute
 red_1() { _sub "$I256" "<<< \"\$culprits\" | tr '\\n' ' ' || true)\"" "<<< \"\$culprits\" | tr '\\n' ' ')\""; }
 
 # phase 25: no tunnel_name in main.tf, and the gate that says so never runs

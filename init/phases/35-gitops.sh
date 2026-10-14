@@ -346,7 +346,7 @@ else
     run_cmd gh api -X POST \
         "repos/$GH_OWNER/$PLATFORM_REPO/hooks/$HOOK_ID/deliveries/$DELIVERY_ID/attempts"
     # the redeliver is asynchronous, and it can fail the way the first
-    # delivery did (alpha-ubuntu 2026-10-12: a 502 four seconds after
+    # delivery did (the Ubuntu lab VM 2026-10-12: a 502 four seconds after
     # cloudflared connected; the same redeliver by hand, minutes later,
     # 200). Only a delivery newer than the one just re-sent counts, and a
     # failed one is re-delivered inside the wait (lib/access.sh):

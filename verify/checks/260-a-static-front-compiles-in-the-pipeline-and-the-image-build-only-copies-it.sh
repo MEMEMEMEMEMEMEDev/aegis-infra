@@ -1,5 +1,5 @@
 # title: a static front compiles in the pipeline (ci/compile.sh in aegis-ci-node), and the image build only copies dist/ onto the signed runtime
-# origin: new in v3 — 2026-09-28, Rob's instance (his H-08): Astro inside kaniko failed 4 builds of 4; 2026-09-30, alpha-arch: the template's build image was retained at the door (npm CVEs past their window)
+# origin: new in v3 — 2026-09-28, a user's instance (their H-08): Astro inside kaniko failed 4 builds of 4; 2026-09-30, the Arch lab VM: the template's build image was retained at the door (npm CVEs past their window)
 check() {
 # Compiling inside kaniko failed every Astro build, and needed a build
 # image the door retained. The sidecar reads the template and the tenant

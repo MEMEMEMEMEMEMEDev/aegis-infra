@@ -3,7 +3,7 @@
 GitHub does not re-deliver on its own. Phase 60 learned it in the P1.5
 audit (2026-07-18) and re-delivered inside its wait; phase 35 kept the
 old shape —redeliver once, then poll that one finished delivery— and lost
-alpha-ubuntu on 2026-10-12: the redeliver hit a 502 («failed to connect
+the Ubuntu lab VM on 2026-10-12: the redeliver hit a 502 («failed to connect
 to host») four seconds after cloudflared connected, the gate re-read that
 dead delivery for 180 s, and the same redeliver by hand, minutes later,
 answered 200. One helper for both: lib/access.sh's hook_delivery_2xx.
@@ -137,7 +137,7 @@ else:
 
         D = lambda i, c, e="push": {"id": i, "event": e, "status_code": c}
 
-        drive("a redelivery that failed (alpha-ubuntu, 2026-10-12)",
+        drive("a redelivery that failed (the Ubuntu lab VM, 2026-10-12)",
               [D(101, 502), D(100, 530)], [200], "", 100, 20, 0, lambda r: r == [101])
         took = drive("a 400 (an HMAC out of sync)", [D(101, 400)], [], "", 100, 20, 1, lambda r: r == [])
         if took is not None and took > 5:

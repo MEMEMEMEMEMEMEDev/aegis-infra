@@ -1,6 +1,6 @@
 """Check 258 — an exception is scoped to what the scan named, and an accepted risk says it was not measured.
 
-MEASURED 2026-09-28 on Rob's instance (his H-06): ten `aegis image request
+MEASURED 2026-09-28 on a user's instance (their H-06): ten `aegis image request
 node:22.23.1-alpine --allow …` wrote exceptions scoped to «Node.js
 (node-pkg)» — the header trivy's table prints over EVERY npm package — and
 trivy reported the same ten CVEs on the next scan. What an exception on a
@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory() as tmp:
         want = ["usr/local/lib/node_modules/npm/node_modules/pacote/package.json",
                 "usr/local/lib/node_modules/npm/node_modules/@npmcli/metavuln-calculator/node_modules/pacote/package.json"]
         if got != want:
-            findings.append(f"an npm finding is scoped to {got}, not to each package.json the scan named (Rob's H-06: «Node.js (node-pkg)» matches nothing)")
+            findings.append(f"an npm finding is scoped to {got}, not to each package.json the scan named (a user's H-06: «Node.js (node-pkg)» matches nothing)")
         osl = "AEGIS_SCAN python:3.12-slim CVE-2026-75804|HIGH|openssl|3.5.7-1~deb13u2|3.5.7-1~deb13u3|2026-09-29||sha256:a|mirror.tar (debian 13.7)\n"
         got = targets(osl, "CVE-2026-75804")
         if got != ["*.tar (debian 13.7)"]:
@@ -116,7 +116,7 @@ with tempfile.TemporaryDirectory() as tmp:
         if rc != 0:
             findings.append(f"a measured exception beyond the acceptance ceiling (but within 12 months) is refused: {err.strip()[:140]}")
 
-# the report reads the door's verdict, not the table (alpha-arch, 2026-09-30:
+# the report reads the door's verdict, not the table (the Arch lab VM, 2026-09-30:
 # «3 blocking findings» for 11, and the exception pointed at «Node.js (node-pkg)»)
 rep = re.search(r"report_scan\(\) \{[^\n]*\n\s*python3 - \"\$1\" \"\$2\" \"\$\{3:-\$2\}\" <<'PY'\n(.*?)\nPY\n", src, re.S)
 if not rep:
@@ -138,7 +138,7 @@ else:
         if "3 finding(s) stopped n:1; 1 would have entered" not in out:
             findings.append(f"the report does not count what the verdict stopped and what it would have let in: {out.strip()[:160]}")
         if "Node.js (node-pkg)" in out:
-            findings.append("the report still names «Node.js (node-pkg)» — the scope that matched nothing on Rob's instance")
+            findings.append("the report still names «Node.js (node-pkg)» — the scope that matched nothing on a user's instance")
         if "usr/lib/npm/x/node_modules/pacote/package.json" not in out:
             findings.append("the report does not name each path a stopped finding lives at")
         if not re.search(r"aegis image request node:22 --accept CVE-2026-59873,CVE-2026-9496 --until \d{4}-\d{2}-\d{2}", out):

@@ -3,7 +3,7 @@
 # mirrored, scanned and signed. This file only copies the result.
 #
 # There is no build stage here on purpose, since 2026-09-30: Vite/esbuild
-# inside kaniko failed every build on Rob's instance, and the build stage
+# inside kaniko failed every build on a user's instance, and the build stage
 # stood on node:*-alpine, whose npm carried CVEs past their window. What
 # differs between Astro, React, Vue and Angular is in ci/compile.sh; this
 # file assumes only that dist/ holds plain files a browser can fetch.

@@ -1,5 +1,5 @@
 # title: an exception is scoped to the paths the scan itself named, and an accepted risk says it was not measured, is bounded by the policy and never covers what is exploited in the wild
-# origin: new in v3 — 2026-09-28, Rob's instance (his H-06): ten --allow on node:22.23.1-alpine scoped to «Node.js (node-pkg)» and the same ten CVEs came back; plan/21 adds the accepted kind
+# origin: new in v3 — 2026-09-28, a user's instance (their H-06): ten --allow on node:22.23.1-alpine scoped to «Node.js (node-pkg)» and the same ten CVEs came back; plan/21 adds the accepted kind
 check() {
 # The scope of an npm exception is each package.json the scan named,
 # which trivy's table never prints. The sidecar RUNS aegis-image's scope

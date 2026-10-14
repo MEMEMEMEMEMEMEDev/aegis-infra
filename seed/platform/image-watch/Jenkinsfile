@@ -706,7 +706,7 @@ spec:
               continue
             }
             if (t.kind == 'app') {
-              // FOUND ON alpha-arch, 2026-10-02: scanned WITHOUT the
+              // FOUND ON the Arch lab VM, 2026-10-02: scanned WITHOUT the
               // mirror's exceptions, the portfolio carried CVE-2026-14456
               // as overdue — measured and excused in nodejs-distroless,
               // the very base it stands on. Scanned WITH them everywhere,

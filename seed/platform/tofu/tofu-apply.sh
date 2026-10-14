@@ -222,7 +222,7 @@ fi
 log "TF_VARs injected (${#INJECTED[@]}). Delegating to tofu: $*"
 
 # ── what tofu PRINTS about a plan is not shown with its values ──────────
-# MEASURED 2026-09-30 on alpha-arch: `aegis destroy` without --yes printed
+# MEASURED 2026-09-30 on the Arch lab VM: `aegis destroy` without --yes printed
 # the tunnel's secret. The hashicorp/random provider does not mark
 # random_id's values as sensitive, so `plan -destroy` shows
 # `b64_std = "…" -> null` — and a random_id's ID is the secret itself, so

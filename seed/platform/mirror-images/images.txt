@@ -101,7 +101,7 @@ public.ecr.aws/docker/library/postgres:17.11-alpine@sha256:b0f9560a2de083e2cc738
 # the buildinfo of the ELF, so the patch belongs to the COMPILER: no
 # line of gateway code can fix this.
 #
-# 1.26.6 -> 1.26.9 on 2026-10-13, the same story: alpha-ubuntu's canary
+# 1.26.6 -> 1.26.9 on 2026-10-13, the same story: the Ubuntu lab VM's canary
 # (also compiled with this golang) was stopped at its first signed build
 # by three HIGH of the 1.26.6 stdlib (CVE-2026-78667, CVE-2026-78669,
 # CVE-2026-97031: net/http, http2, crypto/tls — fixed in 1.26.9,

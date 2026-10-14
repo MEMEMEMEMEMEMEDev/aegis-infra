@@ -1,6 +1,6 @@
 """Check 273 — tofu never prints a value of the state through the wrapper.
 
-MEASURED 2026-09-30 on alpha-arch: `aegis destroy` without --yes printed
+MEASURED 2026-09-30 on the Arch lab VM: `aegis destroy` without --yes printed
 the tunnel's secret. hashicorp/random does not mark random_id's values
 sensitive, so `plan -destroy` showed `b64_std = "…" -> null`; and a
 random_id's ID is the secret itself, so every `Creation complete … [id=…]`

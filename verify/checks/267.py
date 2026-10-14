@@ -167,7 +167,7 @@ for sh in shells:
         stale = find(rs3, "unmeasured", "exploited-list")
         if not stale or "50 days old" not in stale[0][9]:
             findings.append(f"[{who}] an exploited list 50 days old is not said in the books, in the field its readers read")
-        # released 50 days ago but fetched this morning: today's list (alpha-ubuntu, 2026-10-13)
+        # released 50 days ago but fetched this morning: today's list (the Ubuntu lab VM, 2026-10-13)
         rc, outf, err = run(sh, tmp, ["inv", "led1"], "2026-11-20", kevday="2026-10-01", fetched="2026-11-20")
         if find(rows(outf), "unmeasured", "exploited-list"):
             findings.append(f"[{who}] an exploited list fetched this morning is called stale because CISA released "

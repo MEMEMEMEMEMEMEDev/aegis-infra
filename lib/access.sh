@@ -181,7 +181,7 @@ argocd_admin_login_ok() {
 # reading it again for minutes measures nothing. Phase 60 learned it in
 # the P1.5 audit (2026-07-18) and re-delivered inside its own wait;
 # phase 35 kept the old shape —redeliver once, then poll that one
-# finished delivery for 180s— and lost alpha-ubuntu on 2026-10-12: a 502
+# finished delivery for 180s— and lost the Ubuntu lab VM on 2026-10-12: a 502
 # four seconds after cloudflared connected, and the same redeliver by
 # hand, minutes later, 200 OK. Same class twice → one helper.
 #

@@ -1,6 +1,6 @@
 """Check 282 — phase 80 says why the canary keeps its public bases.
 
-Measured on alpha-ubuntu, 2026-10-13: the door held golang and alpine back
+Measured on the Ubuntu lab VM, 2026-10-13: the door held golang and alpine back
 (check 255's case), and phase 80 ended with «phase 80-supply-chain FAILED»
 and not one word more. `_GOLANG="$(_canary_from golang)"` is a bare
 assignment from a $() that fails, and under set -e that ends the phase on
@@ -11,11 +11,11 @@ Driven: the block of phase 80 that repoints the canary's Containerfile,
 cut from `_canary_from() {` to the `fi` of its warning, runs under
 `set -euo pipefail` with a fake `aegis image from`, in three worlds:
   · the mirror does not declare golang → the phase goes on and warns;
-  · it declares both, but the registry does not hold them (alpha-ubuntu)
+  · it declares both, but the registry does not hold them (the Ubuntu lab VM)
     → the phase goes on and warns;
   · it serves both → the Containerfile is repointed, by digest;
   · a resume, over a canary already repointed to an older internal digest
-    → repointed to what the mirror declares now (alpha-ubuntu, golang
+    → repointed to what the mirror declares now (the Ubuntu lab VM, golang
     1.26.6 -> 1.26.9).
 """
 import os
@@ -73,7 +73,7 @@ with tempfile.TemporaryDirectory() as tmp:
     declared = ("public.ecr.aws/docker/library/golang:1.26.6-alpine golang:1.26.6-alpine\n"
                 "public.ecr.aws/docker/library/alpine:3.21 alpine:3.21\n")
     for name, images, mode in (("the mirror does not declare golang", "# nothing\nx/redis:8 redis:8\n", "serves"),
-                               ("the registry does not hold golang/alpine (alpha-ubuntu, 2026-10-13)", declared, "absent")):
+                               ("the registry does not hold golang/alpine (the Ubuntu lab VM, 2026-10-13)", declared, "absent")):
         p, cf = world(name, images, mode)
         if p.returncode != 0 or "REACHED" not in p.stdout:
             findings.append(f"{name}: phase 80 ends there (rc {p.returncode}) before saying why — "
@@ -87,7 +87,7 @@ with tempfile.TemporaryDirectory() as tmp:
         findings.append(f"the mirror serves golang and alpine, and the canary's Containerfile is not repointed "
                         f"by digest (rc {p.returncode})")
     # a resumed phase 80 clones the canary it already repointed and pushed,
-    # at a digest the mirror no longer declares (alpha-ubuntu, 2026-10-13)
+    # at a digest the mirror no longer declares (the Ubuntu lab VM, 2026-10-13)
     CONTAINERFILE_BEFORE = CONTAINERFILE
     CONTAINERFILE = ("FROM registry.registry-system.svc.cluster.local:5000/golang:1.26.6-alpine@sha256:old AS build\n"
                      "RUN true\nFROM registry.registry-system.svc.cluster.local:5000/alpine:3.21@sha256:old\n")

@@ -213,7 +213,7 @@ gate "cosign-secret-vivo" poll 180 5 bash -c \
 # and the protocol already had the two answers; the gate did not point
 # at them.
 #
-# RETAINED IS NOT BROKEN (2026-09-30, alpha-arch; plan/21). That day two
+# RETAINED IS NOT BROKEN (2026-09-30, the Arch lab VM; plan/21). That day two
 # OpenSSL CVEs published the day before, in python:3.12-slim and
 # nodejs-distroless:22 — neither of which the platform runs — killed a
 # clean install here. The door now judges each new image with
@@ -358,14 +358,14 @@ else
     }
     # `|| …=""`: under set -e a bare assignment from a failing $() ends the
     # phase right here, and the warning below — the only line that says
-    # why — never prints (alpha-ubuntu, 2026-10-13: «phase 80 FAILED» and
+    # why — never prints (the Ubuntu lab VM, 2026-10-13: «phase 80 FAILED» and
     # nothing else, with golang and alpine held at the door):
     _GOLANG="$(_canary_from golang)" || _GOLANG=""
     _ALPINE="$(_canary_from alpine)" || _ALPINE=""
     # Any registry, not only docker.io: a resumed phase 80 clones the
     # canary it ALREADY repointed and pushed, and a pattern for the public
     # FROM alone would leave the old internal digest in place and still
-    # say «repointed» (alpha-ubuntu, 2026-10-13, golang 1.26.6 -> 1.26.9):
+    # say «repointed» (the Ubuntu lab VM, 2026-10-13, golang 1.26.6 -> 1.26.9):
     if [[ -n "$_GOLANG" && -n "$_ALPINE" ]]; then
         run_cmd sed -i -E \
             -e "s|^FROM ([^ ]*/)?golang:[^ ]*|FROM $_GOLANG|" \

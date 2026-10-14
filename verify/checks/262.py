@@ -1,12 +1,12 @@
 """Check 262 — a tenant build is judged on its own layers; the base's findings are the platform's.
 
-MEASURED 2026-09-30 on alpha-arch, deploying an Astro portfolio from the
+MEASURED 2026-09-30 on the Arch lab VM, deploying an Astro portfolio from the
 static template: build 1 compiled, built, and died at the scan on three
 OpenSSL CVEs of nodejs-distroless:22 — the base, not the portfolio. The
 platform had judged all three at the mirror's door (one excused with its
 measurement, two admitted as dated debt) and image-watch re-scans them
-every morning; the tenant could do nothing about them. On Rob's instance
-the same class cost half an hour of trivyignore path forms (his H-09).
+every morning; the tenant could do nothing about them. On a user's instance
+the same class cost half an hour of trivyignore path forms (their H-09).
 
 Since then (plan/21, stage 5) the tenant scan:
 - reads its bases' layers (`crane config` of every FROM the from-guard
@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory() as tmp:
         subprocess.run(["sh", "-c", aw.group(1)], cwd=tmp, timeout=30)
         read = lambda n: open(os.path.join(tmp, n)).read() if os.path.exists(os.path.join(tmp, n)) else ""
         if "CVE-1" not in read("inherited.txt") or "CVE-1" in read("own.txt"):
-            findings.append("a finding in a base layer is not set apart as inherited: the base's CVE stops the app (build 1 on alpha-arch)")
+            findings.append("a finding in a base layer is not set apart as inherited: the base's CVE stops the app (build 1 on the Arch lab VM)")
         if "CVE-2" not in read("own.txt") or "CVE-2" in read("inherited.txt"):
             findings.append("a finding in the image's own layer is not judged: the app's own dependency slips through as the base's")
 

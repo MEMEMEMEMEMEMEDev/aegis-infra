@@ -1,6 +1,6 @@
 """Check 276 — the round reads each multibranch job inside its own block.
 
-FOUND on alpha-debian, 2026-10-02: with AI=no, the job-dsl carries
+FOUND on the Debian lab VM, 2026-10-02: with AI=no, the job-dsl carries
 `multibranchPipelineJob('ai-gateway-mb')` with `repository('')`. The
 round's «every push built» read the jobs with ONE regex — the job's name,
 `.*?`, then a non-empty repo — so it stretched past the empty repo to the

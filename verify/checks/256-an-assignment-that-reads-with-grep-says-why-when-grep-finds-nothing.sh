@@ -1,5 +1,5 @@
 # title: under errexit, an assignment that reads with grep has a way out for «grep found nothing», so the next line can say why
-# origin: new in v3 — 2026-09-28, Rob's instance (his H-05): `aegis image request --allow` ended rc 1 with no word, ten times, when the image asked for was the only one that failed
+# origin: new in v3 — 2026-09-28, a user's instance (their H-05): `aegis image request --allow` ended rc 1 with no word, ten times, when the image asked for was the only one that failed
 check() {
 # `NAME="$( … grep … )"` carries grep's exit status to set -e: when grep
 # finds nothing — no other culprit, no hash yet, no tunnel_name — the

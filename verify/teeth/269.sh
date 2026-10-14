@@ -48,8 +48,8 @@ red_10() { _sub "$W269" '                                "${n}.txt".toString())'
 
 # the other mistake: apps scanned only WITH the exceptions — an app's own layer excused by a base's measurement
 red_11() { _sub "$W269" "            if (t.kind == 'app') {
-              // FOUND ON alpha-arch, 2026-10-02" "            if (false) {
-              // FOUND ON alpha-arch, 2026-10-02"; }
+              // FOUND ON the Arch lab VM, 2026-10-02" "            if (false) {
+              // FOUND ON the Arch lab VM, 2026-10-02"; }
 
 # the clone stops saying the FROMs: no layer is known as inherited
 red_12() { _sub "$W269" "                      awk 'toupper(\$1) == \"FROM\" { for (i = 2; i <= NF; i++) if (\$i ~ /@sha256:[0-9a-f]+\$/) print \"FROM\", \$i }' \"\$cf\"" "                      :"; }

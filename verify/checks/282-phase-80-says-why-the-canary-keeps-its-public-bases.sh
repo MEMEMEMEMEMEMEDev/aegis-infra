@@ -1,5 +1,5 @@
 # title: phase 80 says why the canary keeps its public bases: a base the mirror cannot serve is a warning, not a mute death under set -e
-# origin: new in v3 — 2026-10-13, alpha-ubuntu: golang and alpine held at the door, and phase 80 ended «FAILED» without one word on why
+# origin: new in v3 — 2026-10-13, the Ubuntu lab VM: golang and alpine held at the door, and phase 80 ended «FAILED» without one word on why
 check() {
 D282=""
 [[ -f "$AEGIS_ROOT/verify/checks/282.py" ]] || { fail "check 282 has no sidecar"; return; }

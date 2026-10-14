@@ -1,5 +1,5 @@
 # title: the staging area the product fills for another repo (.aegis-app/) is ignored by the platform repo, as the code has always said
-# origin: new in v3 — 2026-09-26 (hackathon, noted) and 2026-09-30 (alpha-arch, measured): the untracked staging area blocked every `aegis seed apply` after an `aegis app new`
+# origin: new in v3 — 2026-09-26 (hackathon, noted) and 2026-09-30 (the Arch lab VM, measured): the untracked staging area blocked every `aegis seed apply` after an `aegis app new`
 check() {
 # org.py said .aegis-app/ was in the .gitignore; it was not. The sidecar
 # reads STAGING_DIR from the code and asks git check-ignore.

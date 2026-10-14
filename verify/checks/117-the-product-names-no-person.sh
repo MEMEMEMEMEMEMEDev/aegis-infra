@@ -102,12 +102,31 @@ _name_absent() {   # <name> <what it is>
     fi
     # A login named after the product names nobody: the lab VMs run as
     # `aegis` (the lab's preparation script makes that user), and every
-    # file of the product says its own name. Measured on alpha-ubuntu, 2026-10-12: the only red
-    # the full verify had there, on every run. Declared, not skipped.
+    # file of the product says its own name. Measured on the Ubuntu lab
+    # VM, 2026-10-12: the only red the full verify had there, on every
+    # run. Declared, not skipped.
     if [[ "${name,,}" == aegis ]]; then
         printf '    %s is "%s", the product'"'"'s own name — it names no person: NOT measured\n' "$what" "$name"
         return 0
     fi
+    # A ROLE IS NOT A PERSON EITHER. `root` is the account every host
+    # has and a word the product cannot do without («root of trust»,
+    # AEGIS_ROOT): run as root, this check was red on every machine
+    # unless CI=1 said so (review of 2026-10-13, 4B-3). The same for the
+    # accounts a cloud image or a lab makes by default: they name a
+    # distribution or a tool, not whoever is at the keyboard. Each one
+    # declared here, because an exception without a reason is a hiding
+    # place:
+    #   root     every host; and the product's own word for its tree
+    #   runner   the GitHub Actions service account (first CI run)
+    #   ubuntu, debian   the default user of those cloud images
+    #   admin    the default user of several images and appliances
+    #   vagrant  the default user of every Vagrant box
+    case "${name,,}" in
+        root|runner|ubuntu|debian|admin|vagrant)
+            printf '    %s is "%s", a role every host or image has — it names nobody: NOT measured\n' "$what" "$name"
+            return 0 ;;
+    esac
     N117=$((N117+1))
     hits="$(cd "$AEGIS_ROOT" && command grep -rIln --exclude-dir=.git -F -- "$name" \
         "${PRODUCT_DIRS[@]}" 2>/dev/null || true)"

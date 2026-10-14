@@ -7,8 +7,8 @@
 # environment, mirrored from the check itself. On a CI platform the
 # login is the platform's service account and the check does not
 # measure it (it measures the account that pushed); elsewhere the login,
-# unless it is the product's own name (the lab VMs run as `aegis`,
-# declared NOT measured since 2026-10-12); then the GitHub account this
+# unless it is the product's own name or a declared role (the lab VMs run as
+# `aegis`, `root` is every host's: NOT measured); then the GitHub account this
 # machine is authenticated as, which it measures everywhere. A tooth
 # that plants what the check is told to ignore aims at nothing — and
 # measured on 2026-10-14, that is what red_1 and red_4 did under CI=1:
@@ -21,7 +21,8 @@ _who117() {
         who="${GITHUB_ACTOR:-}"
     else
         who="${SUDO_USER:-${USER:-$(id -un 2>/dev/null)}}"
-        [[ "${who,,}" == aegis ]] && who=""
+        # the product's own name and the roles the check declares
+        case "${who,,}" in aegis|root|runner|ubuntu|debian|admin|vagrant) who="" ;; esac
     fi
     [[ -n "$who" && ${#who} -ge 4 ]] || who="$(gh api user --jq .login 2>/dev/null)"
     [[ -n "$who" && ${#who} -ge 4 ]] || return 1

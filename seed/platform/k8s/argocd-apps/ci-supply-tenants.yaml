@@ -24,7 +24,7 @@ spec:
 # aegis-vuln-policy in jenkins-system. Its OWN Application and not a line
 # in jenkins-secrets' kustomization: that file is the instance's (it lists
 # the instance's sealed secrets), so `aegis seed apply` never brings a
-# change to it — measured 2026-09-30 on alpha-arch — and an instance
+# change to it — measured 2026-09-30 on the Arch lab VM — and an instance
 # already installed would never get the policy. This file is the seed's.
 # image-watch commits kev.txt every morning; ArgoCD carries it here.
 apiVersion: argoproj.io/v1alpha1

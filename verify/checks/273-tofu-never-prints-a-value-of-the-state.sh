@@ -1,5 +1,5 @@
 # title: what tofu prints through the wrapper about a plan, an apply or a destroy carries addresses and actions, never a value of the state
-# origin: new in v3 — 2026-09-30, alpha-arch: `aegis destroy` without --yes printed the tunnel's secret (random_id's values are not sensitive to its provider, and its ID is the secret itself)
+# origin: new in v3 — 2026-09-30, the Arch lab VM: `aegis destroy` without --yes printed the tunnel's secret (random_id's values are not sensitive to its provider, and its ID is the secret itself)
 check() {
 D273=""
 [[ -f "$AEGIS_ROOT/verify/checks/273.py" ]] || { fail "check 273 has no sidecar"; return; }

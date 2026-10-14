@@ -1,6 +1,6 @@
 """Check 265 — `aegis app rebase` brings an app's Jenkinsfile to the pipeline the platform derives.
 
-MEASURED 2026-09-30 on alpha-arch: the platform changed the tenant scan
+MEASURED 2026-09-30 on the Arch lab VM: the platform changed the tenant scan
 (judge the image's own layers; the base's findings are inherited) and the
 portfolio kept running the old pipeline — `app apply` plants a Jenkinsfile
 once, into an empty repo, and never again. The new one waited in the
@@ -70,7 +70,7 @@ with tempfile.TemporaryDirectory() as tmp:
         findings.append("rebase --check does not say the Jenkinsfile is behind the platform's")
     tot = rebase(True)
     if open(os.path.join(repo_dir, "Jenkinsfile")).read() != open(os.path.join(stage, "Jenkinsfile")).read():
-        findings.append("rebase does not bring the app's Jenkinsfile to the derived one: the portfolio kept the old scan (alpha-arch)")
+        findings.append("rebase does not bring the app's Jenkinsfile to the derived one: the portfolio kept the old scan (the Arch lab VM)")
     elif tot["done"] < 1:
         findings.append("rebase changed the Jenkinsfile without saying so")
     tot = rebase(True)

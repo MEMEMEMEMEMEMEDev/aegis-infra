@@ -1,9 +1,9 @@
 """Check 260 — a static front compiles in the pipeline, and the image build only copies it.
 
-MEASURED 2026-09-28 on Rob's instance (his H-08): an Astro site built with
+MEASURED 2026-09-28 on a user's instance (their H-08): an Astro site built with
 the static template failed four builds of four — Astro printed «Complete!»
 and kaniko died «permission denied» closing the build stage (Vite/esbuild
-leave a process kaniko cannot snapshot). And 2026-09-30 on alpha-arch the
+leave a process kaniko cannot snapshot). And 2026-09-30 on the Arch lab VM the
 template could not even be instantiated: its build stage stood on
 node:22.23.1-alpine, and the door retained that image (its bundled npm
 carried eleven CVEs past their window).

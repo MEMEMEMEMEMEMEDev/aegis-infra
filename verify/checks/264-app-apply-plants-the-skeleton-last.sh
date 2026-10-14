@@ -1,5 +1,5 @@
 # title: `aegis app apply` plants the skeleton after the webhook exists (its push is the first build), and `app new` tells the steps in the order that works
-# origin: new in v3 — 2026-09-30, alpha-arch: the portfolio's skeleton was pushed before the webhook and the first build never started; app new said app apply --check before the push that makes it evaluable
+# origin: new in v3 — 2026-09-30, the Arch lab VM: the portfolio's skeleton was pushed before the webhook and the first build never started; app new said app apply --check before the push that makes it evaluable
 check() {
 # The skeleton went up before the webhook, and the steps were told out
 # of order. The sidecar RUNS app apply with GitHub recorded.

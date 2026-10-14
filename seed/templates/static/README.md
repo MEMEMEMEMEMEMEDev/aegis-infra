@@ -14,8 +14,8 @@ builds itself. The Containerfile only copies `dist/` onto the runtime,
 else has to be mirrored before the template instantiates.
 
 It used to compile INSIDE the image build, on `node:22.23.1-alpine`. On
-Rob's instance that made an Astro site fail four builds of four (Vite and
-esbuild leave a process kaniko cannot snapshot), and on alpha-arch the
+a user's instance that made an Astro site fail four builds of four (Vite and
+esbuild leave a process kaniko cannot snapshot), and on the Arch lab VM the
 door retained that image: its bundled npm carried eleven CVEs past their
 window. Neither can happen now.
 

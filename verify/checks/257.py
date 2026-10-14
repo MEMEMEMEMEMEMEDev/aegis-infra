@@ -1,6 +1,6 @@
 """Check 257 — the mirror's door judges what comes in, and a retained image is not a broken install.
 
-MEASURED 2026-09-30 on alpha-arch: phase 80 died because mirror-images
+MEASURED 2026-09-30 on the Arch lab VM: phase 80 died because mirror-images
 went red on python:3.12-slim and nodejs-distroless:22 — two OpenSSL CVEs
 published the day before, fixed in Debian, not yet in the upstream images.
 The platform runs neither. And the job re-judged every entry on every run,

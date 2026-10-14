@@ -151,10 +151,10 @@ reading of it.
 ### 1.2 What a tenant's scan decides (since 2026-09-30)
 
 A tenant's image is its base plus its own layers, and until 2026-09-30
-the scan judged both the same way. On alpha-arch the first build of an
+the scan judged both the same way. On the Arch lab VM the first build of an
 Astro portfolio died on three OpenSSL CVEs of `nodejs-distroless:22`,
 which the platform had already judged at the mirror (one excused with
-its measurement, two admitted as dated debt); on Rob's instance the same
+its measurement, two admitted as dated debt); on a user's instance the same
 class cost half an hour of `trivyignore` path forms in the app's repo.
 
 Now `Jenkinsfile.app` splits the findings BY LAYER. The layers of every
@@ -273,7 +273,7 @@ There are exactly two honest ways out.
    `vuln-policy/policy.yaml`, and is refused for a CVE on the
    exploited-in-the-wild list. Either one is scoped to the paths the
    scan's own `AEGIS_SCAN` lines named — each `package.json` for an npm
-   finding (the table's «Node.js» header matches nothing: Rob's H-06),
+   finding (the table's «Node.js» header matches nothing: a user's H-06),
    `*.tar (<distro>)` for an OS one:
 
 ```
@@ -779,7 +779,7 @@ the layers of the `FROM`s its Containerfiles pin by digest — and on no
 other: the app is scanned with and without them, and a finding the
 exceptions removed comes back unless its layer is the base's
 (`ledger.sh --inherit`). Without that, a CVE measured and excused in a
-base reads as overdue in every app built on it (found on alpha-arch,
+base reads as overdue in every app built on it (found on the Arch lab VM,
 2026-10-02, CVE-2026-14456 in the portfolio); with the exceptions
 everywhere, an app's own layer would be excused by a measurement made on
 somebody else's binary. What it still does not see: an image

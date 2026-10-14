@@ -1,5 +1,5 @@
 # title: `aegis app rebase` brings an app's Jenkinsfile to the pipeline the platform derives (written, never pushed)
-# origin: new in v3 — 2026-09-30, alpha-arch: the platform changed the tenant scan and the portfolio kept the old pipeline until it was copied by hand
+# origin: new in v3 — 2026-09-30, the Arch lab VM: the platform changed the tenant scan and the portfolio kept the old pipeline until it was copied by hand
 check() {
 # A Jenkinsfile was planted once and never updated. The sidecar RUNS
 # app rebase over a controlled checkout.

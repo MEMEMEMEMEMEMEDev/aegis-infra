@@ -1,5 +1,5 @@
 # title: the mirror's door judges each new image with the one verdict, does not judge again what came in from the same source, and a retained image stops the install only if the platform runs it
-# origin: new in v3 — 2026-09-30, alpha-arch, phase 80: python:3.12-slim and nodejs-distroless:22 (two OpenSSL CVEs of the day before, runtimes the platform does not use) killed a clean install; plan/21 stage 4
+# origin: new in v3 — 2026-09-30, the Arch lab VM, phase 80: python:3.12-slim and nodejs-distroless:22 (two OpenSSL CVEs of the day before, runtimes the platform does not use) killed a clean install; plan/21 stage 4
 check() {
 # mirror-images re-judged every entry on every run with a binary scan,
 # and phase 80 died on anything red. The sidecar reads the job's scan,

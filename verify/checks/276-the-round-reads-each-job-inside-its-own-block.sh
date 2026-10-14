@@ -1,5 +1,5 @@
 # title: the round reads each multibranch job inside its own block: an empty repo is a lane switched off, never the next job's
-# origin: new in v3 — 2026-10-02, alpha-debian: with AI=no the round judged ai-gateway-mb against the portfolio's repo and never looked at the portfolio's job
+# origin: new in v3 — 2026-10-02, the Debian lab VM: with AI=no the round judged ai-gateway-mb against the portfolio's repo and never looked at the portfolio's job
 check() {
 D276=""
 [[ -f "$AEGIS_ROOT/verify/checks/276.py" ]] || { fail "check 276 has no sidecar"; return; }

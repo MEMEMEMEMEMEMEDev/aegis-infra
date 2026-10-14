@@ -7,7 +7,7 @@
 #
 # WHY NOT INSIDE THE IMAGE BUILD (since 2026-10-02). The build stage stood
 # on node:22.23.1-alpine, an image nobody else needs: it had to be mirrored
-# before the template could even be instantiated, and on alpha-arch
+# before the template could even be instantiated, and on the Arch lab VM
 # (2026-09-30) the door retained that very image — its bundled npm carried
 # eleven CVEs past their window. The static template moved first
 # (ci/compile.sh, the same stage); this one follows. Here, the npm that

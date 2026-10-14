@@ -4,12 +4,12 @@
 # aegis-ci-node container, in the same workspace kaniko builds from; the
 # Containerfile then only COPYs dist/ onto the signed runtime.
 #
-# WHY NOT INSIDE THE IMAGE BUILD. On Rob's instance (2026-09-28) an Astro
+# WHY NOT INSIDE THE IMAGE BUILD. On a user's instance (2026-09-28) an Astro
 # site built this way failed four builds of four: Astro printed «Complete!»
 # and kaniko died with «permission denied» closing the stage — the Vite /
 # esbuild family leaves a service process kaniko cannot snapshot. And the
 # build stage had to stand on node:*-alpine, whose bundled npm carried
-# eleven CVEs past their window when the template was tried on alpha-arch
+# eleven CVEs past their window when the template was tried on the Arch lab VM
 # (2026-09-30). Compiled here, neither exists.
 #
 # WHAT YOU CHANGE: the two lines below, for your framework.

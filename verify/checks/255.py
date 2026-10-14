@@ -1,6 +1,6 @@
 """Check 255 — one verdict decides what a known vulnerability costs.
 
-MEASURED 2026-09-30, alpha-arch (the first run of the ALPHA series): a
+MEASURED 2026-09-30, the Arch lab VM (the first run of the ALPHA series): a
 clean install died in phase 80 because Debian had fixed two OpenSSL CVEs
 the day before (CVE-2026-75804, CVE-2026-84782, 3.5.7-1~deb13u3) and the
 upstream python:3.12-slim and nodejs-distroless:22 had not been rebuilt.
@@ -120,7 +120,7 @@ with tempfile.TemporaryDirectory() as tmp:
     stale = (datetime.date(2026, 9, 29) - datetime.timedelta(days=KEVAGE + 1)).isoformat()
     g = run(tmp, [fresh], kev=stale)
     expect("new admission, exploited-in-the-wild list too old", g, "CVE-2026-75804", "block")
-    # alpha-ubuntu, 2026-10-13: CISA had not released for 5 days, the list was
+    # the Ubuntu lab VM, 2026-10-13: CISA had not released for 5 days, the list was
     # fetched that minute — it is today's list, and the copy ages from the fetch
     g = run(tmp, [fresh], kev=stale, fetched=TODAY)
     expect("new admission, a list released days ago but fetched today", g, "CVE-2026-75804", "debt", due_fresh)
@@ -202,7 +202,7 @@ if "name: aegis-vuln-policy" not in kz or "disableNameSuffixHash: true" not in k
     findings.append("the ConfigMap is not `aegis-vuln-policy` without a name suffix: pod templates mount it by name")
 # its own Application, in a file the SEED owns: jenkins-secrets' kustomization
 # is the instance's, and `aegis seed apply` never brings a change to it
-# (measured on alpha-arch, 2026-09-30) — an installed instance would never
+# (measured on the Arch lab VM, 2026-09-30) — an installed instance would never
 # get the policy.
 apps = os.path.join(ROOT, "seed", "platform", "k8s", "argocd-apps", "ci-supply-tenants.yaml")
 with open(apps, encoding="utf-8") as f:

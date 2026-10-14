@@ -10,7 +10,7 @@ p.write_text(s.replace(sys.argv[2], sys.argv[3], 1))
 PY
 }
 
-# the scope as Rob met it on 2026-09-28: the table's header, «Node.js (node-pkg)»
+# the scope as a user met it on 2026-09-28: the table's header, «Node.js (node-pkg)»
 red_1() { _sub "$I258" '    if len(f) == 9 and f[0] == cve:
         hits.append(f[6] if f[6] else re.sub(r"^\S+\.tar ", "*.tar ", f[8]))' '    pass'; }
 

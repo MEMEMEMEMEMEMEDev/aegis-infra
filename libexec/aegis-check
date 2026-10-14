@@ -1008,7 +1008,7 @@ except OSError as e:
 # job -> (owner, repo). From the SAME file that aegis-webhook and the CI
 # quota use: a new repo enters on its own, without touching this script.
 #
-# EACH JOB READ INSIDE ITS OWN BLOCK (2026-10-02, alpha-debian). The first
+# EACH JOB READ INSIDE ITS OWN BLOCK (2026-10-02, the Debian lab VM). The first
 # reading was one regex with `.*?` between the job's name and its repo, and
 # on an instance with AI=no the ai-gateway job carries `repository('')`: the
 # regex, wanting a non-empty repo, stretched to the NEXT job's — so the AI

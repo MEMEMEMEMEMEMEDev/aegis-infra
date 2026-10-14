@@ -16,5 +16,5 @@ ansible/.venv/
 # aegis app's staging area (lib/aegis/org.py, STAGING_DIR): what it holds is
 # bound for the APP's repo, never this one — org.py has always said it is
 # ignored here, and it was not. Untracked, it also blocked every
-# `aegis seed apply` after an `aegis app new` (2026-09-30, alpha-arch).
+# `aegis seed apply` after an `aegis app new` (2026-09-30, the Arch lab VM).
 .aegis-app/

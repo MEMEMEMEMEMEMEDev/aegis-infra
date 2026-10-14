@@ -1,6 +1,6 @@
 """Check 256 — an assignment that reads with grep says why when grep finds nothing.
 
-MEASURED 2026-09-28 on Rob's instance (his H-05), reproduced in the code
+MEASURED 2026-09-28 on a user's instance (their H-05), reproduced in the code
 2026-09-30: `aegis image request <img> --allow CVE --until … --reason …`
 ended rc 1 with no word, ten times in a row, when the image asked for was
 the only one that failed in mirror-images. libexec/aegis-image:856 read

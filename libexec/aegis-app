@@ -401,7 +401,7 @@ def _templates_dir():
     true in the development layout, with the instance nested INSIDE the
     product checkout. Every installation the product documents has them
     side by side (`~/aegis-infra` and `~/aegis`), and there the templates
-    were never found: Rob's instance (his H-07, 2026-09-28) and alpha-arch
+    were never found: a user's instance (their H-07, 2026-09-28) and the Arch lab VM
     (2026-09-30) both got «this clone looks loose», on a textbook install.
     The nested layout still resolves: it is the second place looked at.
     """
@@ -845,7 +845,7 @@ def new(org, template, tot):
               f"({n} file(s), gitignored — its destination is ANOTHER repo)")
     print(f"  {gray}derived:{reset}   k8s/organizations/org-{org}/ + jobs, edge, "
           f"projects, credentials (above)")
-    # IN THE ORDER THAT WORKS (measured 2026-09-30 on alpha-arch). It used
+    # IN THE ORDER THAT WORKS (measured 2026-09-30 on the Arch lab VM). It used
     # to say `app apply --check` BEFORE the push: the deploy key lives in a
     # Secret that only exists once platform/ is pushed and synced, and the
     # check could only answer «COULD NOT EVALUATE». The Jenkins job, the
@@ -1179,7 +1179,7 @@ def _rebase_repo(c, url, write, tot):
 
     touched = 0
     try:
-        # THE PIPELINE (2026-09-30, alpha-arch). The Jenkinsfile in an app's
+        # THE PIPELINE (2026-09-30, the Arch lab VM). The Jenkinsfile in an app's
         # repo is the platform's contract (its pins, limits, stages), put
         # there once by `app apply` and never again: the day the platform
         # changed its scan to judge only the image's own layers, the
@@ -1361,7 +1361,7 @@ def plant_skeleton(r, write, tot):
     """Step 4, LAST: the skeleton, only over an empty repo.
 
     Its push is the app's first build — and until 2026-09-30 it was
-    planted before the webhook existed. On alpha-arch the portfolio's
+    planted before the webhook existed. On the Arch lab VM the portfolio's
     skeleton reached GitHub, nobody told Jenkins, the multibranch never
     scanned, and the first build never started; only the NEXT push, once
     the hook was there, built anything. Planted after the webhooks, the

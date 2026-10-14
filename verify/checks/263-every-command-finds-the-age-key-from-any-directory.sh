@@ -1,5 +1,5 @@
 # title: every aegis command finds the instance's age key from any directory, and an explicit key is respected
-# origin: new in v3 — 2026-09-30, alpha-arch: `aegis app new` run from the product checkout died at its secrets step (sops looked for keys.txt; the key is announced only by a direnv .envrc)
+# origin: new in v3 — 2026-09-30, the Arch lab VM: `aegis app new` run from the product checkout died at its secrets step (sops looked for keys.txt; the key is announced only by a direnv .envrc)
 check() {
 # The key was found only by bash commands that source lib/secrets.sh,
 # or in a shell standing where direnv acts. The sidecar RUNS bin/aegis.

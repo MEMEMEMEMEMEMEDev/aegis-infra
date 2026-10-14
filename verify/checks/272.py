@@ -1,6 +1,6 @@
 """Check 272 — a node service is installed and tested in the pipeline.
 
-2026-09-30, alpha-arch: the static template moved its compile out of the
+2026-09-30, the Arch lab VM: the static template moved its compile out of the
 image build (check 260) because its build stage stood on
 node:22.23.1-alpine — an image that had to be mirrored before the template
 could be instantiated, and that the door retained (its bundled npm carried

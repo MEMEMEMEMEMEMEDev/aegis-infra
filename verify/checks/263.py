@@ -1,6 +1,6 @@
 """Check 263 — every aegis command finds the instance's age key, from any directory.
 
-MEASURED 2026-09-30 on alpha-arch: `aegis app new portafolio` run from the
+MEASURED 2026-09-30 on the Arch lab VM: `aegis app new portafolio` run from the
 product checkout died at its secrets step — sops looked for the default
 ~/.config/sops/age/keys.txt, «failed to get the data key». Phase 10 puts
 the key at ~/.config/sops/age/aegis.key (ADR-0003) and announces it with a
@@ -52,7 +52,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     got = run({}, True)
     if got != key:
-        findings.append(f"run from / with the key installed and no variable, a command sees {got!r}: sops falls back to keys.txt (alpha-arch, app new)")
+        findings.append(f"run from / with the key installed and no variable, a command sees {got!r}: sops falls back to keys.txt (the Arch lab VM, app new)")
     got = run({"SOPS_AGE_KEY_FILE": os.path.join(tmp, "nothing-here.key")}, True)
     if got != key:
         findings.append(f"a SOPS_AGE_KEY_FILE pointing at nothing is kept ({got!r}) instead of the installed key")

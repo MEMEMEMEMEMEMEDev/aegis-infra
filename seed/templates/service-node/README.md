@@ -15,7 +15,7 @@ to be mirrored before the template instantiates.
 
 It used to install and test INSIDE the image build, on
 `node:22.23.1-alpine`. That image had to be mirrored first, and on
-alpha-arch the door retained it: its bundled npm carried eleven CVEs past
+the Arch lab VM the door retained it: its bundled npm carried eleven CVEs past
 their window. The static template made the same move on 2026-09-30.
 
 ## What you change

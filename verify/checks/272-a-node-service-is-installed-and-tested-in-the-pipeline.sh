@@ -1,5 +1,5 @@
 # title: a node service is installed and tested in the pipeline, and the image build only copies it
-# origin: new in v3 — 2026-10-02, plan/21 stage 9: service-node still built on node:22.23.1-alpine inside kaniko, the image the door retained on alpha-arch and that had to be mirrored before the template could even be instantiated
+# origin: new in v3 — 2026-10-02, plan/21 stage 9: service-node still built on node:22.23.1-alpine inside kaniko, the image the door retained on the Arch lab VM and that had to be mirrored before the template could even be instantiated
 check() {
 D272=""
 [[ -f "$AEGIS_ROOT/verify/checks/272.py" ]] || { fail "check 272 has no sidecar"; return; }

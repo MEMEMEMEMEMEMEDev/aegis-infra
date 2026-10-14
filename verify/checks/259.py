@@ -1,7 +1,7 @@
 """Check 259 — `aegis app new --template` finds the templates wherever the product is installed.
 
-MEASURED 2026-09-28 on Rob's instance (his H-07) and again 2026-09-30 on
-alpha-arch: `aegis app new portafolio --template static` died with «I cannot
+MEASURED 2026-09-28 on a user's instance (their H-07) and again 2026-09-30 on
+the Arch lab VM: `aegis app new portafolio --template static` died with «I cannot
 find the templates: ~/aegis/seed/templates does not exist … This
 clone looks loose». _templates_dir() derived the product as
 dirname(PLATFORM_DIR), true only in the development layout (the instance

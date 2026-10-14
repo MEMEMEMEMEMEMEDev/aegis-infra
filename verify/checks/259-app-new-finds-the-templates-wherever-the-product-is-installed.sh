@@ -1,5 +1,5 @@
 # title: `aegis app new --template` finds the templates wherever the product is installed, side by side with the instance or around it
-# origin: new in v3 — 2026-09-28, Rob's instance (his H-07), reproduced 2026-09-30 on alpha-arch: «I cannot find the templates … this clone looks loose» on the install every guide documents
+# origin: new in v3 — 2026-09-28, a user's instance (their H-07), reproduced 2026-09-30 on the Arch lab VM: «I cannot find the templates … this clone looks loose» on the install every guide documents
 check() {
 # _templates_dir() took the product to be dirname(PLATFORM_DIR), true
 # only with the instance nested inside it. The sidecar LOADS the command

@@ -56,7 +56,7 @@ TEMPLATE='{{range .}}{{$t := .Target}}{{range .Vulnerabilities}}{{.Vulnerability
 # --diff-ids: an image CONFIG on stdin (what `crane config` prints) → its
 # layers' diff_ids, one per line. The config may come compact or pretty:
 # distroless ships it indented over many lines, and a one-line reading
-# found no layer at all on alpha-arch (2026-09-30), so every base finding
+# found no layer at all on the Arch lab VM (2026-09-30), so every base finding
 # was judged as the app's. Whitespace goes first; then the one array.
 if [ "${1:-}" = "--diff-ids" ]; then
     tr -d ' \t\r\n' | sed -n 's/.*"diff_ids":\[\([^]]*\)\].*/\1/p' | tr ',' '\n' | tr -d '"' | grep '^sha256:' || true
@@ -115,7 +115,7 @@ BEGIN {
     days["CRITICAL"] = P["critical_days"]; days["HIGH"] = P["high_days"]
     # The KEV list: a header line with the day CISA released it, then one id per line.
     # What ages a copy is the day it was FETCHED: CISA can go a week without a
-    # release, and a list fetched this morning is the list of today (alpha-ubuntu,
+    # release, and a list fetched this morning is the list of today (the Ubuntu lab VM,
     # 2026-10-13: released 10-08, fetched that minute, judged «5 days old»).
     # A copy that does not say when it was fetched ages from its release.
     kevknown = 0; kevwhy = "the exploited-in-the-wild list is missing"

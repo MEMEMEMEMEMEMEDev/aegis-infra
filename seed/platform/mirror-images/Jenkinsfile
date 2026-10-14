@@ -27,7 +27,7 @@
 // fixable CRITICAL/HIGH stopped the entry and the job went red, and it
 // did so for EVERY entry on EVERY run: two OpenSSL CVEs published the
 // day before, in python:3.12-slim and nodejs-distroless:22, killed a
-// clean install on alpha-arch although the platform needs neither of
+// clean install on the Arch lab VM although the platform needs neither of
 // them to run and nobody could make them clean. Now:
 //   - an entry already in the registry, signed by aegis FROM THIS SAME
 //     SOURCE (the signature carries it as an annotation, verified with

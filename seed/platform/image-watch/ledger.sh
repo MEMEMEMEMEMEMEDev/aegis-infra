@@ -83,7 +83,7 @@ DFC='function dfc(s,   y, m, d, era, yoe, doy) {
 # --inherit — what an app image owes, once the platform's exceptions are
 # applied where they belong.
 #
-# FOUND ON alpha-arch, 2026-10-02 (the first run of the series): the watch
+# FOUND ON the Arch lab VM, 2026-10-02 (the first run of the series): the watch
 # scanned app images WITHOUT the mirror's trivyignore.yaml, so a CVE the
 # platform had MEASURED and excused in nodejs-distroless (CVE-2026-14456)
 # came back as OVERDUE in the portfolio built on it — the same bytes,

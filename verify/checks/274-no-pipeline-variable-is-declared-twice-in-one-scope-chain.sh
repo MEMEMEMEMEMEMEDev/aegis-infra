@@ -1,5 +1,5 @@
 # title: no variable of a platform pipeline is declared twice in one scope chain (Groovy refuses it only when Jenkins compiles the run)
-# origin: new in v3 — 2026-10-02, alpha-arch: image-watch #3 died at compile time over `def mrc` declared inside a block that already had one; the declarative linter had validated the file
+# origin: new in v3 — 2026-10-02, the Arch lab VM: image-watch #3 died at compile time over `def mrc` declared inside a block that already had one; the declarative linter had validated the file
 check() {
 D274=""
 [[ -f "$AEGIS_ROOT/verify/checks/274.py" ]] || { fail "check 274 has no sidecar"; return; }

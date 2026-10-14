@@ -1,6 +1,6 @@
 """Check 275 — --help after a verb is help, and writes nothing.
 
-FOUND on alpha-debian, 2026-10-02: `aegis state backup --help` wrote a real
+FOUND on the Debian lab VM, 2026-10-02: `aegis state backup --help` wrote a real
 encrypted bundle to a file named «--help». The commands that hand a verb
 to a script of its own (`exec libexec/<cmd>/$VERB`) only looked at the word
 BEFORE the verb, so the verb's script read «--help» as its first argument.

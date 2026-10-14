@@ -11,10 +11,10 @@ p.write_text(s.replace(sys.argv[2], sys.argv[3], 1))
 PY
 }
 
-# build 1 on alpha-arch: no split, the base's CVEs are the app's
+# build 1 on the Arch lab VM: no split, the base's CVEs are the app's
 red_1() { _sub "$J262" '($8 in B) { print > "inherited.txt"; next }' '(0) { print > "inherited.txt"; next }'; }
 
-# build 3 on alpha-arch: the config read as one line, 0 base layers found
+# build 3 on the Arch lab VM: the config read as one line, 0 base layers found
 red_2() { _sub "$V262" "    tr -d ' \\t\\r\\n' | sed -n" "    sed -n"; }
 
 # the scan decides alone again

@@ -18,7 +18,7 @@ and asserts what comes out. Then it reads the stage: the clone is depth
 scans apps without the mirror's ignorefile, and the books name the app's
 repo as who fixes it.
 
-AND THE EXCEPTIONS OF ITS BASE (found on alpha-arch, 2026-10-02, the first
+AND THE EXCEPTIONS OF ITS BASE (found on the Arch lab VM, 2026-10-02, the first
 run of the series): the first version scanned apps WITHOUT the mirror's
 trivyignore.yaml — this check even required it — and the portfolio carried
 CVE-2026-14456 as OVERDUE, a CVE measured and excused in nodejs-distroless,
