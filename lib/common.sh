@@ -1142,6 +1142,23 @@ git_commit_if_changes() {
         log_info "nothing to commit (idempotent re-run)"
         return 0
     fi
+    # A cleartext secret under an encrypted name never leaves this
+    # machine (2026-10-14, review A-3). A file named *.enc.yaml or
+    # *.enc.json that sops wrote carries its metadata block (`sops:` with
+    # a `mac:`); one that does not is plaintext an interrupted encryption
+    # left behind, and `add -A` would have carried it to GitHub, where a
+    # force push does not un-publish a blob. The commit runs --no-verify
+    # (the repo's own hooks are not the init's), so the fence is here.
+    # Check 283.
+    local staged
+    while IFS= read -r staged; do
+        [[ "$staged" == *.enc.yaml || "$staged" == *.enc.json ]] || continue
+        [[ -f "$dir/$staged" ]] || continue          # a staged deletion
+        if ! grep -qE '^[[:space:]]*"?sops"?:' "$dir/$staged" \
+           || ! grep -qE '^[[:space:]]*"?mac"?:' "$dir/$staged"; then
+            die "$staged is staged under an encrypted name and carries no sops metadata: a CLEARTEXT secret was about to be committed. Encrypt it (sops_encrypt_repo) or remove it, then re-run the phase"
+        fi
+    done < <(git -C "$dir" diff --cached --name-only --diff-filter=AM)
     run_cmd git -C "$dir" commit -m "$msg" --no-verify
 }
 

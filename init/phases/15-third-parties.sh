@@ -707,8 +707,11 @@ EOF
     # VM was populated by copying, not by cloning). Defence in depth —
     # cheap and with no effect if it already exists:
     mkdir -p "$TOKENS_DIR"
-    mv "$SECRETS_TMP/tokens.yaml" "$TOKENS_DIR/tokens.enc.yaml"   # A5: mv first
-    sops_encrypt_repo "$TOKENS_DIR/tokens.enc.yaml"   # explicit --config (pattern A)
+    # encrypted in tmpfs under the destination's rule and moved in as
+    # ciphertext (2026-10-14): the same order as make_enc_secret, for the
+    # same reason (check 283). Explicit --config (pattern A) as before.
+    sops_encrypt_repo "$SECRETS_TMP/tokens.yaml" "$TOKENS_DIR/tokens.enc.yaml"
+    mv "$SECRETS_TMP/tokens.yaml" "$TOKENS_DIR/tokens.enc.yaml"
     gate "tokens-roundtrip" check_sops_roundtrip "$TOKENS_DIR/tokens.enc.yaml"
 else
     log_info "EDGE=local: tokens.enc.yaml is NOT written — its only reader is the tofu wrapper of the edge, and with no Cloudflare zone there is no tofu of the edge to apply"

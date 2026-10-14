@@ -12,8 +12,9 @@
 #    shape-checks of LENGTH only.
 #  - byte-preserving ALWAYS: kubectl --from-file, never stringData by
 #    hand (A6: 1 byte of folding broke a real HMAC).
-#  - SOPS: mv into the repo FIRST, encrypt AFTERWARDS (A5:
-#    path_regex) + a validation roundtrip ALWAYS.
+#  - SOPS: encrypted in tmpfs under the DESTINATION's rule (A5:
+#    path_regex, through --filename-override), moved into the repo
+#    only as ciphertext + a validation roundtrip ALWAYS.
 #  - shared credentials: ONE origin, derivation in the SAME process,
 #    an atomic commit (A27: a real 6-day mismatch).
 #  - irreplaceables (age, cosign, write key): a ceremony whose backup
@@ -78,9 +79,18 @@ sops_env() {
 # platform/'s .sops.yaml made explicit (path_regex resolves relative
 # to the config, not to the CWD). verify-static check 16 hunts down
 # any future sops -e that skips it.
-sops_encrypt_repo() {   # <file under platform/>
+sops_encrypt_repo() {   # <file> [<repo path whose rule applies>]
+    # Since 2026-10-14 the file may live OUTSIDE the repo (tmpfs) and be
+    # encrypted under the rule of the path it is BOUND FOR: sops matches
+    # path_regex against --filename-override instead of the file's own
+    # path. Until then the plaintext had to be moved into the repo first
+    # for the rule to match (A5), and a sops that failed between the mv
+    # and the encryption left a cleartext Secret under a *.enc.yaml name
+    # inside a git checkout, one `git add -A` away from GitHub (review of
+    # 2026-10-13, A-3). With one argument the file's own path is the
+    # rule's, as before. Check 283.
     sops_env
-    sops --config "$PLATFORM_DIR/.sops.yaml" -e --in-place "$1"
+    sops --config "$PLATFORM_DIR/.sops.yaml" --filename-override "${2:-$1}" -e --in-place "$1"
 }
 
 # ── store of ENCRYPTED persistence across runs ──────────────────────
@@ -329,7 +339,8 @@ derive_htpasswd_and_regcreds() {
 
 # ── packaging into an encrypted K8s Secret (KSOPS) ──────────────────
 # make_enc_secret: kubectl --from-file (data:, byte-preserving) →
-# mv to the REPO PATH → sops -e --in-place → validation ROUNDTRIP.
+# sops -e in tmpfs under the REPO PATH's rule → mv of the ciphertext
+# to the REPO PATH → validation ROUNDTRIP.
 # The order is rule A5/A6 encoded; there is no way to use it wrong.
 #   usage: make_enc_secret <name> <ns> <repo_dest.enc.yaml> \
 #          [--type <k8s-secret-type>] [--label k=v]... \
@@ -360,11 +371,18 @@ make_enc_secret() {
     for kv in "${annots[@]:-}"; do [[ -n "$kv" ]] && \
         kubectl annotate -f "$tmp_yaml" --local --dry-run=client -o yaml \
             "$kv" > "$tmp_yaml.n" && mv "$tmp_yaml.n" "$tmp_yaml"; done
-    # A5: FIRST into the repo (.sops.yaml's path_regex), THEN encrypt
-    # (through the helper with an explicit --config — pattern A of
-    # validation #3):
+    # A5 kept (the DESTINATION's rule, .sops.yaml's path_regex) and the
+    # order reversed on 2026-10-14: the plaintext is encrypted where it
+    # was born, in tmpfs, under the rule of the path it is bound for, and
+    # only the ciphertext is moved into the repo. Until then the
+    # plaintext was moved first and encrypted in place, so a sops that
+    # failed between the two (no key in the environment, a rule that did
+    # not match, a Ctrl-C) left a cleartext Secret under a *.enc.yaml
+    # name inside the checkout, and the next phase's `git add -A` would
+    # have carried it to GitHub (review of 2026-10-13, A-3; check 283).
+    mkdir -p "$(dirname "$dest")"
+    sops_encrypt_repo "$tmp_yaml" "$dest"
     mv "$tmp_yaml" "$dest"
-    sops_encrypt_repo "$dest"
     # roundtrip ALWAYS — validates rule and recipient without showing values:
     grep -q '^kind: Secret' < <(sops -d "$dest") \
         || die "SOPS roundtrip failed for $dest"

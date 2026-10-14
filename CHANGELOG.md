@@ -4,6 +4,27 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-10-14 — what the 2026-10-13 review found, closed one commit at a time
+
+A review of the product on 2026-10-13 (static, with no cluster: the suite
+and every tooth, shellcheck, the seed rendered and validated, the Kyverno
+CLI over synthetic pods, gitleaks, and a reading of the code behind each
+finding) left a list. Each item below is one commit with its check and its
+tooth. «Not yet run on a live instance» means exactly that, and each item
+says what an instance will have to do.
+
+- **A Secret is encrypted before it enters the platform repo.**
+  `make_enc_secret` and phase 15's token block used to move the plaintext
+  into the checkout and encrypt it in place, the only way `.sops.yaml`'s
+  `path_regex` would match; a sops that failed in between left a cleartext
+  Secret under a `*.enc.yaml` name, one `git add -A --no-verify` away from
+  GitHub. Now the file is encrypted in tmpfs under the destination's rule
+  (sops's `--filename-override`) and only the ciphertext is moved in; and
+  `git_commit_if_changes`, the door every phase's commit goes through,
+  refuses any staged `*.enc.yaml` or `*.enc.json` that carries no sops
+  metadata. Instances: nothing to do; the files already in the repo are
+  untouched. Not yet run on a live instance. Check 283.
+
 ## 2026-10-13 — the first signed build on a clean Ubuntu, and what it took
 
 The first full run of the series on a clean Ubuntu lab VM (2026-10-12 and
