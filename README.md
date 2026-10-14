@@ -44,19 +44,22 @@ está», quede cerrado y validado en una corrida.
 ![La consola: Projects, con los cinco proyectos de una instancia y el peor estado de cada sección al lado de su entrada](docs/assets/console-projects.png)
 
 Y esto es lo que dice el producto de sí mismo, tal cual salió el
-2026-10-13 sobre el commit `d30d41f` (sin clúster, en un contenedor
-limpio):
+2026-10-14 sobre el árbol del commit `8f41ae9` (sin clúster):
 
 ```
 $ aegis verify --profile both
-══ STATIC VERIFICATION: ALL PASS ══
-   profile cloudflare  291 checks, 0 not evaluated
-   profile local       291 checks, 0 not evaluated
+══ STATIC VERIFICATION: ALL PASS (297 checks, 1 not evaluated) ══
+   no check reads the profile yet (AEGIS_VERIFY_PROFILE): both profiles are one pass, run once as cloudflare — the second comes back the day a check reads it
 ```
 
-Cada uno de esos 291 checks lleva su *diente*: una mutación que demuestra
-que el check se pone rojo cuando debe. Los dientes también se corrieron:
-`aegis verify --teeth` recorre las 1.683 mutaciones en minutos.
+Un solo pase, y lo dice: mientras ningún check lea el perfil, correr los
+dos sería correr lo mismo dos veces. El check que no se evaluó es el que
+renderiza los charts fijados, y sólo corre con `--with-charts` porque
+pide cada chart a su repositorio. Cada uno de esos 298 checks lleva su
+*diente*: una mutación que demuestra que el check se pone rojo cuando
+debe. Los dientes también se corrieron: `aegis verify --teeth` recorre
+las 1.745 mutaciones en minutos (cinco de ellas, las de los charts,
+sólo con `--with-charts`).
 
 ## Lo que ya ha pasado, medido
 
@@ -80,7 +83,7 @@ Lo que hay hoy en el árbol, contado al escribir esta página:
 | | |
 |---|---|
 | 16 fases | `aegis init --list` |
-| 291 checks estáticos, 291 dientes | `aegis verify --list` |
+| 298 checks estáticos, 298 dientes | `aegis verify --list` |
 | 30 comandos | `aegis --help` |
 | 6 plantillas de aplicación | `seed/templates/` |
 | 31 Applications de ArgoCD en la semilla | `seed/platform/k8s/` |

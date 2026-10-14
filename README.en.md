@@ -43,18 +43,22 @@ and validated in a run.
 ![The console: Projects, with an instance's five projects and the worst state of each section beside its entry](docs/assets/console-projects.png)
 
 And this is what the product says about itself, as it came out on
-2026-10-13 at commit `d30d41f` (no cluster, in a clean container):
+2026-10-14 on the tree of commit `8f41ae9` (no cluster):
 
 ```
 $ aegis verify --profile both
-══ STATIC VERIFICATION: ALL PASS ══
-   profile cloudflare  291 checks, 0 not evaluated
-   profile local       291 checks, 0 not evaluated
+══ STATIC VERIFICATION: ALL PASS (297 checks, 1 not evaluated) ══
+   no check reads the profile yet (AEGIS_VERIFY_PROFILE): both profiles are one pass, run once as cloudflare — the second comes back the day a check reads it
 ```
 
-Each of those 291 checks carries its *tooth*: a mutation that proves the
-check turns red when it should. The teeth ran too: `aegis verify --teeth`
-walks the 1,683 mutations in minutes.
+One pass, and it says so: while no check reads the profile, running
+both would be running the same thing twice. The check that was not
+evaluated is the one that renders the pinned charts, which runs only
+under `--with-charts` because it fetches every chart from its
+repository. Each of those 298 checks carries its *tooth*: a mutation
+that proves the check turns red when it should. The teeth ran too:
+`aegis verify --teeth` walks the 1,745 mutations in minutes (five of
+them, the charts', only under `--with-charts`).
 
 ## What has already happened, measured
 
@@ -78,7 +82,7 @@ What is in the tree today, counted when this page was written:
 | | |
 |---|---|
 | 16 phases | `aegis init --list` |
-| 291 static checks, 291 teeth | `aegis verify --list` |
+| 298 static checks, 298 teeth | `aegis verify --list` |
 | 30 commands | `aegis --help` |
 | 6 application templates | `seed/templates/` |
 | 31 ArgoCD Applications in the seed | `seed/platform/k8s/` |
