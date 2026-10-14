@@ -20,9 +20,10 @@ in two the way v2 never was:
 
 - the **product** (`AEGIS_ROOT`) — this repo: `bin/` (the
   dispatcher), `libexec/` (one file per command), `lib/` (the shared
-  helpers, bash and python), `init/` (the orchestrator and its 15
-  idempotent phases), `verify/` (the verifier), `seed/` (what
-  ships). Read-only for the duration of a run.
+  helpers, bash and python), `init/` (the orchestrator and its
+  sixteen idempotent phases; `aegis init --list` counts them),
+  `verify/` (the verifier), `seed/` (what ships). Read-only for the
+  duration of a run.
 - the **instance** (`AEGIS_HOME`) — one machine's living state:
   `platform/` (the GitOps repo the init deploys), `.init-state/`,
   `.state-secrets/`, `aegis.conf`. Mutable.
@@ -216,10 +217,10 @@ cost an entire run.
 
 ```bash
 # The static suite (from the repo root):
-aegis verify                    # 118 checks; exit 0 = PASS
+aegis verify                    # every check (`--list` counts them); exit 0 = PASS
 aegis verify --with-charts      # + renders the real pinned charts
 aegis verify --only 079         # just one check
-aegis verify --teeth            # 243 teeth: mutate on purpose and
+aegis verify --teeth            # the teeth, one per check: mutate on purpose and
                                 # require the check to turn red
 aegis verify --harness          # the functional harnesses
 
@@ -297,4 +298,5 @@ the mould:
 
 *Last updated: 2026-07-24, at the close of VERSION 2. Translated to
 English and brought to the v3 tree on 2026-08-24; revised for the
-technical preview on 2026-08-28.*
+technical preview on 2026-08-28; the counts it used to hard-code were
+replaced by the commands that compute them on 2026-10-13.*
