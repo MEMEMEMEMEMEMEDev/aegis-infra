@@ -39,7 +39,14 @@ export AEGIS_ROOT
 source "$AEGIS_ROOT/lib/paths.sh"
 
 RUNS="$AEGIS_STATE_DIR/runs"
-mkdir -p "$RUNS"
+# The dossier carries the WHOLE run, stderr included — whatever any tool
+# printed, the tofu wrapper's redaction notwithstanding — so it is born
+# 0600 in a 0700 dir whatever the operator's umask. Until 2026-10-14
+# script(1) created it under the default umask: 0644 in a 0755 dir,
+# readable by every account on the host (review of 2026-10-13, A-9).
+# Only the dossier: the init itself runs with the operator's umask, as
+# it does without this wrapper. Check 287.
+mkdir -p "$RUNS"; chmod 700 "$RUNS"
 
 usage() { sed -n '/^# aegis-help:/,/^$/p' "$0" | sed 's/^# \?//;1d'; cat "$AEGIS_ROOT/share/exit-codes.txt"; }
 for a in "$@"; do case "$a" in -h|--help) usage; exit 0 ;; esac; done
@@ -63,6 +70,7 @@ printf 'dossier: %s\n' "$LOG"
 # command. printf %q builds the command proof against spaces in the
 # args.
 CMD="$(printf '%q ' "$AEGIS_ROOT/libexec/aegis-init" "$@")"
+( umask 077; : > "$LOG" )   # born 0600: script(1) truncates it and keeps the mode
 if script -qefc "$CMD" "$LOG"; then
     printf 'dossier: %s (rc 0)\n' "$LOG"
 else

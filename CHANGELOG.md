@@ -72,6 +72,15 @@ says what an instance will have to do.
   bundle is staged in `/dev/shm`, shredded on every way out, with INT/TERM
   trapped as well as EXIT. Instances: nothing to do; `~/aegis/.staging`
   appears on the next backup. Not yet run on a live instance. Check 286.
+- **The dossier of a run is born readable by its owner only.** `aegis
+  init-log` keeps the whole run, stderr included, under
+  `.init-state/runs/`; script(1) created that file under the operator's
+  umask, 0644 in a 0755 directory, readable by every account on the host.
+  The runs directory is now 0700 and the dossier is created 0600 before
+  script(1) writes it; the init itself keeps the operator's umask.
+  Instances: the next `aegis init-log` tightens the runs directory; the
+  dossiers already there keep their mode (`chmod 600` them by hand if the
+  host has other accounts). Not yet run on a live instance. Check 287.
 
 ## 2026-10-13 — the first signed build on a clean Ubuntu, and what it took
 
