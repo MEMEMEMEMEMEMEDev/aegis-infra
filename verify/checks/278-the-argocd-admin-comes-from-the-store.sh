@@ -3,6 +3,7 @@
 check() {
 D278=""
 [[ -f "$AEGIS_ROOT/verify/checks/278.py" ]] || { fail "check 278 has no sidecar"; return; }
+need_tool sops age-keygen || return
 OUT278="$(python3 "$AEGIS_ROOT/verify/checks/278.py" "$AEGIS_ROOT" 2>&1)"
 RC278=$?
 (( RC278 == 0 )) || { fail "the exercise of check 278 itself failed (rc $RC278): ${OUT278:0:200}"; return; }

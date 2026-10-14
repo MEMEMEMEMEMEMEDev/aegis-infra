@@ -60,6 +60,22 @@ body_of() { awk -v fn="$1" 'index($0, fn "()")==1,/^\}/' "$2"; }
 # body_nc: the body, without comments (the most frequent combination).
 body_nc() { body_of "$1" "$2" | grep -vE '^[[:space:]]*#'; }
 
+# ── the instrument itself ────────────────────────────────────────────
+# need_tool TOOL... — a check that DRIVES a real tool (sops, age, script)
+# has no instrument without it, and that is the third outcome, by name,
+# not a red about the artifact. Until 2026-10-14 each driver pushed «not
+# on this machine» as a finding, which read as the product being wrong
+# on a host that merely lacked sops (review of 2026-10-13, 4B-8, M-7).
+# Used as `need_tool sops age-keygen || return`: it emits the skip, so
+# the caller only returns.
+need_tool() {
+    local t missing=()
+    for t in "$@"; do command -v "$t" >/dev/null 2>&1 || missing+=("$t"); done
+    [[ ${#missing[@]} -eq 0 ]] && return 0
+    skip "${missing[*]} not installed here: this check drives it, and without it nothing was measured"
+    return 1
+}
+
 # ── where each thing is ──────────────────────────────────────────────
 # A check does NOT recompute paths: it receives them. (The same principle
 # as lib/paths.sh for the product.)

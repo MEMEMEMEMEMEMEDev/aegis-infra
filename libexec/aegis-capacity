@@ -48,7 +48,14 @@ PLANS = os.path.join(str(paths.aegis_home()), "platform", "plans.yaml")
 
 
 def _kubectl(args):
-    r = subprocess.run(["kubectl", *args], capture_output=True, text=True)
+    # A host with no kubectl is a machine nobody could ask, the same
+    # third outcome as an apiserver that does not answer: until
+    # 2026-10-14 it was a FileNotFoundError traceback and no document
+    # (review of 2026-10-13, M-7).
+    try:
+        r = subprocess.run(["kubectl", *args], capture_output=True, text=True)
+    except OSError as e:
+        raise RuntimeError(f"kubectl is not installed ({e.strerror or e})") from None
     if r.returncode != 0:
         raise RuntimeError((r.stderr or "kubectl did not answer").strip()[:200])
     return r.stdout

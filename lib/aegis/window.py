@@ -1034,7 +1034,15 @@ class Restore:
 
 
 def _kubectl(*args, timeout=60):
-    r = subprocess.run(["kubectl", *args], capture_output=True, text=True, timeout=timeout)
+    """rc, stdout, stderr. A host with no kubectl answers like a cluster
+    nobody could ask (rc 127, the reason on stderr): every caller already
+    reads a non-zero rc as «nobody could ask», and until 2026-10-14 a
+    missing binary was a FileNotFoundError traceback in the middle of
+    `aegis update metrics` instead (review of 2026-10-13, M-7)."""
+    try:
+        r = subprocess.run(["kubectl", *args], capture_output=True, text=True, timeout=timeout)
+    except OSError as e:
+        return 127, "", f"kubectl is not installed ({e.strerror or e})"
     return r.returncode, (r.stdout or "").strip(), (r.stderr or "").strip()
 
 

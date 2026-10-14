@@ -26,6 +26,16 @@
 #      artifact
 #
 # Why there is no `pipefail` here is written down in verify/lib.sh.
+#
+# THE TOOLS THE SUITE DRIVES. Most checks read the tree; a few drive the
+# real thing over a throwaway key or a sandbox instance, and need it on
+# PATH: python3 with yaml, jq, git; sops, age and age-keygen (277, 278,
+# 283-286); openssl (284); shred (277, 286); script(1) (287); helm only
+# under --with-charts (288). kubectl is NOT required: the commands that
+# ask the cluster declare «kubectl is not installed» as not-evaluable
+# (289). A check whose tool is missing SKIPS by name (lib.sh need_tool),
+# and the list below is printed at the start so the skip is expected
+# and not discovered at the end.
 
 set -u
 
@@ -119,6 +129,16 @@ profile_aware() {
 if [[ ${#PROFILE_LIST[@]} -gt 1 ]] && ! profile_aware; then
     PROFILE_LIST=(cloudflare)
     PROFILE_NOTICE="no check reads the profile yet (AEGIS_VERIFY_PROFILE): both profiles are one pass, run once as cloudflare — the second comes back the day a check reads it"
+fi
+
+# the tools, said at the start: a skip at the end is a surprise, a
+# missing tool at the start is a fact
+SUITE_TOOLS=(python3 jq git sops age age-keygen openssl shred script)
+$WITH_CHARTS && SUITE_TOOLS+=(helm)
+_missing_tools=()
+for _t in "${SUITE_TOOLS[@]}"; do command -v "$_t" >/dev/null 2>&1 || _missing_tools+=("$_t"); done
+if [[ ${#_missing_tools[@]} -gt 0 ]] && ! $DO_LIST; then
+    printf '\033[1;33mtools not installed here: %s — the checks that drive them will skip, by name\033[0m\n' "${_missing_tools[*]}" >&2
 fi
 
 # Hygiene: __pycache__ is GENERATED state, not artifact, and it was the
