@@ -35,6 +35,11 @@ import time
 import uuid
 
 ROOT = os.path.abspath(sys.argv[1])
+# the instance's variables never reach the sandbox: the verifier runs with
+# the operator's AEGIS_* exported, and a driver that inherits them writes
+# into the live instance (a gates.jsonl under ~/aegis, 2026-10-14)
+_clean = {k: v for k, v in os.environ.items()
+          if not (k.startswith("AEGIS_") or k in ("PLATFORM_DIR", "SOPS_AGE_KEY_FILE", "AGE_PUBLIC"))}
 findings = []
 scope = []
 
@@ -161,7 +166,7 @@ else:
     with tempfile.TemporaryDirectory() as tmp:
         home = os.path.join(tmp, "home")
         os.makedirs(home)
-        env = dict(os.environ, HOME=home, AEGIS_ROOT=ROOT, AEGIS_HOME=home, CHECK_MODE="false",
+        env = dict(_clean, HOME=home, AEGIS_ROOT=ROOT, AEGIS_HOME=home, CHECK_MODE="false",
                    AEGIS_NONINTERACTIVE="false", AEGIS_PHASE="probe-285")
         # the tmpfs dir of the run is reported first; the probe key is the token;
         # `good` is a validator that passes only if the copy was there to read:

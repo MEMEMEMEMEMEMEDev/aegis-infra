@@ -32,6 +32,11 @@ import sys
 import tempfile
 
 ROOT = os.path.abspath(sys.argv[1])
+# the instance's variables never reach the sandbox: the verifier runs with
+# the operator's AEGIS_* exported, and a driver that inherits them writes
+# into the live instance (a gates.jsonl under ~/aegis, 2026-10-14)
+_clean = {k: v for k, v in os.environ.items()
+          if not (k.startswith("AEGIS_") or k in ("PLATFORM_DIR", "SOPS_AGE_KEY_FILE", "AGE_PUBLIC"))}
 findings = []
 scope = []
 LIBS = ("lib/common.sh", "lib/secrets.sh", "lib/jenkins.sh", "lib/checks.sh", "lib/config.sh")
@@ -115,7 +120,7 @@ if all(shutil.which(t) for t in ("sops", "age-keygen", "openssl")):
             with open(os.path.join(d, "openssl"), "w") as f:
                 f.write(body)
             os.chmod(os.path.join(d, "openssl"), 0o755)
-        env = dict(os.environ, HOME=home, AEGIS_ROOT=ROOT, AEGIS_HOME=home, STATE_SECRETS=store,
+        env = dict(_clean, HOME=home, AEGIS_ROOT=ROOT, AEGIS_HOME=home, STATE_SECRETS=store,
                    SOPS_AGE_KEY_FILE=key, AGE_PUBLIC=recipient, CHECK_MODE="false",
                    AEGIS_NONINTERACTIVE="false", REAL_OPENSSL=shutil.which("openssl"))
         preamble = ('set -euo pipefail; source "$AEGIS_ROOT/lib/common.sh"; '

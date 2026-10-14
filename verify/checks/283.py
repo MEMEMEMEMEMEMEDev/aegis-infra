@@ -38,6 +38,11 @@ import sys
 import tempfile
 
 ROOT = os.path.abspath(sys.argv[1])
+# the instance's variables never reach the sandbox: the verifier runs with
+# the operator's AEGIS_* exported, and a driver that inherits them writes
+# into the live instance (a gates.jsonl under ~/aegis, 2026-10-14)
+_clean = {k: v for k, v in os.environ.items()
+          if not (k.startswith("AEGIS_") or k in ("PLATFORM_DIR", "SOPS_AGE_KEY_FILE", "AGE_PUBLIC"))}
 findings = []
 scope = []
 
@@ -171,7 +176,7 @@ if all(shutil.which(t) for t in ("sops", "age-keygen", "git")):
         subprocess.run(["git", "-C", plat, "config", "user.email", "probe@example.invalid"], check=True)
         subprocess.run(["git", "-C", plat, "config", "user.name", "probe"], check=True)
         dest = os.path.join(plat, "k8s", "base", "x", "secret-demo.enc.yaml")
-        env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"], HOME=home,
+        env = dict(_clean, PATH=bindir + os.pathsep + os.environ["PATH"], HOME=home,
                    AEGIS_ROOT=ROOT, AEGIS_HOME=home, PLATFORM_DIR=plat, SOPS_AGE_KEY_FILE=key,
                    CHECK_MODE="false", AEGIS_NONINTERACTIVE="false", REAL_SOPS=shutil.which("sops"),
                    PROBE_VALUE=VALUE, PROBE_DEST=dest)
