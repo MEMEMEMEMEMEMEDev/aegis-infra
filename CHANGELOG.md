@@ -4,6 +4,125 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-10-13 — the first signed build on a clean Ubuntu, and what it took
+
+The first full run of the series on a clean Ubuntu lab VM (2026-10-12 and
+13) reached phase 80 and stopped there four times. Each stop
+is a fix in the product, each fix has its check, and none of them asks a
+live instance for anything but `git pull` and `aegis seed apply`.
+
+- **The exploited-in-the-wild list ages from the day it was fetched**, not
+  from CISA's last release. A list fetched that minute read as «5 days
+  old: no debt credit», every HIGH inside its window was blocked, and five
+  bases (golang and alpine among them) were held at the door. Both writers
+  (the mirror's fetch and the watch's morning fetch) now stamp
+  `fetched=<UTC day>`; `verdict.sh` and the ledger age the copy from it.
+  Instances: the next `image-watch` morning writes the stamp; nothing to do
+  by hand. Checks 255 and 267.
+- **Phase 80 says why the canary keeps its public bases** instead of
+  ending «FAILED» with nothing else: a bare `_GOLANG="$(…)"` under `set -e`
+  made the warning unreachable. Check 282.
+- **A resumed phase 80 repoints a canary it already repointed**: the
+  pattern only matched `FROM docker.io/library/golang:`, so after a pin
+  moved the canary kept the old digest while the log said «repointed». The
+  pattern takes any registry path. Check 282.
+- **golang 1.26.6 → 1.26.9** in `mirror-images/images.txt`: the canary's
+  first signed build carried three HIGH of the 1.26.6 stdlib, fixed in
+  1.26.9. Instances: `aegis image request` brings the new digest; apps on
+  `__FROM_GOLANG__` get it on their next `aegis org apply`.
+- **CI installs age and sops** at the seed's pins: checks 277 and 278 drive
+  a real sops and age over a throwaway key and were a FAIL, not a skip,
+  on the first push that carried them.
+- **Check 264 records gh's session too**: a machine without a `gh` login
+  (the public CI) stopped `app apply` before the order the check measures.
+
+## 2026-10-12 — a failed webhook delivery is re-delivered, and the lab VMs verify green
+
+- **Phase 35 re-delivers a failed ArgoCD hook delivery** the way phase 60
+  already did, through one helper (`lib/access.sh`'s `hook_delivery_2xx`):
+  a 2xx passes, a 400 stops at once, in flight is waited for, anything
+  else is re-delivered at most once a minute, and only a delivery NEWER
+  than the one the phase marked counts (an old 2xx from a previous run
+  proved nothing). Found on that VM: a 502 four seconds after
+  cloudflared connected, then 180 s polling a dead delivery. Checks 281
+  and 067.
+- **The verifier on a lab VM**: a login named after the product (`aegis`)
+  names no person, so check 117 is no longer the one red of every lab
+  verify; check 120 recognises a home by its shape (`/home/<anyone but
+  operator>`, `/Users/<x>`, the dash-encoded scratchpad form) whoever runs
+  it, and the synthetic `security-vulns` console case no longer carries a
+  lab owner; checks 260 and 272 read what only their `npm` run proved, so
+  their teeth bite on a host without npm too.
+
+## 2026-10-10 — four things a live instance wants to know
+
+- **The edge's plaintext state does not outlive the wrapper call.**
+  `terraform.tfstate` and its `.backup` had sat in `envs/cloudflare-tunnel`
+  since 2026-09-25 with the tunnel token in the clear (measured on the
+  home instance, 2026-10-09). `tofu-apply.sh` now shreds the plaintext and
+  every backup once the encrypted copy is proven to hold the same state;
+  `aegis destroy`, `aegis state` and `aegis rotate` read the encrypted
+  copy. Instances: `aegis seed apply tofu/tofu-apply.sh`, then any
+  `tofu-apply.sh` call shreds what is lying there. Check 277.
+- **The ArgoCD admin password comes from the store, not the installer**
+  (#86). A new instance used to be born with the password
+  `argocd-initial-admin-secret` carried: outside the store, unmeasurable by
+  `aegis rotate check`, absent from a state backup. Phase 30 now generates
+  it with `gen_or_restore`, hashes it through htpasswd's stdin and patches
+  `argocd-secret` only when the annotation says it holds another one;
+  phase 35 logs in through the edge to prove it. Instances: `aegis init
+  --only 30` once (sessions are closed by the new `passwordMtime`), and
+  the password is read from the store from then on
+  (`docs/OPERATE.md`). Check 278.
+- **Traefik buffers bodies in a volume with a ceiling.** Orphaned
+  `temp-multibuf-*` files piled up to 9.7 GB on the home instance's system
+  disk. `TMPDIR` now points at `/buffer`, an emptyDir with `sizeLimit:
+  2Gi`: past it the kubelet evicts that replica instead of the disk
+  filling. Instances: `aegis seed apply k8s/base/ingress/traefik/values.yaml`
+  and a sync of traefik. Check 279.
+- **The node defends its disk again.** `eviction-hard` is one map, and a
+  kubelet given only `memory.available` switched its disk thresholds off
+  on every host since 2026-09-10. The drop-in writes the memory margin
+  plus the kubelet's documented disk defaults; phase 20 asks the running
+  kubelet; `DiscoDelNodoPorLlenarse` warns at 20 % free. Instances: `aegis
+  init --only 20` rewrites the drop-in and restarts k3s. Check 280.
+
+## 2026-10-07 — the books keep their clocks, and a git that cannot answer refuses
+
+- **The ledger**: an image not looked at one morning keeps its first-seen
+  clocks as comment lines, so a dateless window never restarts after a bad
+  morning; an image the verdict stops says the block's reason, not the
+  summary line; an app's events carry the merged findings, not the
+  excused scan's. Checks 267 and 269.
+- **`tofu-apply.sh`** keeps tofu's errors on stderr and the plan on stdout,
+  each through the same value redactor. Check 273.
+- **`aegis update` and `aegis app apply`**: a git that asks for credentials
+  or hangs is a refusal (`GitTrouble`), not a two-minute wait and a
+  traceback. Check 266.
+- **`aegis seed apply` brings over an instance-owned file the instance
+  lacks**: an older instance never got `vuln-policy/kev.txt`, so the three
+  files it did get would have left the Application unable to render.
+  Instances older than 2026-10-02: `aegis seed diff` now lists it; `aegis
+  seed apply` brings it. Check 225.
+
+## 2026-10-02 — after the vulnerability clock: four fixes from the first runs of the series
+
+- **The round reads each multibranch job inside its own block**: with
+  `AI=no` the empty `ai-gateway-mb` repo made «every push built» judge
+  the wrong job, and every instance without AI turned red the day it got
+  its first app. Check 276.
+- **`--help` after a verb is help, and writes nothing**: `aegis state
+  backup --help` used to write a real age bundle to a file named
+  `--help`. Check 275.
+- **A Jenkinsfile's `def` does not shadow a loop variable Groovy already
+  holds** (image-watch died at its first step on the Arch lab VM); check 274
+  compiles that rule over every Jenkinsfile of the seed.
+- **An app inherits its base's scan exceptions on the layers it inherits,
+  and only there**: a CVE excused at the mirror came out OVERDUE in the
+  app that stands on that base. Checks 267 and 269.
+- **Four teeth that had stopped biting** (100, 169, 189, 200), found by
+  the first full teeth run of the series, re-aimed.
+
 ## 2026-10-02 — a known vulnerability costs a date, not a red build
 
 Until now every scan had one answer: a fixable CRITICAL or HIGH stops.
