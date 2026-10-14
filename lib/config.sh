@@ -11,6 +11,7 @@
 #     explanation + inferred default + immediate validation, shows the
 #     summary, confirms, and WRITES the .conf.
 set -euo pipefail
+shopt -s inherit_errexit   # errexit reaches $( ) too; the why is in common.sh (check 284)
 
 CONF_FILE="$AEGIS_HOME/aegis.conf"
 

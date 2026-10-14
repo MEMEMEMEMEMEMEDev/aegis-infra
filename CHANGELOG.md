@@ -24,6 +24,18 @@ says what an instance will have to do.
   refuses any staged `*.enc.yaml` or `*.enc.json` that carries no sops
   metadata. Instances: nothing to do; the files already in the repo are
   untouched. Not yet run on a live instance. Check 283.
+- **A secret that fails to generate stops the init.** bash turns `errexit`
+  off inside a command substitution, and every generator runs inside one:
+  a failing `openssl` in `gen_hex32` used to return the path of a 0-byte
+  file that `persist_secret` encrypted, roundtripped and kept, and the
+  store restored that empty HMAC on every re-run. Every lib that sets
+  `errexit` now sets `inherit_errexit` with it, each generator checks the
+  size of what it produced, and the store refuses empty material.
+  Instances: nothing to do. The option makes a `$( )` die where its parent
+  would, so a latent failure the init used to shrug off can now stop a
+  phase where it happens: that is the point, and the reason this one is
+  owed a full run before it is called done. Not yet run on a live
+  instance. Check 284.
 
 ## 2026-10-13 — the first signed build on a clean Ubuntu, and what it took
 

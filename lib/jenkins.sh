@@ -11,6 +11,7 @@
 # matters is the precondition, and it is stated in the code below.
 
 set -euo pipefail
+shopt -s inherit_errexit   # errexit reaches $( ) too; the why is in common.sh (check 284)
 
 # ── how a job is ADDRESSED ──────────────────────────────────────────
 # Jenkins nests items by repeating /job/: the main branch of the

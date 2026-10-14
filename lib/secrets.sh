@@ -23,6 +23,7 @@
 #  - transient material ONLY in tmpfs (/dev/shm) with shred on exit.
 
 set -euo pipefail
+shopt -s inherit_errexit   # errexit reaches $( ) too; the why is in common.sh (check 284)
 
 # ── ephemeral work area ─────────────────────────────────────────────
 # secrets_workdir: per-phase tmpfs, chmod 700, destroyed with shred in
@@ -108,6 +109,10 @@ STATE_SECRETS="${AEGIS_HOME}/.state-secrets"
 persist_secret() {   # persist_secret <name> <file-in-tmpfs>
     local name="$1" src="$2"
     sops_env
+    # Empty material is a failed generator, never a secret: persisted, it
+    # would be restored on every re-run and registered with every third
+    # party (review of 2026-10-13, A-4; check 284).
+    [[ -s "$src" ]] || die "persist of $name refused: the material is EMPTY — the generator failed; nothing was written to the store"
     : "${AGE_PUBLIC:?persist_secret needs AGE_PUBLIC (phase 10+)}"
     mkdir -p "$STATE_SECRETS"; chmod 700 "$STATE_SECRETS"
     # the store's OWN explicit config: without it, sops looks for a
@@ -225,6 +230,17 @@ gen_or_restore_keypair() {   # <name> <comment>
 # path. It NEVER prints the value. The length is reported with wc -c
 # (an allowed shape-check: length only).
 
+# _gen_guard <path> <min-bytes> <label> — a generator that produced less
+# than it must is a failure, never a secret: a 0-byte HMAC would be
+# persisted, encrypted, roundtripped and registered with GitHub, and
+# every delivery would fail with a 400 nobody could explain (review of
+# 2026-10-13, A-4). Length only: the value is never read. Check 284.
+_gen_guard() {
+    local path="$1" min="$2" label="$3" n
+    n="$(wc -c < "$path" 2>/dev/null || echo 0)"
+    (( n >= min )) || die "generation of $label produced $n bytes (at least $min expected) — the generator failed; nothing is persisted"
+}
+
 gen_hex32() {           # webhook HMACs (ArgoCD, Jenkins) — 32 bytes hex
     local out="$SECRETS_TMP/$1"
     # run #12 (the root bug of phase 60): `openssl rand -hex 32 > out`
@@ -233,6 +249,7 @@ gen_hex32() {           # webhook HMACs (ArgoCD, Jenkins) — 32 bytes hex
     # differ by ONE byte → different signatures → a deterministic 400
     # on EVERY delivery. tr -d '\n' = byte-identical on both sides:
     openssl rand -hex 32 | tr -d '\n' > "$out"
+    _gen_guard "$out" 64 "$1"
     log_info "generated $1 ($(wc -c < "$out") bytes)"
     printf '%s' "$out"
 }
@@ -251,6 +268,7 @@ assert_no_newline() {
 gen_password_b64() {    # random passwords (htpasswd, jenkins-admin)
     local out="$SECRETS_TMP/$1"
     openssl rand -base64 32 | tr -d '\n' > "$out"
+    _gen_guard "$out" 44 "$1"
     log_info "generated $1 ($(wc -c < "$out") bytes)"
     printf '%s' "$out"
 }
@@ -259,6 +277,8 @@ gen_ssh_keypair() {     # deploy keys — ed25519 with no passphrase
     local name="$1" comment="$2"
     ssh-keygen -t ed25519 -N "" -C "$comment" -f "$SECRETS_TMP/$name" \
         -q
+    _gen_guard "$SECRETS_TMP/$name" 1 "$name"
+    _gen_guard "$SECRETS_TMP/$name.pub" 1 "$name.pub"
     log_info "keypair $name generated (pub: $(cut -d' ' -f1,2 \
         < "$SECRETS_TMP/$name.pub" | head -c 40)...)"
     printf '%s' "$SECRETS_TMP/$name"     # private; public in .pub
@@ -271,6 +291,7 @@ gen_age_key() {         # THE root of trust
     # with the official tool: AGE_PUBLIC="$(age-keygen -y "$path")".
     local out="$SECRETS_TMP/age.key"
     age-keygen -o "$out" 2>/dev/null
+    _gen_guard "$out" 1 age.key
     log_info "age key generated in tmpfs"
     printf '%s' "$out"
 }

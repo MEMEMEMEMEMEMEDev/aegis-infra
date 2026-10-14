@@ -4,6 +4,7 @@
 # (gates demand evidence, not "looks like it").
 
 set -euo pipefail
+shopt -s inherit_errexit   # errexit reaches $( ) too; the why is in common.sh (check 284)
 
 # ── binaries ────────────────────────────────────────────────────────
 # Userland pins in platform/ansible/inventory/group_vars/all.yml

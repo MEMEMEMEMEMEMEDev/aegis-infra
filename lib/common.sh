@@ -5,6 +5,13 @@
 # visible exit code); GREEN/YELLOW/RED levels as gate functions.
 
 set -euo pipefail
+# A command substitution does not inherit errexit by default: inside
+# `out="$(gen_hex32 x)"` a failing openssl was shrugged off, the function
+# went on to log «generated (0 bytes)» and return the path of an EMPTY
+# file, and persist_secret encrypted it, roundtrip and all (review of
+# 2026-10-13, A-4). inherit_errexit makes `$( )` die where the parent
+# would. Every lib that sets errexit sets this with it; check 284.
+shopt -s inherit_errexit
 
 : "${AEGIS_ROOT:?common.sh requires AEGIS_ROOT (the PRODUCT). bin/aegis exports it; a libexec invoked by hand resolves it with readlink -f of its own path}"
 
