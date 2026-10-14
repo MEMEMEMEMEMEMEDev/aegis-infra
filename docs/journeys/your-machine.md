@@ -20,7 +20,7 @@ the product.
 | thing | why |
 |---|---|
 | **Cloudflare Zero Trust switched on** in that account (once, free): https://one.dash.cloudflare.com/ → choose a team domain → Zero Trust Free. aegis puts the operator consoles behind Access, and a brand new account has it dormant | phase 25 refuses before it creates anything if it is off |
-| Ubuntu (24.04 or newer; any other system is refused by `aegis preflight` before it touches anything), a user with sudo, ~30 GB free on `/`, a GPU whose driver answers `nvidia-smi` | phase 00 measures all four and stops before anything runs if one is missing. The driver is the operating system's: `sudo ubuntu-drivers install`, reboot. |
+| Ubuntu (24.04 or newer; any other system is refused by `aegis preflight` before it touches anything), a user with sudo, 25 GB free on `/` (the floor `aegis host requires` enforces), a GPU whose driver answers `nvidia-smi` | phase 00 measures all four and stops before anything runs if one is missing. The driver is the operating system's: `sudo ubuntu-drivers install`, reboot. |
 | a zone in Cloudflare (`example.com` you control), its **Account ID** and **Zone ID** | the edge: a tunnel, DNS records, Access in front of the operator consoles. Both IDs are on the zone's overview page; they are not secrets. |
 | a **Cloudflare master credential**, pasted ONCE in phase 15 and destroyed in tmpfs | the init mints its own scoped tokens from it (DNS, API, Access) so that nothing long-lived carries the master. Global API Key, or an account token with *Account API Tokens: Edit*. |
 | `gh auth login` with `repo` and `delete_repo` | the init creates two repositories in your account (the platform repo and a canary app) and registers deploy keys and webhooks. There is no separate token: the init uses your `gh` session. |
@@ -72,7 +72,7 @@ each one proves:
 | 40 registry | the internal registry with TLS from day one | a push and a pull |
 | 50 jenkins | the CI, jobs as code, the tooling image built | the first green build |
 | 60 webhook | a push reaches Jenkins, end to end | a delivery with a 2xx |
-| 70 deploy-auto | the canary tenant and the image updater | the canary serves |
+| 70 deploy-auto | the canary tenant; the pipeline writes the digest and ArgoCD deploys it | the canary serves |
 | 80 supply chain | mirrors, **the bases aegis owns (each run as a pod before it is signed)**, cosign, Kyverno Enforce last | an unsigned image refused, a signed one admitted |
 | 85 observability | metrics, logs, alerts, the heartbeat to your phone | the heartbeat arrives |
 | 87 ai | the gateway, the engines on your card | the engines reach zero when the mode is closed (that is the proof) |
