@@ -71,9 +71,25 @@ esac
 OUT="${1:-$BACKUPS/platform/aegis-state-$(date +%Y%m%d-%H%M%S).age}"
 mkdir -p "$(dirname "$OUT")"
 
-# ── collect ONLY what exists (a pre-phase-25 backup has no tfstate) ──
-STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
+# ── the staging lives in tmpfs and is SHREDDED on every way out ────────
+# The payload is small: the store's ciphertext, the init's trail and the
+# edge's encrypted state (or a plaintext one, from an instance before
+# #46). Until 2026-10-14 it went to `mktemp -d` under /tmp — on disk —,
+# left with a plain rm -rf that keeps the blocks, and only on EXIT
+# (review of 2026-10-13, A-9). The roundtrip's copy lives inside it, so
+# the same cleanup takes both. Check 286.
 umask 077
+SHM=/dev/shm; [[ -d "$SHM" && -w "$SHM" ]] || SHM="${TMPDIR:-/tmp}"
+STAGE="$(mktemp -d "$SHM/aegis-state.XXXXXX")"
+stage_cleanup() {
+  [[ -n "${STAGE:-}" && -d "$STAGE" ]] || return 0
+  find "$STAGE" -type f -exec shred -u {} \;
+  rm -rf "$STAGE"
+}
+trap 'stage_cleanup; exit 130' INT TERM
+trap 'stage_cleanup' EXIT
+
+# ── collect ONLY what exists (a pre-phase-25 backup has no tfstate) ──
 PAY="$STAGE/payload"; mkdir -p "$PAY"
 MANIFEST="$PAY/MANIFEST.txt"; : > "$MANIFEST"
 
@@ -114,14 +130,13 @@ say "age-encrypted bundle → $OUT ($(wc -c <"$OUT") bytes)"
 # key is absent the bundle is still PRODUCED but marked NOT-VERIFIED, loudly
 # — W-09's gate requires the verification.
 if [[ -f "$KEY" ]]; then
-  VER="$(mktemp -d)"; VPAY="$VER/payload"; mkdir -p "$VPAY"
+  VER="$STAGE/verify"; VPAY="$VER/payload"; mkdir -p "$VPAY"
   age -d -i "$KEY" "$OUT" | tar -C "$VPAY" -xzf -
   if diff -r "$PAY" "$VPAY" >/dev/null 2>&1; then
     say "ROUNDTRIP OK — the bundle decrypts and reproduces the states byte for byte (a proven restore)"
   else
-    rm -rf "$VER"; die "ROUNDTRIP FAILED — the bundle does NOT reproduce the states; do NOT trust this backup"
+    die "ROUNDTRIP FAILED — the bundle does NOT reproduce the states; do NOT trust this backup"
   fi
-  rm -rf "$VER"
 else
   say "WARN: no private age key ($KEY) — bundle produced but NOT VERIFIED (recovery with no proof of restore)"
 fi

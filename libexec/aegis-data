@@ -136,6 +136,7 @@ import os
 import re
 import secrets as onetime
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -180,6 +181,71 @@ if not sys.stdout.isatty():
 def die(msg):
     print(f"{red}✗{reset} {msg}", file=sys.stderr)
     sys.exit(1)
+
+
+# ── plaintext that must not outlive the call ─────────────────────────
+# The dumps of every database, the bundle a restore unpacks and the copy
+# a remote restore downloads are staged in the clear. Until 2026-10-14
+# they went to mkdtemp() under /tmp and left through rmtree in a
+# `finally`: a TERM (a stopped timer, a closed terminal) runs no `finally`
+# in Python, so the plaintext of every database stayed under /tmp until
+# someone noticed, and an rmtree frees the blocks without overwriting
+# them (review of 2026-10-13, A-9). Three things, each on its own:
+#   · the staging is born 0700 under the instance (.staging/), never under
+#     /tmp. The instance's disk already holds the live data, and the
+#     backups' disk holds ciphertext only — a dump must not be the first
+#     plaintext on it. Not /dev/shm: a dump can be larger than the RAM
+#     (the store's single secret, in store_write, does go there);
+#   · what is staged is overwritten before it is unlinked (one pass: on
+#     disk it defeats a grep over free blocks; on tmpfs it is moot);
+#   · TERM and HUP become SystemExit (arm_signals, from main), so every
+#     `finally` runs the way it does on a Ctrl-C.
+# Check 286.
+STAGING_ROOT = os.path.join(str(paths.aegis_home()), ".staging")
+
+
+def staging_dir(prefix):
+    """A 0700 directory under the instance for plaintext of this call."""
+    os.makedirs(STAGING_ROOT, mode=0o700, exist_ok=True)
+    os.chmod(STAGING_ROOT, 0o700)
+    return tempfile.mkdtemp(prefix=prefix, dir=STAGING_ROOT)
+
+
+def shred_tree(path):
+    """Overwrite every regular file in `path` once, unlink it, drop the tree."""
+    for base, dirs, files in os.walk(path, topdown=False):
+        for f in files:
+            q = os.path.join(base, f)
+            try:
+                if not os.path.islink(q):
+                    n = os.path.getsize(q)
+                    with open(q, "r+b") as fh:
+                        left = n
+                        while left > 0:
+                            k = min(left, 1 << 20)
+                            fh.write(b"\0" * k)
+                            left -= k
+                        fh.flush()
+                        os.fsync(fh.fileno())
+                os.unlink(q)
+            except OSError:
+                pass
+        for d in dirs:
+            try:
+                os.rmdir(os.path.join(base, d))
+            except OSError:
+                pass
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def _signal_exit(signum, _frame):
+    raise SystemExit(128 + signum)
+
+
+def arm_signals():
+    """TERM and HUP run the `finally` blocks, as a Ctrl-C already does."""
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, _signal_exit)
 
 
 # ── the destination: that it be the disk we believe ─────────────────
@@ -1339,7 +1405,7 @@ def write_readme(root, expected, done_orgs, stamp):
 
 
 def capture_org(org, databases, mongos, buckets, out, remote=True):
-    stage = tempfile.mkdtemp(prefix="aegis-resp-")
+    stage = staging_dir("aegis-resp-")
     pay = os.path.join(stage, "payload"); os.makedirs(pay)
     try:
         pieces = []
@@ -1405,7 +1471,7 @@ def capture_org(org, databases, mongos, buckets, out, remote=True):
             print(f"  {yellow}!{reset} without the private age key: the bundle exists but was "
                   f"NOT verified (DR without proof of restore)")
             return 0
-        check_dir = tempfile.mkdtemp(prefix="aegis-ver-")
+        check_dir = staging_dir("aegis-ver-")
         try:
             d = subprocess.run(["age", "-d", "-i", age_key, out], capture_output=True)
             if d.returncode != 0:
@@ -1437,9 +1503,9 @@ def capture_org(org, databases, mongos, buckets, out, remote=True):
             ok(f"ROUNDTRIP OK — the bundle decrypts and reproduces the "
                f"{len(pieces)} pieces byte by byte")
         finally:
-            shutil.rmtree(check_dir, ignore_errors=True)
+            shred_tree(check_dir)
     finally:
-        shutil.rmtree(stage, ignore_errors=True)
+        shred_tree(stage)
 
     # ── AND NOW IT LEAVES THE HOUSE ─────────────────────────────
     #
@@ -1486,10 +1552,14 @@ def open_bundle(bundle):
     d = subprocess.run(["age", "-d", "-i", age_key, bundle], capture_output=True)
     if d.returncode != 0:
         die(f"it does not decrypt: {d.stderr.decode(errors='replace')[:200]}")
-    tmp = tempfile.mkdtemp(prefix="aegis-rest-")
-    with tarfile.open(fileobj=__import__("io").BytesIO(d.stdout), mode="r:gz") as tf:
-        tf.extractall(tmp, filter="data")
-    man = json.load(open(os.path.join(tmp, "MANIFIESTO.json"), encoding="utf-8"))
+    tmp = staging_dir("aegis-rest-")
+    try:
+        with tarfile.open(fileobj=__import__("io").BytesIO(d.stdout), mode="r:gz") as tf:
+            tf.extractall(tmp, filter="data")
+        man = json.load(open(os.path.join(tmp, "MANIFIESTO.json"), encoding="utf-8"))
+    except BaseException:
+        shred_tree(tmp)
+        raise
     return tmp, man
 
 
@@ -1524,7 +1594,7 @@ def list_bundle(bundle):
                 for o in p["objetos"][:5]:
                     print(f"            {gray}{o['clave']}  {o['bytes']} B{reset}")
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        shred_tree(tmp)
     return 0
 
 
@@ -2009,7 +2079,7 @@ def restore(bundle, org, force):
             scale_consumers_up(ns, consumers)
 
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        shred_tree(tmp)
     return 0
 
 
@@ -2888,6 +2958,7 @@ def remote_main(a):
 
 
 def main():
+    arm_signals()
     # Rule 1: verbs, not flags. And the same pair of names as
     # `aegis state`, because they are the same operation over another
     # thing: `state` is the MACHINE, `data` is the tenants' DATA.
@@ -2983,13 +3054,13 @@ def main():
         # the bundle itself. And it lands in a directory of ours that is
         # removed no matter how this ends — a downloaded copy left lying
         # around is a plaintext-adjacent artefact nobody remembers.
-        down = tempfile.mkdtemp(prefix="aegis-remoto-")
+        down = staging_dir("aegis-remoto-")
         try:
             local = os.path.join(down, os.path.basename(a.restore_bundle))
             remote_fetch(a.restore_bundle, local)
             return restore(local, a.org, a.force)
         finally:
-            shutil.rmtree(down, ignore_errors=True)
+            shred_tree(down)
 
     return capture(a.capture_dir or DEFAULT_DEST, remote=not a.no_remote)
 

@@ -58,6 +58,20 @@ says what an instance will have to do.
   loudly. Instances: `aegis seed diff` shows the wrapper; `aegis seed
   apply` brings it in. Not yet run on a live instance. Check 277, extended
   with a TERM in the middle of an apply.
+- **What a backup or a restore stages in the clear dies with the call,
+  overwritten.** `aegis data` staged the dumps of every database, the
+  bundle a restore unpacks and the copy a remote restore downloads under
+  `/tmp`, and removed them in a `finally` that a TERM (a stopped timer, a
+  closed terminal) never runs; `aegis state backup|restore` staged under
+  `/tmp` too, removed with a plain `rm -rf`, and only on EXIT. Now `aegis
+  data` stages in a 0700 directory under the instance (`.staging/`, never
+  `/tmp`: the instance's disk already holds the live data, the backups'
+  disk holds ciphertext only, and a dump can be larger than the RAM so not
+  `/dev/shm` either), overwrites every file before it unlinks it, and
+  turns TERM and HUP into the exit that runs every `finally`; the state
+  bundle is staged in `/dev/shm`, shredded on every way out, with INT/TERM
+  trapped as well as EXIT. Instances: nothing to do; `~/aegis/.staging`
+  appears on the next backup. Not yet run on a live instance. Check 286.
 
 ## 2026-10-13 — the first signed build on a clean Ubuntu, and what it took
 
