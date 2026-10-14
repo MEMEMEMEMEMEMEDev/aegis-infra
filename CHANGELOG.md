@@ -70,8 +70,11 @@ says what an instance will have to do.
   `/dev/shm` either), overwrites every file before it unlinks it, and
   turns TERM and HUP into the exit that runs every `finally`; the state
   bundle is staged in `/dev/shm`, shredded on every way out, with INT/TERM
-  trapped as well as EXIT. Instances: nothing to do; `~/aegis/.staging`
-  appears on the next backup. Not yet run on a live instance. Check 286.
+  trapped as well as EXIT; when the payload does not fit there (the
+  dossier of every run travels in it) the staging goes to `.staging/` on
+  the instance's disk, shredded the same way, and the command says so.
+  Instances: nothing to do; `~/aegis/.staging` appears on the next backup.
+  Not yet run on a live instance. Check 286.
 - **The dossier of a run is born readable by its owner only.** `aegis
   init-log` keeps the whole run, stderr included, under
   `.init-state/runs/`; script(1) created that file under the operator's

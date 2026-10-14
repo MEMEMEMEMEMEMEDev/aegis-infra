@@ -79,8 +79,26 @@ mkdir -p "$(dirname "$OUT")"
 # (review of 2026-10-13, A-9). The roundtrip's copy lives inside it, so
 # the same cleanup takes both. Check 286.
 umask 077
-SHM=/dev/shm; [[ -d "$SHM" && -w "$SHM" ]] || SHM="${TMPDIR:-/tmp}"
-STAGE="$(mktemp -d "$SHM/aegis-state.XXXXXX")"
+# tmpfs only if the payload fits, twice over (the roundtrip unpacks a
+# second copy): .init-state carries the dossier of every run, and a
+# long-lived instance has many. A payload that does not fit is staged on
+# the instance's disk instead, in a 0700 dir under .staging/, and
+# shredded the same way; it is said, so that the operator knows where
+# the plaintext was.
+SHM=/dev/shm
+NEED=0
+for _p in "$STATE_SECRETS" "$INIT_STATE" "$TUNNEL_ENV"/terraform.tfstate*; do
+  [[ -e "$_p" ]] || continue
+  NEED=$(( NEED + $(du -sb "$_p" | cut -f1) ))
+done
+AVAIL="$(df -B1 --output=avail "$SHM" 2>/dev/null | tail -1 | tr -d ' ')"
+if [[ -d "$SHM" && -w "$SHM" && "$AVAIL" =~ ^[0-9]+$ ]] && (( NEED * 4 < AVAIL )); then
+  STAGE_ROOT="$SHM"
+else
+  STAGE_ROOT="$AEGIS_HOME/.staging"; mkdir -p "$STAGE_ROOT"; chmod 700 "$STAGE_ROOT"
+  say "staging on disk under $STAGE_ROOT: the payload ($NEED bytes, twice for the roundtrip) does not fit in $SHM (${AVAIL:-no} bytes free); it is shredded all the same"
+fi
+STAGE="$(mktemp -d "$STAGE_ROOT/aegis-state.XXXXXX")"
 stage_cleanup() {
   [[ -n "${STAGE:-}" && -d "$STAGE" ]] || return 0
   find "$STAGE" -type f -exec shred -u {} \;

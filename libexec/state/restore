@@ -59,8 +59,19 @@ KEY="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/aegis.key}"
 # 2026-10-14 it went to `mktemp -d` under /tmp and left with a plain
 # rm -rf, only on EXIT (review of 2026-10-13, A-9). Check 286.
 umask 077
-SHM=/dev/shm; [[ -d "$SHM" && -w "$SHM" ]] || SHM="${TMPDIR:-/tmp}"
-TMP="$(mktemp -d "$SHM/aegis-state.XXXXXX")"
+# tmpfs only if the unpacked bundle fits: it is gzip over text, so up to
+# sixteen times the bundle is assumed. Otherwise the instance's disk, in
+# a 0700 dir under .staging/, shredded the same way, and said.
+SHM=/dev/shm
+NEED=$(( $(stat -c %s "$BUNDLE") * 16 ))
+AVAIL="$(df -B1 --output=avail "$SHM" 2>/dev/null | tail -1 | tr -d ' ')"
+if [[ -d "$SHM" && -w "$SHM" && "$AVAIL" =~ ^[0-9]+$ ]] && (( NEED * 2 < AVAIL )); then
+  STAGE_ROOT="$SHM"
+else
+  STAGE_ROOT="$AEGIS_HOME/.staging"; mkdir -p "$STAGE_ROOT"; chmod 700 "$STAGE_ROOT"
+  say "staging on disk under $STAGE_ROOT: the unpacked bundle (up to $NEED bytes) does not fit in $SHM (${AVAIL:-no} bytes free); it is shredded all the same"
+fi
+TMP="$(mktemp -d "$STAGE_ROOT/aegis-state.XXXXXX")"
 stage_cleanup() {
   [[ -n "${TMP:-}" && -d "$TMP" ]] || return 0
   find "$TMP" -type f -exec shred -u {} \;

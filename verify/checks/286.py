@@ -120,10 +120,12 @@ for rel, var in (("libexec/state/backup", "STAGE"), ("libexec/state/restore", "T
     m = re.search(r'^' + var + r'="[$][(]mktemp -d ([^)]*)[)]"', t, re.M)
     if not m:
         findings.append(f"{short} no longer stages through `mktemp -d` into {var}: re-aim this check")
-    elif "$SHM/" not in m.group(1):
+    elif "$STAGE_ROOT/" not in m.group(1):
         findings.append(f"{short} stages {var} under the default tmp dir: on disk, and not where the cleanup looks")
-    if not re.search(r"^SHM=/dev/shm;", t, re.M):
+    if not re.search(r"^SHM=/dev/shm$", t, re.M):
         findings.append(f"{short} does not name /dev/shm for its staging")
+    if "df -B1 --output=avail" not in t or '.staging"' not in t:
+        findings.append(f"{short} does not measure whether the payload fits in tmpfs, with the instance's disk as the fallback")
     if "shred -u" not in sh_body("stage_cleanup", t):
         findings.append(f"{short} removes its staging without shredding it")
     if not re.search(r"^trap 'stage_cleanup; exit 130' INT TERM$", t, re.M):
@@ -342,8 +344,29 @@ else:
         if left:
             findings.append(f"a TERM during the sink left the staging in /dev/shm: {', '.join(left)}")
             destroy_shm(left)
-        scope.append("aegis state backup driven over a sandbox instance with a real age, once to the end and once "
-                     "with a TERM while the sink holds")
+        # (d') a tmpfs that is too small (a df that reports nothing free): the staging goes
+        #      to the instance's disk, is said, and nothing of it stays there
+        fakebin = os.path.join(tmp, "fakebin")
+        os.makedirs(fakebin, exist_ok=True)
+        with open(os.path.join(fakebin, "df"), "w") as f:
+            f.write("#!/bin/sh\nprintf 'Avail\\n0\\n'\n")
+        os.chmod(os.path.join(fakebin, "df"), 0o755)
+        denv = dict(benv, PATH=fakebin + os.pathsep + benv["PATH"])
+        p = subprocess.run(["bash", os.path.join(ROOT, "libexec", "state", "backup")], capture_output=True,
+                           text=True, env=denv, timeout=120)
+        staging = os.path.join(home, ".staging")
+        if p.returncode != 0 or "ROUNDTRIP OK" not in p.stdout:
+            findings.append(f"with a tmpfs too small the backup failed (rc {p.returncode}): {(p.stderr or p.stdout)[-200:]!r}")
+        if "staging on disk under " + staging not in p.stdout:
+            findings.append("with a tmpfs too small the staging did not go to the instance's .staging, or it was not said")
+        elif os.listdir(staging):
+            findings.append(f"the staging on disk outlived the call: {os.listdir(staging)}")
+        left = carrying(token.encode())
+        if left:
+            findings.append(f"with a tmpfs too small the staging still went to /dev/shm: {', '.join(left)}")
+            destroy_shm(left)
+        scope.append("aegis state backup driven over a sandbox instance with a real age, once to the end, once "
+                     "with a TERM while the sink holds, and once with a tmpfs too small for the payload")
 
         # (e) aegis state restore of that bundle into a fresh home
         if bundles:
@@ -360,7 +383,20 @@ else:
             if left:
                 findings.append(f"after a restore the staging is still in /dev/shm: {', '.join(left)}")
                 destroy_shm(left)
-            scope.append("aegis state restore of that bundle into a fresh home")
+            # and the same restore with a tmpfs too small: on disk, said, and gone
+            home3 = os.path.join(tmp, "home3")
+            os.makedirs(home3)
+            renv3 = dict(renv, HOME=home3, AEGIS_HOME=home3, PATH=fakebin + os.pathsep + renv["PATH"])
+            p = subprocess.run(["bash", os.path.join(ROOT, "libexec", "state", "restore"), bundles[-1]],
+                               capture_output=True, text=True, env=renv3, timeout=120)
+            staging3 = os.path.join(home3, ".staging")
+            if p.returncode != 0 or not os.path.isfile(os.path.join(home3, ".state-secrets", "probe.enc")):
+                findings.append(f"with a tmpfs too small the restore failed (rc {p.returncode}): {(p.stderr or p.stdout)[-200:]!r}")
+            if "staging on disk under " + staging3 not in p.stdout:
+                findings.append("with a tmpfs too small the restore's staging did not go to .staging, or it was not said")
+            elif os.listdir(staging3):
+                findings.append(f"the restore's staging on disk outlived the call: {os.listdir(staging3)}")
+            scope.append("aegis state restore of that bundle into a fresh home, with a real tmpfs and with one too small")
 
 print("SCOPE: " + "; ".join(scope))
 for f in findings:

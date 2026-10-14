@@ -44,7 +44,7 @@ red_5() { _sub "$D286" '    for sig in (signal.SIGTERM, signal.SIGHUP):
 '; }
 
 # state backup staged under /tmp again
-red_6() { _sub "$B286" 'STAGE="$(mktemp -d "$SHM/aegis-state.XXXXXX")"
+red_6() { _sub "$B286" 'STAGE="$(mktemp -d "$STAGE_ROOT/aegis-state.XXXXXX")"
 ' 'STAGE="$(mktemp -d)"
 '; }
 
@@ -61,9 +61,15 @@ red_9() { _sub "$B286" "trap 'stage_cleanup' EXIT
 " ''; }
 
 # state restore staged under /tmp again
-red_10() { _sub "$R286" 'TMP="$(mktemp -d "$SHM/aegis-state.XXXXXX")"
+red_10() { _sub "$R286" 'TMP="$(mktemp -d "$STAGE_ROOT/aegis-state.XXXXXX")"
 ' 'TMP="$(mktemp -d)"
 '; }
+
+# tmpfs whatever the size of the payload: a long-lived instance's dossiers fill it
+red_11() { _sub "$B286" '&& (( NEED * 4 < AVAIL )); then' '; then'; }
+
+# the restore unpacks into tmpfs whatever the size of the bundle
+red_12() { _sub "$R286" '&& (( NEED * 2 < AVAIL )); then' '; then'; }
 
 # ── controls ──
 control_1() { _sub "$D286" '#   · what is staged is overwritten before it is unlinked (one pass: on' '#   · what is staged is overwritten before it is unlinked (a single pass: on'; }
