@@ -248,4 +248,40 @@ OUT="$(V --only 016 --teeth --profile cloudflare 2>&1)"; RC=$?
     || bad "a mutation that returned 74 was not reported as broken (rc=$RC)"
 rm -f "$TMP/verify/checks/016-with-tooth.sh" "$TMP/verify/teeth/016.sh"
 
+# 15. check 199 runs ONE sampled tooth per run of the suite, and is red
+# when it does not bite. It is proven here and not by a tooth of its
+# own, because 199 refuses to sample from inside the tooth runner
+# (AEGIS_VERIFY_IN_TOOTH): a tooth that runs a tooth that runs a tooth
+# is the recursion the guard exists for (review of 2026-10-13, 4B-4).
+# The sandbox has no git, so the pick comes from the teeth list.
+cp "$AEGIS_ROOT"/verify/checks/199-*.sh "$TMP/verify/checks/"
+cat > "$TMP/verify/checks/017-with-tooth.sh" <<'C'
+# title: the one check the sample can land on
+check() { grep -q 'sentinel' "$AEGIS_ROOT/verify/mark.txt" && pass "the mark is there" || fail "the mark is missing"; }
+C
+echo "sentinel" > "$TMP/verify/mark.txt"
+cat > "$TMP/verify/teeth/017.sh" <<'C'
+red_1()     { sed -i 's/sentinel/something-else/' "$AEGIS_ROOT/verify/mark.txt"; }
+control_1() { printf 'a new comment\n' >> "$AEGIS_ROOT/verify/mark.txt"; }
+C
+printf 'red_1() { :; }\n' > "$TMP/verify/teeth/199.sh"     # 199 has a tooth file, as the rule demands
+# every other sandbox check is gone or has a tooth: 001..008 were left by the tests above
+for n in 001 002 003 004 005 006 007 008; do rm -f "$TMP/verify/checks/$n"-*.sh; done
+OUT="$(V --only 199 --profile cloudflare 2>&1)"; RC=$?
+[[ $RC == 0 ]] && grep -q 'sampled check 017' <<<"$OUT" && grep -q '1/1 bite' <<<"$OUT" \
+    && ok "199 samples one tooth from the list and reports that it bites" \
+    || bad "199 did not sample and run a tooth (rc=$RC): $(grep -E 'sampled|teeth:' <<<"$OUT" | tr '\n' ' ')"
+printf 'red_1() { printf "this breaks nothing\\n" >> "$AEGIS_ROOT/verify/mark.txt"; }\n' > "$TMP/verify/teeth/017.sh"
+OUT="$(V --only 199 --profile cloudflare 2>&1)"; RC=$?
+[[ $RC == 1 ]] && grep -q 'sampled check 017 .* does not protect what it claims' <<<"$OUT" \
+    && ok "199 is red when the sampled tooth does not bite" \
+    || bad "199 stayed green over a sampled tooth that does not bite (rc=$RC)"
+# ...and inside the tooth runner it does not sample at all
+printf 'red_1()     { sed -i "s/sentinel/something-else/" "$AEGIS_ROOT/verify/mark.txt"; }\n' > "$TMP/verify/teeth/017.sh"
+OUT="$(AEGIS_VERIFY_IN_TOOTH=1 V --only 199 --profile cloudflare 2>&1)"; RC=$?
+[[ $RC == 0 ]] && grep -q 'sample tooth not run: inside the tooth runner' <<<"$OUT" \
+    && ok "inside the tooth runner 199 does not sample (no tooth inside a tooth)" \
+    || bad "199 sampled a tooth from inside the tooth runner (rc=$RC)"
+rm -f "$TMP"/verify/checks/199-*.sh "$TMP/verify/checks/017-with-tooth.sh" "$TMP/verify/teeth/017.sh" "$TMP/verify/teeth/199.sh"
+
 exit $FAILURES

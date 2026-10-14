@@ -3,7 +3,10 @@
 # 199 does not measure the ARTIFACT: it measures the verifier. Its
 # subject is the files of verify/, so taking a command away from the
 # product —what the generated tooth used to do— does not touch it. Its
-# three failure modes:
+# three structural failure modes are below; the fourth, a sampled tooth
+# that does not bite, is proven by harness test 15: inside the tooth
+# runner 199 refuses to sample (a tooth inside a tooth), so no mutation
+# here can reach that branch.
 red_1() {
     # a new check without a tooth
     printf '# title: check without a tooth\ncheck() { pass "nothing"; }\n' \

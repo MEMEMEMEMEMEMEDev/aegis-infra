@@ -239,6 +239,7 @@ _has_subject() {
     (
         set -u
         AEGIS_VERDICT_FILE="$vf"
+        export AEGIS_VERIFY_IN_TOOTH=1    # a probe of the tooth runner: 199 does not sample here
         # shellcheck source=/dev/null
         source "$VERIFY/lib.sh"
         # shellcheck source=/dev/null
@@ -335,7 +336,10 @@ _one_tooth() {
     # variable, so the child would otherwise reset it to false.
     local -a extra=()
     [[ "$WITH_CHARTS" == true ]] && extra+=(--with-charts)
-    AEGIS_ROOT="$tmp" AEGIS_VERIFY_RETRY=1 "$tmp/libexec/aegis-verify" --only "$num" --profile "$(current_profile)" "${extra[@]}" >/dev/null 2>&1
+    # AEGIS_VERIFY_IN_TOOTH: check 199 samples one tooth per run of the
+    # suite, and must not do it from inside a mutation (a tooth inside a
+    # tooth, without end). The probe below sets it too.
+    AEGIS_ROOT="$tmp" AEGIS_VERIFY_RETRY=1 AEGIS_VERIFY_IN_TOOTH=1 "$tmp/libexec/aegis-verify" --only "$num" --profile "$(current_profile)" "${extra[@]}" >/dev/null 2>&1
     rc=$?
     rm -rf "$tmp"
     # 1 = the check turned RED: that is biting.
