@@ -84,6 +84,14 @@ says what an instance will have to do.
   Instances: the next `aegis init-log` tightens the runs directory; the
   dossiers already there keep their mode (`chmod 600` them by hand if the
   host has other accounts). Not yet run on a live instance. Check 287.
+- **The verifier's confirmation pass re-runs the same selection, and a
+  tooth runs its check once.** When a run had failures the verifier
+  re-ran itself to confirm them (H2), but the argument loop had consumed
+  the arguments, so the second pass was the whole suite in both profiles:
+  a `--only` of one check cost the time of all of them, and the teeth,
+  one run per mutation, took hours instead of minutes. The arguments are
+  kept, and a mutated tree no longer gets a confirmation pass at all.
+  Instances: nothing to do. Harness test 12.
 
 ## 2026-10-13 — the first signed build on a clean Ubuntu, and what it took
 

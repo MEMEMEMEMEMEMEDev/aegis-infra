@@ -167,4 +167,26 @@ V --only 008 --profile local >/dev/null 2>&1
 [[ $? == 0 ]] && ok "with the edge implemented (validator + bridge), it runs" \
     || bad "--profile local did NOT run with the local edge implemented"
 
+# 12. the confirmation pass (H2) re-runs THE SAME selection. Until
+# 2026-10-14 the argument loop had consumed "$@" before the pass re-ran
+# `"$0" "$@"`, so a `--only` of one failing check re-ran the whole suite
+# in both profiles, and the teeth — one run per mutation — took hours
+# (review of 2026-10-13, F3). A check that records every run and is NOT
+# selected must never run.
+cat > "$TMP/verify/checks/012-fails.sh" <<'C'
+# title: a check that fails, selected alone
+check() { fail "still red"; }
+C
+cat > "$TMP/verify/checks/013-counts.sh" <<'C'
+# title: a check that records every run
+check() { printf 'ran\n' >> "$AEGIS_ROOT/verify/ran-013"; pass "counted"; }
+C
+rm -f "$TMP/verify/ran-013"
+OUT="$(AEGIS_VERIFY_RETRY='' V --only 012 --profile cloudflare 2>&1)"; RC=$?
+n=0; [[ -f "$TMP/verify/ran-013" ]] && n="$(wc -l < "$TMP/verify/ran-013")"
+[[ $RC == 1 && "${n:-0}" == 0 ]] && grep -q 'REPRODUCED' <<<"$OUT" \
+    && ok "the confirmation pass keeps the selection: an unselected check never ran" \
+    || bad "the confirmation pass dropped the arguments: the unselected check ran ${n:-0} time(s) (rc=$RC)"
+rm -f "$TMP/verify/checks/012-fails.sh" "$TMP/verify/checks/013-counts.sh" "$TMP/verify/ran-013"
+
 exit $FAILURES
