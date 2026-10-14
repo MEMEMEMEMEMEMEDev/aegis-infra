@@ -19,18 +19,27 @@ backup) and a real sops + age with a key made for the run. Asserted:
     #46) is encrypted and then shredded — never shredded unencrypted;
   · without the age key to prove the copy, the plaintext is LEFT, and
     the wrapper says so;
-  · nothing of the state reaches the screen.
-Read, comment-stripped: `aegis destroy`, `aegis state backup|restore`
-and `aegis rotate` look at the encrypted copy, not at the plaintext that
-is no longer there.
+  · nothing of the state reaches the screen;
+  · a TERM in the middle of an apply (the fake tofu holds after writing
+    the new state): the state tofu wrote is re-encrypted and the
+    plaintext shredded on the way out. Until 2026-10-14 the re-encrypt
+    and the shred were the last lines of the script, so a signal, a
+    second Ctrl-C or a die between the decrypt and the end left the
+    state in the clear (review of 2026-10-13, A-9).
+Read, comment-stripped: the wrapper's EXIT trap and its INT/TERM trap
+run finish_state; `aegis destroy`, `aegis state backup|restore` and
+`aegis rotate` look at the encrypted copy, not at the plaintext that is
+no longer there.
 """
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = os.path.abspath(sys.argv[1])
 WRAPPER = os.path.join(ROOT, "seed", "platform", "tofu", "tofu-apply.sh")
@@ -67,6 +76,7 @@ case "$sub" in
     printf '{"version": 4, "serial": %s, "outputs": {"tunnel_token": {"value": "%s"}}, "resources": []}\n' \
       "$serial" "$FAKE_SECRET" > terraform.tfstate
     echo "Apply complete! Resources: 0 added, 1 changed, 0 destroyed."
+    if [ -n "${FAKE_HOLD:-}" ]; then : > "$FAKE_HOLD"; sleep 30; fi
     ;;
   output)
     python3 -c 'import json,sys; sys.stdout.write(json.load(open("terraform.tfstate"))["outputs"]["tunnel_token"]["value"])'
@@ -153,6 +163,41 @@ if not findings:
             findings.append(f"a read call left the decrypted state on disk: {', '.join(leftovers())}")
         scope.append("a read (output -raw)")
 
+        # 6. a TERM in the middle of an apply: the fake tofu writes the new state
+        #    and holds; the wrapper's whole process group gets the signal, as a
+        #    closed terminal or a stopped unit would send it
+        hold = os.path.join(tmp, "hold")
+        p = subprocess.Popen(["bash", os.path.join(tofu_dir, "tofu-apply.sh"), "-chdir=envs/t",
+                              "apply", "-auto-approve"],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                             env=dict(keyed, FAKE_HOLD=hold), cwd=tofu_dir, start_new_session=True)
+        for _ in range(300):
+            if os.path.exists(hold):
+                break
+            time.sleep(0.1)
+        else:
+            findings.append("the fake tofu never reached its hold: the TERM case could not be driven")
+        time.sleep(0.3)
+        os.killpg(p.pid, signal.SIGTERM)
+        try:
+            out, err = p.communicate(timeout=60)
+        except subprocess.TimeoutExpired:
+            os.killpg(p.pid, signal.SIGKILL)
+            out, err = p.communicate()
+            findings.append("the wrapper did not finish within 60 s of a TERM")
+        if p.returncode == 0:
+            findings.append("a TERM in the middle of an apply ended with exit 0")
+        if leftovers():
+            findings.append("a TERM in the middle of an apply left the state in the clear: "
+                            f"{', '.join(leftovers())}")
+        st = decrypted()
+        if not st or st.get("serial") != 3:
+            findings.append("after a TERM in the middle of an apply the encrypted copy does not hold the "
+                            "state tofu wrote (serial 3): the edge's state would be lost with the plaintext")
+        if SECRET in out + err:
+            findings.append("a TERM in the middle of an apply put a value of the state on the screen")
+        scope.append("a TERM in the middle of an apply")
+
         # 4. an instance from before #46: plaintext, no encrypted twin, key at hand
         os.remove(enc)
         with open(plain, "w") as f:
@@ -181,7 +226,17 @@ if not findings:
             findings.append("the plaintext was left without a word: nobody learns the secrets are still in the clear")
         scope.append("no age key to prove the copy")
 
-# ── read: the callers look at the encrypted copy ─────────────────────────
+# ── read: the traps, and the callers that look at the encrypted copy ─────
+wrapper = code(WRAPPER)
+if not re.search(r"^finish_state\(\) \{", wrapper, re.M):
+    findings.append("the wrapper has no finish_state: re-aim this check")
+if not re.search(r"^trap finish_state EXIT$", wrapper, re.M):
+    findings.append("the wrapper has no EXIT trap running finish_state: a die between the decrypt and the "
+                    "end leaves the state in the clear")
+if not re.search(r"^trap 'finish_state; exit 130' INT TERM$", wrapper, re.M):
+    findings.append("the wrapper has no INT/TERM trap running finish_state: on a signal the re-encrypt and "
+                    "the shred are left to bash's own handling of it")
+
 destroy = code(os.path.join(ROOT, "libexec", "aegis-destroy"))
 m = re.search(r'if \[\[([^\n]*)\]\]; then\s*\n\s*say "cloudflare-tunnel: init of the env', destroy)
 if not m or "terraform.tfstate.enc.json" not in m.group(1):
@@ -217,4 +272,4 @@ if not m or not m.group(1).endswith("terraform.tfstate.enc.json"):
 for x in findings:
     print(x)
 print(f"SCOPE: the wrapper driven over {'; '.join(scope) or 'nothing'} with a real sops and age; "
-      "destroy, backup, restore and rotate read")
+      "its traps, destroy, backup, restore and rotate read")

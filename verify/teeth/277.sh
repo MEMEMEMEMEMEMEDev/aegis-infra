@@ -28,7 +28,7 @@ red_4() { _sub "$W277" '    if [[ -f "$ENCRYPTED" ]] && sops -d --output-type js
              "$PLAIN" 2>/dev/null; then' '    if [[ -f "$ENCRYPTED" ]]; then'; }
 
 # a plaintext with no encrypted twin is only encrypted when the call changed it
-red_5() { _sub "$W277" '      && ( ! -f "$ENCRYPTED" || "$(fingerprint "$PLAIN")" != "$FINGERPRINT_BEFORE" ) ]]; then' '      && "$(fingerprint "$PLAIN")" != "$FINGERPRINT_BEFORE" ]]; then'; }
+red_5() { _sub "$W277" '    if [[ ! -f "$ENCRYPTED" || "$(fingerprint "$PLAIN")" != "$FINGERPRINT_BEFORE" ]]; then' '    if [[ "$(fingerprint "$PLAIN")" != "$FINGERPRINT_BEFORE" ]]; then'; }
 
 # aegis destroy asks only for the plaintext
 red_6() { _sub "$AEGIS_ROOT/libexec/aegis-destroy" 'if [[ -f "$TUNNEL_ENV/terraform.tfstate.enc.json" || -f "$TUNNEL_ENV/terraform.tfstate" ]]; then' 'if [[ -f "$TUNNEL_ENV/terraform.tfstate" ]]; then'; }
@@ -42,5 +42,15 @@ red_8() { _sub "$AEGIS_ROOT/libexec/state/restore" '    cmp -s "$f" "$TUNNEL_ENV
 # rotate dates the tunnel token by the plaintext
 red_9() { _sub "$AEGIS_ROOT/libexec/aegis-rotate" '        f="$PLATFORM_DIR/tofu/envs/cloudflare-tunnel/terraform.tfstate.enc.json"' '        f="$PLATFORM_DIR/tofu/envs/cloudflare-tunnel/terraform.tfstate"'; }
 
+# the wrapper as it was until 2026-10-14: the re-encrypt and the shred only
+# run when the script reaches its end — a die or a signal leaves the state
+red_10() { _sub "$W277" 'trap finish_state EXIT
+' ''; }
+
+# a signal is left to bash's own handling, not to the handler
+red_11() { _sub "$W277" "trap 'finish_state; exit 130' INT TERM
+" ''; }
+
 # ── controls ──
 control_1() { _sub "$W277" 'plaintext state shredded — the encrypted copy holds the same state' 'plaintext state shredded; the encrypted copy holds the same state'; }
+control_2() { _sub "$W277" '# further INT/TERM is ignored (the handler takes about a second) and the' '# further INT/TERM is ignored (the handler takes about one second) and the'; }

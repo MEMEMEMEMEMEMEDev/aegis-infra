@@ -47,6 +47,17 @@ says what an instance will have to do.
   it however the phase ends. Instances: nothing to do; the ceremony only
   runs on a fresh phase 10 or a key rotation, and the step reads
   `cat <path>` as before. Not yet run on a live instance. Check 285.
+- **The edge's plaintext state dies with the wrapper call, however the
+  call ends.** `tofu-apply.sh` decrypts the state for every call and, since
+  2026-10-10, re-encrypts and shreds it at the end; but that was the end
+  of the script, so a TERM while tofu ran, a second Ctrl-C or a die
+  between the decrypt and the end left `terraform.tfstate` in the clear,
+  exactly as the 2026-10-09 corpse was found. The re-encrypt and the shred
+  now run from an EXIT trap and an INT/TERM trap, once tofu has returned
+  the state whole; a state that cannot be proven is still left in place,
+  loudly. Instances: `aegis seed diff` shows the wrapper; `aegis seed
+  apply` brings it in. Not yet run on a live instance. Check 277, extended
+  with a TERM in the middle of an apply.
 
 ## 2026-10-13 — the first signed build on a clean Ubuntu, and what it took
 
