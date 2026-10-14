@@ -1,0 +1,70 @@
+name: The install stopped
+description: "aegis init stopped at a phase, or aegis check says something is wrong. Send the three things the product already wrote down."
+title: "[install] phase <NN> stopped at gate <name>"
+labels: ["install"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. Every stop is a bug of the product until proven otherwise, and the product
+        already recorded what you need to send. Three things, nothing else — no screenshots
+        of the terminal, and never the age key or anything from `.state-secrets/`.
+  - type: input
+    id: version
+    attributes:
+      label: Product version
+      description: "`aegis --version` from the checkout (a tag, or a commit hash)."
+      placeholder: "v3.0.0-alpha.1-395-gd30d41f"
+    validations:
+      required: true
+  - type: dropdown
+    id: edge
+    attributes:
+      label: Edge profile
+      options: ["cloudflare", "local"]
+    validations:
+      required: true
+  - type: dropdown
+    id: ai
+    attributes:
+      label: AI lane
+      options: ["no", "cpu", "gpu"]
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: The host, in one line
+      description: "Distribution and version, CPU count, RAM, whether it has a desktop session. No hostnames, no IPs."
+      placeholder: "Ubuntu 24.04, 4 CPU, 16 GB, headless VPS"
+    validations:
+      required: true
+  - type: textarea
+    id: gate
+    attributes:
+      label: The line that failed
+      description: "The output of the first command. It names the phase and the gate."
+      render: shell
+      placeholder: |
+        jq -r 'select(.result=="fail") | "\(.phase) \(.gate) \(.duration_s)s"' ~/aegis/.init-state/gates.jsonl
+    validations:
+      required: true
+  - type: textarea
+    id: dossier
+    attributes:
+      label: The end of the dossier
+      description: "The last ~80 lines of the newest run under `~/aegis/.init-state/runs/` (`ls -t ~/aegis/.init-state/runs/ | head -1`). Attach the whole file if you can. Read it once before pasting: the product never prints a secret, but a tool it calls might."
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: round
+    attributes:
+      label: The round, if the cluster is up
+      description: "`aegis check --json > round.json`, attached or pasted."
+      render: json
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything you already tried
+      description: "A resume with `--from`, a reboot, a second run. Say what changed, if anything."

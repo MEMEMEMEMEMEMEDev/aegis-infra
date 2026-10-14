@@ -1,0 +1,45 @@
+name: Something is wrong
+description: "A command, a check, a pipeline or the console does something other than what it says."
+title: "[bug] <command or check>: <what happened>"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If `aegis init` stopped, use **The install stopped** instead: it asks for the files
+        the product wrote. If this is a security problem, do not open an issue — use GitHub's
+        private vulnerability reporting on this repository (`SECURITY.md`).
+  - type: input
+    id: version
+    attributes:
+      label: Product version
+      description: "`aegis --version`"
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: The command, or the check number
+      placeholder: "aegis org apply orgs/shop.yaml  ·  aegis verify --only 242  ·  the Deployments screen"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What it says it does, and what it did
+      description: "Quote the help text or the doc line, then what you saw. Exit codes matter: 0 done, 1 wrong, 2 could not evaluate, 3 invalid usage."
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: "Paste it as it came out. Never a value from `.state-secrets/`, a token, or the age key."
+      render: shell
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where it ran
+      options: ["on the product checkout (no instance)", "on a live instance", "in CI"]
+    validations:
+      required: true
