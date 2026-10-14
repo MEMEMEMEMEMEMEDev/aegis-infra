@@ -39,6 +39,11 @@ jobs:
           age-keygen --version
       - name: aegis verify --profile both
         run: ./bin/aegis verify --profile both
+      - name: the verifier verifying itself (the functional harnesses)
+        # The harness is what proves a mute check is red, two verdicts are
+        # a bug, and a tooth that does not apply here is not accused. It
+        # ran only by hand until 2026-10-14 (review of 2026-10-13, 4B-6).
+        run: ./bin/aegis verify --harness
       - name: the teeth of every check this change touches
         if: github.event_name == 'pull_request'
         run: |
