@@ -92,6 +92,14 @@ says what an instance will have to do.
   one run per mutation, took hours instead of minutes. The arguments are
   kept, and a mutated tree no longer gets a confirmation pass at all.
   Instances: nothing to do. Harness test 12.
+- **`aegis verify --profile both` is one pass while no check reads the
+  profile, and it says so.** No check reads `AEGIS_VERIFY_PROFILE` yet, so
+  the second profile ran exactly the same code over the same tree and
+  announced a coverage that did not exist (291 identical verdicts, twice).
+  The verifier now derives whether any check reads the profile; while none
+  does, `both` runs once and prints why, and the second pass comes back on
+  its own the day a check reads it. Instances: nothing to do; the suite and
+  the teeth take half the time. Harness test 13.
 
 ## 2026-10-13 — the first signed build on a clean Ubuntu, and what it took
 

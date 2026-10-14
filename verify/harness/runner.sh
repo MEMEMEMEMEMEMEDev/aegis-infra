@@ -189,4 +189,30 @@ n=0; [[ -f "$TMP/verify/ran-013" ]] && n="$(wc -l < "$TMP/verify/ran-013")"
     || bad "the confirmation pass dropped the arguments: the unselected check ran ${n:-0} time(s) (rc=$RC)"
 rm -f "$TMP/verify/checks/012-fails.sh" "$TMP/verify/checks/013-counts.sh" "$TMP/verify/ran-013"
 
+# 13. two profiles are two passes only when a check reads the profile.
+# The sandbox implements the local edge since test 11, so `both` used to
+# run every check twice over the same tree (review of 2026-10-13, F1).
+cat > "$TMP/verify/checks/014-counts.sh" <<'C'
+# title: a check that records every run
+check() { printf 'ran\n' >> "$AEGIS_ROOT/verify/ran-014"; pass "counted"; }
+C
+rm -f "$TMP/verify/ran-014"
+OUT="$(V --only 014 --profile both 2>&1)"; RC=$?
+n=0; [[ -f "$TMP/verify/ran-014" ]] && n="$(wc -l < "$TMP/verify/ran-014")"
+[[ $RC == 0 && "${n:-0}" == 1 ]] && grep -q 'no check reads the profile' <<<"$OUT" \
+    && ok "with no check reading the profile, --profile both is one pass, and it is said" \
+    || bad "--profile both ran the check ${n:-0} time(s) with no check reading the profile (rc=$RC)"
+cat > "$TMP/verify/checks/015-reads-profile.sh" <<'C'
+# title: a check that reads the profile
+check() { printf 'ran\n' >> "$AEGIS_ROOT/verify/ran-015"; pass "under ${AEGIS_VERIFY_PROFILE:-?}"; }
+C
+rm -f "$TMP/verify/ran-014" "$TMP/verify/ran-015"
+V --only 014 --only 015 --profile both >/dev/null 2>&1; RC=$?
+n=0; [[ -f "$TMP/verify/ran-014" ]] && n="$(wc -l < "$TMP/verify/ran-014")"
+m=0; [[ -f "$TMP/verify/ran-015" ]] && m="$(wc -l < "$TMP/verify/ran-015")"
+[[ $RC == 0 && "${n:-0}" == 2 && "${m:-0}" == 2 ]] \
+    && ok "the day a check reads the profile, both passes run again" \
+    || bad "with a check that reads the profile, the passes were $n and $m, not 2 and 2 (rc=$RC)"
+rm -f "$TMP/verify/checks/014-counts.sh" "$TMP/verify/checks/015-reads-profile.sh" "$TMP/verify/ran-014" "$TMP/verify/ran-015"
+
 exit $FAILURES
