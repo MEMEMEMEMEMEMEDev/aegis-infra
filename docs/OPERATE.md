@@ -62,9 +62,11 @@ kubectl get pods -A            # all Running/Completed
 kubectl get applications -n argocd
 ```
 
-Expected: ~19 Apps. MOST of them Synced/Healthy, with up to 3
-**OutOfSync/Healthy that are BENIGN and known**: kyverno (CRDs/
-defaulting), hello-aegis (the Image Updater's digest pin), root
+Expected: as many Apps as the seed declares (`grep -rh '^kind: Application$'
+seed/platform/k8s | wc -l` on the product, 31 on 2026-10-13) plus one per
+organization and one per tenant service. MOST of them Synced/Healthy, with
+up to 3 **OutOfSync/Healthy that are BENIGN and known**: kyverno (CRDs/
+defaulting), hello-aegis (the digest the pipeline writes back), root
 (cascade). They are NOT incidents; do not "fix" them.
 
 Control-plane namespaces: `argocd`, `infra-edge` (traefik +
@@ -476,4 +478,5 @@ screen.
 ---
 
 *Last updated: 2026-07-24, at the close of VERSION 2. Translated to
-English and brought to the v3 command surface on 2026-08-24.*
+English and brought to the v3 command surface on 2026-08-24; the expected
+Application count stopped being a number on 2026-10-13.*
