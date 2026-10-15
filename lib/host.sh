@@ -33,7 +33,7 @@
 AEGIS_HOST_MIN_UBUNTU="24.04"
 AEGIS_HOST_MIN_DEBIAN="13"     # 12 ships python 3.11; ansible==14 needs 3.12
 AEGIS_HOST_FAMILIES_KNOWN="ubuntu debian arch"
-AEGIS_HOST_SUPPORTED_DEFAULT="ubuntu"
+AEGIS_HOST_SUPPORTED_DEFAULT="ubuntu debian arch"
 
 # host_os_release_file — overridable so the check can feed it fixtures
 host_os_release_file() { printf '%s\n' "${AEGIS_OS_RELEASE:-/etc/os-release}"; }

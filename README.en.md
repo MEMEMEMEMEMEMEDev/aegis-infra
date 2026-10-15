@@ -167,7 +167,7 @@ they came out, are in [docs/how-it-works.md](docs/how-it-works.md).
 
 | | |
 |---|---|
-| **Host** | **Ubuntu 24.04 or newer**, with `sudo`. Other distributions (Arch, CachyOS, Fedora, Debian, Mint, Pop!_OS) are refused before anything is touched: aegis uses `apt` and Ubuntu's defaults. `amd64` only. |
+| **Host** | **Ubuntu 24.04 or newer**, **Debian 13 or newer**, or **Arch Linux (rolling)**, with `sudo`. Arch and derivatives declaring `ID_LIKE=arch` are supported. Other distributions (Fedora, Mint, Pop!_OS) are refused before anything is touched. `amd64` only. |
 | **Resources** | 4 CPU and 16 GB of RAM is what has been run. With 8 GB it starts without AI and without margin. 25 GB free on `/`. `aegis host measure` measures your machine; `aegis host budget` says whether what the platform reserves fits in what the machine leaves. |
 | **If you share the machine** | With a graphical session, aegis reserves a memory floor for the desktop and never touches it. `aegis host floor --set` changes it. |
 | **GPU (optional)** | For the AI's GPU lane: an NVIDIA card with driver 570 or newer. It is shared with your desktop; `aegis host show` says how much VRAM there is. |

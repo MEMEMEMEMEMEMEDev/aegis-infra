@@ -6,9 +6,9 @@ IPv6 switched off, a half k3s and a wizard answered for nothing. The
 only «is this Ubuntu?» lived in the playbook of phase 20; phase 00 only
 warned about the version, and the preflight's apt-get failed in silence.
 
-Read out of the source, and driven: `host_supported` is fed the
-os-release of nine real systems, and the preflight and the orchestrator
-are run on a fake CachyOS with `sudo` trapped, so that «refused before
+Read out of the source, and driven: `host_supported` is fed eleven
+os-release fixtures, and the preflight and the orchestrator
+are run on a fake Linux Mint with `sudo` trapped, so that «refused before
 acting» is measured and not read.
 """
 import os
@@ -139,10 +139,10 @@ else:
     if "die" not in p00[i_q]:
         findings.append("phase 00 asks host_supported and warns instead of stopping")
 
-# ── driven: the function against nine real os-release files ─────────
+# ── driven: the function against eleven os-release fixtures ─────────
 CASES = {
-    "cachyos": ('NAME="CachyOS Linux"\nPRETTY_NAME="CachyOS"\nID=cachyos\nID_LIKE=arch\n', 1),
-    "arch": ('PRETTY_NAME="Arch Linux"\nID=arch\nBUILD_ID=rolling\n', 1),
+    "cachyos": ('NAME="CachyOS Linux"\nPRETTY_NAME="CachyOS"\nID=cachyos\nID_LIKE=arch\n', 0),
+    "arch": ('PRETTY_NAME="Arch Linux"\nID=arch\nBUILD_ID=rolling\n', 0),
     "mint": ('PRETTY_NAME="Linux Mint 22"\nID=linuxmint\nID_LIKE="ubuntu debian"\nVERSION_ID="22"\n', 1),
     "debian": ('PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\nID=debian\nVERSION_ID="12"\n', 1),
     "ubuntu2204": ('PRETTY_NAME="Ubuntu 22.04.4 LTS"\nID=ubuntu\nVERSION_ID="22.04"\n', 1),
@@ -154,10 +154,8 @@ CASES = {
     "pop2404": ('PRETTY_NAME="Pop!_OS 24.04 LTS"\nID=pop\nID_LIKE="ubuntu debian"\nVERSION_ID="24.04"\n', 1),
     "ubuntu2404": ('PRETTY_NAME="Ubuntu 24.04.3 LTS"\nID=ubuntu\nID_LIKE=debian\nVERSION_ID="24.04"\n', 0),
     "ubuntu2604": ('PRETTY_NAME="Ubuntu 26.04.1 LTS"\nID=ubuntu\nVERSION_ID="26.04"\n', 0),
-    # Debian 13 as measured on lab-debian13 (2026-09-23): refused by the
-    # default list, which is the supported one, until its run is archived
     "debian13": ('PRETTY_NAME="Debian GNU/Linux 13 (trixie)"\nNAME="Debian GNU/Linux"\n'
-                 'VERSION_ID="13"\nVERSION="13 (trixie)"\nVERSION_CODENAME=trixie\nID=debian\n', 1),
+                 'VERSION_ID="13"\nVERSION="13 (trixie)"\nVERSION_CODENAME=trixie\nID=debian\n', 0),
     "debiansid": ('PRETTY_NAME="Debian GNU/Linux forky/sid"\nID=debian\n', 1),
 }
 # the lab override: (fixture, AEGIS_HOST_SUPPORTED, expected rc). It opens
@@ -171,7 +169,7 @@ WIDENED = [
     ("mint", "ubuntu,debian", 1),          # a derivative is not its parent
     ("cachyos", "ubuntu,arch", 0),         # an Arch derivative IS arch (ID_LIKE=arch)
     ("arch", "ubuntu,arch", 0),
-    ("arch", "ubuntu,debian", 1),          # arch has code, but was not opened
+    ("arch", "ubuntu,debian", 1),          # an explicit narrower override omits arch
     ("mint", "ubuntu,arch", 1),
     ("fedora42", "ubuntu,debian,rhel", 1), # rhel has no code: nothing is accepted
     ("ubuntu2404", "ubuntu,debain", 1),    # a typo: nothing is accepted
@@ -207,7 +205,7 @@ with tempfile.TemporaryDirectory() as td:
         elif want == 0 and "lab run" not in r.stderr:
             findings.append(f"host_supported let {name} in under a widened list without saying so")
 
-    # ── driven: preflight and init on a fake CachyOS, sudo trapped ────
+    # ── driven: preflight and init on a fake Mint, sudo trapped ────
     bindir = os.path.join(td, "bin")
     os.makedirs(bindir)
     log = os.path.join(td, "sudo.log")
@@ -215,21 +213,21 @@ with tempfile.TemporaryDirectory() as td:
     with open(trap, "w") as fh:
         fh.write(f"#!/bin/sh\necho called >> '{log}'\nexit 1\n")
     os.chmod(trap, stat.S_IRWXU)
-    env = {**os.environ, "AEGIS_OS_RELEASE": os.path.join(td, "cachyos"),
+    env = {**os.environ, "AEGIS_OS_RELEASE": os.path.join(td, "mint"),
            "PATH": bindir + ":" + os.environ.get("PATH", ""), "AEGIS_ROOT": ROOT}
-    for label, argv in (("aegis preflight", [os.path.join(ROOT, "bin", "aegis"), "preflight"]),
-                        ("aegis init --from 20 --check",
+    for label, argv in (("aegis preflight on Mint", [os.path.join(ROOT, "bin", "aegis"), "preflight"]),
+                        ("aegis init --from 20 --check on Mint",
                          [os.path.join(ROOT, "bin", "aegis"), "init", "--from", "20", "--check"])):
         r = subprocess.run(argv, capture_output=True, text=True, env=env,
                            stdin=subprocess.DEVNULL, timeout=60)
         driven += 1
         calls = open(log).read().count("called") if os.path.exists(log) else 0
         if r.returncode != 1:
-            findings.append(f"{label} on CachyOS returned rc {r.returncode}, expected 1 (wrong host)")
+            findings.append(f"{label} on Mint returned rc {r.returncode}, expected 1 (wrong host)")
         if calls:
-            findings.append(f"{label} on CachyOS called sudo {calls} time(s) before refusing")
+            findings.append(f"{label} on Mint called sudo {calls} time(s) before refusing")
         if "nothing was changed" not in (r.stdout + r.stderr):
-            findings.append(f"{label} on CachyOS refused without saying that nothing was changed")
+            findings.append(f"{label} on Mint refused without saying that nothing was changed")
         if os.path.exists(log):
             os.remove(log)
 
@@ -238,4 +236,4 @@ for f in findings:
 print(f"SCOPE: the rule agrees with the playbook family by family, the question sits before the "
       f"first action in the preflight, the orchestrator and phase 00; driven {driven} times "
       f"({len(CASES)} os-release files, {len(WIDENED)} under a widened lab list, and two commands "
-      f"on a CachyOS with sudo trapped)")
+            f"on a Mint with sudo trapped)")

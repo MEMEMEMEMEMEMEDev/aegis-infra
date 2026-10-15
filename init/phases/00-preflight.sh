@@ -147,9 +147,8 @@ else
     log_warn "sudo will ask for a password in phase 20 (or install NOPASSWD now so you don't have to be present: drop-in in /etc/sudoers.d)"
 fi
 
-# 2. Supported host (designed on Ubuntu 24.04; 26.04 tolerated with
-#    a warning — the checks are version-agnostic, but the fact stays
-#    in plain sight in case something odd shows up later):
+# 2. Supported host families have completed their serial runs. Warn only
+#    when a specific release is newer than the versions exercised:
 gate "wsl2-o-linux" check_wsl2
 if [[ -r /etc/os-release ]]; then
     . /etc/os-release
@@ -157,8 +156,8 @@ if [[ -r /etc/os-release ]]; then
     # supported was decided at the top (lib/host.sh); what is left is
     # telling a newer release that nobody has run it there yet
     case "$(host_family):${VERSION_ID:-}" in
-        ubuntu:24.04|ubuntu:26.04|debian:13) ;;
-        *) log_warn "${PRETTY_NAME:-this system} is accepted but not on the tested list (Ubuntu 24.04/26.04, Debian 13)" ;;
+        ubuntu:24.04|ubuntu:26.04|debian:13|arch:*) ;;
+        *) log_warn "${PRETTY_NAME:-this system} is accepted but not on the tested list (Ubuntu 24.04/26.04, Debian 13, Arch rolling)" ;;
     esac
 fi
 

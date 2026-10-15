@@ -4,6 +4,15 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-10-15 — Debian and Arch host families enabled
+
+After successful serial runs, the preflight accepts Ubuntu 24.04 or
+newer, Debian 13 or newer, and Arch Linux (rolling) by default. Arch
+derivatives that declare `ID_LIKE=arch` use the same host and package
+family. Other distributions remain refused before the preflight acts.
+The README, installation journey and phase 00's tested-release notice
+now describe the same policy.
+
 ## 2026-10-15 — the front page, for the people it is for
 
 Nothing in the product changes. The front page, in both languages, is

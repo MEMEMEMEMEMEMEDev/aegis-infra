@@ -70,9 +70,9 @@ red_8() { _sub "$AEGIS_ROOT/lib/host.sh" \
 # Debian 12 let in: python 3.11, and ansible==14 dies in phase 20
 red_9() { _sub "$AEGIS_ROOT/lib/host.sh" 'AEGIS_HOST_MIN_DEBIAN="13"' 'AEGIS_HOST_MIN_DEBIAN="12"'; }
 
-# the door opened with no archived run behind it
+# Arch has a successful run but the default door closes it again
 red_10() { _sub "$AEGIS_ROOT/lib/host.sh" \
-    'AEGIS_HOST_SUPPORTED_DEFAULT="ubuntu"' 'AEGIS_HOST_SUPPORTED_DEFAULT="ubuntu debian"'; }
+    'AEGIS_HOST_SUPPORTED_DEFAULT="ubuntu debian arch"' 'AEGIS_HOST_SUPPORTED_DEFAULT="ubuntu debian"'; }
 
 # the playbook lets Debian through whatever the list says
 red_11() { _sub "$AEGIS_ROOT/seed/platform/ansible/playbooks/bootstrap-host.yml" \
@@ -107,7 +107,8 @@ control_1() { _sub "$AEGIS_ROOT/libexec/aegis-preflight" \
 
 # control: a newer Ubuntu joins the tested list; nothing about the order changes
 control_2() { _sub "$AEGIS_ROOT/init/phases/00-preflight.sh" \
-    '        ubuntu:24.04|ubuntu:26.04|debian:13) ;;' '        ubuntu:24.04|ubuntu:26.04|ubuntu:26.10|debian:13) ;;'; }
+    '        ubuntu:24.04|ubuntu:26.04|debian:13|arch:*) ;;' \
+    '        ubuntu:24.04|ubuntu:26.04|ubuntu:26.10|debian:13|arch:*) ;;'; }
 
 # control: a COMMENT in the playbook with a lower Debian floor is prose;
 # the check reads the assert, not what somebody wrote above it

@@ -426,7 +426,7 @@ Said plainly, because the checks would say them anyway.
   tenant's console does not exist.
 - **Restoring between instances is not automatic.** A bundle is encrypted
   to the key of the instance that made it.
-- **`amd64` only**, and Ubuntu 24.04 or newer on the host.
+- **`amd64` only.** The host can be Ubuntu 24.04 or newer, Debian 13 or newer, or Arch Linux (rolling), including derivatives that declare `ID_LIKE=arch`.
 
 ---
 
