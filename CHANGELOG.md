@@ -4,6 +4,17 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-10-15 — the front page, for the people it is for
+
+Nothing in the product changes. The front page, in both languages, is
+rewritten for whoever is deciding whether to install it: what it is in
+one sentence, who it is for, what problem it solves, what it does, who
+does what, what it does not do, how it looks and where it has run, with
+three new figures (`docs/assets/que-es`, `antes-despues`,
+`quien-hace-que`, Spanish and English) drawn to read on a phone. The
+requirements, the commands, the gap list and the install steps are the
+same lines the checks read.
+
 ## 2026-10-14 — the verifier's cost, and the front page rewritten
 
 Nothing here changes what the init does to a machine; it changes how the

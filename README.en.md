@@ -5,45 +5,152 @@
 [![verify](https://github.com/MEMEMEMEMEMEMEDev/aegis-infra/actions/workflows/verify.yml/badge.svg)](https://github.com/MEMEMEMEMEMEMEDev/aegis-infra/actions/workflows/verify.yml)
 · Léelo en español: [README.md](README.md)
 
+![A Linux machine and a GitHub account go in; your own deployment platform comes out](docs/assets/que-es.en.svg)
+
+## In one sentence
+
+aegis turns a Linux machine and a GitHub account into your own
+deployment platform. It installs and wires together everything it takes
+for a `git push` to end as an application published on the internet,
+with a certificate, scanned and signed, and then it keeps watch that it
+stays that way. It is free software, it runs on your server and the keys
+are yours.
+
+For whoever pushes, it feels like Vercel or Heroku. The difference is
+that nobody else is inside.
+
+## Who it is for
+
+- **For whoever has a server and several applications.** A VPS, a
+  machine at home, an old box running Linux. Today you publish by hand,
+  copying files or starting containers one by one, and every change is
+  an afternoon. With aegis, the change is a push.
+- **For a small team that wants to work like the big ones without
+  paying like the big ones.** Every project in its place, with its
+  database, its domain and its backups, and one flow for all of them:
+  push, build, test, publish.
+- **For whoever does not want to hand over their keys.** Commercial
+  platforms are comfortable because they keep your code, your secrets
+  and your data. aegis gives you the same comfort on your machine: the
+  code on your GitHub, the secrets encrypted on your disk, the data on
+  your server.
+- **For whoever wants to understand what runs.** Nothing is hidden.
+  Every piece is a known tool, every decision is written down, and the
+  platform measures itself every day and tells you what it found.
+
+It is not for a company with dozens of teams, nor for hosting
+strangers. It is for one team and its projects.
+
+## What problem it solves
+
+Building a platform like this by hand is a project of its own: a
+cluster, continuous deployment, an image registry, a vulnerability
+scanner, signatures, certificates, DNS, tunnels, metrics, logs, alerts
+and backups. Each piece has its manual and its way of breaking, and
+wiring them together is where the time goes. Most people leave it half
+done: they publish without scanning, keep secrets in loose files, have
+no tested backups, and never know something is wrong until a user says
+so.
+
+![By hand: ten pieces, each with its manual. With aegis: one command, then a push](docs/assets/antes-despues.en.svg)
+
+aegis does that work once, with the pieces already chosen and already
+wired, and with one rule that holds everywhere: **if something could not
+be checked, it says so.** A platform that stays quiet when it does not
+know is worse than one that does not exist.
+
+## What it does
+
 ![What happens to a git push: build, scan, sign, deploy, expose; unsigned, refused](docs/assets/pipeline.en.svg)
 
-## What it gives you, in thirty seconds
+- **Installs the whole platform with one command.** `aegis init` asks
+  the little it cannot infer and walks through sixteen phases. Each
+  phase records what it checked. If something fails, it stops there,
+  says why, and can be resumed.
+- **Turns every push into a release.** The application is built in an
+  isolated environment, scanned for vulnerabilities, signed and
+  deployed. It ends up published with TLS at `your-app.your-domain`,
+  without you touching DNS or certificates.
+- **Lets nothing run that did not go through there.** An unsigned image
+  does not enter the cluster. The platform refuses it and says why.
+- **Signs a project up with one file.** One contract per project says
+  which services it has, which database, which domain and how much it
+  may consume. Everything else is derived from it.
+- **Watches itself.** Metrics, logs, a daily round of checks and alerts
+  to your phone. Every morning it re-scans what runs and keeps a book of
+  what must be fixed and by when.
+- **Backs up and knows how to restore.** Each project's data and the
+  platform's own state, encrypted, with the restore tested.
 
-You have a Linux machine and a GitHub account. One command, `aegis init`,
-turns them into a deployment platform of your own: Kubernetes, GitOps,
-CI, an image registry, a vulnerability scanner, image signing, metrics,
-logs and alerts to your phone, installed and wired together.
+## Who does what
 
-From then on:
+![The team pushes; the platform builds, scans, signs and publishes; you watch the console and get the alerts](docs/assets/quien-hace-que.en.svg)
 
-- **You push and your application is on the internet.** Every push is
-  built in an unprivileged pod, scanned, signed, deployed and published
-  with TLS at `your-app.your-domain`. You touch no DNS, no certificates,
-  no tunnel and no Kubernetes manifest.
-- **Nothing runs unsigned.** An image that did not go through your
-  pipeline does not enter the cluster: admission refuses it and says why.
-- **The server, the data and the keys are yours.** For whoever pushes it
-  feels like Vercel; the difference is that nobody else is inside.
-- **The platform measures itself and tells you.** A round (`aegis check`)
-  and a console say what is fine, what is wrong and, above all, what
-  could not be looked at. If it stops reporting, that is a report too.
+There are two roles. **The team** writes code and pushes; it does not
+need to know what Kubernetes is. **Whoever operates** installs aegis,
+signs projects up and looks at the console now and then; it helps to
+know what a cluster is, because when something stops, the diagnosis is
+theirs. In a small team they are usually the same person.
 
-For whoever operates it, today it is a platform engineering tool: one
-person who knows what a cluster is installs it and looks after it. For
-the team that pushes, it is a `git push`.
+## What it does not do
 
-**Status: technical preview** (tag `v3.0.0-alpha.1` of 2026-08-28; 395
-fix commits since, as of 2026-10-13). The trust model is a team's, by
-decision: whoever can push to an application repository is trusted by
-the whole platform. It is said in «What is not there yet», with what it
-implies.
+Said before you find out:
 
-## See it
+- **It is not for hosting third parties.** Whoever can push to a
+  project is trusted by the whole platform. Projects are isolated from
+  each other, but not from the platform. It is a decision: aegis is for
+  a team hosting itself.
+- **One machine.** No high availability and no multiple nodes. If the
+  machine goes down, the platform goes down with it; the backups exist
+  to come back.
+- **One operating system on the host.** Ubuntu, and nothing else for
+  now. Other distributions are refused before anything is touched.
+- **No web panel for administration.** The console shows; changes are
+  made with commands and commits. On purpose: nothing runs until you
+  commit it.
+- **It is not instant.** The install takes hours, not minutes, because
+  it builds and signs its own images. After that, a push takes as long
+  as building your application takes.
+- **It demands reading.** There is a wizard to install and a console to
+  look at, but operating a platform is operating a platform.
+
+The complete, measured list is further down in «What is not there yet».
+
+## What it looks like
 
 ![The console: Projects, with an instance's five projects and the worst state of each section beside its entry](docs/assets/console-projects.png)
 
-And this is what the product says about itself, as it came out on
-2026-10-14 on the tree of commit `39d2405` (no cluster):
+The console opens in your browser over an SSH tunnel and shows your
+projects, the deployments, the domains, the traffic, the storage, the
+security and the machine. Everything has one of four states:
+
+![Four states: fine, wrong, attention, could not look](docs/assets/states.en.svg)
+
+The fourth state is the important one. When something could not be
+measured, the console does not paint it green: it says so.
+
+![Deployments: the last sixty pushes, each with its four links measured](docs/assets/console-deployments.png)
+
+## Status
+
+**Alpha.** It is the first version somebody else can install from this
+repository. It works, it is tested and it is used daily on the author's
+instance, but few people have installed it yet and your machine will
+probably find something the author's did not. If it does, there is an
+issue template that asks for exactly what is needed to diagnose it.
+
+Where a complete install has run, from zero and with no intervention:
+
+| system | result |
+|---|---|
+| Ubuntu 26.04, on lab VMs | several clean installs end to end, with the domain on Cloudflare, an application published and the recovery from backup tested |
+| Ubuntu, on a rented VPS | the first complete install, with the profile without a domain |
+| Arch Linux and Debian 13, in the lab | clean installs through the experimental lane; the installer does not accept them outside the lab yet |
+| the author's machine, Ubuntu with a GPU | in daily use: pushes, off-site backups, updates and the vulnerability book every morning |
+
+Every run that failed left a fix and a check that watches it. What the
+product says about itself, as it came out on 2026-10-14 on the tree of
+commit `39d2405` (no cluster):
 
 ```
 $ aegis verify --profile both
@@ -51,43 +158,10 @@ $ aegis verify --profile both
    no check reads the profile yet (AEGIS_VERIFY_PROFILE): both profiles are one pass, run once as cloudflare — the second comes back the day a check reads it
 ```
 
-One pass, and it says so: while no check reads the profile, running
-both would be running the same thing twice. The check that was not
-evaluated is the one that renders the pinned charts, which runs only
-under `--with-charts` because it fetches every chart from its
-repository. Each of those 293 checks carries its *tooth*: a mutation
-that proves the check turns red when it should. The teeth ran too:
-`aegis verify --teeth` walks the 1,688 mutations in minutes (five of
-them, the charts', only under `--with-charts`).
-
-## What has already happened, measured
-
-The figures are left as they came out on the day they were measured. Every
-row has its source in the repository.
-
-| when | where | what | result |
-|---|---|---|---|
-| 2026-08-27 | a rented VPS (4 CPU, 16 GB, Ubuntu, nothing installed but ssh), a fresh GitHub account, no domain (`local` profile) | `aegis init` from zero | 15 of 15 phases (there were fifteen then; 87 came later), 174 gates passed, 20 recorded as not evaluable because they need a public edge. Fourteen resumes and about thirty defects the static checks could not see, all closed with their check |
-| 2026-08-27 | the same host | two applications signed up from their contract, with their data restored from backups | 12 products and 4 orders served over HTTPS |
-| 2026-08-27 | the same host | the supply chain end to end | a signed image admitted; an unsigned one refused citing the policy |
-| 2026-08-27 | the same host | `aegis state backup` and `aegis state restore` into a second instance directory | round trip verified |
-| 2026-08-27 | the same host, dirty | `aegis destroy --k3s` and a second `aegis init` over the leftovers | complete, after three fixes to the product; what a previous instance leaves behind, the init detects and repairs |
-| 2026-09-22 → 09-24 | lab cloud VMs (Vultr, Ubuntu 26.04; a second one after the first froze), with a zone in Cloudflare | the `cloudflare` profile from zero: tunnel, DNS, Access, Kyverno, the canary | installed; every stop became a fix and a check (Zero Trust dormant, a previous instance's leftovers in Access, a canary sync ArgoCD does not retry) |
-| 2026-09-30 → 10-02 | a clean lab install on Arch | phase 80 against two OpenSSL CVEs published the day before | the dated-debt policy was born: what a change brings stops the build; what time brings has a deadline |
-| 2026-10-12 → 10-13 | a clean lab install on Ubuntu | from phase 00 to the canary's first signed image | four stops in phase 80, four fixes with their check (the exploited list ageing wrong, golang 1.26.9, the canary repointed twice) |
-| in use | the author's home instance, on the `cloudflare` profile: born as v2 and carried to v3 piece by piece on the same seed (the improvements standardised, proven with teeth and on the lab VPSs); not a clean v3 install | the daily routine: pushes, off-site backups, the update window, the vulnerability books every morning | the measured cases the console draws come from here |
-
-What is in the tree today, counted when this page was written:
-
-| | |
-|---|---|
-| 16 phases | `aegis init --list` |
-| 293 static checks, 293 teeth | `aegis verify --list` |
-| 30 commands | `aegis --help` |
-| 6 application templates | `seed/templates/` |
-| 31 ArgoCD Applications in the seed | `seed/platform/k8s/` |
-| 8 named failure classes | `seed/platform/docs/failure-modes.md` |
-| 395 commits since the `v3.0.0-alpha.1` tag (2026-08-28), as of 2026-10-13 | `git log` |
+Each of those 293 checks carries its *tooth*: a mutation that proves the
+check turns red when it should. `aegis verify --teeth` walks the 1,688
+mutations in minutes. The details of each run, with their numbers as
+they came out, are in [docs/how-it-works.md](docs/how-it-works.md).
 
 ## Before you start
 
@@ -247,24 +321,18 @@ reject it.
 aegis console serve            # http://127.0.0.1:7391
 ```
 
-A visual layer on top of the CLI. Every screen is drawn from the
+A visual layer on top of the commands. Every screen is drawn from the
 documents the commands already emit; it measures nothing of its own and
 there is nothing it can run that you cannot. It has no AI agent: a
 platform whose job is to say what is true about your machine does not
 guess.
 
-![Four states: fine, wrong, attention, could not look](docs/assets/states.en.svg)
-
 It is organized like the consoles you already know: nine screens
 (Projects, Deployments, Domains, Traffic, Storage, Plans, Security,
 Machine and Health), and beside each entry the worst state of what feeds
-it. It opens with your projects and with the repositories nobody runs
-yet. It signs a project up in three cards and writes the contract, the
+it. It signs a project up in three cards and writes the contract, the
 manifests and the secrets that are missing. It does not commit, push,
-apply or touch the cluster: ArgoCD reads the remote, so nothing runs
-until you commit.
-
-![Deployments: the last sixty pushes, each with its four links measured](docs/assets/console-deployments.png)
+apply or touch the cluster: nothing runs until you commit.
 
 It comes with a guided tour of sixteen steps. It is not published through
 the tunnel: you get in with `ssh -L 7391:127.0.0.1:7391`. The why, the
@@ -349,8 +417,9 @@ restore the other.
 
 ## How it works, in short
 
-The long version, with every mechanism and every number recomputed, is
-[docs/how-it-works.md](docs/how-it-works.md). This is the map.
+For whoever wants to open the hood. The long version, with every
+mechanism and every number recomputed, is
+[docs/how-it-works.md](docs/how-it-works.md).
 
 <details>
 <summary><b>Sixteen phases, four stages</b></summary>

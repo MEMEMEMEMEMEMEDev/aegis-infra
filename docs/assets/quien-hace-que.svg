@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 330" width="800" height="330" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <title>El equipo hace push; la plataforma construye, escanea, firma y publica; tú miras la consola y recibes las alertas</title>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b4652"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="800" height="330" rx="14" fill="#f6f7f9"/>
+  <text x="30" y="40" font-size="15" fill="#5b6672" letter-spacing="1.5">QUIÉN HACE QUÉ</text>
+  <g text-anchor="middle" fill="#1f2733">
+    <rect x="30" y="70" width="220" height="200" rx="10" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/>
+    <text x="140" y="108" font-size="22" font-weight="600">El equipo</text>
+    <text x="140" y="146" font-size="17" fill="#5b6672">escribe código</text>
+    <text x="140" y="172" font-size="17" fill="#5b6672">y hace git push</text>
+    <text x="140" y="214" font-size="15" fill="#5b6672">no necesita saber</text>
+    <text x="140" y="236" font-size="15" fill="#5b6672">qué es Kubernetes</text>
+
+    <rect x="290" y="70" width="220" height="200" rx="10" fill="#e6f2ee" stroke="#2f6f5e" stroke-width="1.5"/>
+    <text x="400" y="108" font-size="22" font-weight="600">La plataforma</text>
+    <text x="400" y="146" font-size="17" fill="#2f4f44">construye y escanea</text>
+    <text x="400" y="172" font-size="17" fill="#2f4f44">firma y publica</text>
+    <text x="400" y="198" font-size="17" fill="#2f4f44">vigila y respalda</text>
+    <text x="400" y="236" font-size="14" fill="#2f4f44">rechaza lo que no pasó por ahí</text>
+
+    <rect x="550" y="70" width="220" height="200" rx="10" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/>
+    <text x="660" y="108" font-size="22" font-weight="600">Tú</text>
+    <text x="660" y="146" font-size="17" fill="#5b6672">instalas y das de alta</text>
+    <text x="660" y="172" font-size="17" fill="#5b6672">miras la consola</text>
+    <text x="660" y="198" font-size="17" fill="#5b6672">recibes las alertas</text>
+    <text x="660" y="236" font-size="14" fill="#5b6672">conviene saber qué es un clúster</text>
+  </g>
+  <line x1="252" y1="170" x2="286" y2="170" stroke="#3b4652" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="512" y1="170" x2="546" y2="170" stroke="#3b4652" stroke-width="2" marker-end="url(#a)"/>
+  <text x="400" y="306" font-size="15" fill="#5b6672" text-anchor="middle">en un equipo pequeño, los dos papeles suelen ser la misma persona</text>
+</svg>

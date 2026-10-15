@@ -5,45 +5,151 @@
 [![verify](https://github.com/MEMEMEMEMEMEMEDev/aegis-infra/actions/workflows/verify.yml/badge.svg)](https://github.com/MEMEMEMEMEMEMEDev/aegis-infra/actions/workflows/verify.yml)
 · Read this in English: [README.en.md](README.en.md)
 
+![Una máquina Linux y una cuenta de GitHub entran; sale tu propia plataforma de despliegue](docs/assets/que-es.svg)
+
+## En una frase
+
+aegis convierte una máquina Linux y una cuenta de GitHub en tu propia
+plataforma de despliegue. Instala y conecta todo lo que hace falta para
+que un `git push` termine en una aplicación publicada en internet, con
+certificado, escaneada y firmada, y después vigila que siga así. Es
+software libre, corre en tu servidor y las llaves son tuyas.
+
+Para quien hace push, se parece a Vercel o a Heroku. La diferencia es
+que no hay nadie más dentro.
+
+## Para quién es
+
+- **Para quien tiene un servidor y varias aplicaciones.** Un VPS, una
+  máquina en casa, un equipo viejo con Linux. Hoy publicas a mano,
+  copiando ficheros o levantando contenedores uno a uno, y cada cambio
+  es una tarde. Con aegis, el cambio es un push.
+- **Para un equipo pequeño que quiere trabajar como los grandes sin
+  pagar como los grandes.** Cada proyecto en su sitio, con su base de
+  datos, su dominio y sus respaldos, y un flujo igual para todos: push,
+  construir, probar, publicar.
+- **Para quien no quiere regalar sus llaves.** Las plataformas
+  comerciales son cómodas porque guardan tu código, tus secretos y tus
+  datos. aegis te da la misma comodidad en tu máquina: el código en tu
+  GitHub, los secretos cifrados en tu disco, los datos en tu servidor.
+- **Para quien quiere entender qué corre.** Nada está escondido. Cada
+  pieza es una herramienta conocida, cada decisión está escrita y la
+  plataforma se mide a sí misma todos los días y te dice qué encontró.
+
+No es para una empresa con decenas de equipos ni para alojar a
+desconocidos. Es para un equipo y sus proyectos.
+
+## Qué problema resuelve
+
+Montar una plataforma así a mano es un proyecto en sí mismo: un clúster,
+un sistema de despliegue continuo, un registro de imágenes, un escáner
+de vulnerabilidades, firmas, certificados, DNS, túneles, métricas, logs,
+alertas y respaldos. Cada pieza tiene su manual y su forma de romperse,
+y conectarlas entre sí es donde se va el tiempo. La mayoría de la gente
+lo deja a medias: publica sin escanear, guarda secretos en ficheros
+sueltos, no tiene respaldos probados, y nunca sabe si algo está mal
+hasta que un usuario avisa.
+
+![A mano: diez piezas, cada una con su manual. Con aegis: un comando, y después un push](docs/assets/antes-despues.svg)
+
+aegis hace ese trabajo de una vez, con las piezas ya elegidas y ya
+conectadas, y con una regla que vale para todo: **si algo no se pudo
+comprobar, se dice.** Una plataforma que calla cuando no sabe es peor
+que una que no existe.
+
+## Qué hace
+
 ![Qué le pasa a un git push: construir, escanear, firmar, desplegar, exponer; sin firma, rechazada](docs/assets/pipeline.svg)
 
-## Qué te da, en treinta segundos
+- **Instala la plataforma entera con un comando.** `aegis init` pregunta
+  lo poco que no puede deducir y recorre dieciséis fases. Cada fase deja
+  constancia de lo que comprobó. Si algo falla, se detiene ahí, dice por
+  qué y se puede reanudar.
+- **Convierte cada push en una publicación.** La aplicación se construye
+  en un entorno aislado, se escanea en busca de vulnerabilidades, se firma
+  y se despliega. Queda publicada con TLS en `tu-app.tu-dominio`, sin
+  que toques DNS ni certificados.
+- **No deja correr nada que no haya pasado por ahí.** Una imagen sin
+  firma no entra al clúster. La plataforma la rechaza y dice por qué.
+- **Da de alta un proyecto con un fichero.** Un contrato por proyecto
+  dice qué servicios tiene, qué base de datos, qué dominio y cuánto puede
+  consumir. Todo lo demás se deriva de ahí.
+- **Se vigila a sí misma.** Métricas, logs, una ronda diaria de
+  comprobaciones y alertas al teléfono. Cada mañana vuelve a escanear lo
+  que corre y lleva un libro de lo que se debe arreglar y hasta cuándo.
+- **Hace respaldos y sabe restaurarlos.** Los datos de cada proyecto y el
+  estado de la propia plataforma, cifrados, con la restauración probada.
 
-Tienes una máquina Linux y una cuenta de GitHub. Un comando, `aegis init`,
-las convierte en tu propia plataforma de despliegue: Kubernetes, GitOps,
-CI, registro de imágenes, escáner de vulnerabilidades, firma de imágenes,
-métricas, logs y alertas al teléfono, instalados y conectados entre sí.
+## Quién hace qué
 
-Desde ese momento:
+![El equipo hace push; la plataforma construye, escanea, firma y publica; tú miras la consola y recibes las alertas](docs/assets/quien-hace-que.svg)
 
-- **Haces push y tu aplicación sale a internet.** Cada push se construye
-  en un pod sin privilegios, se escanea, se firma, se despliega y queda
-  publicada con TLS en `tu-app.tu-dominio`. No tocas DNS, certificados,
-  túneles ni manifiestos de Kubernetes.
-- **Nada corre sin firma.** Una imagen que no pasó por tu pipeline no
-  entra al clúster: la admisión la rechaza y dice por qué.
-- **El servidor, los datos y las llaves son tuyos.** Para quien hace push
-  se parece a Vercel; la diferencia es que no hay nadie más dentro.
-- **La plataforma se mide a sí misma y te lo cuenta.** Una ronda (`aegis
-  check`) y una consola dicen qué está bien, qué está mal y, lo más
-  importante, qué no se pudo mirar. Si deja de avisar, eso también es un
-  aviso.
+Hay dos papeles. **El equipo** escribe código y hace push; no necesita
+saber qué es Kubernetes. **Quien opera** instala aegis, da de alta los
+proyectos y mira la consola de vez en cuando; conviene que sepa qué es
+un clúster, porque cuando algo se frena, el diagnóstico es suyo. En un
+equipo pequeño suelen ser la misma persona.
 
-Para quien la opera, hoy es una herramienta de platform engineering: la
-instala y la cuida una persona que sabe lo que es un clúster. Para el
-equipo que hace push, es un `git push`.
+## Qué no hace
 
-**Estado: avance técnico** (etiqueta `v3.0.0-alpha.1` del 2026-08-28;
-395 commits de corrección desde entonces, al 2026-10-13). El modelo de
-confianza es el de un equipo, por decisión: quien puede hacer push a un
-repositorio de aplicación es de confianza para toda la plataforma. Está
-dicho en «Lo que no está», con lo que eso implica.
+Dicho antes de que lo descubras:
 
-## Míralo
+- **No es para alojar a terceros.** Quien puede hacer push a un
+  proyecto es de confianza para toda la plataforma. Los proyectos están
+  aislados entre sí, pero no de la plataforma. Es una decisión: aegis es
+  para un equipo que se aloja a sí mismo.
+- **Una sola máquina.** Sin alta disponibilidad ni varios nodos. Si la
+  máquina se cae, la plataforma se cae con ella; los respaldos existen
+  para volver.
+- **Un solo sistema operativo en el host.** Ubuntu, y nada más por
+  ahora. Otras distribuciones se rechazan antes de tocar nada.
+- **No tiene panel web para administrar.** La consola muestra; el
+  cambio se hace con comandos y commits. Es a propósito: nada corre
+  hasta que tú lo commiteas.
+- **No es instantáneo.** La instalación tarda horas, no minutos, porque
+  construye y firma sus propias imágenes. Después, un push tarda lo que
+  tarda construir tu aplicación.
+- **Exige leer.** Hay un asistente para instalar y una consola para
+  mirar, pero operar una plataforma es operar una plataforma.
+
+La lista completa, medida, está más abajo en «Lo que no está».
+
+## Cómo se ve
 
 ![La consola: Projects, con los cinco proyectos de una instancia y el peor estado de cada sección al lado de su entrada](docs/assets/console-projects.png)
 
-Y esto es lo que dice el producto de sí mismo, tal cual salió el
+La consola se abre en tu navegador por un túnel SSH y muestra tus
+proyectos, los despliegues, los dominios, el tráfico, el almacenamiento,
+la seguridad y la máquina. Cada cosa tiene uno de cuatro estados:
+
+![Cuatro estados: bien, mal, pide atención, nadie pudo mirar](docs/assets/states.svg)
+
+El cuarto estado es el importante. Cuando algo no se pudo medir, la
+consola no lo pinta de verde: lo dice.
+
+![Deployments: los últimos sesenta pushes, cada uno con sus cuatro eslabones medidos](docs/assets/console-deployments.png)
+
+## Estado
+
+**Versión alpha.** Es la primera versión que otra persona puede instalar
+desde este repositorio. Funciona, está probada y se usa a diario en la
+instancia del autor, pero todavía la ha instalado poca gente y es
+probable que tu máquina encuentre algo que las del autor no. Si pasa,
+hay una plantilla de issue que pide exactamente lo que hace falta para
+diagnosticarlo.
+
+Dónde ha corrido una instalación completa, desde cero y sin
+intervención:
+
+| sistema | resultado |
+|---|---|
+| Ubuntu 26.04, en VMs de laboratorio | varias instalaciones limpias de principio a fin, con el dominio en Cloudflare, una aplicación publicada y la recuperación desde respaldo probada |
+| Ubuntu, en un VPS alquilado | la primera instalación completa, con el perfil sin dominio |
+| Arch Linux y Debian 13, en laboratorio | instalaciones limpias por el carril experimental; el instalador aún no las acepta fuera del laboratorio |
+| la máquina del autor, Ubuntu con GPU | en uso diario: pushes, respaldos fuera de sitio, actualizaciones y el libro de vulnerabilidades cada mañana |
+
+Cada corrida que falló dejó un arreglo y una comprobación que lo
+vigila. Lo que el producto dice de sí mismo, tal cual salió el
 2026-10-14 sobre el árbol del commit `39d2405` (sin clúster):
 
 ```
@@ -52,43 +158,11 @@ $ aegis verify --profile both
    no check reads the profile yet (AEGIS_VERIFY_PROFILE): both profiles are one pass, run once as cloudflare — the second comes back the day a check reads it
 ```
 
-Un solo pase, y lo dice: mientras ningún check lea el perfil, correr los
-dos sería correr lo mismo dos veces. El check que no se evaluó es el que
-renderiza los charts fijados, y sólo corre con `--with-charts` porque
-pide cada chart a su repositorio. Cada uno de esos 293 checks lleva su
-*diente*: una mutación que demuestra que el check se pone rojo cuando
-debe. Los dientes también se corrieron: `aegis verify --teeth` recorre
-las 1.688 mutaciones en minutos (cinco de ellas, las de los charts,
-sólo con `--with-charts`).
-
-## Lo que ya ha pasado, medido
-
-Las cifras se dejan como salieron el día que se midieron. Cada fila tiene
-su fuente en el repositorio.
-
-| cuándo | dónde | qué | resultado |
-|---|---|---|---|
-| 2026-08-27 | un VPS alquilado (4 CPU, 16 GB, Ubuntu, nada instalado salvo ssh), una cuenta de GitHub nueva, sin dominio (perfil `local`) | `aegis init` desde cero | 15 de 15 fases (entonces eran quince; la 87 llegó después), 174 puertas pasadas, 20 registradas como no evaluables porque piden un borde público. Catorce reanudaciones y unos treinta defectos que los checks estáticos no podían ver, todos cerrados con su check |
-| 2026-08-27 | el mismo host | dos aplicaciones dadas de alta desde su contrato, con sus datos restaurados desde respaldos | 12 productos y 4 pedidos servidos por HTTPS |
-| 2026-08-27 | el mismo host | la cadena de suministro de extremo a extremo | imagen firmada admitida; imagen sin firma rechazada citando la política |
-| 2026-08-27 | el mismo host | `aegis state backup` y `aegis state restore` en un segundo directorio de instancia | ida y vuelta verificada |
-| 2026-08-27 | el mismo host, sucio | `aegis destroy --k3s` y un segundo `aegis init` sobre los restos | completo, tras tres arreglos del producto; lo que una instancia anterior deja atrás, el init lo detecta y lo repara |
-| 2026-09-22 → 09-24 | VMs cloud de laboratorio (Vultr, Ubuntu 26.04; una segunda tras morir la primera), con una zona en Cloudflare | el perfil `cloudflare` de cero: túnel, DNS, Access, Kyverno, canario | instalado; cada parada se convirtió en un arreglo y un check (Zero Trust dormido, restos de una instancia anterior en Access, un sync del canario que ArgoCD no reintenta) |
-| 2026-09-30 → 10-02 | una instalación limpia en Arch, de laboratorio | la fase 80 contra dos CVE de OpenSSL publicadas el día anterior | nació la política de deuda con fecha: lo que el cambio trae detiene el build; lo que el tiempo trae tiene plazo |
-| 2026-10-12 → 10-13 | una instalación limpia en Ubuntu, de laboratorio | de la fase 00 a la primera imagen firmada del canario | cuatro paradas en la fase 80, cuatro arreglos con su check (la lista de explotadas que envejecía mal, golang 1.26.9, el canario reapuntado dos veces) |
-| en uso | la instancia de casa del autor, con el perfil `cloudflare`: nació como v2 y se fue llevando a v3 pieza a pieza con la misma semilla (las mejoras estandarizadas, probadas con dientes y en las VPS de laboratorio); no es una instalación limpia de v3 | el día a día: pushes, respaldos fuera de sitio, la ventana de actualizaciones, el libro de vulnerabilidades cada mañana | de aquí salen los casos medidos que dibuja la consola |
-
-Lo que hay hoy en el árbol, contado al escribir esta página:
-
-| | |
-|---|---|
-| 16 fases | `aegis init --list` |
-| 293 checks estáticos, 293 dientes | `aegis verify --list` |
-| 30 comandos | `aegis --help` |
-| 6 plantillas de aplicación | `seed/templates/` |
-| 31 Applications de ArgoCD en la semilla | `seed/platform/k8s/` |
-| 8 clases de fallo con nombre | `seed/platform/docs/failure-modes.md` |
-| 395 commits desde la etiqueta `v3.0.0-alpha.1` (2026-08-28), al 2026-10-13 | `git log` |
+Cada uno de esos 293 checks lleva su *diente*: una mutación que
+demuestra que el check se pone rojo cuando debe. `aegis verify --teeth`
+recorre las 1.688 mutaciones en minutos. Los detalles de cada corrida,
+con sus cifras tal como salieron, están en
+[docs/how-it-works.md](docs/how-it-works.md).
 
 ## Antes de empezar
 
@@ -245,24 +319,18 @@ rechazan.
 aegis console serve            # http://127.0.0.1:7391
 ```
 
-Una capa visual encima del CLI. Cada pantalla se dibuja con los
+Una capa visual encima de los comandos. Cada pantalla se dibuja con los
 documentos que los comandos ya emiten; no mide nada por su cuenta y no
 puede correr nada que tú no puedas. No tiene agente de AI: una
 plataforma cuyo trabajo es decir qué es verdad sobre tu máquina no
 adivina.
 
-![Cuatro estados: bien, mal, pide atención, nadie pudo mirar](docs/assets/states.svg)
-
 Está organizada como las consolas que ya conoces: nueve pantallas
 (Projects, Deployments, Domains, Traffic, Storage, Plans, Security,
 Machine y Health) y al lado de cada entrada el peor estado de lo que la
-alimenta. Abre con tus proyectos y con los repositorios que todavía no
-corre nadie. Da de alta un proyecto en tres tarjetas y escribe el
-contrato, los manifiestos y los secretos que falten. No commitea, no
-empuja, no aplica y no toca el clúster: ArgoCD lee el remoto, así que
-nada corre hasta que tú commitees.
-
-![Deployments: los últimos sesenta pushes, cada uno con sus cuatro eslabones medidos](docs/assets/console-deployments.png)
+alimenta. Da de alta un proyecto en tres tarjetas y escribe el contrato,
+los manifiestos y los secretos que falten. No commitea, no empuja, no
+aplica y no toca el clúster: nada corre hasta que tú commitees.
 
 Trae un recorrido guiado de dieciséis pasos. No se publica por el túnel:
 se entra con `ssh -L 7391:127.0.0.1:7391`. El porqué, el modelo de
@@ -347,8 +415,8 @@ restaura el otro.
 
 ## Cómo funciona, en corto
 
-La versión larga, con cada mecanismo y cada número recalculado, es
-[docs/how-it-works.md](docs/how-it-works.md). Esto es el mapa.
+Para quien quiera abrir el capó. La versión larga, con cada mecanismo y
+cada número recalculado, es [docs/how-it-works.md](docs/how-it-works.md).
 
 <details>
 <summary><b>Dieciséis fases, cuatro etapas</b></summary>

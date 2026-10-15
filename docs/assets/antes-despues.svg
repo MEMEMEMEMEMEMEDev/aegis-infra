@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 430" width="800" height="430" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <title>A mano: diez piezas, cada una con su manual. Con aegis: un comando, y después un push</title>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f6f5e"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="800" height="430" rx="14" fill="#f6f7f9"/>
+  <text x="30" y="40" font-size="15" fill="#5b6672" letter-spacing="1.5">A MANO</text>
+  <text x="440" y="40" font-size="15" fill="#5b6672" letter-spacing="1.5">CON AEGIS</text>
+  <g font-size="17" fill="#1f2733">
+    <rect x="26" y="60" width="182" height="44" rx="8" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/><text x="117" y="88" text-anchor="middle">un clúster</text>
+    <rect x="218" y="60" width="182" height="44" rx="8" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/><text x="309" y="88" text-anchor="middle">despliegue continuo</text>
+    <rect x="26" y="118" width="182" height="44" rx="8" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/><text x="117" y="146" text-anchor="middle">registro de imágenes</text>
+    <rect x="218" y="118" width="182" height="44" rx="8" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/><text x="309" y="146" text-anchor="middle">escáner de CVE</text>
+    <rect x="26" y="176" width="182" height="44" rx="8" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/><text x="117" y="204" text-anchor="middle">firma de imágenes</text>
+    <rect x="218" y="176" width="182" height="44" rx="8" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/><text x="309" y="204" text-anchor="middle">certificados y DNS</text>
+    <rect x="26" y="234" width="182" height="44" rx="8" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/><text x="117" y="262" text-anchor="middle">túnel o proxy</text>
+    <rect x="218" y="234" width="182" height="44" rx="8" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/><text x="309" y="262" text-anchor="middle">secretos cifrados</text>
+    <rect x="26" y="292" width="182" height="44" rx="8" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/><text x="117" y="320" text-anchor="middle">métricas y alertas</text>
+    <rect x="218" y="292" width="182" height="44" rx="8" fill="#ffffff" stroke="#c9d1d9" stroke-width="1.5"/><text x="309" y="320" text-anchor="middle">respaldos probados</text>
+  </g>
+  <text x="207" y="372" font-size="16" fill="#5b6672" text-anchor="middle">diez piezas, diez manuales,</text>
+  <text x="207" y="396" font-size="16" fill="#5b6672" text-anchor="middle">y conectarlas es donde se va el tiempo</text>
+  <line x1="412" y1="60" x2="412" y2="400" stroke="#c9d1d9" stroke-width="1.5" stroke-dasharray="4 6"/>
+  <g text-anchor="middle">
+    <rect x="470" y="96" width="260" height="84" rx="10" fill="#2f6f5e"/>
+    <text x="600" y="132" font-size="26" font-weight="600" fill="#ffffff">aegis init</text>
+    <text x="600" y="162" font-size="16" fill="#d7eae3">una vez, en tu máquina</text>
+    <line x1="600" y1="184" x2="600" y2="238" stroke="#2f6f5e" stroke-width="2.5" marker-end="url(#a)"/>
+    <rect x="470" y="246" width="260" height="84" rx="10" fill="#e6f2ee" stroke="#2f6f5e" stroke-width="1.5"/>
+    <text x="600" y="282" font-size="26" font-weight="600" fill="#1f2733">git push</text>
+    <text x="600" y="312" font-size="16" fill="#2f4f44">cada cambio, desde entonces</text>
+  </g>
+  <text x="600" y="372" font-size="16" fill="#5b6672" text-anchor="middle">las mismas diez piezas, ya elegidas</text>
+  <text x="600" y="396" font-size="16" fill="#5b6672" text-anchor="middle">y ya conectadas entre sí</text>
+</svg>
