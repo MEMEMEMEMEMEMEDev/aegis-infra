@@ -120,6 +120,23 @@ if "suggested" in plain:
     findings.append("a form nobody imported into says something was suggested: the label "
                     "has to mean this value came from a guess, or it means nothing")
 
+# ── contract words stay internal; the person sees English ───────────
+form_with_sizes = console.render_form(doc, "a-token")
+for contract_word, screen_word in (("chico", "Small"), ("mediano", "Medium"),
+                                   ("grande", "Large")):
+    if f'value="{contract_word}"' not in form_with_sizes or f'<b>{screen_word}</b>' not in form_with_sizes:
+        findings.append(f"the service-size choice does not keep `{contract_word}` as its "
+                        f"contract value while showing `{screen_word}` on screen")
+plan_choice = console._plan_choice({"cuota": {"opciones": ["pequena"]}}, "pequena", "/")
+if 'value="pequena"' not in plan_choice or "Small</b>" not in plan_choice:
+    findings.append("the quota choice does not keep `pequena` as its contract value while "
+                    "showing `Small` on screen")
+summary = console._in_words("organizacion: probe\ncuota: pequena\nservicios:\n"
+                            "  - nombre: web\n    tipo: http\n    tamano: mediano\n")
+if "plan <b class=\"mono\">Small</b>" not in summary or "size Medium" not in summary:
+    findings.append("the plain-language contract summary shows an untranslated quota or "
+                    "service-size name")
+
 # ── what goes into a style attribute ─────────────────────────────────
 # The language's colour arrives from somebody else's API and is painted
 # into an inline `style`. GitHub answering today is not a reason to hand

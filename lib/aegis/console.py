@@ -251,7 +251,7 @@ def _plan_choice(by, value, back):
     sentence its plan declares and its numbers in words, out of the
     schema — never typed here — and the way to a plan of your own sits
     beside them, because «none of these fits» is a real answer."""
-    from .screens import _plan_words
+    from .screens import _plan_words, plan_word
     cuota = by.get("cuota") or {}
     options = cuota.get("opciones") or []
     if not options:
@@ -263,7 +263,7 @@ def _plan_choice(by, value, back):
     picks = "".join(
         f'<label class="plan-pick"><input type="radio" name="cuota" value="{_e(o)}"'
         f'{" checked" if o == value or (not value and i == 0) else ""}>'
-        f'<span class="plan-body"><b class="mono">{_e(o)}</b>'
+        f'<span class="plan-body"><b class="mono">{_e(plan_word(o))}</b>'
         + (f'<span class="desc">{_e(words.get(o))}</span>' if words.get(o) else "")
         + f'<span class="nums">{_e(_plan_words(numbers.get(o)))}</span></span></label>'
         for i, o in enumerate(options))
@@ -415,7 +415,7 @@ def render_form(schema, token, filled=None, problem=None, action="/new",
     # The words a person reads beside the contract's own. The VALUE the
     # form submits is the contract's word, always: the label is for the
     # person, and the validator never sees it.
-    from .screens import KIND, KIND_ABOUT, KIND_ICON, _icon
+    from .screens import KIND, KIND_ABOUT, KIND_ICON, _icon, plan_word
     sizes = (by.get("tamano") or {}).get("opciones") or []
     # Small to large, which is how a person reads a ladder; the schema
     # lists them alphabetically. A size the ladder does not know goes
@@ -471,7 +471,7 @@ def render_form(schema, token, filled=None, problem=None, action="/new",
     size_cards = "".join(
         f'<label class="kind-pick"><input type="radio" name="{n}.tamano" value="{_e(z)}"'
         f'{" checked" if z == val(n + ".tamano", default_size) else ""}>'
-        f'<span class="plan-body"><b>{_e(z)}</b>'
+        f'<span class="plan-body"><b>{_e(plan_word(z))}</b>'
         f'<span class="desc">{_e(size_words.get(z) or "")}</span></span></label>'
         for z in sizes)
     main = (f'<div class="main-svc">'
@@ -869,7 +869,7 @@ def _in_words(contract_text):
     because a person checks what they meant against words, not against
     a list of generated files."""
     import yaml
-    from .screens import KIND, USES
+    from .screens import KIND, USES, plan_word
     try:
         c = yaml.safe_load(contract_text) or {}
     except yaml.YAMLError:
@@ -879,7 +879,7 @@ def _in_words(contract_text):
     rows = [f'<li><b class="mono">{_e(c.get("organizacion") or "?")}</b>'
             + (f', at <span class="mono">{_e(c["dominio"])}</span>' if c.get("dominio") else
                ", with no public hostname")
-            + f', plan <b class="mono">{_e(c.get("cuota") or "?")}</b>.</li>']
+            + f', plan <b class="mono">{_e(plan_word(c.get("cuota") or "?"))}</b>.</li>']
     for sv in c.get("servicios") or []:
         kind = sv.get("tipo")
         if kind in PROVIDED_NAME:
@@ -894,7 +894,7 @@ def _in_words(contract_text):
         if sv.get("repo"):
             bits.append(f'built from <span class="mono">{_e(sv["repo"])}</span>')
         if sv.get("tamano"):
-            bits.append(f'size {_e(sv["tamano"])}')
+            bits.append(f'size {_e(plan_word(sv["tamano"]))}')
         line = f'<li><b class="mono">{_e(sv.get("nombre"))}</b>: {", ".join(bits)}'
         if sv.get("usa"):
             line += f'; may reach {_e(", ".join(USES.get(u, u) for u in sv["usa"]))}'

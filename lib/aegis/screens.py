@@ -38,6 +38,17 @@ KIND = {
     "estatico": "static site", "http": "web service", "worker": "background worker",
     "postgres": "PostgreSQL database", "redis": "Redis cache", "mongodb": "MongoDB database",
 }
+PLAN_WORDS = {
+    "pequena": "Small", "chico": "Small",
+    "mediana": "Medium", "mediano": "Medium",
+    "grande": "Large",
+}
+
+
+def plan_word(name):
+    return PLAN_WORDS.get(name, name)
+
+
 KIND_ICON = {
     "estatico": "static", "http": "web", "worker": "worker",
     "postgres": "database", "mongodb": "database", "redis": "cache",
@@ -2202,7 +2213,7 @@ def _plans_section(reading, capacity, projects):
                   if not shipped else
                   f'<a class="act act--quiet small" href="/plans/new?from={_e(name)}">Start from it</a>')
         rows.append(
-            f'<tr><td><b class="mono">{_e(name)}</b><br>{badge}</td>'
+            f'<tr><td><b class="mono">{_e(plan_word(name))}</b><br>{badge}</td>'
             f'<td class="desc">{_e(st.get("descripcion") or "")}'
             + (f'<br><span class="note">{_e(st.get("error"))}</span>' if st.get("error") else "")
             + f'</td>'
@@ -2249,8 +2260,8 @@ def plans(readings):
         '<section class="block" id="sizes"><header class="src-head">' + _icon("steps") +
         '<h2>Two ceilings, not one</h2></header><p class="lead">The <b>plan</b> is the wall '
         'around the whole project: the apiserver refuses anything past it. Each service has a '
-        '<b>size</b> of its own inside that wall (<code class="mono">tamano</code>: chico, mediano, '
-        'grande), which is what one container may reserve and burst to. Their sum has to fit '
+        '<b>size</b> of its own inside that wall (Small, Medium, Large), which is what one '
+        'container may reserve and burst to. Their sum has to fit '
         'in the plan, and the generator says so before anything is written, naming the plan '
         'that would hold it.</p></section>')
     actions = '<a class="act" href="/plans/new">New plan</a>'
