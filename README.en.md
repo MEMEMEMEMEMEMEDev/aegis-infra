@@ -33,21 +33,21 @@ person who knows what a cluster is installs it and looks after it. For
 the team that pushes, it is a `git push`.
 
 **Status: technical preview** (tag `v3.0.0-alpha.1` of 2026-08-28; 395
-fix commits since, as of 2026-10-13). Today, whoever can push to an
-application repository is trusted by the whole platform; it becomes a
-beta when that, the first item of «What is not there yet», is closed
-and validated in a run.
+fix commits since, as of 2026-10-13). The trust model is a team's, by
+decision: whoever can push to an application repository is trusted by
+the whole platform. It is said in «What is not there yet», with what it
+implies.
 
 ## See it
 
 ![The console: Projects, with an instance's five projects and the worst state of each section beside its entry](docs/assets/console-projects.png)
 
 And this is what the product says about itself, as it came out on
-2026-10-14 on the tree of commit `8f41ae9` (no cluster):
+2026-10-14 on the tree of commit `39d2405` (no cluster):
 
 ```
 $ aegis verify --profile both
-══ STATIC VERIFICATION: ALL PASS (297 checks, 1 not evaluated) ══
+══ STATIC VERIFICATION: ALL PASS (292 checks, 1 not evaluated) ══
    no check reads the profile yet (AEGIS_VERIFY_PROFILE): both profiles are one pass, run once as cloudflare — the second comes back the day a check reads it
 ```
 
@@ -55,9 +55,9 @@ One pass, and it says so: while no check reads the profile, running
 both would be running the same thing twice. The check that was not
 evaluated is the one that renders the pinned charts, which runs only
 under `--with-charts` because it fetches every chart from its
-repository. Each of those 298 checks carries its *tooth*: a mutation
+repository. Each of those 293 checks carries its *tooth*: a mutation
 that proves the check turns red when it should. The teeth ran too:
-`aegis verify --teeth` walks the 1,745 mutations in minutes (five of
+`aegis verify --teeth` walks the 1,688 mutations in minutes (five of
 them, the charts', only under `--with-charts`).
 
 ## What has already happened, measured
@@ -82,7 +82,7 @@ What is in the tree today, counted when this page was written:
 | | |
 |---|---|
 | 16 phases | `aegis init --list` |
-| 298 static checks, 298 teeth | `aegis verify --list` |
+| 293 static checks, 293 teeth | `aegis verify --list` |
 | 30 commands | `aegis --help` |
 | 6 application templates | `seed/templates/` |
 | 31 ArgoCD Applications in the seed | `seed/platform/k8s/` |
@@ -463,11 +463,13 @@ instance, keeping what is its own.
 
 Said plainly, because the checks would say it anyway.
 
-- **The trust model is a team's.** Isolation holds between
+- **The trust model is a team's, by decision.** Isolation holds between
   organizations; it does not hold between an application repository and
-  the platform: today, whoever can push to an application repository is
-  trusted by the whole platform. Closing that is the first item of the
-  next release.
+  the platform: whoever can push to an application repository is trusted
+  by the whole platform. aegis is for a small team hosting itself, not
+  for hosting third parties. A version with that boundary closed exists
+  as a working branch and asks for runs of its own; it is not what comes
+  next.
 - As far as the author knows, nobody else has installed the `cloudflare`
   profile from zero yet: it has run on the author's lab machines, and a
   second person is trying it now.
@@ -493,9 +495,9 @@ Said plainly, because the checks would say it anyway.
   `aegis org` by hand.
 - Outside the console, it still demands reading.
 
-Next, in this order and with no dates: closing the trust model between
-tenant and platform; the `cloudflare` profile installed by a second
-person; the tenant's console; the monorepo as a first-class case.
+Next, in this order and with no dates: the `cloudflare` profile
+installed by a second person; the tenant's console; the monorepo as a
+first-class case.
 
 ## What is inside
 

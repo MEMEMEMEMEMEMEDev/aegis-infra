@@ -4,6 +4,43 @@ Nothing here is a promise of a version: `main` is what you clone. This
 file says what changed for whoever installs or operates, from which
 commit, and what it asks of an instance that already exists.
 
+## 2026-10-14 — the verifier's cost, and the front page rewritten
+
+Nothing here changes what the init does to a machine; it changes how the
+product is verified and how it is presented. A review of 2026-10-13
+left a longer list; the items that change the init, the seed and the
+trust boundary between tenant and platform live on a working branch and
+will come with runs of their own.
+
+- **The confirmation pass keeps its arguments.** On a FAIL the verifier
+  re-runs the suite once to tell a flaky check from a real one; it used
+  to re-run EVERYTHING in both profiles because `"$@"` had been consumed,
+  and a tooth run paid that price for every mutation: hours. It re-runs
+  the same selection now, and a tooth runs its check once. The full tooth
+  run takes minutes, and CI runs the harness on every push.
+- **`--profile both` is one pass while no check reads the profile**, and
+  the summary says so; the second pass comes back the day a check reads
+  `AEGIS_VERIFY_PROFILE`.
+- **A tooth that does not apply here says so** (rc 75, with its reason)
+  instead of being counted as not biting: the teeth of 117 and 120 that
+  depend on a login or an instance's conf declare it.
+- **117 names no role login** (`root`, `runner`, `ubuntu`, `debian`,
+  `admin`, `vagrant`), and the product's comments name no lab machine and
+  no person.
+- **199 runs one sampled tooth per run**, picked from the commit, so a
+  tooth file that exists and bites nothing is found.
+- **`--with-charts` is check 288**, with one verdict and a named skip; the
+  dead branch inside 074 is gone.
+- **A host with no `kubectl` is declared, never a traceback** (check
+  289): `aegis capacity` and `aegis update metrics` answer not-evaluable,
+  and the verifier names at start the tools it drives.
+- **The front page, in both languages**, leads with what a push gets you,
+  states the trust model as the decision it is, quotes the verifier's
+  real tail from a dated tree, and computes its numbers from the tree;
+  `docs/how-it-works.md` explains the platform in depth; issue and pull
+  request templates ask for the evidence the product already produces;
+  the CHANGELOG is caught up to 2026-10-13.
+
 ## 2026-10-13 — the first signed build on a clean Ubuntu, and what it took
 
 The first full run of the series on a clean Ubuntu lab VM (2026-10-12 and

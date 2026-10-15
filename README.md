@@ -34,31 +34,31 @@ instala y la cuida una persona que sabe lo que es un clúster. Para el
 equipo que hace push, es un `git push`.
 
 **Estado: avance técnico** (etiqueta `v3.0.0-alpha.1` del 2026-08-28;
-395 commits de corrección desde entonces, al 2026-10-13). Hoy, quien
-puede hacer push a un repositorio de aplicación es de confianza para
-toda la plataforma; será beta cuando eso, lo primero de «Lo que no
-está», quede cerrado y validado en una corrida.
+395 commits de corrección desde entonces, al 2026-10-13). El modelo de
+confianza es el de un equipo, por decisión: quien puede hacer push a un
+repositorio de aplicación es de confianza para toda la plataforma. Está
+dicho en «Lo que no está», con lo que eso implica.
 
 ## Míralo
 
 ![La consola: Projects, con los cinco proyectos de una instancia y el peor estado de cada sección al lado de su entrada](docs/assets/console-projects.png)
 
 Y esto es lo que dice el producto de sí mismo, tal cual salió el
-2026-10-14 sobre el árbol del commit `8f41ae9` (sin clúster):
+2026-10-14 sobre el árbol del commit `39d2405` (sin clúster):
 
 ```
 $ aegis verify --profile both
-══ STATIC VERIFICATION: ALL PASS (297 checks, 1 not evaluated) ══
+══ STATIC VERIFICATION: ALL PASS (292 checks, 1 not evaluated) ══
    no check reads the profile yet (AEGIS_VERIFY_PROFILE): both profiles are one pass, run once as cloudflare — the second comes back the day a check reads it
 ```
 
 Un solo pase, y lo dice: mientras ningún check lea el perfil, correr los
 dos sería correr lo mismo dos veces. El check que no se evaluó es el que
 renderiza los charts fijados, y sólo corre con `--with-charts` porque
-pide cada chart a su repositorio. Cada uno de esos 298 checks lleva su
+pide cada chart a su repositorio. Cada uno de esos 293 checks lleva su
 *diente*: una mutación que demuestra que el check se pone rojo cuando
 debe. Los dientes también se corrieron: `aegis verify --teeth` recorre
-las 1.745 mutaciones en minutos (cinco de ellas, las de los charts,
+las 1.688 mutaciones en minutos (cinco de ellas, las de los charts,
 sólo con `--with-charts`).
 
 ## Lo que ya ha pasado, medido
@@ -83,7 +83,7 @@ Lo que hay hoy en el árbol, contado al escribir esta página:
 | | |
 |---|---|
 | 16 fases | `aegis init --list` |
-| 298 checks estáticos, 298 dientes | `aegis verify --list` |
+| 293 checks estáticos, 293 dientes | `aegis verify --list` |
 | 30 comandos | `aegis --help` |
 | 6 plantillas de aplicación | `seed/templates/` |
 | 31 Applications de ArgoCD en la semilla | `seed/platform/k8s/` |
@@ -460,11 +460,13 @@ instancia, conservando lo que es suyo.
 
 Dicho claro, porque los checks lo dirían igual.
 
-- **El modelo de confianza es el de un equipo.** El aislamiento vale
-  entre organizaciones; no vale entre un repositorio de aplicación y la
-  plataforma: hoy, quien puede hacer push a un repositorio de aplicación
-  es de confianza para toda la plataforma. Cerrar eso es lo primero de la
-  siguiente versión.
+- **El modelo de confianza es el de un equipo, por decisión.** El
+  aislamiento vale entre organizaciones; no vale entre un repositorio de
+  aplicación y la plataforma: quien puede hacer push a un repositorio de
+  aplicación es de confianza para toda la plataforma. aegis es para un
+  equipo pequeño que se aloja a sí mismo, no para alojar a terceros. Una
+  versión con esa frontera cerrada existe como rama de trabajo y pide
+  sus propias corridas; no es lo próximo.
 - Que el autor sepa, nadie más ha instalado todavía el perfil `cloudflare`
   de cero: ha corrido en máquinas de laboratorio del autor, y una segunda
   persona lo está probando ahora.
@@ -491,10 +493,9 @@ Dicho claro, porque los checks lo dirían igual.
   `aegis org` a mano.
 - Fuera de la consola, sigue exigiendo leer.
 
-Lo próximo, en este orden y sin fechas: cerrar el modelo de confianza
-entre inquilino y plataforma; el perfil `cloudflare` instalado por una
-segunda persona; la consola del inquilino; el monorepo como caso de
-primera clase.
+Lo próximo, en este orden y sin fechas: el perfil `cloudflare`
+instalado por una segunda persona; la consola del inquilino; el
+monorepo como caso de primera clase.
 
 ## Qué hay dentro
 
