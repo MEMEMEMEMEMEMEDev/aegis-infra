@@ -295,16 +295,49 @@ derives from the validator itself; and the validator is what refuses,
 JavaScript anywhere in the console, so a field cannot be greyed out as
 you change a kind: the rules travel as text beside each kind instead.
 
-## Reaching it, and why it is not published
+## Reaching it from another machine
 
-The console binds `127.0.0.1` and there is no flag to change it. From
-another machine:
+The console binds `127.0.0.1` and there is no flag to change it. That is
+why it opens normally when the browser and Aegis are on the same
+machine, but a VPS's public IP or hostname will not serve it. A
+successful request to `http://127.0.0.1:7391` on the VPS only proves
+that the console is running there; it does not make that loopback
+address reachable from your laptop.
+
+Use an SSH local-forward instead. Keep the console running on the VPS
+(for example, in `tmux`):
 
 ```bash
-ssh -L 7391:127.0.0.1:7391 you@your-server
+# On the VPS:
+aegis console serve
 ```
 
-It is **not published through the tunnel**, and not for lack of trying:
+From a terminal on your own computer, open the tunnel and leave that
+command running:
+
+```bash
+ssh -N -L 7391:127.0.0.1:7391 you@your-server
+```
+
+Then open **http://127.0.0.1:7391** in a browser on your own computer.
+The browser connects to the local end of the tunnel; SSH carries that
+connection to `127.0.0.1:7391` on the VPS. The public VPS address is
+not the URL to open. If port `7391` is already in use on your computer,
+forward a different local port to the console's VPS port and open that
+local port instead:
+
+```bash
+ssh -N -L 7392:127.0.0.1:7391 you@your-server
+```
+
+In that example, open **http://127.0.0.1:7392**. If the console itself
+uses a non-default port (`aegis console serve --port 7400`), change the
+right-hand port too: `ssh -N -L 7392:127.0.0.1:7400 ...`.
+
+If it does not connect, check that `aegis console serve` is still
+running on the VPS, that the SSH tunnel command is still running on
+your computer, and that the browser URL uses the tunnel's local port.
+The console is **not published through the Cloudflare tunnel**, and not for lack of trying:
 the tunnel has a single `ingress_service` pointing at traefik inside the
 cluster, cloudflared runs inside the cluster, and the console runs on
 the host because it needs the age key, the `gh` session and kubectl. A
