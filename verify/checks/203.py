@@ -121,7 +121,8 @@ if "suggested" in plain:
                     "has to mean this value came from a guess, or it means nothing")
 
 # ── contract words stay internal; the person sees English ───────────
-form_with_sizes = console.render_form(doc, "a-token")
+size_schema = {"steps": [{"step": "tamano", "opciones": ["chico", "mediano", "grande"]}]}
+form_with_sizes = console.render_form(size_schema, "a-token")
 for contract_word, screen_word in (("chico", "Small"), ("mediano", "Medium"),
                                    ("grande", "Large")):
     if f'value="{contract_word}"' not in form_with_sizes or f'<b>{screen_word}</b>' not in form_with_sizes:
